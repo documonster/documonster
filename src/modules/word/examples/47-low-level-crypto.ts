@@ -123,8 +123,8 @@ if (infoEntry) {
   //    Each entry in AGILE_BLOCK_KEYS gives a different key for a different
   //    purpose: encryptedKey, dataIntegrity, verifierHashInput, verifierHashValue.
   const dataIntegrityKey = await WordCrypto.Agile.deriveKey(
-    password,
     info,
+    password,
     WordCrypto.Agile.BLOCK_KEYS.dataIntegrityKey
   );
   log(`  deriveKey(dataIntegrityKey) → ${dataIntegrityKey.length} bytes (keyBits=${info.keyBits})`);

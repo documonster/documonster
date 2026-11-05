@@ -46,7 +46,7 @@ describe("entry names", () => {
   });
 
   it("refuses an unsafe name in ZipEditor.set and rename", async () => {
-    const editor = await Archive.editZip(await Archive.packZip([["a.txt", "a"]]));
+    const editor = await Archive.ZipEditor.open(await Archive.packZip([["a.txt", "a"]]));
     expectArchiveError(() => editor.set("../evil.txt", "x"), "Archive.ZipEditor#set");
     expectArchiveError(() => editor.rename("a.txt", "/evil.txt"), "Archive.ZipEditor#rename");
     expect(editor.has("a.txt")).toBe(true);
@@ -110,7 +110,7 @@ describe("builder options", () => {
 
   it("refuses bad editor defaults when the editor is opened", async () => {
     const bytes = await Archive.packZip([["a.txt", "a"]]);
-    await expect(Archive.editZip(bytes, { level: 12 })).rejects.toThrow(/level must be/);
+    await expect(Archive.ZipEditor.open(bytes, { level: 12 })).rejects.toThrow(/level must be/);
   });
 
   it("keeps accepting the boundaries", async () => {

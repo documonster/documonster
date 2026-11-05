@@ -3,12 +3,12 @@
  * library. Each is now refused at the call, with the module's own error naming what was wrong.
  */
 import { ExcelCsv } from "@excel/bridge/csv";
-import type { CsvOptions } from "@excel/bridge/csv";
+import type { ExcelCsvOptions } from "@excel/bridge/csv";
 import {
   Cell,
   DataValidation,
   ExcelArgumentError,
-  InvalidValueTypeError,
+  ExcelInvalidValueTypeError,
   Workbook,
   Worksheet
 } from "@excel/index";
@@ -19,9 +19,9 @@ const BAD = [42, null, [], true] as const;
 describe("entry points refuse what is not an argument of theirs", () => {
   it("a cell refuses an invalid Date, which the writer could not write", () => {
     const ws = Workbook.addWorksheet(Workbook.create(), "S");
-    expect(() => Cell.setValue(ws, "A1", new Date("x"))).toThrow(InvalidValueTypeError);
+    expect(() => Cell.setValue(ws, "A1", new Date("x"))).toThrow(ExcelInvalidValueTypeError);
     expect(() => Cell.setValue(ws, "A2", { formula: "TODAY()", result: new Date("x") })).toThrow(
-      InvalidValueTypeError
+      ExcelInvalidValueTypeError
     );
     expect(Cell.getValue(ws, "A1")).toBeNull();
   });
@@ -74,11 +74,11 @@ describe("ExcelCsv options are the read half or the write half", () => {
   });
 
   it("one bag of both still serves both, and `info` / `raw` no longer break a read", async () => {
-    const both: CsvOptions = { delimiter: ";", dateFormat: "YYYY", sheetName: "In" };
+    const both: ExcelCsvOptions = { delimiter: ";", dateFormat: "YYYY", sheetName: "In" };
     const wb = await ExcelCsv.read("a;b\n1;2", both);
     expect(ExcelCsv.format(wb, both)).toBe("a;b\n1;2");
     for (const extra of [{ info: true }, { raw: true }, { info: true, headers: true }]) {
-      const read = await ExcelCsv.read("a,b\n1,2", extra as CsvOptions);
+      const read = await ExcelCsv.read("a,b\n1,2", extra as ExcelCsvOptions);
       expect(Cell.getValue(Workbook.listWorksheets(read)[0]!, "B2")).toBe(2);
     }
   });

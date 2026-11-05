@@ -236,7 +236,7 @@ describe("TAR Module", () => {
 
       expect(entries.length).toBe(1);
       expect(entries[0].info.size).toBe(256);
-      const data = await entries[0].data();
+      const data = await entries[0].bytes();
       expect(data).toEqual(binaryData);
     });
 
@@ -253,7 +253,7 @@ describe("TAR Module", () => {
       const entries = parseTar(bytes);
 
       expect(entries[0].info.size).toBe(largeData.length);
-      const data = await entries[0].data();
+      const data = await entries[0].bytes();
       expect(data).toEqual(largeData);
     });
 
@@ -265,7 +265,7 @@ describe("TAR Module", () => {
       const entries = parseTar(bytes);
 
       expect(entries[0].info.size).toBe(0);
-      const data = await entries[0].data();
+      const data = await entries[0].bytes();
       expect(data.length).toBe(0);
     });
   });
@@ -290,7 +290,7 @@ describe("TAR Module", () => {
         // Parse and verify data integrity
         const entries = parseTar(bytes);
         expect(entries[0].info.size).toBe(size);
-        const parsed = await entries[0].data();
+        const parsed = await entries[0].bytes();
         expect(parsed).toEqual(data);
       }
     });

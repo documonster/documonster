@@ -83,11 +83,11 @@ describe("Cell addressing", () => {
     expect(Cell.getValidation(ws, 1, 1)?.type).toBe("whole");
     expect(Cell.getValidation(ws, "B1")?.type).toBe("whole");
 
-    Cell.setName(ws, "A1", "Left");
-    Cell.setName(ws, 1, 2, "Right");
+    Cell.setNames(ws, "A1", ["Left"]);
+    Cell.setNames(ws, 1, 2, ["Right"]);
     expect(Cell.getNames(ws, 1, 1)).toEqual(["Left"]);
     expect(Cell.getNames(ws, "B1")).toEqual(["Right"]);
-    Cell.removeAllNames(ws, 1, 1);
+    Cell.clearNames(ws, 1, 1);
     expect(Cell.getNames(ws, "A1")).toEqual([]);
   });
 

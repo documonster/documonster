@@ -16,7 +16,7 @@ import {
   archiveBytesToUint8Array,
   isArchiveBytes,
   isInMemoryArchiveSource,
-  toAsyncIterable,
+  iterateArchiveSource,
   toUint8Array
 } from "@archive/io/archive-source";
 import { gzipTarChunks, gzipTarStream, gzipTarSync } from "@archive/tar/gzip-tar-stream";
@@ -28,7 +28,7 @@ import {
   checkTarArchiveOptions,
   checkTarReaderArguments
 } from "@archive/tar/tar-archive";
-import type { TarEntry, TarParseOptions } from "@archive/tar/tar-parser";
+import type { TarEntry, TarParseOptions, UnpackedTarEntry } from "@archive/tar/tar-parser";
 import { parseTar, readTarStream, untar, untarSync } from "@archive/tar/tar-parser";
 import { createAbortError, isAbortError, throwIfAborted } from "@utils/errors";
 
@@ -111,7 +111,7 @@ async function getCompressedData(
   if (isInMemoryArchiveSource(source)) {
     return toUint8Array(source);
   }
-  return collect(toAsyncIterable(source, { signal }));
+  return collect(iterateArchiveSource(source, { signal }));
 }
 
 /**
@@ -141,7 +141,7 @@ function gunzipChunks(
 ): AsyncIterable<Uint8Array> {
   return {
     [Symbol.asyncIterator]: () =>
-      gzipTarChunks(toAsyncIterable(source, { signal }), createGunzipStream())[
+      gzipTarChunks(iterateArchiveSource(source, { signal }), createGunzipStream())[
         Symbol.asyncIterator
       ]()
   };
@@ -190,7 +190,7 @@ function borrow<T>(iterator: AsyncIterator<T>): AsyncIterable<T> {
 export async function* parseTarGzStream(
   source: ArchiveSource | ArchiveBytes,
   options: ParseTarGzOptions = {}
-): AsyncIterable<TarEntry> {
+): AsyncGenerator<TarEntry> {
   yield* await parseTarGz(source, options);
 }
 
@@ -210,7 +210,7 @@ export async function* parseTarGzStream(
 export function parseTarGzIncremental(
   source: ArchiveSource | ArchiveBytes,
   options: ParseTarGzOptions = {}
-): AsyncIterable<TarEntry> {
+): AsyncGenerator<TarEntry> {
   checkTarReaderArguments("Archive.parseTarGzStream", source, options);
   return readTarGzStream(source, options);
 }
@@ -218,7 +218,7 @@ export function parseTarGzIncremental(
 async function* readTarGzStream(
   source: ArchiveSource | ArchiveBytes,
   options: ParseTarGzOptions
-): AsyncIterable<TarEntry> {
+): AsyncGenerator<TarEntry> {
   const inflated = gunzipChunks(source, options.signal)[Symbol.asyncIterator]();
   let drained = false;
   try {
@@ -249,7 +249,7 @@ async function* readTarGzStream(
 export async function untargz(
   source: ArchiveSource | ArchiveBytes,
   options: ParseTarGzOptions = {}
-): Promise<Map<string, { info: TarEntry["info"]; data: Uint8Array }>> {
+): Promise<Map<string, UnpackedTarEntry>> {
   checkTarReaderArguments("Archive.unpackTarGz", source, options);
   const compressed = await getCompressedData(source, options.signal);
   return untar(await gunzipTar(compressed), options);
@@ -276,7 +276,7 @@ export function targzSync(
 export function untargzSync(
   source: ArchiveBytes,
   options: Omit<ParseTarGzOptions, "signal"> = {}
-): Map<string, { info: TarEntry["info"]; data: Uint8Array }> {
+): Map<string, UnpackedTarEntry> {
   if (!isArchiveBytes(source)) {
     throw new ArchiveArgumentError(
       "source",

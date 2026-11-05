@@ -27,7 +27,7 @@
  */
 
 import { createEventWaiter } from "@stream/core/event-utils";
-import { UnsupportedStreamTypeError } from "@stream/errors";
+import { StreamUnsupportedTypeError } from "@stream/errors";
 import type { EventEmitterLike } from "@stream/types";
 
 /**
@@ -111,7 +111,7 @@ export class SinkAdapter {
         typeof duck.write !== "function" ||
         typeof duck.end !== "function"
       ) {
-        throw new UnsupportedStreamTypeError(
+        throw new StreamUnsupportedTypeError(
           "Streams.LowLevel.SinkAdapter",
           sink === null ? "null" : typeof sink,
           {

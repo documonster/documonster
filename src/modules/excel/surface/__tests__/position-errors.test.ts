@@ -2,22 +2,22 @@
  * Positions are checked before anything changes, and a bad one is an argument error.
  *
  * - Every `Column` setter (and `Stream`'s `WorksheetWriter#getColumn`) refuses a column number that is not a whole
- *   number from 1 to 16 384 with `ColumnOutOfBoundsError`, as the getters do — they used to throw a raw `TypeError` for
+ *   number from 1 to 16 384 with `ExcelColumnOutOfBoundsError`, as the getters do — they used to throw a raw `TypeError` for
  *   0 or 1.5, and accept 16 385 (materialising every column up to it).
- * - `RowOutOfBoundsError`, `ColumnOutOfBoundsError` and `InvalidAddressError` are `ExcelArgumentError`s carrying the
+ * - `ExcelRowOutOfBoundsError`, `ExcelColumnOutOfBoundsError` and `ExcelInvalidAddressError` are `ExcelArgumentError`s carrying the
  *   `field` of the parameter at fault, so the one `catch` a caller writes for bad input catches them.
  */
 import {
   Address,
   Cell,
   Column,
-  ColumnOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   ExcelArgumentError,
   ExcelError,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   isExcelError,
   Row,
-  RowOutOfBoundsError,
+  ExcelRowOutOfBoundsError,
   Stream,
   Workbook
 } from "@excel";
@@ -45,7 +45,7 @@ describe("Column setters check the column first", () => {
   describe.each(SETTERS)("Column.%s", (_name, call) => {
     it.each([0, -1, 1.5, 16385, 1e7, Number.NaN])("refuses %s and changes nothing", col => {
       const ws = sheet();
-      expect(() => call(ws, col)).toThrow(ColumnOutOfBoundsError);
+      expect(() => call(ws, col)).toThrow(ExcelColumnOutOfBoundsError);
       expect(Column.getDefinitions(ws)).toEqual([]);
       expect(Column.has(ws, 1)).toBe(false);
     });
@@ -60,23 +60,23 @@ describe("Column setters check the column first", () => {
     const wb = new Stream.WorkbookWriter({});
     const ws = wb.addWorksheet("S");
     for (const col of [0, 1.5, 16385]) {
-      expect(() => ws.getColumn(col)).toThrow(ColumnOutOfBoundsError);
+      expect(() => ws.getColumn(col)).toThrow(ExcelColumnOutOfBoundsError);
     }
     expect(ws.getColumn(16384).number).toBe(16384);
     // A built-in property name is not a column key.
-    expect(() => ws.getColumn("toString")).toThrow(ColumnOutOfBoundsError);
+    expect(() => ws.getColumn("toString")).toThrow(ExcelColumnOutOfBoundsError);
   });
 });
 
 describe("position errors are argument errors", () => {
   it.each<[string, () => unknown, abstract new (...args: never[]) => Error, string]>([
-    ["Row.setHeight row 0", () => Row.setHeight(sheet(), 0, 5), RowOutOfBoundsError, "row"],
-    ["Cell.getValue ZZ0", () => Cell.getValue(sheet(), "ZZ0"), InvalidAddressError, "addr"],
-    ["Cell.getValue col 0", () => Cell.getValue(sheet(), 1, 0), ColumnOutOfBoundsError, "col"],
-    ["Column.setWidth 0", () => Column.setWidth(sheet(), 0, 5), ColumnOutOfBoundsError, "col"],
-    ["Address.encodeCol -1", () => Address.encodeCol(-1), ColumnOutOfBoundsError, "col"],
-    ["Address.encodeRow -1", () => Address.encodeRow(-1), RowOutOfBoundsError, "row"],
-    ["Address.decodeCell nope", () => Address.decodeCell("nope"), InvalidAddressError, "cstr"]
+    ["Row.setHeight row 0", () => Row.setHeight(sheet(), 0, 5), ExcelRowOutOfBoundsError, "row"],
+    ["Cell.getValue ZZ0", () => Cell.getValue(sheet(), "ZZ0"), ExcelInvalidAddressError, "addr"],
+    ["Cell.getValue col 0", () => Cell.getValue(sheet(), 1, 0), ExcelColumnOutOfBoundsError, "col"],
+    ["Column.setWidth 0", () => Column.setWidth(sheet(), 0, 5), ExcelColumnOutOfBoundsError, "col"],
+    ["Address.encodeCol -1", () => Address.encodeCol(-1), ExcelColumnOutOfBoundsError, "col"],
+    ["Address.encodeRow -1", () => Address.encodeRow(-1), ExcelRowOutOfBoundsError, "row"],
+    ["Address.decodeCell nope", () => Address.decodeCell("nope"), ExcelInvalidAddressError, "cstr"]
   ])("%s", (_name, call, type, field) => {
     let error: unknown;
     try {
@@ -102,16 +102,16 @@ describe("position errors are argument errors", () => {
   });
 
   it("the constructors keep their positional forms, and take a field in the options", () => {
-    const row = new RowOutOfBoundsError(0);
+    const row = new ExcelRowOutOfBoundsError(0);
     expect([row.row, row.field, row.message]).toEqual([0, "row", "Row 0 is out of bounds"]);
-    const col = new ColumnOutOfBoundsError("XFE", "too far", { field: "options.col" });
+    const col = new ExcelColumnOutOfBoundsError("XFE", "too far", { field: "options.col" });
     expect([col.column, col.field, col.message]).toEqual([
       "XFE",
       "options.col",
       "Column XFE is out of bounds: too far"
     ]);
     const cause = new Error("x");
-    const address = new InvalidAddressError("Q", undefined, { cause });
+    const address = new ExcelInvalidAddressError("Q", undefined, { cause });
     expect([address.address, address.field, address.cause]).toEqual(["Q", "addr", cause]);
   });
 });

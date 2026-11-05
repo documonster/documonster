@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Build, Document, DocxArgumentError, Io, Streaming } from "../index";
+import { Build, Document, DocxArgumentError, Io, Stream } from "../index";
 import type { BodyContent, DocxDocument } from "../index";
 
 const BAD = "bogus";
@@ -279,7 +279,7 @@ describe("write-time model checks name the exact path", () => {
   });
 
   it("the streaming writer, from its element parameter", () => {
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     const element = para({ alignment: BAD });
     let error: unknown;
     try {

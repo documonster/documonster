@@ -3,7 +3,7 @@
  * naming the function and the argument, instead of being stored and then dropped or refused when the workbook is
  * written.
  */
-import { ExcelArgumentError, InvalidAddressError } from "@excel/errors";
+import { ExcelArgumentError, ExcelInvalidAddressError } from "@excel/errors";
 import { describeValue as describe } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
 
@@ -76,7 +76,7 @@ export interface ArgumentChecks {
     value: unknown,
     length?: { min?: number; max?: number }
   ): value is unknown[];
-  /** An A1 reference: a cell, and whatever else `shape` allows. Refused with an {@link InvalidAddressError}. */
+  /** An A1 reference: a cell, and whatever else `shape` allows. Refused with an {@link ExcelInvalidAddressError}. */
   reference(argument: string, value: unknown, shape?: ReferenceShape): void;
 }
 
@@ -154,7 +154,7 @@ export function argumentChecks(where: string): ArgumentChecks {
           shape.range ? "a range such as B2:D5" : "",
           shape.lines ? "whole columns or rows such as A:C or 2:5" : ""
         ].filter(Boolean);
-        throw new InvalidAddressError(
+        throw new ExcelInvalidAddressError(
           String(value),
           `${argument} must be ${kinds.join(" or ")}` +
             `${shape.list ? ", or several separated by spaces" : ""}` +

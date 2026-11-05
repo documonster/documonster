@@ -173,8 +173,8 @@ export async function readXlsbInto(
     ...(options.formulas === undefined ? {} : { formulas: options.formulas })
   });
   if (parsed.diagnostics.lost.length > 0 && options.unsupported === "error") {
-    const { ExcelNotSupportedError } = await import("@excel/errors");
-    throw new ExcelNotSupportedError(
+    const { ExcelUnsupportedFeatureError } = await import("@excel/errors");
+    throw new ExcelUnsupportedFeatureError(
       "Read XLSB",
       `${parsed.diagnostics.lost.length} item(s) could not be recovered: ` +
         `${parsed.diagnostics.lost.slice(0, 10).join(", ")}` +

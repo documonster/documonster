@@ -56,15 +56,15 @@ describe("CSV argument errors name the public call", () => {
       "options.objname"
     ],
     [
-      "Csv.createParserStream",
-      () => Csv.createParserStream({ delimiter: 5 as never }),
-      "Csv.createParserStream:",
+      "new Csv.ParserStream",
+      () => new Csv.ParserStream({ delimiter: 5 as never }),
+      "new Csv.ParserStream:",
       "options.delimiter"
     ],
     [
-      "Csv.createParserStream encoding",
-      () => Csv.createParserStream({ encoding: "nope" }),
-      "Csv.createParserStream:",
+      "new Csv.ParserStream encoding",
+      () => new Csv.ParserStream({ encoding: "nope" }),
+      "new Csv.ParserStream:",
       "options.encoding"
     ],
     ["Csv.format", () => Csv.format([[1]], { delimiter: "" }), "Csv.format:", "options.delimiter"],
@@ -77,9 +77,9 @@ describe("CSV argument errors name the public call", () => {
       "options.decimalSeparator"
     ],
     [
-      "Csv.createFormatterStream",
-      () => Csv.createFormatterStream({ delimiter: "" }),
-      "Csv.createFormatterStream:",
+      "new Csv.FormatterStream",
+      () => new Csv.FormatterStream({ delimiter: "" }),
+      "new Csv.FormatterStream:",
       "options.delimiter"
     ],
     ["Csv.generate", () => Csv.generate({ rows: -2 }), "Csv.generate:", "options.rows"],
@@ -95,6 +95,42 @@ describe("CSV argument errors name the public call", () => {
       () => Csv.createGenerator(42 as never),
       "Csv.createGenerator:",
       "options"
+    ],
+    [
+      "Csv.applyDynamicTyping without a value",
+      () => (Csv.applyDynamicTyping as (...args: unknown[]) => unknown)(),
+      "Csv.applyDynamicTyping:",
+      "value"
+    ],
+    [
+      "Csv.applyDynamicTyping with a number",
+      () => Csv.applyDynamicTyping(42 as never),
+      "Csv.applyDynamicTyping:",
+      "value"
+    ],
+    [
+      "Csv.applyDynamicTyping with a bad columnConfig",
+      () => Csv.applyDynamicTyping("1", "yes" as never),
+      "Csv.applyDynamicTyping:",
+      "columnConfig"
+    ],
+    [
+      "Csv.applyDynamicTypingToRow without dynamicTyping",
+      () => (Csv.applyDynamicTypingToRow as (...args: unknown[]) => unknown)({ a: "1" }),
+      "Csv.applyDynamicTypingToRow:",
+      "dynamicTyping"
+    ],
+    [
+      "Csv.applyDynamicTypingToRow with a non-string value",
+      () => Csv.applyDynamicTypingToRow({ a: 1 } as never, true),
+      "Csv.applyDynamicTypingToRow:",
+      'row["a"]'
+    ],
+    [
+      "new Csv.FormatterStream with null options",
+      () => new Csv.FormatterStream(null as never),
+      "new Csv.FormatterStream:",
+      "options"
     ]
   ])("%s", async (_label, call, prefix, field) => {
     const error = await caught(call);
@@ -103,12 +139,21 @@ describe("CSV argument errors name the public call", () => {
   });
 
   it("a formatter stream names itself for a bad row", async () => {
-    const stream = Csv.createFormatterStream();
+    const stream = new Csv.FormatterStream();
     const error = await new Promise<Error>(resolve => {
       stream.on("error", resolve);
       stream.write(42 as never);
     });
     expect(error).toBeInstanceOf(CsvArgumentError);
-    expect(error.message.startsWith("Csv.createFormatterStream:")).toBe(true);
+    expect(error.message.startsWith("new Csv.FormatterStream:")).toBe(true);
+  });
+
+  it("dynamic typing still applies to valid input, and the row is untouched when refused", () => {
+    expect(Csv.applyDynamicTyping("42")).toBe(42);
+    expect(Csv.applyDynamicTyping("42", false)).toBe("42");
+    const row = { a: "1", b: 2 } as never as Record<string, string>;
+    expect(() => Csv.applyDynamicTypingToRow(row, true)).toThrow(CsvArgumentError);
+    expect(row).toEqual({ a: "1", b: 2 });
+    expect(Csv.applyDynamicTypingToRow({ a: "1" }, true)).toEqual({ a: 1 });
   });
 });

@@ -11,7 +11,7 @@ import type { ArchiveSink } from "@archive/io/archive-sink";
 import { checkSinkArgument, collect, pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
 import {
-  toAsyncIterable,
+  iterateArchiveSource,
   collectUint8ArrayStream,
   toUint8ArraySync,
   isSyncArchiveSource,
@@ -314,7 +314,9 @@ export class ZipEditor {
   /**
    * Open an existing ZIP archive for editing.
    *
-   * @param source - The ZIP data (Uint8Array, ArrayBuffer, Blob, string, or async iterable)
+   * @param source - The ZIP data (Uint8Array, ArrayBuffer, Blob, string, async iterable or a
+   *   random-access reader). A string is the archive's content, encoded as UTF-8 — never a file
+   *   path or URL; read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
    * @param options - Edit options
    * @returns A new `ZipEditor` instance
    *
@@ -806,8 +808,8 @@ export class ZipEditor {
             await file.push(bytes, true);
             await file.outputCheckpoint();
           } else {
-            // Streaming path (includes Blob via toAsyncIterable(Blob) which prefers Blob.stream())
-            for await (const chunk of toAsyncIterable(entry.source, { signal, onChunk })) {
+            // Streaming path (includes Blob via iterateArchiveSource(Blob) which prefers Blob.stream())
+            for await (const chunk of iterateArchiveSource(entry.source, { signal, onChunk })) {
               throwIfAborted(signal);
               await file.push(chunk, false);
               await file.outputCheckpoint();
@@ -951,8 +953,8 @@ export class ZipEditor {
         if (isSyncArchiveSource(entry.source)) {
           data = toUint8ArraySync(entry.source);
         } else {
-          // Streaming source: collect all chunks (includes Blob via toAsyncIterable(Blob) which prefers Blob.stream())
-          data = await collectUint8ArrayStream(toAsyncIterable(entry.source));
+          // Streaming source: collect all chunks (includes Blob via iterateArchiveSource(Blob) which prefers Blob.stream())
+          data = await collectUint8ArrayStream(iterateArchiveSource(entry.source));
         }
 
         return {
@@ -1006,30 +1008,7 @@ export class ZipEditor {
 /**
  * Open an existing ZIP archive for editing.
  *
- * This is a convenience function equivalent to `ZipEditor.open()`.
- *
- * @param source - The ZIP data. A string is the archive's content, encoded as UTF-8 — never a file
- *   path or URL; read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
- * @param options - Edit options
- * @returns A new `ZipEditor` instance
- *
- * @example
- * ```ts
- * import { Archive } from "documonster/archive";
- *
- * // Create and edit
- * const original = await Archive.createZip().add("a.txt", "hello").toBuffer();
- * const editor = await Archive.editZip(original);
- * editor.set("b.txt", "world");
- * const modified = await editor.toBuffer();
- *
- * // Edit with options
- * const strict = await Archive.editZip(original, {
- *   path: { mode: "safe" },
- *   reproducible: true,
- *   onWarning: (w) => console.warn(w.message)
- * });
- * ```
+ * @deprecated Use {@link ZipEditor.open}; this only forwards to it. Removed in 1.0.
  */
 export async function editZip(
   source: ArchiveSource | ArchiveBytes | RandomAccessReader,
@@ -1041,7 +1020,7 @@ export async function editZip(
 /**
  * Open a remote ZIP archive for editing using HTTP Range requests.
  *
- * This is a convenience function equivalent to `ZipEditor.openUrl()`.
+ * @deprecated Use {@link ZipEditor.openUrl}; this only forwards to it. Removed in 1.0.
  */
 export async function editZipUrl(url: string, options: ZipEditUrlOptions = {}): Promise<ZipEditor> {
   return ZipEditor.openUrl(url, options);

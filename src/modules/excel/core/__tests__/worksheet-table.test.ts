@@ -20,7 +20,7 @@ import {
 } from "@excel/core/table";
 import { getCell, getTable, removeTable, rowGetCell } from "@excel/core/worksheet";
 import { getRow } from "@excel/core/worksheet-core";
-import { Cell, Table, TableError, Workbook } from "@excel/index";
+import { Cell, Table, ExcelTableError, Workbook } from "@excel/index";
 import { colCache } from "@excel/utils/col-cache";
 import { describe, it, expect } from "vitest";
 
@@ -601,7 +601,7 @@ describe("Worksheet", () => {
           }
           throw new Error("accepted");
         })();
-        expect(error).toBeInstanceOf(TableError);
+        expect(error).toBeInstanceOf(ExcelTableError);
         expect(error.message).toContain(reason);
         expect(error.message).toContain(JSON.stringify(valid));
         expect(Table.list(ws)).toEqual([]);
@@ -617,9 +617,11 @@ describe("Worksheet", () => {
         /displayName "My Display"/
       );
       const t = Table.add(ws, table("Sales"));
-      expect(() => tableSetName(t, "new name")).toThrow(TableError);
-      expect(() => tableSetDisplayName(t, "B2")).toThrow(TableError);
-      expect(() => Table.setModel(t, { ...Table.getModel(t), name: "C3" })).toThrow(TableError);
+      expect(() => tableSetName(t, "new name")).toThrow(ExcelTableError);
+      expect(() => tableSetDisplayName(t, "B2")).toThrow(ExcelTableError);
+      expect(() => Table.setModel(t, { ...Table.getModel(t), name: "C3" })).toThrow(
+        ExcelTableError
+      );
       expect(tableName(t)).toBe("Sales");
       expect(tableDisplayName(t)).toBe("Sales");
     });

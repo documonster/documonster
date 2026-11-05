@@ -105,7 +105,7 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addColumnChart(ws, { series: [baseSeries("S")], grouping: "stacked" }, "C1:J10");
 
-    const group = Chart.getChartTypes(getCharts(ws)[0])[0] as BarChartGroup;
+    const group = Chart.getTypes(getCharts(ws)[0])[0] as BarChartGroup;
     expect(group.type).toBe("bar");
     expect(group.barDir).toBe("col");
     expect(group.grouping).toBe("stacked");
@@ -116,7 +116,7 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addLineChart(ws, { series: [baseSeries("S")] }, "C1:J10");
 
-    expect(Chart.getChartTypes(getCharts(ws)[0])[0].type).toBe("line");
+    expect(Chart.getTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("addHistogramChart creates a chartEx histogram", () => {
@@ -137,7 +137,7 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addPresetChart(ws, "bar3DConeClustered", { series: [baseSeries("S")] }, "C1:J10");
 
-    const group = Chart.getChartTypes(getCharts(ws)[0])[0] as BarChartGroup;
+    const group = Chart.getTypes(getCharts(ws)[0])[0] as BarChartGroup;
     expect(group.type).toBe("bar3D");
     expect(group.barDir).toBe("bar");
     expect(group.shape).toBe("cone");
@@ -325,12 +325,12 @@ describe("P1: chart convenience APIs and presets", () => {
       "E12:K22"
     );
     expect(getCharts(ws)).toHaveLength(2);
-    expect(
-      (Chart.getChartTypes(getCharts(ws)[0])[0].series[0] as BarSeries).val?.numRef?.formula
-    ).toBe("SalesTable[Sales]");
-    expect(
-      (Chart.getChartTypes(getCharts(ws)[1])[0].series[0] as BarSeries).cat?.strRef?.formula
-    ).toBe("Sheet1!$H$21:$H$22");
+    expect((Chart.getTypes(getCharts(ws)[0])[0].series[0] as BarSeries).val?.numRef?.formula).toBe(
+      "SalesTable[Sales]"
+    );
+    expect((Chart.getTypes(getCharts(ws)[1])[0].series[0] as BarSeries).cat?.strRef?.formula).toBe(
+      "Sheet1!$H$21:$H$22"
+    );
     expect(
       ChartClassic.createOptionsFromTable(ws, "SalesTable", {
         type: "line",
@@ -766,7 +766,7 @@ describe("P1: chart convenience APIs and presets", () => {
     addSurfaceChart(ws, { series: [baseSeries("Surface")], wireframe: true }, "E67:L76");
 
     const charts = getCharts(ws);
-    expect(charts.slice(0, 7).map(chart => Chart.getChartTypes(chart)[0].type)).toEqual([
+    expect(charts.slice(0, 7).map(chart => Chart.getTypes(chart)[0].type)).toEqual([
       "bar",
       "area",
       "doughnut",
@@ -775,8 +775,8 @@ describe("P1: chart convenience APIs and presets", () => {
       "stock",
       "surface"
     ]);
-    expect((Chart.getChartTypes(charts[0])[0] as BarChartGroup).barDir).toBe("bar");
-    expect((Chart.getChartTypes(charts[0])[0] as BarChartGroup).grouping).toBe("stacked");
+    expect((Chart.getTypes(charts[0])[0] as BarChartGroup).barDir).toBe("bar");
+    expect((Chart.getTypes(charts[0])[0] as BarChartGroup).grouping).toBe("stacked");
 
     const chartExSeries = { name: "Modern", values: VALUES_A };
     addParetoChart(ws, { series: [chartExSeries] }, "N1:T10");
@@ -819,7 +819,7 @@ describe("P1: chart convenience APIs and presets", () => {
       "F1:M10"
     );
 
-    const group = Chart.getChartTypes(getCharts(ws)[0])[0] as LineChartGroup;
+    const group = Chart.getTypes(getCharts(ws)[0])[0] as LineChartGroup;
     expect(group.type).toBe("line");
     expect(group.series[0].cat?.strRef?.formula).toBe("Sheet1!$C$4:$C$5");
     expect(group.series[0].val?.numRef?.formula).toBe("Sheet1!$D$4:$D$5");

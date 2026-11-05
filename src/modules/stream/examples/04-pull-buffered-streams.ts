@@ -2,9 +2,9 @@
  * Example: PullStream + BufferedStream (cross-platform pull/buffer primitives)
  *
  * Demonstrates:
- * - Streams.createPullStream() / PullStream: pull-based reading with size and
+ * - new Streams.PullStream() / PullStream: pull-based reading with size and
  *   pattern matching (e.g. read up to the next newline)
- * - Streams.createBufferedStream() / BufferedStream: accumulate writes and drain the
+ * - new Streams.BufferedStream() / BufferedStream: accumulate writes and drain the
  *   whole buffer as a single Uint8Array
  *
  * These are the stream module's signature primitives: instead of the
@@ -24,7 +24,7 @@ const decoder = new TextDecoder();
  */
 export async function examplePullStream(): Promise<void> {
   // highWaterMark opts into bounded-memory backpressure (default Infinity).
-  const stream = Streams.createPullStream({ highWaterMark: 64 });
+  const stream = new Streams.PullStream({ highWaterMark: 64 });
 
   stream.write(encoder.encode("Line1\nLine2\nLine3\n"));
   stream.end();
@@ -48,7 +48,7 @@ export async function examplePullStream(): Promise<void> {
  * BufferedStream: accumulate string/byte writes, then drain as one Uint8Array.
  */
 export function exampleBufferedStream(): void {
-  const buffered = Streams.createBufferedStream({ batchSize: 1024 });
+  const buffered = new Streams.BufferedStream({ batchSize: 1024 });
 
   // Accepts both strings and Uint8Array chunks.
   buffered.write("Hello ");

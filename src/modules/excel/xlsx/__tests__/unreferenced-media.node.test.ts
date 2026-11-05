@@ -117,9 +117,9 @@ describe("unreferenced media are not written", () => {
     const watermark = Image.add(wb, { base64: PNG, extension: "png" });
     const header = Image.add(wb, { base64: PNG, extension: "png" });
     Image.setBackground(ws, background);
-    Watermark.add(ws, { imageId: watermark });
+    Watermark.set(ws, { imageId: watermark });
     const other = Workbook.addWorksheet(wb, "T");
-    Watermark.add(other, { imageId: header, mode: "header" });
+    Watermark.set(other, { imageId: header, mode: "header" });
     const bytes = await Workbook.toBuffer(wb);
     await expectValidXlsx(bytes, { label: "background + watermarks" });
     expect(await mediaParts(bytes)).toHaveLength(3);

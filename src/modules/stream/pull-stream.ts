@@ -5,7 +5,7 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 import type { IPullStream, PullStreamOptions, PullUntilOptions } from "@stream/types";
 import { uint8ArrayIndexOf } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
@@ -46,9 +46,19 @@ export class PullStream extends EventEmitter implements IPullStream {
 
   constructor(options: PullStreamOptions = {}) {
     super();
+    if (typeof options !== "object" || options === null) {
+      throw new StreamArgumentError(
+        "an options object",
+        options === null ? "null" : typeof options,
+        {
+          field: "options",
+          where: "Streams.PullStream"
+        }
+      );
+    }
     const hwm = options.highWaterMark;
     if (hwm !== undefined && (typeof hwm !== "number" || Number.isNaN(hwm) || hwm < 0)) {
-      throw new StreamTypeError("a non-negative highWaterMark", String(hwm), {
+      throw new StreamArgumentError("a non-negative highWaterMark", String(hwm), {
         field: "options.highWaterMark",
         where: "Streams.PullStream"
       });
@@ -98,7 +108,7 @@ export class PullStream extends EventEmitter implements IPullStream {
    */
   write(chunk: Uint8Array): boolean {
     if (!isByteArray(chunk)) {
-      throw new StreamTypeError("a Uint8Array chunk", chunk === null ? "null" : typeof chunk, {
+      throw new StreamArgumentError("a Uint8Array chunk", chunk === null ? "null" : typeof chunk, {
         field: "chunk",
         where: "Streams.PullStream#write"
       });
@@ -306,7 +316,7 @@ export class PullStream extends EventEmitter implements IPullStream {
   ): Promise<Uint8Array> {
     if (!isByteArray(pattern) || pattern.length === 0) {
       return Promise.reject(
-        new StreamTypeError(
+        new StreamArgumentError(
           "a non-empty Uint8Array pattern",
           pattern === null ? "null" : isByteArray(pattern) ? "an empty array" : typeof pattern,
           { field: "pattern", where }

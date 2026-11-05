@@ -76,7 +76,7 @@ describe("remote entry points", () => {
   it.each([42, null, undefined])("refuses %s as a URL", async url => {
     await expect(Archive.HttpRangeReader.open(url as never)).rejects.toBeInstanceOf(ArchiveError);
     await expect(Archive.RemoteZipReader.open(url as never)).rejects.toBeInstanceOf(ArchiveError);
-    await expect(Archive.editZipUrl(url as never)).rejects.toBeInstanceOf(ArchiveError);
+    await expect(Archive.ZipEditor.openUrl(url as never)).rejects.toBeInstanceOf(ArchiveError);
   });
 });
 
@@ -91,7 +91,7 @@ describe("Archive.Crypto", () => {
 
   it("refuses a size that is not a non-negative integer", () => {
     expect(() => Archive.Crypto.getAesEncryptedSize(Number.NaN, 256)).toThrow(ArchiveError);
-    expect(() => Archive.Crypto.randomBytes(-1)).toThrow(ArchiveError);
+    expect(() => Archive.randomBytes(-1)).toThrow(ArchiveError);
   });
 
   it("refuses an AES version other than AE-1 or AE-2", () => {

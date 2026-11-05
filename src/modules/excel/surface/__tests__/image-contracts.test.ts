@@ -2,7 +2,7 @@
  * Images and shapes are checked where they are given — a value the drawing part cannot hold used to be written as
  * `NaN`, a negative extent or an unknown geometry, or to fail only when the workbook was written.
  */
-import { ExcelArgumentError, Image, ImageError, Workbook } from "@excel";
+import { ExcelArgumentError, Image, ExcelImageError, Workbook } from "@excel";
 import { describe, expect, it } from "vitest";
 
 const PNG = Uint8Array.from(
@@ -29,7 +29,7 @@ describe("Image.add", () => {
     [null]
   ])("refuses %j", image => {
     const { wb } = setup();
-    expect(() => Image.add(wb, image as never)).toThrow(ImageError);
+    expect(() => Image.add(wb, image as never)).toThrow(ExcelImageError);
   });
 
   it("accepts bytes, base64 or a link", async () => {
@@ -78,7 +78,7 @@ describe("Image.setModel", () => {
     Image.place(ws, id, "B2:C3");
     const image = Image.list(ws)[0];
     const before = Image.getModel(image);
-    expect(() => Image.setModel(image, { ...before, imageId: "999" })).toThrow(ImageError);
+    expect(() => Image.setModel(image, { ...before, imageId: "999" })).toThrow(ExcelImageError);
     expect(() => Image.setModel(image, { ...before, type: "bogus" })).toThrow(ExcelArgumentError);
     expect(() => Image.setModel(image, { ...before, range: "zz" })).toThrow();
     expect(Image.getModel(image)).toEqual(before);

@@ -68,7 +68,7 @@ describe("a removed worksheet cannot be edited", () => {
     ["Table.remove", ({ ws }) => Table.remove(ws, "Kpi")],
     ["Image.place", ({ ws, imageId }) => Image.place(ws, imageId, "A1:B2")],
     ["Image.setBackground", ({ ws, imageId }) => Image.setBackground(ws, imageId)],
-    ["Watermark.add", ({ ws, imageId }) => Watermark.add(ws, { imageId })],
+    ["Watermark.set", ({ ws, imageId }) => Watermark.set(ws, { imageId })],
     ["Form.addCheckbox", ({ ws }) => Form.addCheckbox(ws, "A1", {})],
     [
       "DataValidation.add",

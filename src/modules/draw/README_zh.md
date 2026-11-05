@@ -102,15 +102,15 @@ interface DrawList {
 
 ```typescript
 interface DrawPaint {
-  readonly fill?: Rgba01;
-  readonly stroke?: Rgba01;
+  readonly fill?: DrawRgba01;
+  readonly stroke?: DrawRgba01;
   readonly strokeWidth?: number; // 用户单位,有描边时默认 1
   readonly dash?: readonly number[]; // 交替的实/虚,SVG 语义
   readonly fillRule?: "nonzero" | "evenodd";
 }
 ```
 
-颜色是 `Rgba01` —— 各通道取值 `0..1`,含 alpha。`Draw.parseColor("#3366cc")` 把 CSS 记号解析成它 —— 十六进制、`rgb()`、`hsl()` 或颜色名;`none` 与 `transparent` 为完全透明,读不懂的记号为黑色。`Draw.withAlpha("#3366cc", 0.5)` 一步完成解析并设置 alpha。
+颜色是 `DrawRgba01` —— 各通道取值 `0..1`,含 alpha。`Draw.parseColor("#3366cc")` 把 CSS 记号解析成它 —— 十六进制、`rgb()`、`hsl()` 或颜色名;`none` 与 `transparent` 为完全透明,读不懂的记号为黑色。`Draw.withAlpha("#3366cc", 0.5)` 一步完成解析并设置 alpha。
 
 没有 `style.fill` 的文字节点在任何后端都不绘制 —— 与没有 `fill` 的 paint 规则相同。
 
@@ -140,7 +140,7 @@ const lines = Draw.wrapText("A longer label that has to fit", style, 120);
 
 ### 变换
 
-`DrawMatrix` 辅助函数:`Matrix.IDENTITY`、`translate`、`scale`、`getUniformScale`、`rotate`、`multiply`、`apply`、`getRotation`(位于 `Matrix` 命名空间)。路径辅助函数位于底层命名空间 `Draw.Geometry`:`arcToCubics`、`flattenPath`、`roundedRectToPath`、`sectorToPath`、`rectNode`。`toSvg`/`toRgba` 之下的底层构件 —— `SvgSurface`、`BasicRasterCanvas`、`createRasterSurface`、`renderNode`、`downsample`、`normalizeSamples`、`fontHasGlyph` —— 位于 `Draw.Backend`。
+`DrawMatrix` 辅助函数:`Matrix.IDENTITY`、`translate`、`scale`、`getUniformScale`、`rotate`、`multiply`、`apply`、`getRotation`(位于 `Matrix` 命名空间)。路径辅助函数位于底层命名空间 `Draw.Geometry`:`arcToCubics`、`flattenPath`、`roundedRectToPath`、`sectorToPath`、`createRectNode`。`toSvg`/`toRgba` 之下的底层构件 —— `SvgSurface`、`BasicRasterCanvas`、`createRasterSurface`、`renderNode`、`downsample`、`normalizeSamples`、`fontHasGlyph` —— 位于 `Draw.Backend`。
 
 ---
 
@@ -158,7 +158,7 @@ const lines = Draw.wrapText("A longer label that has to fit", style, 120);
 
 ### 是像素,不是 PNG
 
-`Draw.toRgba` 返回 `RgbaImage` —— `{ width, height, data }`,`width * height * 4` 字节的直通 alpha RGBA —— 而不是编码后的文件。编码 PNG 需要 DEFLATE,它位于本模块之上一层;把压缩库拉下来会让绘图引擎的每个使用者都为此付费。
+`Draw.toRgba` 返回 `DrawRgbaImage` —— `{ width, height, data }`,`width * height * 4` 字节的直通 alpha RGBA —— 而不是编码后的文件。编码 PNG 需要 DEFLATE,它位于本模块之上一层;把压缩库拉下来会让绘图引擎的每个使用者都为此付费。
 
 所以接缝定在图像上,而配对只有两行。`documonster/archive` 拥有 DEFLATE 和 CRC-32,而 PNG 就是这两样东西:
 
@@ -199,7 +199,7 @@ const image = Draw.toRgba(list, { fonts: [notoSansScBytes] });
 ```typescript
 import { Draw } from "documonster/draw";
 
-const regular = Draw.parseRasterFont(songtiTtcBytes, 3); // .ttc 中的某一 face
+const regular = Draw.parseRasterFont({ data: songtiTtcBytes, collectionIndex: 3 }); // .ttc 中的某一 face
 const image = Draw.toRgba(list, { fonts: [regular] });
 
 // 不想自己解析时,等价写法:

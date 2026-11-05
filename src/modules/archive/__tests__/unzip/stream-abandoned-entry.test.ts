@@ -10,7 +10,7 @@
 
 import { Readable } from "stream";
 
-import { Crc32MismatchError, ZipParseError } from "@archive/core/errors";
+import { ZipCrc32MismatchError, ZipParseError } from "@archive/core/errors";
 import { zip } from "@archive/create-archive";
 import type { ZipEntry } from "@archive/unzip/stream";
 import { createParse } from "@archive/unzip/stream";
@@ -79,8 +79,8 @@ describe("unzip stream: an entry whose consumer does not listen for errors", () 
       }
     })();
 
-    await expect(settleWithin(iterated, 5000)).rejects.toBeInstanceOf(Crc32MismatchError);
-    expect(await failure).toBeInstanceOf(Crc32MismatchError);
+    await expect(settleWithin(iterated, 5000)).rejects.toBeInstanceOf(ZipCrc32MismatchError);
+    expect(await failure).toBeInstanceOf(ZipCrc32MismatchError);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(uncaught).toEqual([]);
   });
@@ -92,7 +92,7 @@ describe("unzip stream: an entry whose consumer does not listen for errors", () 
     parse.on("entry", (entry: ZipEntry) => entry.resume());
     parse.resume();
 
-    await expect(settleWithin(done, 5000)).rejects.toBeInstanceOf(Crc32MismatchError);
+    await expect(settleWithin(done, 5000)).rejects.toBeInstanceOf(ZipCrc32MismatchError);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(uncaught).toEqual([]);
   });
@@ -126,7 +126,7 @@ describe("unzip stream: an entry whose consumer does not listen for errors", () 
         break;
       }
     }
-    expect(entryError).toBeInstanceOf(Crc32MismatchError);
+    expect(entryError).toBeInstanceOf(ZipCrc32MismatchError);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(uncaught).toEqual([]);
   });

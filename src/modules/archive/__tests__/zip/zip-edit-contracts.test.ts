@@ -14,7 +14,7 @@ const zip = Archive.packZipSync([
 
 describe("ZipEditor.apply", () => {
   it("applies nothing when an operation of the plan is refused", async () => {
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     const plan = new Archive.ZipEditPlan()
       .delete("a.txt")
       .set("new.txt", "N")
@@ -33,7 +33,7 @@ describe("ZipEditor.apply", () => {
   });
 
   it("refuses a rename onto a traversal name before applying anything", async () => {
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     const plan = new Archive.ZipEditPlan().delete("a.txt").rename("b.txt", "../c.txt");
     expect(() => editor.apply(plan)).toThrow(ArchiveError);
     expect(editor.getOutputEntryNames()).toEqual(["a.txt", "b.txt"]);
@@ -46,7 +46,7 @@ describe("sources and comments are checked when they are given", () => {
     expect(() => Archive.createTar().add("a", source as never)).toThrow(ArchiveError);
     expect(() => Archive.createTarGz().add("a", source as never)).toThrow(ArchiveError);
     expect(() => Archive.packZipSync([["a", source as never]])).toThrow(ArchiveError);
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     expect(() => editor.set("a", source as never)).toThrow(ArchiveError);
   });
 
@@ -61,7 +61,7 @@ describe("sources and comments are checked when they are given", () => {
   });
 
   it("refuses an editor comment that is not a string", async () => {
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     expect(() => editor.setComment(42 as never)).toThrow(ArchiveError);
     expect(() => editor.setComment(undefined)).not.toThrow();
   });
@@ -105,7 +105,7 @@ describe("readers return copies", () => {
   });
 
   it("ZipEditor.getEntries", async () => {
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     expect(() => {
       (editor.getEntries()[0] as { path: string }).path = "zzz";
     }).toThrow(TypeError);

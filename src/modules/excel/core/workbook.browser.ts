@@ -7,7 +7,7 @@
  * Features:
  * - xlsx: File/stream/buffer support (file operations Node.js only)
  * - csv: CSV read/write support (file operations Node.js only)
- * - streaming: createStreamWriter/createStreamReader for large files
+ * - streaming: `Stream.WorkbookWriter` / `Stream.WorkbookReader` for large files
  */
 
 import { nameCall } from "@excel/chart/api/call";
@@ -284,7 +284,7 @@ function withRenamedTables(
  * Everything that can refuse the import is checked before the sheet is added, so a refused import adds nothing.
  *
  * @throws {ExcelArgumentError} when `source` is not a worksheet or `name` is not a string.
- * @throws {WorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
+ * @throws {ExcelWorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
  */
 export function importWorksheet(wb: WorkbookData, source: Worksheet, name?: string): Worksheet {
   checkWorkbook(wb);
@@ -665,7 +665,7 @@ export function removeWorksheet(wb: WorkbookData, sheet: number | string | Works
 /**
  * Add a chartsheet — a tab that holds one chart — and return it. `name` defaults to `ChartN`.
  *
- * @throws {WorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
+ * @throws {ExcelWorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
  */
 export function addChartsheet(
   wb: WorkbookData,
@@ -934,7 +934,7 @@ export function renameChartsheet(
  * Copy a chartsheet — by handle, name or 0-based position — chart included, under `name` (by default its name followed
  * by ` Copy`), and return the copy, or `undefined` when there is no such chartsheet.
  *
- * @throws {WorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
+ * @throws {ExcelWorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
  */
 export function copyChartsheet(
   wb: WorkbookData,
@@ -1534,8 +1534,8 @@ function cloneChartExEntry(entry: ChartExEntry, chartExNumber: number): ChartExE
 
 export type Workbook = WorkbookData;
 
-// Streaming factories (formerly Workbook.createStreamWriter / .createStreamReader
-// statics). Free functions so they tree-shake.
+// Constructor forwards behind the deprecated `Workbook.createStreamWriter` /
+// `createStreamReader`; use `new Stream.WorkbookWriter` / `new Stream.WorkbookReader`.
 export function createStreamWriter(options?: WorkbookWriterOptions): WorkbookWriter {
   return new WorkbookWriter(options);
 }

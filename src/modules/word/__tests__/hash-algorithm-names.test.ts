@@ -73,15 +73,15 @@ describe("hash algorithm names", () => {
     const block = WordCrypto.Agile.BLOCK_KEYS.encryptedKey;
     for (const [canonical, compact] of SPELLINGS) {
       expect(
-        await WordCrypto.Agile.deriveKey("pw", { ...info, hashAlgorithm: canonical }, block),
+        await WordCrypto.Agile.deriveKey({ ...info, hashAlgorithm: canonical }, "pw", block),
         canonical
-      ).toEqual(await WordCrypto.Agile.deriveKey("pw", { ...info, hashAlgorithm: compact }, block));
+      ).toEqual(await WordCrypto.Agile.deriveKey({ ...info, hashAlgorithm: compact }, "pw", block));
     }
     // SHA-1 and SHA-512 really differ (a hyphenated name was read as SHA-512).
     expect(
-      await WordCrypto.Agile.deriveKey("pw", { ...info, hashAlgorithm: "SHA-1" }, block)
+      await WordCrypto.Agile.deriveKey({ ...info, hashAlgorithm: "SHA-1" }, "pw", block)
     ).not.toEqual(
-      await WordCrypto.Agile.deriveKey("pw", { ...info, hashAlgorithm: "SHA-512" }, block)
+      await WordCrypto.Agile.deriveKey({ ...info, hashAlgorithm: "SHA-512" }, "pw", block)
     );
   });
 

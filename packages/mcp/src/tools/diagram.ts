@@ -26,9 +26,13 @@ import path from "node:path";
 
 import { Archive } from "documonster/archive";
 import { Draw } from "documonster/draw";
-import type { DrawList, RasterFontSource } from "documonster/draw";
+import type { DrawList, DrawRasterFontSource } from "documonster/draw";
 import { Mermaid, MermaidParseError } from "documonster/mermaid";
-import type { MermaidDiagram, MermaidRenderOptions, ThemeOptions } from "documonster/mermaid";
+import type {
+  MermaidDiagram,
+  MermaidRenderOptions,
+  MermaidThemeOptions
+} from "documonster/mermaid";
 import { Pdf } from "documonster/pdf";
 import type { PdfFontConfig } from "documonster/pdf";
 import { z } from "zod";
@@ -93,7 +97,7 @@ export function requireDiagramFormat(filePath: string, field: string): DiagramFo
  */
 export type ThemePreset = "default" | "dark" | "neutral";
 
-export const THEME_PRESETS: Readonly<Record<ThemePreset, ThemeOptions>> = {
+export const THEME_PRESETS: Readonly<Record<ThemePreset, MermaidThemeOptions>> = {
   default: {},
   dark: {
     background: "#1e222a",
@@ -224,7 +228,7 @@ export const diagramStyleShape = {
 /** The parsed form of {@link diagramStyleShape}. */
 export interface DiagramStyleArgs {
   readonly theme?: ThemePreset;
-  readonly themeOverrides?: ThemeOptions;
+  readonly themeOverrides?: MermaidThemeOptions;
   readonly background?: string;
   readonly fontSize?: number;
   readonly fontFamily?: string;
@@ -254,7 +258,7 @@ export function toRenderOptions(args: DiagramStyleArgs): MermaidRenderOptions & 
     args.background ?? overrides.background ?? preset.background ?? "#ffffff",
     "background"
   );
-  const theme: ThemeOptions = { ...preset, ...overrides, background };
+  const theme: MermaidThemeOptions = { ...preset, ...overrides, background };
 
   return {
     theme,
@@ -269,7 +273,7 @@ export function toRenderOptions(args: DiagramStyleArgs): MermaidRenderOptions & 
 }
 
 /** Validate every colour in a set of overrides, including the palette. */
-function requireColours(overrides: ThemeOptions): ThemeOptions {
+function requireColours(overrides: MermaidThemeOptions): MermaidThemeOptions {
   const checked: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) {
@@ -282,7 +286,7 @@ function requireColours(overrides: ThemeOptions): ThemeOptions {
           )
         : requireColour(value as string, `themeOverrides.${key}`);
   }
-  return checked as ThemeOptions;
+  return checked as MermaidThemeOptions;
 }
 
 /**
@@ -703,7 +707,7 @@ function formatCodePoint(codePoint: number): string {
  */
 export interface DiagramFontOptions {
   readonly pdf?: PdfFontConfig;
-  readonly raster?: readonly RasterFontSource[];
+  readonly raster?: readonly DrawRasterFontSource[];
   /** False once the operator named their faces, so the render does not depend on the host. */
   readonly useSystemFonts?: boolean;
 }

@@ -5,6 +5,7 @@
  * once it existed, while leaving the sheet — and what it saves — untouched.
  */
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { describe, expect, it } from "vitest";
 
 function styledSheet(): Worksheet.Handle {
@@ -96,13 +97,61 @@ describe("Cell readers leave the sheet untouched", () => {
     expect(Cell.getFont(ws, "B51")).toEqual({ bold: true });
   });
 
-  it("an existing cell's facet is still live", () => {
+  it("editing what an existing cell's facet reader returned changes nothing", () => {
     const ws = styledSheet();
     Cell.setValue(ws, "B3", 1);
     Cell.getFont(ws, "B3")!.italic = true;
-    expect(Cell.getFont(ws, "B3")).toEqual({ bold: true, italic: true });
-    // The column snapshot the cell inherited from is not reached through it.
+    Cell.getAlignment(ws, "B3")!.horizontal = "right";
+    Cell.getBorder(ws, "B3")!.top = { style: "thick" };
+    Cell.getFill(ws, "B3")!.type = "gradient";
+    Cell.getProtection(ws, "B3")!.locked = true;
+    expect(Cell.getStyle(ws, "B3")).toEqual(Column.findStyle(ws, "B"));
     expect(Column.findStyle(ws, "B")?.font).toEqual({ bold: true });
+  });
+
+  it("a facet is changed through its setter or the live getStyle record", () => {
+    const ws = styledSheet();
+    Cell.setFont(ws, "B3", { ...Cell.getFont(ws, "B3"), italic: true });
+    expect(Cell.getFont(ws, "B3")).toEqual({ bold: true, italic: true });
+    Cell.getStyle(ws, "B4").font = { underline: true };
+    expect(Cell.getFont(ws, "B4")).toEqual({ underline: true });
+    expect(Column.findStyle(ws, "B")?.font).toEqual({ bold: true });
+  });
+
+  it("Cell, Row and Column facet readers all return copies", () => {
+    const ws = styledSheet();
+    Row.setFont(ws, 7, { size: 20 });
+    Cell.setValue(ws, "B3", 1);
+    const reads = [
+      () => Cell.getFont(ws, "B3"),
+      () => Cell.getFont(ws, "B60"),
+      () => Row.getFont(ws, 7),
+      () => Column.getFont(ws, "B")
+    ];
+    for (const read of reads) {
+      const first = read()!;
+      expect(read()).not.toBe(first);
+      first.strike = true;
+      expect(read()!.strike).toBeUndefined();
+    }
+  });
+
+  it("Row.commit on a document-model sheet creates no row", () => {
+    const ws = styledSheet();
+    const before = shape(ws);
+    Row.commit(ws, 80);
+    expect(Row.has(ws, 80)).toBe(false);
+    expect(shape(ws)).toBe(before);
+    expect(() => Row.commit(ws, 0)).toThrow();
+  });
+
+  it("Row.commit still commits a streaming writer's row", () => {
+    const wb = new WorkbookWriter({});
+    const ws = wb.addWorksheet("S");
+    Cell.setValue(ws as never, "A1", "x");
+    expect(() => ws.getRow(1)).not.toThrow();
+    Row.commit(ws as never, 1);
+    expect(() => ws.getRow(1)).toThrow();
   });
 
   it("Row.eachCell over an absent row visits nothing and creates nothing", () => {

@@ -75,7 +75,7 @@ Twenty-one types, but far fewer layouts — because most of them are the same pi
 
 `sequenceDiagram` · `gantt` · `timeline` · `journey` · `kanban` · `mindmap` · `gitGraph` · `quadrantChart` · `xychart` · `radar` · `sankey` · `packet` · `block` · `pie`
 
-A box that sizes itself — a class compartment stack, a C4 element with its technology line — tells the layout its size through `LayoutOptions.measureNode`.
+A box that sizes itself — a class compartment stack, a C4 element with its technology line — tells the layout its size through `MermaidLayoutOptions.measureNode`.
 
 ---
 
@@ -105,11 +105,11 @@ Inspecting the tree or re-using the positions are real things to want, which is 
 
 ## Options
 
-`Mermaid.toSvg` and `Mermaid.toDrawList` take `MermaidRenderOptions`, which extends `LayoutOptions`:
+`Mermaid.toSvg` and `Mermaid.toDrawList` take `MermaidRenderOptions`, which extends `MermaidLayoutOptions`:
 
 | Option          | Type                          | Description                                                       |
 | --------------- | ----------------------------- | ----------------------------------------------------------------- |
-| `theme`         | `ThemeOptions`                | Colour overrides; anything omitted keeps the default              |
+| `theme`         | `MermaidThemeOptions`         | Colour overrides; anything omitted keeps the default              |
 | `background`    | `string`                      | Background fill. `"transparent"` (default) leaves no backdrop     |
 | `fontSize`      | `number`                      | Label size                                                        |
 | `fontFamily`    | `string`                      | Label family                                                      |

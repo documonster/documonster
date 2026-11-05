@@ -9,7 +9,7 @@
 
 import { toStreamBytes } from "@stream/core/binary-chunk";
 import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
-import { UnsupportedStreamTypeError } from "@stream/errors";
+import { StreamUnsupportedTypeError } from "@stream/errors";
 import type { ReadableLike, WritableLike } from "@stream/types";
 import { concatUint8Arrays, createTextDecoder } from "@utils/binary";
 
@@ -47,7 +47,7 @@ export async function* readableStreamToAsyncIterable<T>(
   stream: ReadableStreamLike<T>
 ): AsyncGenerator<T, void, unknown> {
   if (!isReadableStream(stream)) {
-    throw new UnsupportedStreamTypeError(
+    throw new StreamUnsupportedTypeError(
       "Streams.readableStreamToAsyncIterable",
       stream === null ? "null" : typeof stream,
       { field: "stream" }
@@ -77,7 +77,7 @@ export async function collect<T>(stream: {
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }): Promise<T[]> {
   if (!isAsyncIterable(stream)) {
-    throw new UnsupportedStreamTypeError(
+    throw new StreamUnsupportedTypeError(
       "Streams.collect",
       stream === null ? "null" : typeof stream,
       {
@@ -142,7 +142,7 @@ export async function readTextAt(
     }
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
-      throw new UnsupportedStreamTypeError(where, typeof chunk);
+      throw new StreamUnsupportedTypeError(where, typeof chunk);
     }
     text += decoder.decode(bytes, { stream: true });
   }
@@ -184,7 +184,7 @@ function toAsyncIterable<T>(
       yield* stream as Iterable<T>;
     })();
   }
-  throw new UnsupportedStreamTypeError(name, stream === null ? "null" : typeof stream, {
+  throw new StreamUnsupportedTypeError(name, stream === null ? "null" : typeof stream, {
     field: "stream"
   });
 }
@@ -201,7 +201,7 @@ export async function streamToUint8Array(
   for await (const chunk of toAsyncIterable(stream, "Streams.bytes")) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
-      throw new UnsupportedStreamTypeError("Streams.bytes", typeof chunk);
+      throw new StreamUnsupportedTypeError("Streams.bytes", typeof chunk);
     }
     chunks.push(bytes);
     totalLength += bytes.byteLength;
@@ -229,7 +229,7 @@ export async function streamToString(
   for await (const chunk of toAsyncIterable(stream, "streamToString")) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
-      throw new UnsupportedStreamTypeError("streamToString", typeof chunk);
+      throw new StreamUnsupportedTypeError("streamToString", typeof chunk);
     }
     text += decoder.decode(bytes, { stream: true });
   }

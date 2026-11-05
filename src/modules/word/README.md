@@ -31,7 +31,7 @@ Works in Node.js 22+ and modern browsers.
 - **Conversion** — DOCX ↔ HTML, DOCX ↔ Markdown, Excel → Word, Word → PDF
 - **Flat OPC** — single-XML `.xml` representation round-trip
 - **Diff and merge** — compare two documents, combine multiple documents
-- **Streaming writer** — `Streaming.createWriter()` for large documents
+- **Streaming writer** — `new Stream.DocumentWriter()` for large documents
 - **Validation** — structural checks with severity-tagged issues
 - **OOXML Strict** — transparent normalization to Transitional on read
 - **Browser support** — the same `documonster/word` import works in Node.js and browsers
@@ -119,6 +119,13 @@ const text = Query.getText(doc);
 // Search
 const results = Query.searchText(doc, /pattern/g);
 ```
+
+On Node, `Io.readFile(path)` and `Io.writeFile(doc, path)` read and write a file
+directly; the browser build publishes neither — read the bytes yourself and pass
+them to `Io.read`. A file the system will not read or write is a `DocxFileError`
+(`path`, `operation`) whose `cause` is the system's error (`error.cause.code` is
+`ENOENT`, `EACCES`, …), as Excel's `ExcelFileError` is; a file that was read but is
+not a valid document is a `DocxParseError`.
 
 ### One Document Object
 
@@ -416,15 +423,17 @@ const merged = Transform.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" })
 ### Streaming Writer
 
 ```typescript
-import { Streaming } from "documonster/word";
+import { Stream } from "documonster/word";
 
-const stream = Streaming.createWriter();
+const stream = new Stream.DocumentWriter();
 stream.addText("Title", { style: "Heading1" });
 for (const item of largeDataset) {
   stream.addText(item.text);
 }
-const buffer = await stream.finalize();
+const buffer = await stream.toBuffer();
 ```
+
+With `new Stream.DocumentWriter({ sink })` the bytes flow into the sink as they are produced: finish with `await stream.commit()`, which ends the sink (`toBuffer()` is refused, since the writer holds no bytes).
 
 ### Document Protection
 
@@ -517,7 +526,7 @@ const fromBase64 = await Io.read(await Io.toBase64(doc), { base64: true });
 
 A password-protected DOCX — Agile Encryption in an OLE compound file, what Word writes for "Encrypt with
 Password" — is read with `{ password }` (`Io.read`, `Io.readFile`, the `Package` functions,
-`Streaming.createReader`) and written with it (`Io.toBuffer`, `Io.toBase64`, `Io.writeFile`); `encryption` tunes
+`new Stream.DocumentReader`) and written with it (`Io.toBuffer`, `Io.toBase64`, `Io.writeFile`); `encryption` tunes
 it (Office's defaults: AES-256, SHA-512, 100,000 iterations). Excel's `Workbook.read` / `toBuffer` take the same
 options, and both modules share one implementation. The encryption code is loaded only when a password is given.
 Without a password an encrypted file is a `DocxEncryptedError`; a wrong one is a `DocxDecryptionError` whose

@@ -245,7 +245,7 @@ export interface XlsbReadOptions {
   readonly formulas?: "preserve" | "cached" | "error";
   /**
    * Container options. Every part is checked against the CRC-32 the package records for
-   * it, failing with an `ExcelFileError` whose `cause` is the archive's `Crc32MismatchError`;
+   * it, failing with an `ExcelFileError` whose `cause` is the archive's `ZipCrc32MismatchError`;
    * `checkCrc32: false` reads a damaged package as far as it goes.
    */
   readonly zip?: { readonly checkCrc32?: boolean };

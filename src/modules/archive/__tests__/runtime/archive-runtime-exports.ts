@@ -40,15 +40,13 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "TarGzArchive",
 
   // ZIP editing and entries
-  "editZip",
-  "editZipUrl",
   "ZipEditor",
   "ZipEditPlan",
   "UnzipEntry",
 
   // TAR entries and constants
   "TAR_BLOCK_SIZE",
-  "TAR_TYPE",
+  "TarType",
   "createTarReaderEntry",
   "isTarFile",
   "isTarDirectory",
@@ -59,11 +57,21 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   // Deprecated forwards
   "zip",
   "unzip",
+  "editZip",
+  "editZipUrl",
   "createTarArchive",
   "createTarReader",
   "tar",
   "tarSync",
   "untar",
+  "TAR_TYPE",
+  "createAbortError",
+  "isAbortError",
+  "base64ToUint8Array",
+  "uint8ArrayToBase64",
+  "concatUint8Arrays",
+  "stringToUint8Array",
+  "uint8ArrayToString",
 
   // CRC-32 and PNG encoding
   "crc32",
@@ -77,9 +85,7 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "createBufferReader",
   "RemoteZipReader",
 
-  // Abort utilities
-  "createAbortError",
-  "isAbortError",
+  // Abort utility
   "throwIfAborted",
 
   // Crypto - ZipCrypto
@@ -108,14 +114,7 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "AES_VENDOR_ID",
   "AES_VERSION_AE1",
   "AES_VERSION_AE2",
-  "COMPRESSION_METHOD_AES",
-
-  // Binary / encoding utilities
-  "base64ToUint8Array",
-  "uint8ArrayToBase64",
-  "concatUint8Arrays",
-  "stringToUint8Array",
-  "uint8ArrayToString"
+  "COMPRESSION_METHOD_AES"
 ] as const;
 
 /**
@@ -196,21 +195,37 @@ export const ARCHIVE_BROWSER_EXPORTS = [
   // Error types
   "ArchiveError",
   "AbortError",
+  "isAbortError",
   "ZipParseError",
+  "ZipInvalidSignatureError",
   "InvalidZipSignatureError",
+  "ZipEocdNotFoundError",
+  "ZipCrc32MismatchError",
+  "ZipEntrySizeMismatchError",
+  "ArchiveLimitError",
+  "ArchiveWorkerStreamStartError",
+  "ArchiveWorkerUnsupportedError",
+  "ArchiveArgumentError",
+  "ZipDecryptionError",
+  "ZipPasswordRequiredError",
+  "ArchiveRangeNotSupportedError",
+  "ArchiveHttpRangeError",
+  "ArchiveFileTooLargeError",
+  "ArchiveFileError",
+  "ZipUnsupportedCompressionError",
+  "isArchiveError",
+
+  // Deprecated error names
   "EocdNotFoundError",
   "Crc32MismatchError",
   "EntrySizeMismatchError",
-  "ArchiveLimitError",
   "WorkerStreamStartError",
-  "ArchiveArgumentError",
   "DecryptionError",
   "PasswordRequiredError",
   "RangeNotSupportedError",
   "HttpRangeError",
   "FileTooLargeError",
-  "UnsupportedCompressionError",
-  "isArchiveError"
+  "UnsupportedCompressionError"
 ] as const;
 
 /**
@@ -346,8 +361,6 @@ export const FS_NAMESPACE_EXPORTS = [
   "removeSync",
   "copyFile",
   "copyFileSync",
-  "createReadStream",
-  "createWriteStream",
   "createTempDir",
   "createTempDirSync"
 ] as const;

@@ -1,5 +1,5 @@
 import * as entry from "@archive";
-import { Archive, ArchiveError, Compression, Fs } from "@archive";
+import { Archive, ArchiveError, ArchiveWorkerUnsupportedError, Compression, Fs } from "@archive";
 import { compress, decompress, detectCompressionFormat } from "@archive/compression/compress";
 import { zip } from "@archive/create-archive";
 import { encodePng } from "@archive/png";
@@ -89,21 +89,28 @@ describe("Compression namespace", () => {
   });
 
   it("Workers.WorkerPool cannot be constructed in Node", () => {
-    expect(() => new Compression.Workers.WorkerPool()).toThrow(/only available in browser/);
+    expect(Compression.hasWorkerSupport()).toBe(false);
+    expect(() => new Compression.Workers.WorkerPool()).toThrow(ArchiveWorkerUnsupportedError);
     expect(() => Compression.Workers.terminateDefaultPool()).not.toThrow();
   });
 
   it("Workers members have the browser signatures on Node, and reject", async () => {
     // Type-checked: code guarded by hasWorkerSupport() compiles against the Node types.
     const data = new Uint8Array([1, 2, 3]);
-    await expect(Compression.Workers.deflate(data, { level: 6 })).rejects.toThrow(
-      /not available in Node/
+    const rejected = await Compression.Workers.deflate(data, { level: 6 }).catch((e: unknown) => e);
+    expect(rejected).toBeInstanceOf(ArchiveWorkerUnsupportedError);
+    expect(rejected).toBeInstanceOf(ArchiveError);
+    expect((rejected as ArchiveWorkerUnsupportedError).operation).toBe(
+      "Compression.Workers.deflate"
+    );
+    expect((rejected as Error).message).toMatch(
+      /^Compression\.Workers\.deflate: .*not available in Node/
     );
     await expect(Compression.Workers.inflateBatch([{ data }])).rejects.toThrow(
-      /not available in Node/
+      ArchiveWorkerUnsupportedError
     );
     expect(() => Compression.Workers.getDefaultPool({ maxWorkers: 2 })).toThrow(
-      /not available in Node/
+      ArchiveWorkerUnsupportedError
     );
   });
 });
@@ -116,15 +123,13 @@ describe("Archive.Crypto", () => {
   it("keeps the flat Archive members as deprecated forwards", () => {
     expect(Archive.aesEncrypt).toBe(Archive.Crypto.encryptAes);
     expect(Archive.AES_KEY_LENGTH).toBe(Archive.Crypto.AES_KEY_LENGTH);
-    expect(Archive.randomBytes).toBe(Archive.Crypto.randomBytes);
+    expect("randomBytes" in Archive.Crypto).toBe(false);
+    expect(Archive.randomBytes(16)).toHaveLength(16);
   });
 
   it("zipCryptoDecrypt throws on a wrong password; the deprecated Archive form returns null", () => {
-    const encrypted = Archive.Crypto.encryptZipCrypto(
-      plain,
-      password,
-      crc,
-      Archive.Crypto.randomBytes
+    const encrypted = Archive.Crypto.encryptZipCrypto(plain, password, crc, n =>
+      crypto.getRandomValues(new Uint8Array(n))
     );
     expect(Archive.Crypto.decryptZipCrypto(encrypted, password, crc)).toEqual(plain);
     expect(() => Archive.Crypto.decryptZipCrypto(encrypted, "wrong", crc)).toThrow(ArchiveError);
@@ -211,19 +216,19 @@ describe("Archive builders", () => {
 });
 
 describe("Fs namespace", () => {
-  it("holds the file-system helpers, with flat forwards", () => {
-    expect(Fs.glob).toBe(glob);
+  it("holds the file-system helpers; the flat forwards keep the unchecked v0.21.1 functions", () => {
+    expect(typeof Fs.glob).toBe("function");
     expect(entry.glob).toBe(glob);
-    expect(entry.remove).toBe(Fs.remove);
+    expect(entry.safeStats).toBe(safeStats);
+    // Fs checks its arguments first, so it wraps rather than re-exports them.
+    expect(Fs.glob).not.toBe(glob);
   });
 
-  it("safeStats reports a missing path as null; the flat forward is the same function", async () => {
+  it("safeStats reports a missing path as null", async () => {
     const missing = "/definitely/not/here/documonster";
     expect(await Fs.safeStats(missing)).toBeNull();
     expect(Fs.safeStatsSync(missing)).toBeNull();
-    expect(entry.safeStats).toBe(Fs.safeStats);
-    expect(entry.safeStatsSync).toBe(Fs.safeStatsSync);
-    expect(Fs.safeStats).toBe(safeStats);
+    expect(await entry.safeStats(missing)).toBeNull();
     expect((await Fs.safeStats(import.meta.dirname))?.isDirectory()).toBe(true);
   });
 });

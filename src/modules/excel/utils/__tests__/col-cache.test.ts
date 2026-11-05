@@ -1,4 +1,4 @@
-import { ColumnOutOfBoundsError } from "@excel/errors";
+import { ExcelColumnOutOfBoundsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { describe, it, expect } from "vitest";
 
@@ -84,7 +84,7 @@ describe("colCache", () => {
 
   it("l2n carries the offending letter (not its length) in the error message", () => {
     // Regression: `l2n("AAAA")` used to delegate the bounds check to
-    // `_fill(level)`, which then threw `ColumnOutOfBoundsError(level)`
+    // `_fill(level)`, which then threw `ExcelColumnOutOfBoundsError(level)`
     // — the *length* of the input, not the input itself. Users saw
     // "Column 4 is out of bounds" for an `AAAA` lookup, which is
     // misleading (column 4 is actually `D`, a perfectly valid column).
@@ -98,7 +98,7 @@ describe("colCache", () => {
     // itself — a function where every caller expects a column number, which then
     // indexes a cell array as `NaN` and silently reads nothing.
     for (const name of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
-      expect(() => colCache.l2n(name)).toThrow(ColumnOutOfBoundsError);
+      expect(() => colCache.l2n(name)).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 

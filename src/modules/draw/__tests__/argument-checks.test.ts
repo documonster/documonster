@@ -1,5 +1,6 @@
 import { Draw, DrawArgumentError, DrawError, Matrix, isDrawError } from "@draw/index";
 import type { DrawList, DrawNode } from "@draw/index";
+import { buildCoverageFont } from "@test/ttf-fixture";
 import { describe, expect, it } from "vitest";
 
 const RED = { r: 1, g: 0, b: 0, a: 1 };
@@ -152,8 +153,36 @@ describe("Draw.parseRasterFont reports a font it cannot read", () => {
   it("throws instead of returning an empty face", () => {
     // Was an empty face indistinguishable from a real one.
     expect(() => Draw.parseRasterFont(new Uint8Array(10))).toThrow(DrawError);
-    expect(fieldOf(() => Draw.parseRasterFont(null as never))).toBe("data");
-    expect(fieldOf(() => Draw.parseRasterFont(new Uint8Array(10), -1))).toBe("collectionIndex");
+    expect(() => Draw.parseRasterFont({ data: new Uint8Array(10) })).toThrow(DrawError);
+  });
+
+  it("takes the bytes or { data, collectionIndex }, naming the field as the caller wrote it", () => {
+    expect(fieldOf(() => Draw.parseRasterFont(null as never))).toBe("source");
+    expect(fieldOf(() => Draw.parseRasterFont(42 as never))).toBe("source");
+    expect(fieldOf(() => Draw.parseRasterFont([1, 2] as never))).toBe("source");
+    expect(fieldOf(() => Draw.parseRasterFont({} as never))).toBe("source.data");
+    expect(fieldOf(() => Draw.parseRasterFont({ data: "x" } as never))).toBe("source.data");
+    expect(
+      fieldOf(() => Draw.parseRasterFont({ data: new Uint8Array(10), collectionIndex: -1 }))
+    ).toBe("source.collectionIndex");
+    expect(
+      fieldOf(() =>
+        Draw.parseRasterFont({ data: new Uint8Array(10), collectionIndex: "1" as never })
+      )
+    ).toBe("source.collectionIndex");
+    expect(() => Draw.parseRasterFont({ data: new Uint8Array(10), collectionIndex: 1.5 })).toThrow(
+      /^Draw\.parseRasterFont: source\.collectionIndex must be an integer >= 0, got 1\.5$/
+    );
+  });
+
+  it("reads a real face from either form, and refuses an index the file does not have", () => {
+    const bytes = buildCoverageFont([0x41], "Fixture");
+    expect(Draw.parseRasterFont(bytes).hasGlyph?.(0x41)).toBe(true);
+    expect(Draw.parseRasterFont({ data: bytes }).hasGlyph?.(0x41)).toBe(true);
+    expect(Draw.parseRasterFont({ data: bytes, collectionIndex: 0 }).hasGlyph?.(0x41)).toBe(true);
+    expect(fieldOf(() => Draw.parseRasterFont({ data: bytes, collectionIndex: 1 }))).toBe(
+      "source.collectionIndex"
+    );
   });
 });
 
@@ -180,10 +209,39 @@ describe("Draw.Geometry and Draw.Backend check their arguments", () => {
         Draw.Geometry.arcToCubics({ x: 0, y: 0 }, Number.NaN, 5, 0, false, true, { x: 10, y: 0 })
       )
     ).toBe("rx");
-    expect(fieldOf(() => Draw.Geometry.flattenPath([{ op: "move", x: 0, y: 0 }], 0))).toBe("scale");
+    expect(
+      fieldOf(() => Draw.Geometry.flattenPath([{ op: "move", x: 0, y: 0 }], { scale: 0 }))
+    ).toBe("options.scale");
+    expect(fieldOf(() => Draw.Geometry.flattenPath([], null as never))).toBe("options");
+    expect(fieldOf(() => Draw.Geometry.flattenPath([], 2 as never))).toBe("options");
     expect(
       fieldOf(() => Draw.Geometry.createRectNode({ x: 0, y: 0, width: 1, height: 1 }, {}, -1))
     ).toBe("rx");
+  });
+
+  it("names roundedRectToPath's own parameters, not an internal box", () => {
+    for (const [args, field] of [
+      [[Number.NaN, 0, 1, 1, 0], "x"],
+      [[0, Infinity, 1, 1, 0], "y"],
+      [[0, 0, "1", 1, 0], "width"],
+      [[0, 0, 1, null, 0], "height"],
+      [[0, 0, 1, 1, Number.NaN], "radius"]
+    ] as const) {
+      try {
+        Draw.Geometry.roundedRectToPath(
+          ...(args as unknown as [number, number, number, number, number])
+        );
+        throw new Error("expected a throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(DrawArgumentError);
+        expect((err as DrawArgumentError).field).toBe(field);
+        expect(
+          (err as Error).message.startsWith(`Draw.Geometry.roundedRectToPath: ${field} must be`)
+        ).toBe(true);
+      }
+    }
+    // A negative size is drawn as given, as before.
+    expect(Draw.Geometry.roundedRectToPath(0, 0, -10, 5, 0).length).toBeGreaterThan(0);
   });
 
   it("rejects an unusable canvas size", () => {

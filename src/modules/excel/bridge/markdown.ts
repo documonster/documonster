@@ -12,9 +12,9 @@ import {
 } from "@excel/bridge/markdown-bridge";
 
 export type {
-  MarkdownInput,
-  MarkdownReadOptions,
-  MarkdownWriteOptions
+  ExcelMarkdownInput,
+  ExcelMarkdownReadOptions,
+  ExcelMarkdownWriteOptions
 } from "@excel/bridge/markdown-bridge";
 export * as ExcelMarkdown from "@excel/bridge/excel-markdown";
 
@@ -25,8 +25,11 @@ export {
   ExcelArgumentError,
   ExcelError,
   ExcelFileError,
-  InvalidValueTypeError,
+  ExcelInvalidValueTypeError,
   isExcelError,
+  ExcelWorksheetNameError,
+  // Deprecated pre-prefix names; removed in 1.0.
+  InvalidValueTypeError,
   WorksheetNameError
 } from "@excel/errors";
 export type { ExcelFileErrorOptions, InvalidValueTypeErrorOptions } from "@excel/errors";

@@ -29,7 +29,7 @@ import { GALLERY_TO_OOXML } from "@word/core/glossary-galleries";
 import { within } from "@word/core/node-path";
 import type { BodyContent, GlossaryDocument } from "@word/types";
 import { renderBodyContent } from "@word/writer/document-writer";
-import type { WordRenderContext } from "@word/writer/render-context";
+import type { DocxRenderContext } from "@word/writer/render-context";
 import { createRenderContext } from "@word/writer/render-context";
 import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
@@ -84,7 +84,7 @@ function renderGlossary(xml: XmlSink, glossary: GlossaryDocument): void {
 function renderDocPart(
   xml: XmlSink,
   block: GlossaryDocument["blocks"][number],
-  ctx: WordRenderContext
+  ctx: DocxRenderContext
 ): void {
   xml.openNode("w:docPart");
 

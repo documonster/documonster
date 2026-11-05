@@ -7,6 +7,7 @@
 
 import { CsvArgumentError } from "@csv/errors";
 import { describeValue } from "@csv/utils/check-options";
+import { isRecordArgument } from "@utils/object";
 
 /**
  * Decimal separator type.
@@ -68,11 +69,40 @@ export function parseNumberFromCsv(value: string, decimalSeparator: DecimalSepar
   return Number(trimmed);
 }
 
-function checkDecimalSeparator(where: string, decimalSeparator: unknown): void {
+/** The settings of {@link formatNumber} and {@link parseNumber}. */
+export interface CsvNumberOptions {
+  /**
+   * Decimal separator the number is written with (default `"."`), as
+   * `CsvParseOptions.decimalSeparator` and `CsvFormatOptions.decimalSeparator` take it.
+   */
+  decimalSeparator?: DecimalSeparator;
+}
+
+/**
+ * The separator of `options` — the options object, or the deprecated positional separator —
+ * checked in the name of `where`. The field names the argument as the caller wrote it.
+ */
+function resolveDecimalSeparator(
+  where: string,
+  options: CsvNumberOptions | DecimalSeparator | undefined
+): DecimalSeparator {
+  if (isRecordArgument(options)) {
+    const { decimalSeparator = "." } = options;
+    checkSeparator(where, "options.decimalSeparator", decimalSeparator);
+    return decimalSeparator;
+  }
+  if (options === undefined) {
+    return ".";
+  }
+  checkSeparator(where, "decimalSeparator", options);
+  return options;
+}
+
+function checkSeparator(where: string, field: string, decimalSeparator: unknown): void {
   if (decimalSeparator !== "." && decimalSeparator !== ",") {
     throw new CsvArgumentError(
-      "decimalSeparator",
-      `${where}: decimalSeparator must be "." or ",", got ${describeValue(decimalSeparator)}`
+      field,
+      `${where}: ${field} must be "." or ",", got ${describeValue(decimalSeparator)}`
     );
   }
 }
@@ -84,18 +114,20 @@ function checkDecimalSeparator(where: string, decimalSeparator: unknown): void {
  * @example
  * ```ts
  * import { Csv } from "documonster/csv";
- * Csv.formatNumber(3.14, ","); // "3,14"
+ * Csv.formatNumber(3.14, { decimalSeparator: "," }); // "3,14"
  * ```
  */
-export function formatNumber(value: number, decimalSeparator: DecimalSeparator): string {
+export function formatNumber(value: number, options?: CsvNumberOptions): string;
+/** @deprecated Pass the separator as `{ decimalSeparator }`. Removed in 1.0. */
+export function formatNumber(value: number, decimalSeparator: DecimalSeparator): string;
+export function formatNumber(value: number, options?: CsvNumberOptions | DecimalSeparator): string {
   if (typeof value !== "number") {
     throw new CsvArgumentError(
       "value",
       `Csv.formatNumber: value must be a number, got ${describeValue(value)}`
     );
   }
-  checkDecimalSeparator("Csv.formatNumber", decimalSeparator);
-  return formatNumberForCsv(value, decimalSeparator);
+  return formatNumberForCsv(value, resolveDecimalSeparator("Csv.formatNumber", options));
 }
 
 /**
@@ -106,16 +138,18 @@ export function formatNumber(value: number, decimalSeparator: DecimalSeparator):
  * @example
  * ```ts
  * import { Csv } from "documonster/csv";
- * Csv.parseNumber("3,14", ","); // 3.14
+ * Csv.parseNumber("3,14", { decimalSeparator: "," }); // 3.14
  * ```
  */
-export function parseNumber(value: string, decimalSeparator: DecimalSeparator): number {
+export function parseNumber(value: string, options?: CsvNumberOptions): number;
+/** @deprecated Pass the separator as `{ decimalSeparator }`. Removed in 1.0. */
+export function parseNumber(value: string, decimalSeparator: DecimalSeparator): number;
+export function parseNumber(value: string, options?: CsvNumberOptions | DecimalSeparator): number {
   if (typeof value !== "string") {
     throw new CsvArgumentError(
       "value",
       `Csv.parseNumber: value must be a string, got ${describeValue(value)}`
     );
   }
-  checkDecimalSeparator("Csv.parseNumber", decimalSeparator);
-  return parseNumberFromCsv(value, decimalSeparator);
+  return parseNumberFromCsv(value, resolveDecimalSeparator("Csv.parseNumber", options));
 }

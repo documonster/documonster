@@ -60,10 +60,10 @@ export function createStreamReader(
 }
 
 export type {
-  CsvOptions,
-  CsvInput,
-  CsvReadOptions,
-  CsvWriteOptions
+  ExcelCsvOptions,
+  ExcelCsvInput,
+  ExcelCsvReadOptions,
+  ExcelCsvWriteOptions
 } from "@excel/bridge/csv-bridge";
 export type {
   WorkbookModel,

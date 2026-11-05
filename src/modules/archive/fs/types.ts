@@ -598,7 +598,7 @@ export interface ArchiveFileOpenOptionsZip {
 
   /**
    * Whether to verify each entry read from the archive against its recorded CRC-32,
-   * throwing `Crc32MismatchError` on a mismatch. Set `false` to read damaged archives as
+   * throwing `ZipCrc32MismatchError` on a mismatch. Set `false` to read damaged archives as
    * far as they go. AES entries carry an HMAC instead; ZipCrypto entries are always verified.
    * @default true
    */
@@ -606,7 +606,7 @@ export interface ArchiveFileOpenOptionsZip {
 
   /**
    * Largest uncompressed size, in bytes, of one entry inflated into memory — by a read, or by
-   * a write that re-encodes the entry (`FileTooLargeError`), as `unpackZip`'s `maxEntrySize`.
+   * a write that re-encodes the entry (`ArchiveFileTooLargeError`), as `unpackZip`'s `maxEntrySize`.
    * @default 536870912 (512 MiB)
    */
   maxEntrySize?: number;

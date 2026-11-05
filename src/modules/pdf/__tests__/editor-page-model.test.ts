@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { generateSelfSignedCertificate } from "../examples/utils/self-signed-certificate";
-import { Pdf, PdfArgumentError, PdfSignatureInvalidationError, PdfStructureError } from "../index";
+import { Pdf, PdfArgumentError, PdfSignatureInvalidationError } from "../index";
 
 async function pages(...labels: string[]): Promise<Uint8Array> {
   const builder = new Pdf.Builder();
@@ -104,13 +104,15 @@ describe("PdfEditor — one index space for read and added pages", () => {
     expect(await rotations(part)).toEqual([90]);
   });
 
-  it("an index past every page still throws PdfStructureError", async () => {
+  it("an index past every page throws PdfArgumentError", async () => {
     const editor = Pdf.Editor.read(await pages("P1", "P2"));
     editor.addPage();
-    expect(() => editor.getPage(3)).toThrow(PdfStructureError);
-    expect(() => editor.getPage(3)).toThrow(/^Page index 3 out of range \(0-2\)/);
-    expect(() => editor.removePage(-1)).toThrow(/^Page index -1 out of range \(0-2\)$/);
-    expect(() => editor.isPageRemoved(2.5)).toThrow(PdfStructureError);
+    expect(() => editor.getPage(3)).toThrow(PdfArgumentError);
+    expect(() => editor.getPage(3)).toThrow(/^Pdf\.Editor#getPage: index 3 names no page \(0-2\)$/);
+    expect(() => editor.removePage(-1)).toThrow(
+      /^Pdf\.Editor#removePage: index -1 names no page \(0-2\)$/
+    );
+    expect(() => editor.isPageRemoved(2.5)).toThrow(PdfArgumentError);
   });
 
   it("removing every page, added ones included, refuses to write a page-less PDF", async () => {

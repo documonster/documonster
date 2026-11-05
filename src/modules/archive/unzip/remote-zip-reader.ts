@@ -75,14 +75,14 @@ export interface RemoteZipReaderOptions {
 
   /**
    * Whether to verify each extracted entry against its recorded CRC-32
-   * (`Crc32MismatchError`). Set `false` to read damaged archives as far as they go.
+   * (`ZipCrc32MismatchError`). Set `false` to read damaged archives as far as they go.
    * @default true
    */
   checkCrc32?: boolean;
 
   /**
    * Largest uncompressed size, in bytes, of one entry an extraction inflates into memory
-   * (`FileTooLargeError`), as `unpackZip`'s `maxEntrySize`; `extractToStream` streams and is
+   * (`ArchiveFileTooLargeError`), as `unpackZip`'s `maxEntrySize`; `extractToStream` streams and is
    * not bounded by it.
    * @default 536870912 (512 MiB)
    */
@@ -160,12 +160,12 @@ export interface RemoteZipStats {
 /**
  * Error thrown when CRC32 validation fails
  */
-export { Crc32MismatchError } from "@archive/core/errors";
+export { ZipCrc32MismatchError } from "@archive/core/errors";
 import {
   ArchiveArgumentError,
   ArchiveError,
-  Crc32MismatchError,
-  EocdNotFoundError,
+  ZipCrc32MismatchError,
+  ZipEocdNotFoundError,
   throwIfAborted
 } from "@archive/core/errors";
 
@@ -304,7 +304,7 @@ export class RemoteZipReader {
     // Search backwards for EOCD signature with validation
     const eocdLocalOffset = findEOCDSignature(tailData, true);
     if (eocdLocalOffset === -1) {
-      throw new EocdNotFoundError();
+      throw new ZipEocdNotFoundError();
     }
 
     // Parse EOCD using shared function
@@ -1192,7 +1192,7 @@ export class RemoteZipReader {
    *
    * @param path - File path within the archive
    * @param options - Extract options (password if encrypted)
-   * @returns true if CRC32 matches, throws Crc32MismatchError if not, null if entry not found
+   * @returns true if CRC32 matches, throws ZipCrc32MismatchError if not, null if entry not found
    */
   verifyCrc32(path: string, options?: RemoteZipExtractOptions): Promise<true | null>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
@@ -1216,7 +1216,7 @@ export class RemoteZipReader {
     const actualCrc = crc32(data);
 
     if (actualCrc !== entry.crc32) {
-      throw new Crc32MismatchError(entry.path, entry.crc32, actualCrc);
+      throw new ZipCrc32MismatchError(entry.path, entry.crc32, actualCrc);
     }
 
     return true;

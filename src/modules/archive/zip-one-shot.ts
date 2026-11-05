@@ -15,7 +15,7 @@ import {
   checkSourceArgument,
   isArchiveBytes,
   isInMemoryArchiveSource,
-  toAsyncIterable,
+  iterateArchiveSource,
   toUint8Array
 } from "@archive/io/archive-source";
 import type { TarEntryInput } from "@archive/tar/tar-archive";
@@ -115,7 +115,7 @@ export async function unpackZip(
   const { signal, ...parseOptions } = options;
   const bytes = isInMemoryArchiveSource(source)
     ? await toUint8Array(source)
-    : await collect(toAsyncIterable(source, { signal }));
+    : await collect(iterateArchiveSource(source, { signal }));
   const parser = new ZipParser(bytes, parseOptions);
   const all = await parser.extractAll();
   return extractAllEntries(parser, path => all.get(path) ?? null);
@@ -127,7 +127,7 @@ export async function unpackZip(
  */
 export function unpackZipSync(
   source: ArchiveBytes,
-  options: ZipParseOptions = {}
+  options: Omit<UnpackZipOptions, "signal"> = {}
 ): Map<string, UnpackedZipEntry> {
   if (!isArchiveBytes(source)) {
     throw new ArchiveArgumentError(

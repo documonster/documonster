@@ -331,19 +331,19 @@ Cell.setAlignment(ws, "A18", { wrapText: true });
 Cell.setValue(ws, "A20", "Wrap Text - Wrapping Wrappity Wrap");
 Cell.setAlignment(ws, "A20", { shrinkToFit: true });
 
-Cell.setName(ws, "A2", "Passe");
-Cell.setName(ws, "B2", "Passe");
+Cell.setNames(ws, "A2", ["Passe"]);
+Cell.setNames(ws, "B2", ["Passe"]);
 
-Cell.setName(ws, "E2", "Greet");
+Cell.setNames(ws, "E2", ["Greet"]);
 Cell.setValue(ws, "A22", { formula: "E2" });
 
 Cell.setValue(ws, "A24", "Choose");
 Cell.setValue(ws, "D24", "Hewie");
-Cell.setName(ws, "D24", "Nephews");
+Cell.setNames(ws, "D24", ["Nephews"]);
 Cell.setValue(ws, "E24", "Dewie");
-Cell.setName(ws, "E24", "Nephews");
+Cell.setNames(ws, "E24", ["Nephews"]);
 Cell.setValue(ws, "F24", "Louie");
-Cell.setName(ws, "F24", "Nephews");
+Cell.setNames(ws, "F24", ["Nephews"]);
 Cell.setValidation(ws, "B24", {
   type: "list",
   allowBlank: true,

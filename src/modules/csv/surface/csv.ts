@@ -4,7 +4,7 @@
  *
  * `import { Csv } from "documonster/csv"` →
  *   `Csv.parse(text)`, `Csv.parseAsync(...)`, `Csv.format(rows)`,
- *   `Csv.detectDelimiter(text)`, `Csv.createParserStream()`, …
+ *   `Csv.detectDelimiter(text)`, `new Csv.ParserStream()`, …
  *
  * Single flat namespace (csv is a single-purpose module). Re-exported via
  * `export * as Csv`, tree-shaken per-member on rolldown / rspack.
@@ -15,6 +15,7 @@ import {
   CsvFormatterStream as CsvFormatterStreamImpl,
   CsvParserStream as CsvParserStreamImpl
 } from "@csv/stream/index";
+import type { CsvFormatOptions, CsvParseOptions } from "@csv/types";
 import { quoted as quotedImpl, unquoted as unquotedImpl } from "@csv/types";
 import { csvGenerateAsync } from "@csv/utils/generate";
 import {
@@ -32,12 +33,6 @@ export { parseCsvAsync as parseAsync, parseCsvRows as parseRows } from "@csv/par
 
 // Formatting
 export { formatCsv as format } from "@csv/format/index";
-
-// Streaming
-export {
-  createCsvParserStream as createParserStream,
-  createCsvFormatterStream as createFormatterStream
-} from "@csv/stream/index";
 
 // Detection
 export { detectDelimiter, detectLinebreak, stripBom } from "@csv/utils/detect";
@@ -69,22 +64,31 @@ export {
 export { formatNumber, parseNumber } from "@csv/utils/number";
 
 /**
- * The streaming parser class. {@link createParserStream} is the usual way to build one;
- * the class is public for `instanceof` checks and subclassing.
+ * The streaming CSV parser: `new Csv.ParserStream(options)` — a Transform that takes CSV
+ * text or bytes and emits rows.
  */
 export const ParserStream = CsvParserStreamImpl;
-/** The streaming parser {@link createParserStream} returns. */
+/** The streaming CSV parser. */
 export type ParserStream = CsvParserStreamImpl;
 /**
- * The streaming formatter class. {@link createFormatterStream} is the usual way to build
- * one; the class is public for `instanceof` checks and subclassing.
+ * The streaming CSV formatter: `new Csv.FormatterStream(options)` — a Transform that takes
+ * rows and emits CSV text.
  */
 export const FormatterStream = CsvFormatterStreamImpl;
-/** The streaming formatter {@link createFormatterStream} returns. */
+/** The streaming CSV formatter. */
 export type FormatterStream = CsvFormatterStreamImpl;
+/** @deprecated Use `new Csv.ParserStream(options)`. Removed in 1.0. */
+export function createParserStream(options: CsvParseOptions = {}): ParserStream {
+  return new CsvParserStreamImpl(options);
+}
+/** @deprecated Use `new Csv.FormatterStream(options)`. Removed in 1.0. */
+export function createFormatterStream(options: CsvFormatOptions = {}): FormatterStream {
+  return new CsvFormatterStreamImpl(options);
+}
 /**
- * @deprecated Use {@link generateRowsAsync}: it yields rows like {@link generateRows}, and
- * `*Async` alone names a Promise elsewhere in this namespace (`parseAsync`). Removed in 1.0.
+ * @deprecated Use {@link generateRowsAsync}. `Async` marks the asynchronous sibling of a
+ * synchronous form, so this read as the sibling of {@link generate}, which returns the whole
+ * CSV; what it does is yield rows, as {@link generateRows} does. Removed in 1.0.
  */
 export const generateAsync = csvGenerateAsync;
 /**

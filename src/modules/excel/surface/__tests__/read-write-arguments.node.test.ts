@@ -67,3 +67,14 @@ describe("Workbook.toBuffer", () => {
     await expect(Workbook.toBuffer(wb, 42 as never)).rejects.toThrow(ExcelArgumentError);
   });
 });
+
+describe("Workbook.writeFile", () => {
+  it.each([undefined, 42, {}])("refuses %j as the workbook before touching the file", async bad => {
+    const error = await Workbook.writeFile(
+      bad as never,
+      "/nonexistent-dir/never-written.xlsx"
+    ).catch(e => e);
+    expect(error).toBeInstanceOf(ExcelArgumentError);
+    expect(error.field).toBe("wb");
+  });
+});

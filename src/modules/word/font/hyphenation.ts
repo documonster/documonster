@@ -14,7 +14,14 @@
  * @stability experimental
  */
 
-import { checkRecord, checkString, invalidArgument } from "@word/core/argument-checks";
+import { isRecordArgument } from "@utils/object";
+import {
+  checkInteger,
+  checkRecord,
+  checkString,
+  checkStringArray,
+  invalidArgument
+} from "@word/core/argument-checks";
 
 // =============================================================================
 // Public API
@@ -26,7 +33,17 @@ export interface HyphenationOptions {
   readonly minLeft?: number;
   /** Minimum characters after the last hyphenation point. Default: 2. */
   readonly minRight?: number;
-  /** Custom hyphen character. Default: "\u00AD" (soft hyphen). */
+  /**
+   * Has no effect: a hyphenator returns break points, not text.
+   *
+   * @deprecated Pass `{ hyphenChar }` to `Font.hyphenateWord` or `Font.hyphenateText`. Removed in 1.0.
+   */
+  readonly hyphenChar?: string;
+}
+
+/** Options for `Font.hyphenateWord` and `Font.hyphenateText`. */
+export interface HyphenateOptions {
+  /** The character inserted at each break point. Default: "\u00AD" (soft hyphen). */
   readonly hyphenChar?: string;
 }
 
@@ -51,8 +68,15 @@ export function createHyphenator(
   patterns: HyphenationPatterns,
   options?: HyphenationOptions
 ): (word: string) => number[] {
-  checkRecord(patterns, "patterns", "Font.createHyphenator");
-  checkRecord(options, "options", "Font.createHyphenator", { optional: true });
+  const where = "Font.createHyphenator";
+  checkRecord(patterns, "patterns", where);
+  // Nothing reads the language, so a pattern set without one is still usable.
+  checkString(patterns.language, "patterns.language", where, { optional: true });
+  checkStringArray(patterns.patterns, "patterns.patterns", where);
+  checkStringArray(patterns.exceptions, "patterns.exceptions", where, { optional: true });
+  checkRecord(options, "options", where, { optional: true });
+  checkInteger(options?.minLeft, "options.minLeft", where, { optional: true, min: 0 });
+  checkInteger(options?.minRight, "options.minRight", where, { optional: true, min: 0 });
   const minLeft = options?.minLeft ?? 2;
   const minRight = options?.minRight ?? 2;
 
@@ -87,16 +111,28 @@ export function createHyphenator(
  *
  * @param word - The word to hyphenate.
  * @param hyphenator - A hyphenator function (from createHyphenator).
- * @param hyphenChar - The hyphen character to insert. Default: "\u00AD".
+ * @param options - `hyphenChar`, the character to insert. Default: "\u00AD".
  * @returns The word with soft hyphens inserted.
  */
 export function hyphenateWord(
   word: string,
   hyphenator: (w: string) => number[],
+  options?: HyphenateOptions
+): string;
+/**
+ * @deprecated Pass the hyphen character as `{ hyphenChar }`. Removed in 1.0.
+ */
+export function hyphenateWord(
+  word: string,
+  hyphenator: (w: string) => number[],
   hyphenChar?: string
+): string;
+export function hyphenateWord(
+  word: string,
+  hyphenator: (w: string) => number[],
+  options?: HyphenateOptions | string
 ): string {
-  checkHyphenationArguments(word, "word", hyphenator, hyphenChar, "Font.hyphenateWord");
-  const hChar = hyphenChar ?? "\u00AD";
+  const hChar = checkHyphenationArguments(word, "word", hyphenator, options, "Font.hyphenateWord");
   const points = hyphenator(word);
   if (points.length === 0) {
     return word;
@@ -117,16 +153,28 @@ export function hyphenateWord(
  *
  * @param text - The text to hyphenate.
  * @param hyphenator - A hyphenator function.
- * @param hyphenChar - The hyphen character to insert.
+ * @param options - `hyphenChar`, the character to insert. Default: "\u00AD".
  * @returns The text with soft hyphens inserted.
  */
 export function hyphenateText(
   text: string,
   hyphenator: (w: string) => number[],
+  options?: HyphenateOptions
+): string;
+/**
+ * @deprecated Pass the hyphen character as `{ hyphenChar }`. Removed in 1.0.
+ */
+export function hyphenateText(
+  text: string,
+  hyphenator: (w: string) => number[],
   hyphenChar?: string
+): string;
+export function hyphenateText(
+  text: string,
+  hyphenator: (w: string) => number[],
+  options?: HyphenateOptions | string
 ): string {
-  checkHyphenationArguments(text, "text", hyphenator, hyphenChar, "Font.hyphenateText");
-  const hChar = hyphenChar ?? "\u00AD";
+  const hChar = checkHyphenationArguments(text, "text", hyphenator, options, "Font.hyphenateText");
   // Split on word boundaries while keeping separators
   return text.replace(/[a-zA-Z\u00C0-\u024F]+/g, word => {
     if (word.length < 5) {
@@ -4287,16 +4335,28 @@ function computeHyphenPoints(
   return points;
 }
 
+/**
+ * Check the arguments of `hyphenateWord` / `hyphenateText` and return the
+ * hyphen character: from `{ hyphenChar }`, or — the deprecated form — the
+ * string itself.
+ */
 function checkHyphenationArguments(
   text: unknown,
   field: string,
   hyphenator: unknown,
-  hyphenChar: unknown,
+  options: unknown,
   where: string
-): void {
+): string {
   checkString(text, field, where);
   if (typeof hyphenator !== "function") {
     invalidArgument(where, "hyphenator", "a function from Font.createHyphenator", hyphenator);
   }
-  checkString(hyphenChar, "hyphenChar", where, { optional: true });
+  if (!isRecordArgument(options)) {
+    // The deprecated positional form, or no third argument.
+    checkString(options, "hyphenChar", where, { optional: true });
+    return (options as string | undefined) ?? "\u00AD";
+  }
+  const hyphenChar = (options as HyphenateOptions).hyphenChar;
+  checkString(hyphenChar, "options.hyphenChar", where, { optional: true });
+  return hyphenChar ?? "\u00AD";
 }

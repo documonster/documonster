@@ -341,7 +341,7 @@ export interface ParseOptions {
   encoding?: ZipStringEncoding;
   /**
    * Whether each entry checks its data against the recorded CRC-32 before it ends,
-   * failing with `Crc32MismatchError`. Autodrained and encrypted entries are not checked
+   * failing with `ZipCrc32MismatchError`. Autodrained and encrypted entries are not checked
    * here. @default true
    */
   checkCrc32?: boolean;

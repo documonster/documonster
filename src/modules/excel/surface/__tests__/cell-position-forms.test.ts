@@ -5,7 +5,7 @@
 import {
   Cell,
   ExcelArgumentError,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   Row,
   Workbook,
   Worksheet
@@ -35,7 +35,7 @@ describe('an "A1" address with a column after it', () => {
     ["Cell.removeName", ws => (Cell.removeName as (...a: unknown[]) => unknown)(ws, "A1", 5, "n")]
   ])("is refused by %s rather than addressing another cell", (_name, call) => {
     const ws = sheet();
-    expect(() => call(ws)).toThrow(InvalidAddressError);
+    expect(() => call(ws)).toThrow(ExcelInvalidAddressError);
     expect(Worksheet.getDimensions(ws)).toBeUndefined();
     expect(Row.getCount(ws)).toBe(0);
   });

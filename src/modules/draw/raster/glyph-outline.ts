@@ -32,6 +32,7 @@
  */
 
 import { DrawArgumentError, DrawError } from "@draw/errors";
+import { describeValue } from "@utils/describe-value";
 import { COMP_USE_MY_METRICS, countTtfFaces, glyphComponents, parseTtf } from "@utils/font-ttf";
 import type { TtfFont } from "@utils/font-ttf";
 
@@ -343,23 +344,28 @@ export function parseRasterFont(data: Uint8Array, collectionIndex = 0): RasterFo
  * face and carrying on with the next is the documented behaviour.
  *
  * @throws {DrawArgumentError} `data` is not bytes, or `collectionIndex` is not an integer
- *   naming a face in the file.
+ *   naming a face in the file. `fields` names the two in the caller's own words.
  * @throws {DrawError} the bytes are not a TrueType font with outlines (`glyf`).
  */
-export function readRasterFont(data: Uint8Array, collectionIndex = 0): RasterFont {
+export function readRasterFont(
+  data: Uint8Array,
+  collectionIndex = 0,
+  fields: { readonly data: string; readonly collectionIndex: string } = {
+    data: "data",
+    collectionIndex: "collectionIndex"
+  }
+): RasterFont {
   if (!isByteSource(data)) {
     throw new DrawArgumentError(
-      "data",
-      `Draw.parseRasterFont: data must be the bytes of a .ttf or .ttc file, got ${
-        data === null ? "null" : typeof data
-      }`
+      fields.data,
+      `Draw.parseRasterFont: ${fields.data} must be the bytes of a .ttf or .ttc file, got ${describeValue(data)}`
     );
   }
   const bytes = normalizeBytes(data);
   if (!Number.isInteger(collectionIndex) || collectionIndex < 0) {
     throw new DrawArgumentError(
-      "collectionIndex",
-      `Draw.parseRasterFont: collectionIndex must be an integer >= 0, got ${String(collectionIndex)}`
+      fields.collectionIndex,
+      `Draw.parseRasterFont: ${fields.collectionIndex} must be an integer >= 0, got ${describeValue(collectionIndex)}`
     );
   }
   let faces: number;
@@ -370,8 +376,8 @@ export function readRasterFont(data: Uint8Array, collectionIndex = 0): RasterFon
   }
   if (collectionIndex >= faces) {
     throw new DrawArgumentError(
-      "collectionIndex",
-      `Draw.parseRasterFont: collectionIndex ${collectionIndex} is out of range — the file has ${faces} face(s)`
+      fields.collectionIndex,
+      `Draw.parseRasterFont: ${fields.collectionIndex} ${collectionIndex} is out of range — the file has ${faces} face(s)`
     );
   }
   try {
@@ -555,7 +561,7 @@ function toRasterFont(source: RasterFontSource, index: number, warnings: string[
  * the only route to a non-ASCII glyph in a browser, which is exactly where cross-realm
  * values come from.
  */
-function isByteSource(value: unknown): value is Uint8Array {
+export function isByteSource(value: unknown): value is Uint8Array {
   if (value instanceof Uint8Array) {
     return true;
   }

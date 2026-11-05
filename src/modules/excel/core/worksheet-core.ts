@@ -25,7 +25,7 @@ import type { AnchorData } from "@excel/core/anchor";
  *
  * No file below this one imports the heavy `worksheet.ts`.
  */
-import type { CellData, CellValueInputType, CellValueType } from "@excel/core/cell";
+import type { CellData } from "@excel/core/cell";
 import {
   CellTypes,
   cellComment,
@@ -63,17 +63,18 @@ import type { TableData } from "@excel/core/table";
 import { sanitizeTableName } from "@excel/core/table-name";
 import type { Workbook } from "@excel/core/workbook";
 import {
-  ColumnOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   ExcelArgumentError,
   ExcelError,
-  InvalidAddressError,
-  RowOutOfBoundsError
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError
 } from "@excel/errors";
 import type {
   Alignment,
   AutoFilter,
   Borders,
   CellValue,
+  CellValueInput,
   ColBreak,
   ConditionalFormattingOptions,
   DecodedAddress,
@@ -406,15 +407,15 @@ export function findColumnNumber(ws: WorksheetData, c: string | number): number 
 }
 
 /**
- * `c` when it is a column number Excel has — a whole number from 1 to 16 384 — or `ColumnOutOfBoundsError`. Every
+ * `c` when it is a column number Excel has — a whole number from 1 to 16 384 — or `ExcelColumnOutOfBoundsError`. Every
  * numeric column position goes through it before anything is read or created: a getter and a setter refuse the same
  * numbers, and a setter refuses before it has materialised a column.
  */
 export function checkColumnNumber(c: unknown): number {
   if (typeof c !== "number" || !Number.isInteger(c)) {
-    throw new ColumnOutOfBoundsError(c as number);
+    throw new ExcelColumnOutOfBoundsError(c as number);
   }
-  // `n2l` owns the 1..16384 bound and throws `ColumnOutOfBoundsError` past it,
+  // `n2l` owns the 1..16384 bound and throws `ExcelColumnOutOfBoundsError` past it,
   // so the numeric form is rejected exactly as `l2n` rejects `"XFE"`
   // rather than duplicating the limit here.
   colCache.n2l(c);
@@ -474,9 +475,38 @@ export function _commitRow(ws: WorksheetData, row: RowData): void {
   }
 }
 
+/**
+ * The row-access a streaming worksheet writer provides, when `ws` is one.
+ *
+ * A writer stands in for a worksheet (it hands itself to the core factories), but it keeps only its uncommitted rows,
+ * behind an offset that moves as rows are written out and that resets whenever it compacts its buffer. Indexing its
+ * row array as `r - 1` therefore lands on the wrong row once anything has been committed — `Row.setHeight` on row
+ * 2002 of a writer that had flushed 2000 rows set the height of a new, detached row. Every by-number row lookup goes
+ * through {@link rowAt} or {@link getRow}, which ask the writer itself.
+ */
+function streamingRows(ws: WorksheetData):
+  | {
+      findRow(rowNumber: number): RowData | undefined;
+      getRow(rowNumber: number): RowData;
+      eachRow(
+        options: { includeEmpty?: boolean } | undefined,
+        callback: (row: RowData, rowNumber: number) => void
+      ): void;
+    }
+  | undefined {
+  const writer = ws as unknown as { _commitRow?: unknown };
+  return typeof writer._commitRow === "function" ? (writer as never) : undefined;
+}
+
+/** Row `r` of the sheet if it exists, without creating it — read correctly from a streaming writer too. */
+function rowAt(ws: WorksheetData, r: number): RowData | undefined {
+  const writer = streamingRows(ws);
+  return writer ? writer.findRow(r) : ws._rows[r - 1];
+}
+
 export function findRow(ws: WorksheetData, r: number): RowData | undefined {
   checkWorksheet(ws);
-  const row = ws._rows[r - 1];
+  const row = rowAt(ws, r);
   if (row === undefined) {
     checkRowNumber(r);
   }
@@ -489,6 +519,9 @@ export function findRows(
   length: number
 ): (RowData | undefined)[] {
   checkWorksheet(ws);
+  if (streamingRows(ws)) {
+    return Array.from({ length: Math.max(0, length) }, (_, i) => rowAt(ws, start + i));
+  }
   return ws._rows.slice(start - 1, start - 1 + length);
 }
 
@@ -515,6 +548,10 @@ export function getRow(ws: WorksheetData, r: number): RowData {
     checkWorksheet(ws);
   }
   checkWorksheetAttached(ws);
+  const writer = streamingRows(ws);
+  if (writer) {
+    return writer.getRow(r);
+  }
   let row = ws._rows[r - 1];
   if (!row) {
     checkRowNumber(r);
@@ -526,7 +563,7 @@ export function getRow(ws: WorksheetData, r: number): RowData {
 /** Rows are whole numbers from 1 to 1,048,576; anything else names no row. */
 export function checkRowNumber(r: number): void {
   if (!Number.isInteger(r) || r < 1 || r > 1048576) {
-    throw new RowOutOfBoundsError(r, "Excel rows are whole numbers from 1 to 1048576");
+    throw new ExcelRowOutOfBoundsError(r, "Excel rows are whole numbers from 1 to 1048576");
   }
 }
 
@@ -564,6 +601,11 @@ export function eachRow(
     options = optOrCallback;
     callback = maybeCallback!;
   }
+  const writer = streamingRows(ws);
+  if (writer && options?.includeEmpty) {
+    writer.eachRow(options, callback);
+    return;
+  }
   if (options && options.includeEmpty) {
     const n = ws._rows.length;
     for (let i = 1; i <= n; i++) {
@@ -600,7 +642,7 @@ export function getSheetValues(ws: WorksheetData): CellValue[][] {
 
 export function findCell(ws: WorksheetData, r: number | string, c?: number): CellData | undefined {
   const address = colCache.getAddress(r, c);
-  const row = ws._rows[address.row - 1];
+  const row = rowAt(ws, address.row);
   return row ? rowFindCell(row, address.col) : undefined;
 }
 
@@ -624,7 +666,7 @@ export function locateCell(
   c?: number
 ): CellData | undefined {
   const decoded = colCache.getAddress(r, c);
-  const cell = ws._rows[decoded.row - 1]?.cells[decoded.col - 1];
+  const cell = rowAt(ws, decoded.row)?.cells[decoded.col - 1];
   if (cell === undefined || (typeof r === "string" && !isCellReferenceText(r))) {
     checkCellAddress(typeof r === "string" ? r : decoded.address, decoded);
   }
@@ -668,7 +710,7 @@ function checkCellAddress(
   decoded: { address: string; row: number; col: number }
 ): void {
   if (!isCellReferenceText(text)) {
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       text,
       "a cell reference is column letters then a row number, such as B7 or $B$7"
     );
@@ -678,7 +720,7 @@ function checkCellAddress(
     !(decoded.row >= 1 && decoded.row <= 1048576) ||
     !(decoded.col >= 1 && decoded.col <= 16384)
   ) {
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       text,
       "a cell reference names a row from 1 to 1048576 and a column from A to XFD"
     );
@@ -705,7 +747,7 @@ export function inheritedNumFmt(
   row: number,
   col: number
 ): Style["numFmt"] | undefined {
-  return ws._rows[row - 1]?.style.numFmt || ws._columns[col - 1]?.style.numFmt || undefined;
+  return rowAt(ws, row)?.style.numFmt || ws._columns[col - 1]?.style.numFmt || undefined;
 }
 
 /**
@@ -715,7 +757,7 @@ export function inheritedNumFmt(
  */
 export function previewCell(ws: WorksheetData, r: number | string, c?: number): CellData {
   const address = colCache.getAddress(r, c);
-  const row = ws._rows[address.row - 1];
+  const row = rowAt(ws, address.row);
   return (
     row?.cells[address.col - 1] ??
     cellCreate(
@@ -728,7 +770,7 @@ export function previewCell(ws: WorksheetData, r: number | string, c?: number): 
 
 export function getCell(ws: WorksheetData, r: number | string, c?: number): CellData {
   const address = colCache.getAddress(r, c);
-  const existing = ws._rows[address.row - 1]?.cells[address.col - 1];
+  const existing = rowAt(ws, address.row)?.cells[address.col - 1];
   if (existing !== undefined && (typeof r !== "string" || isCellReferenceText(r))) {
     checkWorksheetAttached(ws);
     return existing;
@@ -762,7 +804,7 @@ export function getCell(ws: WorksheetData, r: number | string, c?: number): Cell
  *   {@link RangeData} handle. Reversed corners are normalised, including on a
  *   hand-built handle. An optional sheet qualifier must name `ws` (compared
  *   case-insensitively, as Excel does).
- * @throws {InvalidAddressError} If the range cannot be decoded, is unbounded
+ * @throws {ExcelInvalidAddressError} If the range cannot be decoded, is unbounded
  *   (`"A:A"`, `"1:5"`), or is unset — including the dimensions of a sheet that
  *   has no cells.
  * @throws {ExcelError} If the range is qualified with a different worksheet.
@@ -787,7 +829,7 @@ export function getRangeValues(ws: WorksheetData, range: string | RangeData): Ce
     // `colCache.decodeAddress` yields `undefined` for a missing row or column,
     // which `rangeCreate` turns into a NaN bound. That covers both unbounded
     // references ("A:A", "1:5") and strings it cannot decode at all.
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       label,
       'expected a bounded A1 range like "G7:H19" — whole-column and whole-row references have no bounds to read'
     );
@@ -795,7 +837,7 @@ export function getRangeValues(ws: WorksheetData, range: string | RangeData): Ce
   if (!set) {
     // All-zero is `rangeCreate`'s unset sentinel — e.g. `Range.create()`, or the
     // dimensions of a sheet with no cells. Reading it as "A1" would hide the bug.
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       label,
       "range bounds must be 1-based row and column numbers; this range is unset or empty"
     );
@@ -940,7 +982,7 @@ export function columnEachCell(
   });
 }
 
-export function columnValues(c: ColumnData): CellValueType[] {
+export function columnValues(c: ColumnData): CellValue[] {
   return columnValuesAt(c.worksheet, c.number);
 }
 
@@ -953,13 +995,9 @@ export function columnValues(c: ColumnData): CellValueType[] {
  * leaves an empty leading slot (what `Column.getValues(ws, c, { base: 1 })` returns), `0` makes it a
  * plain array (`Column.getValues`). Either way an empty cell is a hole.
  */
-export function columnValuesAt(
-  ws: WorksheetData,
-  colNumber: number,
-  base: 0 | 1 = 1
-): CellValueType[] {
+export function columnValuesAt(ws: WorksheetData, colNumber: number, base: 0 | 1 = 1): CellValue[] {
   checkWorksheet(ws);
-  const v: CellValueType[] = [];
+  const v: CellValue[] = [];
   // Deliberately not via `columnEachCell`: its callback signature demands a
   // `CellData`, so it materialises a cell on every row of the column. This is a
   // getter, so walk the rows non-destructively instead.
@@ -993,7 +1031,7 @@ export function columnValuesAt(
 export function columnSetValuesAt(
   ws: WorksheetData,
   colNumber: number,
-  v: readonly CellValueInputType[]
+  v: readonly CellValueInput[]
 ): void {
   if (!v) {
     return;
@@ -1498,6 +1536,7 @@ export function freeze(
   columnsOrOptions?: number | FreezePanesOptions,
   legacyRows?: number
 ): void {
+  checkWorksheet(ws);
   checkWorksheetAttached(ws);
   if (isRecordArgument(columnsOrOptions)) {
     freezeCounts(ws, columnsOrOptions.columns, columnsOrOptions.rows);
@@ -1546,6 +1585,7 @@ export function split(
   xOrOptions?: number | SplitPanesOptions,
   legacyY?: number
 ): void {
+  checkWorksheet(ws);
   checkWorksheetAttached(ws);
   if (isRecordArgument(xOrOptions)) {
     splitAt(ws, xOrOptions.x, xOrOptions.y);

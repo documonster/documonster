@@ -13,16 +13,16 @@ import {
   DataValidation,
   ExcelArgumentError,
   Image,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   Pivot,
   Row,
   Table,
   Workbook,
   Worksheet,
-  WorksheetNameError
+  ExcelWorksheetNameError
 } from "@excel";
 import { ExcelFormula } from "@excel/bridge/formula";
-import { ChartClassic, ChartOptionsError } from "@excel/chart";
+import { ChartClassic, ExcelChartOptionsError } from "@excel/chart";
 import { describe, expect, it } from "vitest";
 
 const PNG = Uint8Array.from(
@@ -53,7 +53,7 @@ describe("R3-B4 a table's ref is a cell or range of its own sheet", () => {
       const { ws } = book();
       expect(() =>
         Table.add(ws, { name: "T", ref, columns: [{ name: "h" }], rows: [[1]] })
-      ).toThrow(InvalidAddressError);
+      ).toThrow(ExcelInvalidAddressError);
       expect(Table.list(ws)).toEqual([]);
     }
   );
@@ -63,7 +63,7 @@ describe("R3-B4 a table's ref is a cell or range of its own sheet", () => {
     const t = Table.add(ws, { name: "T", ref: "b2", columns: [{ name: "h" }], rows: [[1]] });
     expect(Table.getRef(t)).toBe("B2:B3");
     expect(Cell.getValue(ws, "B2")).toBe("h");
-    expect(() => Table.setRef(t, "Other!H1")).toThrow(InvalidAddressError);
+    expect(() => Table.setRef(t, "Other!H1")).toThrow(ExcelInvalidAddressError);
     expect(Table.getRef(t)).toBe("B2:B3");
     Table.setRef(t, "d4");
     expect(Table.getRef(t)).toBe("D4:D5");
@@ -121,8 +121,8 @@ describe("R3-C4 Anchor setters and create check what they are given", () => {
 
   it("create refuses an address that is not a cell, a sheet qualifier and a bad offset", () => {
     const { ws } = book();
-    expect(() => Anchor.create(ws, "zz")).toThrow(InvalidAddressError);
-    expect(() => Anchor.create(ws, "Other!D5")).toThrow(InvalidAddressError);
+    expect(() => Anchor.create(ws, "zz")).toThrow(ExcelInvalidAddressError);
+    expect(() => Anchor.create(ws, "Other!D5")).toThrow(ExcelInvalidAddressError);
     expect(() => Anchor.create(ws, "B2", { offset: Number.NaN })).toThrow(ExcelArgumentError);
     expect(() => Anchor.create(ws, { col: Number.NaN, row: 1 })).toThrow(ExcelArgumentError);
     expect(Anchor.getModel(Anchor.create(ws, "b2"))).toMatchObject({ nativeCol: 2, nativeRow: 2 });
@@ -191,9 +191,9 @@ describe("R3-C1 sheet-qualified targets are refused", () => {
   it("DataValidation.add / remove / find", () => {
     const { ws } = book();
     const rule = { type: "whole" as const, operator: "greaterThan" as const, formulae: [1] };
-    expect(() => DataValidation.add(ws, "Other!E1", rule)).toThrow(InvalidAddressError);
-    expect(() => DataValidation.remove(ws, "Other!E1")).toThrow(InvalidAddressError);
-    expect(() => DataValidation.find(ws, "Other!E1")).toThrow(InvalidAddressError);
+    expect(() => DataValidation.add(ws, "Other!E1", rule)).toThrow(ExcelInvalidAddressError);
+    expect(() => DataValidation.remove(ws, "Other!E1")).toThrow(ExcelInvalidAddressError);
+    expect(() => DataValidation.find(ws, "Other!E1")).toThrow(ExcelInvalidAddressError);
     expect(DataValidation.find(ws, "E1")).toBeUndefined();
     DataValidation.add(ws, "e1", rule);
     expect(DataValidation.find(ws, "E1")).toMatchObject({ type: "whole" });
@@ -207,7 +207,7 @@ describe("R3-C1 sheet-qualified targets are refused", () => {
     ]);
     expect(() =>
       Pivot.add(other, { sourceSheet: ws, rows: ["Region"], values: ["Amt"], ref: "Other!D5" })
-    ).toThrow(InvalidAddressError);
+    ).toThrow(ExcelInvalidAddressError);
     expect(Pivot.list(other)).toEqual([]);
     expect(
       Pivot.add(other, { sourceSheet: ws, rows: ["Region"], values: ["Amt"], ref: "d5" }).ref
@@ -276,7 +276,7 @@ describe("R3-C2 the 31-character rule on every entry that names a sheet", () => 
     const cs = Workbook.addChartsheet(wb, "CS", {
       chart: { type: "bar", barDir: "col", series: [{ values: "S!$B$2:$B$2" }] }
     });
-    expect(() => Chartsheet.setName(cs, "c".repeat(40))).toThrow(WorksheetNameError);
+    expect(() => Chartsheet.setName(cs, "c".repeat(40))).toThrow(ExcelWorksheetNameError);
     expect(Chartsheet.getName(cs)).toBe("CS");
   });
 });
@@ -305,8 +305,8 @@ describe("R3-C5 typed errors at the boundary", () => {
   });
 
   it("ChartClassic.toSvg", () => {
-    expect(() => ChartClassic.toSvg({} as never)).toThrow(ChartOptionsError);
-    expect(() => ChartClassic.toSvg(null as never)).toThrow(ChartOptionsError);
+    expect(() => ChartClassic.toSvg({} as never)).toThrow(ExcelChartOptionsError);
+    expect(() => ChartClassic.toSvg(null as never)).toThrow(ExcelChartOptionsError);
   });
 });
 

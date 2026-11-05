@@ -8,7 +8,7 @@
 import type { FormatConfig, FormatRowOptions } from "@csv/format";
 import { createFormatConfig, formatRowWithLookup, headerNames } from "@csv/format";
 import type { CsvFormatOptions, Row } from "@csv/types";
-import { checkFormatRow } from "@csv/utils/check-options";
+import { checkFormatRow, checkObject } from "@csv/utils/check-options";
 import {
   extractRowValues,
   detectRowKeys,
@@ -69,6 +69,8 @@ export class CsvFormatterStream extends Transform {
   };
 
   constructor(options: CsvFormatOptions = {}) {
+    // `objectMode` is read before `createFormatConfig` checks the rest.
+    checkObject("new Csv.FormatterStream", options);
     const rowsIn = options.objectMode !== false;
     super({
       // The two sides are set independently: rows arrive on the writable side,
@@ -81,7 +83,7 @@ export class CsvFormatterStream extends Transform {
     this.options = options;
 
     // Use shared config factory (same as batch formatter)
-    this.formatConfig = createFormatConfig(options, "Csv.createFormatterStream");
+    this.formatConfig = createFormatConfig(options, "new Csv.FormatterStream");
 
     // Pre-allocate row options object (mutated per-row to avoid GC pressure)
     const cfg = this.formatConfig;
@@ -247,11 +249,4 @@ export class CsvFormatterStream extends Transform {
         this.outputRowIndex === 0);
     return isFirstLine ? formattedRow : cfg.lineEnding + formattedRow;
   }
-}
-
-/**
- * Create formatter stream factory
- */
-export function createCsvFormatterStream(options: CsvFormatOptions = {}): CsvFormatterStream {
-  return new CsvFormatterStream(options);
 }

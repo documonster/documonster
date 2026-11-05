@@ -1,5 +1,5 @@
 import { Draw, DrawArgumentError } from "@draw/index";
-import { ChartClassic, ChartOptionsError } from "@excel/chart/index";
+import { ChartClassic, ExcelChartOptionsError } from "@excel/chart/index";
 /**
  * One background check (`@utils/background-check`): `Draw.toSvg` / `Draw.toRgba`, the chart renderers
  * (`ChartRenderOptions.background`) and Word's page renderer (`RenderOptions.background`) all
@@ -66,7 +66,7 @@ describe("checkBackgroundWith", () => {
       const chart = thrown(() => ChartClassic.toSvg(model, { background: bad as never }));
       const word = thrown(() => Layout.toSvg(doc, { background: bad as never }));
       expect(draw).toBeInstanceOf(DrawArgumentError);
-      expect(chart).toBeInstanceOf(ChartOptionsError);
+      expect(chart).toBeInstanceOf(ExcelChartOptionsError);
       expect(word).toBeInstanceOf(DocxArgumentError);
       expect(chart.field).toBe(draw.field);
       expect(word.field).toBe(draw.field);

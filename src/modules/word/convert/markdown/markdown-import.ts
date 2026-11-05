@@ -205,8 +205,9 @@ function checkMarkdownImport(markdown: unknown, options: unknown, where: string)
  *
  * Supports the full GFM feature set including inline images (embedded via the
  * `resolveImage` callback) and footnotes (`[^id]` references with `[^id]: …`
- * definitions). Because image resolution and document packaging are inherently
- * asynchronous, this function is async.
+ * definitions). It is async because `resolveImage` may return a Promise (an image
+ * fetched or read from disk) and is awaited per image; `WordHtml.toDocx` is synchronous
+ * because it embeds only pictures already in the HTML, as `data:` URLs.
  *
  * @param markdown - The GFM Markdown string.
  * @param options - Optional conversion settings.

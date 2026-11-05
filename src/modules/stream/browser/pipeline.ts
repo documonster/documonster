@@ -9,7 +9,7 @@ import { createFinishedAll } from "@stream/core/finished-all";
 import type { FinishedOptions, PipelineCallback, PipelineOptions } from "@stream/core/options";
 import { createPipeline } from "@stream/core/pipeline-api";
 import { isWebOnlyPipeline, pipeWebStreams } from "@stream/core/web-pipeline";
-import { UnsupportedStreamTypeError } from "@stream/errors";
+import { StreamUnsupportedTypeError } from "@stream/errors";
 import { kernel } from "@stream/kernel/classes";
 import { eos } from "@stream/kernel/end-of-stream";
 import { pipelineImpl } from "@stream/kernel/pipeline-impl";
@@ -83,7 +83,7 @@ export function finished(
   }
 
   if (!isNodeStream(stream) && !isWebStream(stream)) {
-    const error = new UnsupportedStreamTypeError(
+    const error = new StreamUnsupportedTypeError(
       "finished",
       stream === null ? "null" : typeof stream,
       { field: "stream" }

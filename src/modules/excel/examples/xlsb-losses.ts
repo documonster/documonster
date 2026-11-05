@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ExcelNotSupportedError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
 import { Cell, DefinedNames, Row, Workbook, Worksheet } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -64,7 +64,7 @@ try {
   await Workbook.toBuffer(wb, { format: "xlsb" });
   console.log("unexpected: the write was accepted");
 } catch (error) {
-  if (!(error instanceof ExcelNotSupportedError)) {
+  if (!(error instanceof ExcelUnsupportedFeatureError)) {
     throw error;
   }
   console.log(`refused, and named ${error.items.length} item(s):`);
@@ -98,7 +98,7 @@ try {
   await Workbook.read(bytes, { unsupported: "error" });
   console.log("\nstrict read: nothing was lost coming back in");
 } catch (error) {
-  if (!(error instanceof ExcelNotSupportedError)) {
+  if (!(error instanceof ExcelUnsupportedFeatureError)) {
     throw error;
   }
   console.log(`\nstrict read refused, naming ${error.items.length} item(s):`);

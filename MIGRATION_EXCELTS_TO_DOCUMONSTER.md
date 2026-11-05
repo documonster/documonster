@@ -108,11 +108,11 @@ function.
   `Workbook` (Node adds file-path `readFile`/`writeFile`) and `Stream`.
 
 Also exported (unchanged classes of errors): `ExcelError`, `isExcelError`,
-`WorksheetNameError`, `InvalidAddressError`, `ColumnOutOfBoundsError`,
-`RowOutOfBoundsError`, `MergeConflictError`, `InvalidValueTypeError`,
-`ExcelNotSupportedError`, `ExcelFileError`, `ExcelStreamStateError`,
-`ExcelDownloadError`, `PivotTableError`, `ChartOptionsError`, `TableError`,
-`ImageError`, `MaxItemsExceededError`.
+`ExcelWorksheetNameError`, `ExcelInvalidAddressError`, `ExcelColumnOutOfBoundsError`,
+`ExcelRowOutOfBoundsError`, `ExcelMergeConflictError`, `ExcelInvalidValueTypeError`,
+`ExcelUnsupportedFeatureError`, `ExcelFileError`, `ExcelStreamStateError`,
+`ExcelDownloadError`, `ExcelPivotTableError`, `ExcelChartOptionsError`, `ExcelTableError`,
+`ExcelImageError`, `ExcelLimitExceededError`.
 
 > Note: the standalone `Column`, `Range`, `Table`, `Image`, `Note`,
 > `FormCheckbox`, `DataValidations`, `DefinedNames`, `Chartsheet` **class
@@ -350,8 +350,8 @@ object**. `addr` is `"A1"` or a `(row, col)` pair for `getValue`/`setValue`/
 | `cell.name` / `cell.names`              | `Cell.getNames(ws, addr)`                                                      |
 | `cell.addName(n)`                       | `Cell.addName(ws, addr, n)`                                                    |
 | `cell.removeName(n)`                    | `Cell.removeName(ws, addr, n)`                                                 |
-| `cell.removeAllNames()`                 | `Cell.removeAllNames(ws, addr)`                                                |
-| _(set a single name)_                   | `Cell.setName(ws, addr, n)`                                                    |
+| `cell.removeAllNames()`                 | `Cell.clearNames(ws, addr)`                                                    |
+| _(set a single name)_                   | `Cell.setNames(ws, addr, [n])`                                                 |
 | _(set names)_                           | `Cell.setNames(ws, addr, names)`                                               |
 | `cell.fullAddress`                      | `Cell.getFullAddress(ws, addr)`                                                |
 | `cell.model` (get) / `= m`              | `Cell.getModel(ws, addr)` / `Cell.setModel(ws, addr, m)`                       |
@@ -376,7 +376,7 @@ All operations take `(ws, rowNumber)`.
 | `row.values = v`                 | `Row.setValues(ws, n, v)`                                           |
 | `row.getCell(col)`               | `Cell.*(ws, n, col)` — address the cell by position                 |
 | `row.eachCell(cb)` / `(opt, cb)` | `Row.eachAddress(ws, n, (address, row, col) => …, opt?)`            |
-| `row.commit()`                   | `Row.commit(ws, n)`                                                 |
+| `row.commit()`                   | `Stream.commitRow(ws.getRow(n))`                                    |
 | `row.number`                     | `n` — rows are addressed by number                                  |
 | `row.hasValues`                  | `Row.hasValues(ws, n)`                                              |
 | `row.cellCount`                  | `Row.getCellCount(ws, n)`                                           |
@@ -517,41 +517,41 @@ Chart-handle operations (`chart` is the handle): `Chart.toSvg(chart)`,
 `Chart.getTitle(chart)`, `Chart.getLegend(chart)`, `Chart.setLegend(...)`,
 `Chart.getAxis(...)`, `Chart.getCategoryAxis(chart)`, `Chart.getValueAxis(chart)`,
 `Chart.getPlotArea(chart)`, `Chart.getModel(chart)`, `Chart.getAnchorModel(chart)`,
-`Chart.isEx(chart)`, `Chart.clone(chart)`, `Chart.copyTo(...)`, etc.
+`Chart.isEx(chart)`, `Chart.copyTo(chart, targetWs)`, etc.
 (Full list: `getTitle`, `setTitle`, `getTitleRichText`, `mutate`, `mutateEx`, `setStyle`,
 `addSeries`, `removeSeries`, `getSeries`, `updateSeries`, `addSeriesFromOptions`, `setSeriesValues`,
 `setSeriesCategories`, `setSeriesName`, `getSeriesCount`, `getTotalSeriesCount`,
-`getChartTypes`, `getAxes`, `getAxis`, `getCategoryAxis`, `getValueAxis`, `getPlotArea`,
+`getTypes`, `getAxes`, `getAxis`, `getCategoryAxis`, `getValueAxis`, `getPlotArea`,
 `getLegend`, `setLegend`, `getSpPr`, `setSpPr`, `getUnknownElements`, `getUserShapesXml`,
-`setUserShapesXml`, `removeUserShapes`, `copyTo`, `clone`, `getModel`, `getExModel`, `isEx`,
+`setUserShapesXml`, `removeUserShapes`, `copyTo`, `getModel`, `getExModel`, `isEx`,
 `getAnchorModel`, `toSvg`, `toPng`.)
 
 ### 4.9 `Table`
 
-| Old (`Table` class / `ws`)                | New (`Table.*`)                                                   |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `ws.addTable(model)`                      | `Table.add(ws, model)`                                            |
-| `ws.getTable(name)`                       | `Table.get(ws, name)`                                             |
-| `ws.getTables()`                          | `Table.list(ws)`                                                  |
-| `ws.removeTable(name)`                    | `Table.remove(ws, name)`                                          |
-| `new Table(ws, model)`                    | `Table.create(...)`                                               |
-| `table.addRow(values, rowNumber?, opts?)` | `Table.addRow(t, values, rowNumber?, opts?)`                      |
-| `table.removeRows(idx, count?, opts?)`    | `Table.removeRows(t, idx, count?, opts?)`                         |
-| `table.getColumn(idx)`                    | `Table.getColumn(t, idx)`                                         |
-| `table.addColumn(col, values, idx?)`      | `Table.addColumn(t, col, values, idx?)`                           |
-| `table.removeColumns(idx, count?)`        | `Table.removeColumns(t, idx, count?)`                             |
-| `table.commit()`                          | `Table.commit(t)`                                                 |
-| `table.model` (get/set)                   | `Table.getModel(t)` / `Table.setModel(t, m)`                      |
-| `table.ref` / `= v`                       | `Table.getRef(t)` / `Table.setRef(t, v)`                          |
-| `table.name` / `= v`                      | `Table.getName(t)` / `Table.setName(t, v)`                        |
-| `table.displayName` / `= v`               | `Table.getDisplayName(t)` / `Table.setDisplayName(t, v)`          |
-| `table.headerRow` / `= v`                 | `Table.hasHeaderRow(t)` / `Table.setHeaderRow(t, v)`              |
-| `table.totalsRow` / `= v`                 | `Table.hasTotalsRow(t)` / `Table.setTotalsRow(t, v)`              |
-| `table.theme` / `= v`                     | `Table.getTheme(t)` / `Table.setTheme(t, v)`                      |
-| `table.showFirstColumn` / `= v`           | `Table.hasFirstColumnStyle(t)` / `Table.setShowFirstColumn(t, v)` |
-| `table.showLastColumn` / `= v`            | `Table.hasLastColumnStyle(t)` / `Table.setShowLastColumn(t, v)`   |
-| `table.showRowStripes` / `= v`            | `Table.hasRowStripes(t)` / `Table.setShowRowStripes(t, v)`        |
-| `table.showColumnStripes` / `= v`         | `Table.hasColumnStripes(t)` / `Table.setShowColumnStripes(t, v)`  |
+| Old (`Table` class / `ws`)                | New (`Table.*`)                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| `ws.addTable(model)`                      | `Table.add(ws, model)`                                             |
+| `ws.getTable(name)`                       | `Table.get(ws, name)`                                              |
+| `ws.getTables()`                          | `Table.list(ws)`                                                   |
+| `ws.removeTable(name)`                    | `Table.remove(ws, name)`                                           |
+| `new Table(ws, model)`                    | `Table.create(...)`                                                |
+| `table.addRow(values, rowNumber?, opts?)` | `Table.addRow(t, values, rowNumber?, opts?)`                       |
+| `table.removeRows(idx, count?, opts?)`    | `Table.removeRows(t, idx, count?, opts?)`                          |
+| `table.getColumn(idx)`                    | `Table.getColumn(t, idx)` (`undefined` past the end)               |
+| `table.addColumn(col, values, idx?)`      | `Table.addColumn(t, col, values, idx?)`                            |
+| `table.removeColumns(idx, count?)`        | `Table.removeColumns(t, idx, count?)`                              |
+| `table.commit()`                          | `Table.commit(t)`                                                  |
+| `table.model` (get/set)                   | `Table.getModel(t)` / `Table.setModel(t, m)`                       |
+| `table.ref` / `= v`                       | `Table.getRef(t)` / `Table.setRef(t, v)`                           |
+| `table.name` / `= v`                      | `Table.getName(t)` / `Table.setName(t, v)`                         |
+| `table.displayName` / `= v`               | `Table.getDisplayName(t)` / `Table.setDisplayName(t, v)`           |
+| `table.headerRow` / `= v`                 | `Table.hasHeaderRow(t)` / `Table.setHeaderRow(t, v)`               |
+| `table.totalsRow` / `= v`                 | `Table.hasTotalsRow(t)` / `Table.setTotalsRow(t, v)`               |
+| `table.theme` / `= v`                     | `Table.getTheme(t)` / `Table.setTheme(t, v)`                       |
+| `table.showFirstColumn` / `= v`           | `Table.hasFirstColumnStyle(t)` / `Table.setFirstColumnStyle(t, v)` |
+| `table.showLastColumn` / `= v`            | `Table.hasLastColumnStyle(t)` / `Table.setLastColumnStyle(t, v)`   |
+| `table.showRowStripes` / `= v`            | `Table.hasRowStripes(t)` / `Table.setRowStripes(t, v)`             |
+| `table.showColumnStripes` / `= v`         | `Table.hasColumnStripes(t)` / `Table.setColumnStripes(t, v)`       |
 
 Table-column accessors (formerly on the table-column wrapper class) are on the
 `Table` namespace prefixed with `column`: `Table.getColumnName(t, idx)`,
@@ -578,7 +578,7 @@ Table-column accessors (formerly on the table-column wrapper class) are on the
 | `checkbox.checked` / `= b`                                              | `Form.isChecked(cb)` / `Form.setChecked(cb, b)`                                                                                                                                                                                                                  |
 | `checkbox.link` / `= v`                                                 | `Form.getLink(cb)` / `Form.setLink(cb, v)`                                                                                                                                                                                                                       |
 | `checkbox.text` / `= v`                                                 | `Form.getText(cb)` / `Form.setText(cb, v)`                                                                                                                                                                                                                       |
-| `ws.addWatermark(opts)`                                                 | `Watermark.add(ws, opts)`                                                                                                                                                                                                                                        |
+| `ws.addWatermark(opts)`                                                 | `Watermark.set(ws, opts)`                                                                                                                                                                                                                                        |
 | `ws.getWatermark()`                                                     | `Watermark.get(ws)`                                                                                                                                                                                                                                              |
 | `ws.removeWatermark()`                                                  | `Watermark.remove(ws)`                                                                                                                                                                                                                                           |
 | `new DataValidations()`                                                 | `DataValidation.create()`                                                                                                                                                                                                                                        |
@@ -705,14 +705,14 @@ import { Pdf } from "documonster/pdf";
 const bytes = await Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 ```
 
-The Excel-specific callback is declared on `ExcelToPdfOptions`, not on the
+The Excel-specific callback is declared on `PdfFromExcelOptions`, not on the
 generic `PdfExportOptions`. If you explicitly typed an options object, update
 the annotation:
 
 ```ts
-import type { ExcelToPdfOptions } from "documonster/pdf";
+import type { PdfFromExcelOptions } from "documonster/pdf";
 
-const options: ExcelToPdfOptions = { recalculate: ExcelFormula.calculate };
+const options: PdfFromExcelOptions = { recalculate: ExcelFormula.calculate };
 ```
 
 The old `PdfExportOptions.recalculate` parameter used `never`, which accepted
@@ -831,7 +831,7 @@ puts everything else in `Streams` (e.g.
 
 The standalone CSV module is now the `Csv` namespace; **every** value export
 was moved into it and most were de-prefixed. Types (`CsvParseOptions`, etc.)
-and errors (`CsvError`, `CsvWorkerError`, `isCsvError`) plus
+and errors (`CsvError`, `isCsvError`) plus
 `DecimalSeparator` remain flat named exports.
 
 | Old (`documonster/csv` named export)               | New (`Csv.*`)                                                               |
@@ -841,8 +841,8 @@ and errors (`CsvError`, `CsvWorkerError`, `isCsvError`) plus
 | `parseCsvRows`                                     | `Csv.parseRows`                                                             |
 | `parseCsvWithProgress`                             | `Csv.parseAsync(input, { onProgress })`                                     |
 | `formatCsv`                                        | `Csv.format`                                                                |
-| `createCsvParserStream`                            | `Csv.createParserStream`                                                    |
-| `createCsvFormatterStream`                         | `Csv.createFormatterStream`                                                 |
+| `createCsvParserStream`                            | `new Csv.ParserStream()`                                                    |
+| `createCsvFormatterStream`                         | `new Csv.FormatterStream()`                                                 |
 | `csvGenerate`                                      | `Csv.generate`                                                              |
 | `csvGenerateRows`                                  | `Csv.generateRows`                                                          |
 | `csvGenerateAsync`                                 | `Csv.generateRowsAsync`                                                     |
@@ -941,7 +941,7 @@ namespace): `Build.*` (all run/paragraph/table/math/shape/field builders:
 | `isDocumentProtected`                                              | `Security.isProtected`                                                                         |
 | `getProtectionState`                                               | `Security.getState`                                                                            |
 | `verifyProtectionPassword`                                         | `Security.verifyProtectionPassword`                                                            |
-| `DEFAULT_SECURITY_POLICY` / `STRICT_SECURITY_POLICY`               | `Security.DEFAULT_SECURITY_POLICY` / `Security.STRICT_SECURITY_POLICY`                         |
+| `DEFAULT_SECURITY_POLICY` / `STRICT_SECURITY_POLICY`               | `Security.DEFAULT_POLICY` / `Security.STRICT_POLICY`                                           |
 | `parseStyleMap`                                                    | `Styles.parse`                                                                                 |
 | `createStyleMap`                                                   | `Styles.create`                                                                                |
 | `mergeStyleMaps`                                                   | `Styles.merge`                                                                                 |
@@ -956,13 +956,14 @@ namespace): `Build.*` (all run/paragraph/table/math/shape/field builders:
 | `createBuildingBlock` / `createGlossaryDocument`                   | `Glossary.createBlock` / `Glossary.createDocument`                                             |
 | `findBuildingBlock` / `listBuildingBlocks`                         | `Glossary.findBlock` / `Glossary.listBlocks`                                                   |
 | `getAutoTextEntries` / `getQuickParts`                             | `Glossary.listAutoTextEntries` / `Glossary.listQuickParts`                                     |
-| `StreamingDocxWriter` / `createDocxStream`                         | `Streaming.createWriter`                                                                       |
-| _(new)_ streaming reader                                           | `Streaming.createReader`                                                                       |
+| `StreamingDocxWriter` / `createDocxStream`                         | `new Stream.DocumentWriter()`                                                                  |
+| `writer.finalize()`                                                | `writer.toBuffer()` (bytes), or `writer.commit()` when writing to `options.sink`               |
+| _(new)_ streaming reader                                           | `new Stream.DocumentReader()`                                                                  |
 
 **Unchanged (still flat):** the error classes (`DocxError`, `DocxParseError`,
 `DocxWriteError`, `DocxMissingPartError`, `DocxInvalidStructureError`,
 `DocxUnsupportedFeatureError`, `DocxEncryptedError`, `DocxDecryptionError`,
-`DocxLimitExceededError`, `isDocxError`, `TemplateError`) and every `export type`
+`DocxLimitExceededError`, `isDocxError`, `DocxTemplateError`) and every `export type`
 (data-model types, options, layout/IR types). The integrations on their own
 subpaths are namespaces: `WordHtml` (`documonster/word/html`), `WordMarkdown`
 (`documonster/word/markdown`), `WordExcel` (`documonster/word/excel`) and `WordCrypto`
@@ -983,19 +984,19 @@ low-level helpers. These are **no longer exported from `documonster/excel`**; mo
 not public anywhere, and the few that are live on another entry's namespace. Migrate as
 follows:
 
-| Old (root named export)                                                                               | New                                                                                                                                                                                                      |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `decodeCell` / `encodeCol` / `decodeRow` / `encodeRow` / `encodeCell` / `decodeRange` / `encodeRange` | `Address.*` from `documonster/excel` (§4.10)                                                                                                                                                             |
-| `xmlEncode`                                                                                           | `Xml.encode` from `documonster/xml`                                                                                                                                                                      |
-| `xmlDecode`                                                                                           | `Xml.decode` from `documonster/xml`                                                                                                                                                                      |
-| `xmlEncodeAttr` / `validateXmlName`                                                                   | `Xml.encodeAttr` / `Xml.validateName`                                                                                                                                                                    |
-| `createTextWatermarkImage` / `TextWatermarkImageOptions`                                              | Use `Watermark.add(ws, opts)` on a worksheet (§4.10); the standalone image generator is no longer a public export                                                                                        |
-| `getCellDisplayText` / `formatCellValue` / `isDateDisplayFormat`                                      | Use `Cell.getDisplayText(ws, addr)` (§4.3); the standalone helpers are no longer public                                                                                                                  |
-| `dateToExcel` / `excelToDate`                                                                         | Internal — no longer public. Compute Excel serial dates in your own code, or store JS `Date` values directly in cells.                                                                                   |
-| `base64ToUint8Array` / `uint8ArrayToBase64`                                                           | `Archive.base64ToUint8Array` / `Archive.uint8ArrayToBase64` from `documonster/archive`                                                                                                                   |
-| `concatUint8Arrays` / `stringToUint8Array` / `uint8ArrayToString` / `toUint8Array`                    | `Archive.concatUint8Arrays` / `Archive.stringToUint8Array` / `Archive.uint8ArrayToString` from `documonster/archive`; `toUint8Array` is no longer public — use `TextEncoder` or `new Uint8Array(buffer)` |
-| `DateParser` / `DateFormatter` / `getSupportedFormats` / `DateFormat`                                 | Internal — no longer public.                                                                                                                                                                             |
-| `BaseError` / `toError` / `errorToJSON` / `getErrorChain` / `getRootCause`                            | Internal — no longer public. Catch the module-specific error classes (`ExcelError`, `PdfError`, `XmlError`, …) instead.                                                                                  |
+| Old (root named export)                                                                               | New                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decodeCell` / `encodeCol` / `decodeRow` / `encodeRow` / `encodeCell` / `decodeRange` / `encodeRange` | `Address.*` from `documonster/excel` (§4.10)                                                                                                                                              |
+| `xmlEncode`                                                                                           | `Xml.encode` from `documonster/xml`                                                                                                                                                       |
+| `xmlDecode`                                                                                           | `Xml.decode` from `documonster/xml`                                                                                                                                                       |
+| `xmlEncodeAttr` / `validateXmlName`                                                                   | `Xml.encodeAttr` / `Xml.validateName`                                                                                                                                                     |
+| `createTextWatermarkImage` / `TextWatermarkImageOptions`                                              | Use `Watermark.set(ws, opts)` on a worksheet (§4.10); the standalone image generator is no longer a public export                                                                         |
+| `getCellDisplayText` / `formatCellValue` / `isDateDisplayFormat`                                      | Use `Cell.getDisplayText(ws, addr)` (§4.3); the standalone helpers are no longer public                                                                                                   |
+| `dateToExcel` / `excelToDate`                                                                         | Internal — no longer public. Compute Excel serial dates in your own code, or store JS `Date` values directly in cells.                                                                    |
+| `base64ToUint8Array` / `uint8ArrayToBase64`                                                           | Native: `Buffer.from(s, "base64")` / `Buffer.from(bytes).toString("base64")` on Node; `Uint8Array.fromBase64` / `bytes.toBase64()` where available (not Node 22)                          |
+| `concatUint8Arrays` / `stringToUint8Array` / `uint8ArrayToString` / `toUint8Array`                    | Native: `new Uint8Array(total)` + `out.set(part, offset)` (or `Buffer.concat`), `new TextEncoder().encode`, `new TextDecoder(encoding).decode`; `toUint8Array` → `new Uint8Array(buffer)` |
+| `DateParser` / `DateFormatter` / `getSupportedFormats` / `DateFormat`                                 | Internal — no longer public.                                                                                                                                                              |
+| `BaseError` / `toError` / `errorToJSON` / `getErrorChain` / `getRootCause`                            | Internal — no longer public. Catch the module-specific error classes (`ExcelError`, `PdfError`, `XmlError`, …) instead.                                                                   |
 
 If you depended on any of these, replace them with the namespace equivalent
 above or inline a small implementation — they were never intended as a stable
@@ -1018,7 +1019,7 @@ Two deliberate compile-time breaks:
 
 - **Mixed addressing is rejected.** `Cell.getValue(ws, "A1", 99)` used to
   type-check and silently read `"CUA1"` (`n2l(99) + "A1"`); `Cell.getValue(ws, 5)`
-  used to type-check and throw `InvalidAddressError`. Both are now errors. Pass
+  used to type-check and throw `ExcelInvalidAddressError`. Both are now errors. Pass
   `"A1"` alone, or `(row, col)` together.
 - **Columns are not handed out.** `ws.columns[0].header = "X"` (which used to
   work, unadvertised, and bypassed the key registry and cell styles) has no

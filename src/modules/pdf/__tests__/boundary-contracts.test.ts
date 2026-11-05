@@ -330,7 +330,7 @@ describe("converter and builder arguments", () => {
   it("checks the builder's handler, font bytes and PDF/A level", () => {
     const b = new Pdf.Builder();
     expect(argumentError(() => b.onWarning(42 as never)).field).toBe("handler");
-    expect(argumentError(() => b.embedFont(null as never)).field).toBe("fontBytes");
+    expect(argumentError(() => b.embedFont(null as never)).field).toBe("source");
     expect(argumentError(() => b.setPdfACompliance("2b" as never)).field).toBe("level");
   });
 

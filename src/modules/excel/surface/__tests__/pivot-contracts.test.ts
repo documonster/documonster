@@ -2,7 +2,14 @@
  * A pivot table's source cannot be removed from under it, two new pivot tables cannot share cells, and the model is
  * checked before anything is added.
  */
-import { ExcelArgumentError, Pivot, PivotTableError, Table, Workbook, Worksheet } from "@excel";
+import {
+  ExcelArgumentError,
+  Pivot,
+  ExcelPivotTableError,
+  Table,
+  Workbook,
+  Worksheet
+} from "@excel";
 import { describe, expect, it } from "vitest";
 
 function book() {
@@ -21,7 +28,7 @@ describe("a pivot table's source", () => {
   it("its sheet cannot be removed while the pivot table reads it", () => {
     const { wb, data, out } = book();
     const pivot = Pivot.add(out, { sourceSheet: data, rows: ["Region"], values: ["Sales"] });
-    expect(() => Workbook.removeWorksheet(wb, data)).toThrow(PivotTableError);
+    expect(() => Workbook.removeWorksheet(wb, data)).toThrow(ExcelPivotTableError);
     expect(Workbook.getWorksheet(wb, "Data")).toBe(data);
     Pivot.remove(out, pivot);
     expect(Workbook.removeWorksheet(wb, data)).toBe(true);
@@ -36,8 +43,8 @@ describe("a pivot table's source", () => {
       rows: [["a", 1]]
     });
     Pivot.add(out, { sourceTable: table, rows: ["k"], values: ["v"] });
-    expect(() => Table.remove(data, "Src")).toThrow(PivotTableError);
-    expect(() => Workbook.removeWorksheet(wb, data)).toThrow(PivotTableError);
+    expect(() => Table.remove(data, "Src")).toThrow(ExcelPivotTableError);
+    expect(() => Workbook.removeWorksheet(wb, data)).toThrow(ExcelPivotTableError);
     expect(Table.list(data)).toHaveLength(1);
   });
 
@@ -56,10 +63,10 @@ describe("Pivot.add", () => {
     Pivot.add(out, { sourceSheet: data, rows: ["Region"], values: ["Sales"] });
     expect(() =>
       Pivot.add(out, { sourceSheet: data, rows: ["Region"], values: ["Sales"] })
-    ).toThrow(PivotTableError);
+    ).toThrow(ExcelPivotTableError);
     expect(() =>
       Pivot.add(out, { sourceSheet: data, rows: ["Region"], values: ["Sales"], ref: "B4" })
-    ).toThrow(PivotTableError);
+    ).toThrow(ExcelPivotTableError);
     Pivot.add(out, { sourceSheet: data, rows: ["Region"], values: ["Sales"], ref: "E3" });
     expect(Pivot.list(out)).toHaveLength(2);
   });

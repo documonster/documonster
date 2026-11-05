@@ -6,7 +6,7 @@
  * sidecar, the raw-XML patcher) and for the renderer, so a colour cannot be read one way and drawn another.
  */
 import type { ChartColor } from "@excel/chart/model/types";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import type { ColorTransform, ColorTransformKind } from "@utils/theme-colors";
 
 /** Every transform element of ECMA-376 §20.1.2.3, by the name the markup gives it. */
@@ -137,7 +137,7 @@ const KNOWN: ReadonlySet<string> = new Set(KINDS);
 
 /**
  * `list` as the elements it is written as, in order — `[name, val]`, `val` `undefined` for a flag. A kind the markup
- * does not have, or a valued transform without a finite `val`, is refused (`ChartOptionsError` on
+ * does not have, or a valued transform without a finite `val`, is refused (`ExcelChartOptionsError` on
  * `transforms[i]`) rather than written as markup Excel refuses: the writers fail loudly on a malformed colour.
  */
 export function colorTransformElements(
@@ -145,7 +145,7 @@ export function colorTransformElements(
 ): [name: string, val: number | undefined][] {
   return list.map((t, i) => {
     if (!KNOWN.has(t?.kind)) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `transforms[${i}].kind`,
         `transforms[${i}].kind must be a DrawingML colour transform (lumMod, satOff, comp, …), got ${JSON.stringify(t?.kind)}.`
       );
@@ -154,7 +154,7 @@ export function colorTransformElements(
       return [t.kind, undefined];
     }
     if (typeof t.val !== "number" || !Number.isFinite(t.val)) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `transforms[${i}].val`,
         `transforms[${i}].val must be a finite number for ${t.kind}, got ${JSON.stringify(t.val)}.`
       );

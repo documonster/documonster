@@ -1,5 +1,5 @@
 import { getImage } from "@excel/core/workbook-core";
-import { Image, ImageError, Stream, Workbook } from "@excel/index";
+import { Image, ExcelImageError, Stream, Workbook } from "@excel/index";
 import type { ImageData } from "@excel/types";
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +10,7 @@ describe("image extension at the API boundary", () => {
     const wb = Workbook.create();
     const call = (): number =>
       Image.add(wb, { buffer: PNG, extension: "image/png" as ImageData["extension"] });
-    expect(call).toThrow(ImageError);
+    expect(call).toThrow(ExcelImageError);
     expect(call).toThrow(/png, jpeg, gif/);
     expect(getImage(wb, 0)).toBeUndefined();
   });
@@ -19,7 +19,7 @@ describe("image extension at the API boundary", () => {
     const wb = new Stream.WorkbookWriter({});
     expect(() =>
       wb.addImage({ buffer: PNG, extension: "image/png" as ImageData["extension"] })
-    ).toThrow(ImageError);
+    ).toThrow(ExcelImageError);
   });
 
   it("documented extensions and jpg still work", () => {
@@ -41,7 +41,7 @@ describe("image extension at write time", () => {
     (model.media[0] as { extension: string }).extension = "image/png";
     const copy = Workbook.create();
     Workbook.setModel(copy, model);
-    await expect(Workbook.toBuffer(copy)).rejects.toThrow(ImageError);
-    await expect(Workbook.toBuffer(copy, { format: "xlsb" })).rejects.toThrow(ImageError);
+    await expect(Workbook.toBuffer(copy)).rejects.toThrow(ExcelImageError);
+    await expect(Workbook.toBuffer(copy, { format: "xlsb" })).rejects.toThrow(ExcelImageError);
   });
 });

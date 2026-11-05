@@ -12,11 +12,11 @@
 
 import { readFile, stat } from "node:fs/promises";
 
-import { ExcelNotSupportedError, Row, Workbook, Worksheet } from "documonster/excel";
+import { ExcelUnsupportedFeatureError, Row, Workbook, Worksheet } from "documonster/excel";
 import { ExcelCsv } from "documonster/excel/csv";
 import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
-import type { CjkLanguage } from "documonster/pdf";
+import type { PdfCjkLanguage } from "documonster/pdf";
 import { Convert, Io } from "documonster/word";
 import { WordHtml } from "documonster/word/html";
 import { WordMarkdown } from "documonster/word/markdown";
@@ -80,7 +80,7 @@ async function workbookLossReport(
     await Workbook.toBuffer(workbook, { format });
     return [];
   } catch (cause) {
-    return cause instanceof ExcelNotSupportedError ? cause.items : [];
+    return cause instanceof ExcelUnsupportedFeatureError ? cause.items : [];
   }
 }
 
@@ -192,7 +192,7 @@ async function convert(
   args: {
     readonly sheet?: string | number;
     readonly renderDiagrams?: boolean;
-    readonly textLanguage?: CjkLanguage;
+    readonly textLanguage?: PdfCjkLanguage;
     readonly allowMissingGlyphs: boolean;
     readonly config: ServerConfig;
   }

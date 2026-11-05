@@ -2,7 +2,7 @@
  * Word Example 46 — Security policy & render context
  *
  * The reader / writer apply hard limits and content filters from a
- * `WordSecurityPolicy`. Two presets ship out of the box:
+ * `DocxSecurityPolicy`. Two presets ship out of the box:
  *   - DEFAULT_SECURITY_POLICY — preserve everything, generous limits.
  *   - STRICT_SECURITY_POLICY  — strip VBA/OLE/altChunks, tighter limits,
  *     no external relationship targets.
@@ -40,11 +40,11 @@ function log(s: string): void {
 // 1. Show the two preset policies
 // ---------------------------------------------------------------------------
 log(`  DEFAULT_SECURITY_POLICY:`);
-for (const [k, v] of Object.entries(Security.DEFAULT_SECURITY_POLICY)) {
+for (const [k, v] of Object.entries(Security.DEFAULT_POLICY)) {
   log(`    ${k.padEnd(24)} = ${v}`);
 }
 log(`\n  STRICT_SECURITY_POLICY:`);
-for (const [k, v] of Object.entries(Security.STRICT_SECURITY_POLICY)) {
+for (const [k, v] of Object.entries(Security.STRICT_POLICY)) {
   log(`    ${k.padEnd(24)} = ${v}`);
 }
 
@@ -66,11 +66,11 @@ const bytes = await Io.toBuffer(d);
 fs.writeFileSync(path.join(outDir, "46-policy.docx"), bytes);
 
 // Default policy: succeeds
-const defaultRead = await Io.read(bytes, { securityPolicy: Security.DEFAULT_SECURITY_POLICY });
+const defaultRead = await Io.read(bytes, { securityPolicy: Security.DEFAULT_POLICY });
 log(`\n  Io.read(DEFAULT) body length: ${defaultRead.body.length}`);
 
 // Strict policy: still succeeds for this benign file
-const strictRead = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
+const strictRead = await Io.read(bytes, { securityPolicy: Security.STRICT_POLICY });
 log(`  Io.read(STRICT)  body length: ${strictRead.body.length}`);
 
 // A partial policy with a comically tight cap forces a rejection; every field
@@ -104,7 +104,7 @@ log(
 // ---------------------------------------------------------------------------
 const ctx = RenderContext.create({
   partName: "/word/custom.xml",
-  securityPolicy: Security.STRICT_SECURITY_POLICY,
+  securityPolicy: Security.STRICT_POLICY,
   ids
 });
 log(

@@ -7,7 +7,7 @@
 // That loose signature was not merely imprecise, it was dangerous:
 // `Cell.getValue(ws, "A1", 99)` type-checked and silently read `"CUA1"`
 // (`colCache.getAddress` composes `n2l(99) + "A1"`), and `Cell.getValue(ws, 5)`
-// type-checked and threw `InvalidAddressError` at runtime. The `@ts-expect-error`
+// type-checked and threw `ExcelInvalidAddressError` at runtime. The `@ts-expect-error`
 // blocks below are the regression guard: if any of them stops erroring, the
 // loose signature is back.
 

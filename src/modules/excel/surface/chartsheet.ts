@@ -75,7 +75,7 @@ function checkAttached(where: string, cs: ChartsheetData): void {
 /**
  * Rename the chartsheet, by the rules a worksheet name follows.
  *
- * @throws {WorksheetNameError} when the name is not one Excel accepts or another sheet has it.
+ * @throws {ExcelWorksheetNameError} when the name is not one Excel accepts or another sheet has it.
  */
 export function setName(cs: ChartsheetData, value: string): void {
   checkChartsheet(cs);

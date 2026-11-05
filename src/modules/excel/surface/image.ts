@@ -6,6 +6,10 @@
  * `Image.setBackground(ws, imageId)` sets a sheet background, `Image.removeBackground(ws)` removes it;
  * `Image.list(ws)` lists a sheet's images, `Image.remove(ws, image)` removes one,
  * `Image.listShapes(ws)` lists its shapes.
+ *
+ * Two collections share the namespace: the workbook's media (`add` registers, by id) and a
+ * sheet's placements of it (`place`, `list`, `remove`). Removing a placement leaves the media
+ * registered, so its id can be placed again.
  */
 import { checkWorksheetImage } from "@excel/core/feature-handles";
 import type { ImageModel, ImageModelInput, WorksheetImage } from "@excel/core/image";
@@ -30,7 +34,7 @@ import {
   checkWorksheetAttached,
   getSheetWorkbook
 } from "@excel/core/worksheet-core";
-import { ImageError } from "@excel/errors";
+import { ExcelImageError } from "@excel/errors";
 import { checkListTarget } from "@excel/surface/argument-checks";
 import type { AddImageRange, AddShapeOptions, ImageData, ShapeModel } from "@excel/types";
 import { argumentChecks } from "@excel/utils/arguments";
@@ -39,7 +43,7 @@ import { checkDrawingRange, checkShapeOptions } from "@excel/utils/drawing-check
 /**
  * Register a picture in the workbook and return its id, for {@link place} and {@link setBackground}.
  *
- * @throws {ImageError} when the image has no extension of the supported kinds (`png`, `jpeg`, `jpg`, `gif`), or no
+ * @throws {ExcelImageError} when the image has no extension of the supported kinds (`png`, `jpeg`, `jpg`, `gif`), or no
  * bytes — `buffer`, `base64` or `filename` — and no `link`.
  */
 export function add(wb: WorkbookData, image: ImageData): number {
@@ -49,7 +53,7 @@ export function add(wb: WorkbookData, image: ImageData): number {
 
 function checkImageId(where: string, ws: WorksheetData, imageId: string | number): void {
   if (getImage(getSheetWorkbook(ws), imageId) === undefined) {
-    throw new ImageError(
+    throw new ExcelImageError(
       `${where}: the workbook has no image ${JSON.stringify(imageId)}; add it with Image.add first.`
     );
   }
@@ -60,7 +64,7 @@ function checkImageId(where: string, ws: WorksheetData, imageId: string | number
  * {@link list} lists, which {@link remove} and {@link setModel} take. A lower-case range (`"b2:c3"`) is read as Excel
  * reads it.
  *
- * @throws {ImageError} when the workbook has no such image — which used to be accepted and written as a picture with
+ * @throws {ExcelImageError} when the workbook has no such image — which used to be accepted and written as a picture with
  * nothing to show.
  */
 export function place(
@@ -76,7 +80,7 @@ export function place(
   return addImage(ws, imageId, range);
 }
 
-/** Use the workbook image `imageId` as the sheet's background. @throws {ImageError} when there is no such image. */
+/** Use the workbook image `imageId` as the sheet's background. @throws {ExcelImageError} when there is no such image. */
 export function setBackground(ws: WorksheetData, imageId: string | number): void {
   checkWorksheet(ws);
   checkImageId("Image.setBackground", ws, imageId);
@@ -152,7 +156,7 @@ const IMAGE_TYPES = ["image", "background", "watermark", "headerImage"];
  * a picture, its range as {@link place} checks one — so a refused model leaves the image as it was.
  *
  * @throws {ExcelArgumentError} when the image is no longer on its sheet, or the model is malformed.
- * @throws {ImageError} when the workbook has no image `model.imageId`: the picture used to be dropped from the file.
+ * @throws {ExcelImageError} when the workbook has no image `model.imageId`: the picture used to be dropped from the file.
  */
 export function setModel(image: WorksheetImage, model: ImageModelInput): void {
   checkWorksheetImage(image);

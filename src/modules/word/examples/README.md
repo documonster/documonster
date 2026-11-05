@@ -54,7 +54,7 @@ Output is written to `tmp/word-examples/`.
 | `19-merge-split-diff.ts`      | `Transform.merge` / `Transform.split` / `Diff.compare`                                   |
 | `20-protection-encryption.ts` | `Security.protect` + `WordCrypto.encrypt`                                                |
 | `21-validation.ts`            | `Validation.validate` (clean / malformed / strict / compat)                              |
-| `22-streaming.ts`             | `Streaming.createWriter` for huge documents                                              |
+| `22-streaming.ts`             | `Stream.DocumentWriter` for huge documents                                               |
 | `23-fonts.ts`                 | `Font.embed` (subsetting & ODTTF obfuscation) + `Font.obfuscate`                         |
 | `24-watermark-bg.ts`          | Text & image watermark, page background, custom theme                                    |
 
@@ -88,7 +88,7 @@ Output is written to `tmp/word-examples/`.
 | `43-compat-modes.ts`             | `getCompatibilityMode` / `setCompatibilityMode` for Word 2003-2013+                                                          |
 | `44-queries-deep.ts`             | `Query.getBookmark` / `Query.getComment` / `Query.searchByFormat` / `Query.listUsedFormats`                                  |
 | `45-digital-signatures.ts`       | `WordCrypto.listSignatures` / `parseSignature` / `isWellFormedSignature` / `hasSignatures`                                   |
-| `46-security-policy.ts`          | `Security.DEFAULT_SECURITY_POLICY` / `Security.resolvePolicy` / `RenderContext.create` / `RenderContext.createIds`           |
+| `46-security-policy.ts`          | `Security.DEFAULT_POLICY` / `Security.resolvePolicy` / `RenderContext.create` / `RenderContext.createIds`                    |
 | `47-low-level-crypto.ts`         | `WordCrypto.verifyPassword` / `readCfb` / `writeCfb` / `parseEncryptionInfo` / `deriveKey` / `decryptPackage`                |
 
 ## Conventions

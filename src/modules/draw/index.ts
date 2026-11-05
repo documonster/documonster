@@ -37,14 +37,41 @@
 
 import * as DrawNs from "@draw/api/draw";
 import * as MatrixNs from "@draw/api/matrix";
-import { checkRasterCanvas } from "@draw/arguments";
+import { checkPathCommands, checkRasterCanvas } from "@draw/arguments";
+import type {
+  RasterPoint as DrawRasterPoint,
+  DrawRasterLineOptions,
+  DrawRasterStrokeOptions,
+  DrawRasterTextOptions,
+  DrawRasterTextRotation
+} from "@draw/raster/canvas";
 import { parseRasterFont as parseRasterFontLenient } from "@draw/raster/glyph-outline";
+import type {
+  GlyphOutline as DrawGlyphOutline,
+  GlyphPoint as DrawGlyphPoint,
+  RasterFont as DrawRasterFont,
+  RasterFontSource as DrawRasterFontSource
+} from "@draw/raster/glyph-outline";
 import {
   createScaledRasterSurface,
   rasterizeToRgba as rasterizeToRgbaLenient
 } from "@draw/raster/surface";
+import type {
+  RasterSurfaceOptions as DrawRasterSurfaceOptions,
+  RasterizeOptions as DrawRasterizeOptions,
+  RasterizedImage as DrawRasterizedImage,
+  RgbaImage as DrawRgbaImage
+} from "@draw/raster/surface";
 import type { DrawSurface } from "@draw/surface";
+import type { ToSvgOptions as DrawToSvgOptions } from "@draw/svg";
 import { toSvg as toSvgLenient } from "@draw/svg";
+import { flattenPath as flattenPathImpl } from "@draw/types";
+import type {
+  DrawPathCommand,
+  DrawSubpath,
+  RasterTextStyle as DrawRasterTextStyle
+} from "@draw/types";
+import type { Rgba01 as DrawRgba01 } from "@utils/svg-lex";
 
 // =============================================================================
 // Public API — the `Draw` and `Matrix` namespaces (tree-shaken via `export * as`)
@@ -71,43 +98,52 @@ export { DrawError, DrawArgumentError, isDrawError } from "@draw/errors";
 // =============================================================================
 
 export type { DrawSurface } from "@draw/surface";
-export type { ToSvgOptions } from "@draw/svg";
 export type {
-  RasterSurfaceOptions,
-  RasterizeOptions,
-  RasterizedImage,
-  RgbaImage
-} from "@draw/raster/surface";
+  DrawToSvgOptions,
+  DrawRasterSurfaceOptions,
+  DrawRasterizeOptions,
+  DrawRasterizedImage,
+  DrawRgbaImage
+};
 /**
  * Reachable from `Draw.Backend.BasicRasterCanvas`'s own signatures — its point lists and the
  * font it rasterises glyphs from. Without the names a consumer can call the methods but
  * cannot declare a variable to hold what they take.
  */
-export type { RasterPoint } from "@draw/raster/canvas";
-export type { GlyphOutline, RasterFont } from "@draw/raster/glyph-outline";
+export type {
+  DrawRasterPoint,
+  DrawRasterLineOptions,
+  DrawRasterStrokeOptions,
+  DrawRasterTextOptions,
+  DrawRasterTextRotation,
+  DrawGlyphOutline,
+  DrawGlyphPoint,
+  DrawRasterFont
+};
 /**
  * How a font may be supplied: bytes, a parsed face (`Draw.parseRasterFont`), or a face
  * inside a collection.
  *
- * Named because it appears in `RasterizeOptions.fonts` and
+ * Named because it appears in `DrawRasterizeOptions.fonts` and
  * `BasicRasterCanvas.setFonts`.
  *
  * There is deliberately **no process-wide font registry**, published or otherwise.
- * Fonts belong to a render — `RasterizeOptions.fonts` — or to a canvas —
+ * Fonts belong to a render — `DrawRasterizeOptions.fonts` — or to a canvas —
  * `BasicRasterCanvas.setFonts`. A module-level setter would let one caller change what
  * another caller's canvas draws with; the one that existed was used by nothing but the
  * tests, and removing it took two mutable globals with it.
  */
-export type { RasterFontSource } from "@draw/raster/glyph-outline";
+export type { DrawRasterFontSource };
 /**
  * Re-exported because it is reachable from this module's own signatures —
  * `DrawPaint.fill`, `DrawTextStyle.fill` and the return of `Draw.parseColor` are
- * all `Rgba01`. Without the name a consumer can assign one but cannot declare one.
+ * all `DrawRgba01`. Without the name a consumer can assign one but cannot declare one.
  */
-export type { Rgba01 } from "@utils/svg-lex";
+export type { DrawRgba01 };
 export type {
   DrawBox,
   DrawClip,
+  DrawFlattenPathOptions,
   DrawSubpath,
   DrawList,
   DrawMatrix,
@@ -117,9 +153,9 @@ export type {
   DrawPoint,
   DrawTextAnchor,
   DrawTextLine,
-  DrawTextStyle,
-  RasterTextStyle
+  DrawTextStyle
 } from "@draw/types";
+export type { DrawRasterTextStyle };
 
 // =============================================================================
 // Deprecated flat names — forwards to the namespaces above
@@ -182,15 +218,22 @@ export type BasicRasterCanvas = DrawNs.Backend.BasicRasterCanvas;
 /** @deprecated Use {@link DrawNs.Backend.fontHasGlyph | Draw.Backend.fontHasGlyph}. Removed in 1.0. */
 export const fontHasGlyph = DrawNs.Backend.fontHasGlyph;
 /**
- * @deprecated Use {@link DrawNs.parseRasterFont | Draw.parseRasterFont}, which throws for
- * bytes it cannot read (this form returns an empty face, and face 0 for an index past the
- * end of a collection). Removed in 1.0.
+ * @deprecated Use {@link DrawNs.parseRasterFont | Draw.parseRasterFont}, which takes the bytes or
+ * `{ data, collectionIndex }` and throws for bytes it cannot read (this form returns an empty
+ * face, and face 0 for an index past the end of a collection). Removed in 1.0.
  */
 export const parseRasterFont = parseRasterFontLenient;
 /** @deprecated Use {@link DrawNs.Geometry.arcToCubics | Draw.Geometry.arcToCubics}. Removed in 1.0. */
 export const arcToCubics = DrawNs.Geometry.arcToCubics;
-/** @deprecated Use {@link DrawNs.Geometry.flattenPath | Draw.Geometry.flattenPath}. Removed in 1.0. */
-export const flattenPath = DrawNs.Geometry.flattenPath;
+/**
+ * @deprecated Use {@link DrawNs.Geometry.flattenPath | Draw.Geometry.flattenPath}, which takes
+ * `{ scale }` and checks it. This form multiplies by whatever `scale` it is given, as it always
+ * did. Removed in 1.0.
+ */
+export function flattenPath(commands: readonly DrawPathCommand[], scale?: number): DrawSubpath[] {
+  checkPathCommands("flattenPath", "commands", commands);
+  return flattenPathImpl(commands, scale);
+}
 /** @deprecated Use {@link DrawNs.Geometry.createRectNode | Draw.Geometry.createRectNode}. Removed in 1.0. */
 export const rectNode = DrawNs.Geometry.createRectNode;
 /** @deprecated Use {@link DrawNs.Geometry.roundedRectToPath | Draw.Geometry.roundedRectToPath}. Removed in 1.0. */
@@ -213,6 +256,33 @@ export const translate = MatrixNs.translate;
 export const rotationOf = MatrixNs.getRotation;
 /** @deprecated Use {@link MatrixNs.getUniformScale | Matrix.getUniformScale}. Removed in 1.0. */
 export const uniformScale = MatrixNs.getUniformScale;
+
+// =============================================================================
+// Deprecated unprefixed type names — every flat type of this entry carries `Draw`
+// =============================================================================
+
+/** @deprecated Use {@link DrawToSvgOptions}. Removed in 1.0. */
+export type ToSvgOptions = DrawToSvgOptions;
+/** @deprecated Use {@link DrawRasterSurfaceOptions}. Removed in 1.0. */
+export type RasterSurfaceOptions = DrawRasterSurfaceOptions;
+/** @deprecated Use {@link DrawRasterizeOptions}. Removed in 1.0. */
+export type RasterizeOptions = DrawRasterizeOptions;
+/** @deprecated Use {@link DrawRasterizedImage}. Removed in 1.0. */
+export type RasterizedImage = DrawRasterizedImage;
+/** @deprecated Use {@link DrawRgbaImage}. Removed in 1.0. */
+export type RgbaImage = DrawRgbaImage;
+/** @deprecated Use {@link DrawRasterPoint}. Removed in 1.0. */
+export type RasterPoint = DrawRasterPoint;
+/** @deprecated Use {@link DrawGlyphOutline}. Removed in 1.0. */
+export type GlyphOutline = DrawGlyphOutline;
+/** @deprecated Use {@link DrawRasterFont}. Removed in 1.0. */
+export type RasterFont = DrawRasterFont;
+/** @deprecated Use {@link DrawRasterFontSource}. Removed in 1.0. */
+export type RasterFontSource = DrawRasterFontSource;
+/** @deprecated Use {@link DrawRgba01}. Removed in 1.0. */
+export type Rgba01 = DrawRgba01;
+/** @deprecated Use {@link DrawRasterTextStyle}. Removed in 1.0. */
+export type RasterTextStyle = DrawRasterTextStyle;
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";

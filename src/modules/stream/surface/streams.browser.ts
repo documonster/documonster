@@ -14,6 +14,12 @@
  * flat export under Node's own name; everything Node does not have lives here.
  */
 
+import { createCollector as createCollectorImpl } from "@stream/browser/collector";
+import {
+  createBufferedStream as createBufferedStreamImpl,
+  createPullStream as createPullStreamImpl
+} from "@stream/browser/factories";
+
 // Factories
 export {
   createReadable,
@@ -27,8 +33,6 @@ export {
   createTransform,
   createPassThrough,
   createDuplex,
-  createPullStream,
-  createBufferedStream,
   createStringChunk,
   createByteChunk,
   fromBytes,
@@ -36,11 +40,17 @@ export {
   fromJSON as fromJson,
   filter
 } from "@stream/browser/factories";
-export { createCollector } from "@stream/browser/collector";
 
-// Classes behind the factories — public for `instanceof` checks and subclassing
+// Stateful stream classes — build them with their constructor (`new Streams.PullStream()`)
 export { PullStream, BufferedStream } from "@stream/browser/factories";
 export { Collector } from "@stream/browser/collector";
+
+/** @deprecated Use `new Streams.PullStream(options)`. Removed in 1.0. */
+export const createPullStream = createPullStreamImpl;
+/** @deprecated Use `new Streams.BufferedStream(options)`. Removed in 1.0. */
+export const createBufferedStream = createBufferedStreamImpl;
+/** @deprecated Use `new Streams.Collector(options)`. Removed in 1.0. */
+export const createCollector = createCollectorImpl;
 export { ChunkedBuilder, TransactionalChunkedBuilder } from "@stream/chunked-builder";
 
 // Adapters for event emitters, sinks and callbacks — a labelled low-level corner

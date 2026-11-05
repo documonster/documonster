@@ -19,7 +19,7 @@ import {
   Io,
   Layout,
   Query,
-  Streaming,
+  Stream,
   Transform,
   Validation
 } from "../index";
@@ -182,7 +182,7 @@ describe("block-level range markers — reading", () => {
     for (const block of doc.body) {
       expect(BLOCK_TYPES.has(block.type)).toBe(true);
     }
-    for await (const item of Streaming.createReader(bytes)) {
+    for await (const item of new Stream.DocumentReader(bytes)) {
       expect(BLOCK_TYPES.has(item.type)).toBe(true);
     }
     expect(markerMap(doc)).toEqual([
@@ -297,7 +297,7 @@ describe("block-level range markers — reading", () => {
     const bytes = await docxWithBody(
       `${SPANNING_TABLE}<w:bookmarkStart w:id="9" w:name="tail"/><w:bookmarkEnd w:id="9"/>`
     );
-    const reader = Streaming.createReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
     const body: BodyContent[] = [];
     for await (const item of reader) {
       body.push(item);
@@ -362,7 +362,7 @@ describe("block-level range markers — writing", () => {
   });
 
   it("the streaming writer writes block-level markers in place", async () => {
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       bodyRangeMarkersAfter: [
         Build.bookmarkStart(5, "tail") as RangeMarker,
         Build.bookmarkEnd(5) as RangeMarker

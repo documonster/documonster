@@ -24,7 +24,7 @@ import { renderChartPng, renderChartSvg } from "@excel/chart/render/chart-render
 import { workbookThemeColors } from "@excel/chart/render/workbook-theme";
 import { checkChart } from "@excel/core/feature-handles";
 import type { ChartHandle } from "@excel/core/worksheet-core";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 
 /**
  * Render this chart as a **zero-dependency deterministic preview** SVG.
@@ -54,7 +54,7 @@ export function chartToSVG(c: ChartHandle, options: ChartRenderOptions = {}): st
     _chartRefreshChartExCaches(c);
     return renderChartExSvg(chartEx, options, "Chart.toSvg");
   }
-  throw new ChartOptionsError("c", "Cannot render chart because no chart model is available.");
+  throw new ExcelChartOptionsError("c", "Cannot render chart because no chart model is available.");
 }
 
 /**
@@ -87,7 +87,7 @@ export async function chartToPNG(
     _chartRefreshChartExCaches(c);
     return renderChartExPng(chartEx, options, "Chart.toPng");
   }
-  throw new ChartOptionsError("c", "Cannot render chart because no chart model is available.");
+  throw new ExcelChartOptionsError("c", "Cannot render chart because no chart model is available.");
 }
 
 /**

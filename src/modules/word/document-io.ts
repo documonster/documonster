@@ -14,13 +14,14 @@ import {
   invalidArgument
 } from "@word/core/argument-checks";
 import { bytesToBase64 } from "@word/core/internal-utils";
+import { DocxFileError } from "@word/errors";
 import type { PatchOperation } from "@word/patcher";
 import { applyPatchesToDocument, checkPatches } from "@word/patcher";
 import { checkReadOptions, readDocx } from "@word/reader/docx-reader";
 import type { ReadDocxOptions } from "@word/reader/docx-reader";
 import { checkWriteEncryption, encryptIfRequested } from "@word/security/package-encryption";
 import { checkSecurityPolicy } from "@word/security/policy";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import { fillData, fillDocument, fillTemplate } from "@word/template/template-engine";
 import type { LegacyTemplateOptions, TemplateOptions } from "@word/template/template-engine";
 import type { DocxDocument } from "@word/types";
@@ -72,26 +73,30 @@ export async function toBase64(doc: DocxDocument, options?: DocxWriteOptions): P
 // =============================================================================
 //
 // Convenience wrappers that read/write a DOCX directly from/to the filesystem,
-// mirroring the Excel module's `Workbook.readFile` / `Workbook.writeFile`. They
-// delegate byte IO to `@utils/fs`, whose `*.browser` variant throws a helpful
-// "not available" error — so these resolve to no-ops only on Node and fail
-// clearly in the browser without dragging `node:fs` into browser bundles.
+// mirroring the Excel module's `Workbook.readFile` / `Workbook.writeFile`. The
+// browser build of the `Io` namespace (`surface/io.browser.ts`) does not publish
+// them, as Excel's and Archive's browser entries publish no file-path API.
 
 /**
  * Read a DOCX file from a filesystem path and parse it into a `DocxDocument`.
  *
- * Node-only. In the browser, read the bytes yourself and use {@link read}.
- * A file-system error (`ENOENT`, `EACCES`, …) is the platform's own error,
- * passed on unchanged.
+ * Node-only. In the browser, read the bytes yourself and use `Io.read`.
  *
  * @param path - Filesystem path to the `.docx` file.
  * @param options - Read options (password, security policy).
  * @throws {DocxArgumentError} If `path` is not a non-empty string.
+ * @throws {DocxFileError} If the file system will not let the file be read
+ *   (`ENOENT`, `EACCES`, …); the system's error is its `cause`.
  */
 export async function readFile(path: string, options?: ReadDocxOptions): Promise<DocxDocument> {
   checkPath(path, "Io.readFile");
   checkReadOptions(options, "Io.readFile");
-  const bytes = await readFileBytes(path);
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFileBytes(path);
+  } catch (error) {
+    throw fileSystemError(path, "read", error);
+  }
   return readDocx(bytes, options);
 }
 
@@ -99,12 +104,13 @@ export async function readFile(path: string, options?: ReadDocxOptions): Promise
  * Package a `DocxDocument` and write it to a filesystem path.
  *
  * Node-only. In the browser, use {@link toBuffer} and persist the bytes yourself.
- * A file-system error is the platform's own error, passed on unchanged.
  *
  * @param doc - The document model to serialize.
  * @param path - Destination filesystem path.
  * @param options - Packaging options, as {@link toBuffer} takes them (`password` encrypts the file).
  * @throws {DocxArgumentError} If `path` is not a non-empty string.
+ * @throws {DocxFileError} If the file system will not let the file be written;
+ *   the system's error is its `cause`.
  */
 export async function writeFile(
   doc: DocxDocument,
@@ -116,7 +122,19 @@ export async function writeFile(
   checkWriteOptions(options, "Io.writeFile");
   checkWriteEncryption(options, "Io.writeFile");
   const bytes = await encryptIfRequested(await packageDocx(doc, options), options);
-  await writeFileBytes(path, bytes);
+  try {
+    await writeFileBytes(path, bytes);
+  } catch (error) {
+    throw fileSystemError(path, "write", error);
+  }
+}
+
+/** The `DocxFileError` for a file the system would not let us read or write, with its error as the cause. */
+function fileSystemError(path: string, operation: "read" | "write", error: unknown): DocxFileError {
+  const code = (error as { code?: unknown } | null)?.code;
+  const detail =
+    code === "ENOENT" ? "File not found" : error instanceof Error ? error.message : String(error);
+  return new DocxFileError(path, operation, detail, { cause: error });
 }
 
 /**
@@ -153,7 +171,7 @@ export interface PatchOptions {
   /** Timestamp for every entry of the written package, as in `Io.toBuffer`. */
   readonly modTime?: Date;
   /** Security policy for writing (raw-XML policy, preserved parts), as in `Io.toBuffer`. */
-  readonly securityPolicy?: WordSecurityPolicy;
+  readonly securityPolicy?: DocxSecurityPolicy;
 }
 
 /** A compiled template that can be reused for multiple patch operations. */
@@ -197,11 +215,19 @@ export async function patchTemplate(
   patches: readonly PatchOperation[],
   options?: PatchOptions
 ): Promise<Uint8Array> {
+  const doc = (template as { _doc?: unknown } | null | undefined)?._doc;
+  if (typeof doc !== "object" || doc === null || !Array.isArray((doc as { body?: unknown }).body)) {
+    invalidArgument(
+      "Package.patchTemplate",
+      "template",
+      "a CompiledTemplate (from Package.compileTemplate)",
+      template
+    );
+  }
   checkPatches(patches, "Package.patchTemplate");
   checkWriteOptions(options, "Package.patchTemplate");
   // Deep clone the document to avoid mutating the cached template
-  const doc = structuredClone(template._doc);
-  const patched = applyPatchesToDocument(doc, patches);
+  const patched = applyPatchesToDocument(structuredClone(template._doc), patches);
   return packageDocx(patched, writeOptions(options));
 }
 

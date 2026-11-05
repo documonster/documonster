@@ -210,7 +210,7 @@ export interface TaskResult {
 
 /**
  * A streaming session bound to one worker, from `WorkerPool#openStream`. If the worker does
- * not start, `write` / `end` reject with a `WorkerStreamStartError` and nothing was sent.
+ * not start, `write` / `end` reject with a `ArchiveWorkerStreamStartError` and nothing was sent.
  */
 export interface WorkerPoolStream {
   write(data: Uint8Array): Promise<void>;

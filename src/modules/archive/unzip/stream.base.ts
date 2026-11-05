@@ -1,7 +1,7 @@
 import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { ByteQueue } from "@archive/core/byte-queue";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { Crc32MismatchError, ZipParseError } from "@archive/core/errors";
+import { ZipCrc32MismatchError, ZipParseError } from "@archive/core/errors";
 import { decodeZipPath, resolveZipStringCodec } from "@archive/core/text";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
 import type { Readable, TransformCallback } from "@stream";
@@ -64,7 +64,7 @@ async function awaitEntryCompletion(entry: ZipEntry): Promise<void> {
  * the parse fails instead, because nobody else would hear of it.
  */
 function isEntryOwnFailure(entry: ZipEntry, error: unknown): boolean {
-  return entry.reportsOwnFailures === true && error instanceof Crc32MismatchError;
+  return entry.reportsOwnFailures === true && error instanceof ZipCrc32MismatchError;
 }
 
 import type {
@@ -1214,7 +1214,7 @@ async function readFileRecord(
     }
     const actual = crc32Finalize(crc);
     if (expected !== null && expected !== undefined && expected >>> 0 !== actual) {
-      throw new Crc32MismatchError(entry.path, expected >>> 0, actual);
+      throw new ZipCrc32MismatchError(entry.path, expected >>> 0, actual);
     }
   }
 

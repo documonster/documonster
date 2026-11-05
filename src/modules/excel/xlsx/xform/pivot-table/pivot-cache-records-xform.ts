@@ -6,7 +6,7 @@ import type {
   SharedItemValue
 } from "@excel/core/pivot-table-types";
 import { isPivotError } from "@excel/core/pivot-table-types";
-import { PivotTableError } from "@excel/errors";
+import { ExcelPivotTableError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { formatDateForExcel } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
@@ -207,7 +207,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
     // shared items — look up index (type-aware for Date)
     const sharedItemsIndex = findSharedItemIndex(sharedItems, value);
     if (sharedItemsIndex < 0) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `${JSON.stringify(value)} not in sharedItems ${JSON.stringify(sharedItems)}`
       );
     }

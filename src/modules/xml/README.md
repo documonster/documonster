@@ -30,7 +30,7 @@ import { Xml } from "documonster/xml";
 import { Xml } from "documonster/xml";
 
 const w = new Xml.Writer();
-w.openXml(Xml.StdDocAttributes);
+w.openXml(Xml.DEFAULT_DECLARATION);
 w.openNode("root", { version: "1.0" });
 w.leafNode("item", { id: "1" }, "hello");
 w.leafNode("item", { id: "2" }, "world");
@@ -144,7 +144,7 @@ Xml.decode("&lt;hello&gt;"); // "<hello>"
 
 ```
 src/modules/xml/
-├── types.ts              # Core types (XmlNode, XmlSink, SaxTag, etc.)
+├── types.ts              # Core types (XmlNode, XmlSink, XmlSaxTag, etc.)
 ├── errors.ts             # XmlError, XmlParseError, XmlWriteError
 ├── encode.ts             # Xml.encode, Xml.decode, Xml.validateName, Xml.encodeCData, etc.
 ├── writer.ts             # Xml.Writer (buffered, with rollback support)
@@ -163,7 +163,7 @@ src/modules/xml/
 ```
 XmlSink (interface)
 ├── Xml.Writer        — Builds XML as a string in memory
-│                      Supports rollback/transactions (save/commit/rollback)
+│                      Supports rollback/transactions (snapshot/commit/rollback)
 │                      Best for: small-medium XML, speculative writes
 │
 └── Xml.StreamWriter  — Writes directly to an XmlWritableTarget
@@ -215,7 +215,7 @@ Built with `new Xml.Writer()`.
 | `writeComment(text)`            | Write `<!--...-->` comment              |
 | `closeAll()`                    | Close all open elements                 |
 | `toString()`                    | Get the built XML string                |
-| `save()`                        | Save rollback snapshot                  |
+| `snapshot()`                    | Take a rollback snapshot                |
 | `commit()`                      | Discard snapshot (keep changes)         |
 | `rollback()`                    | Restore to snapshot (discard changes)   |
 | `reset()`                       | Clear everything                        |
@@ -228,7 +228,7 @@ Built with `new Xml.Writer()`.
 Built with `new Xml.StreamWriter(target)`. Same methods as `Xml.Writer` (both implement `XmlSink`), except:
 
 - No `toString()` — content is already written to target
-- No `save()` / `commit()` / `rollback()` — streaming is irreversible
+- No `snapshot()` / `commit()` / `rollback()` — streaming is irreversible
 - No `cursor` — not applicable for streaming
 
 Both writers refuse `openXml` once anything has been written (`XmlWriteError`): XML allows the
@@ -265,8 +265,8 @@ declaration only at the very start of a document. `Xml.parse` is lenient here an
 ```text
 Xml.parseSax(
   iterable: AsyncIterable<string | Uint8Array | ArrayBuffer>,
-  options?: SaxOptions
-): AsyncGenerator<SaxEventAny[]>
+  options?: XmlSaxOptions
+): AsyncGenerator<XmlSaxEventAny[]>
 ```
 
 ### Xml.parse

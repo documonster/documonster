@@ -10,10 +10,13 @@ import {
   FormulaArgumentError,
   FormulaError,
   FormulaParseError,
-  NodeType
+  FormulaNodeType as NodeType
 } from "@formula/index";
 import type {
-  AstNode,
+  AstNode as LegacyAstNode,
+  NodeType as LegacyNodeType,
+  Token as LegacyToken,
+  FormulaAstNode as AstNode,
   FormulaCellRefNode as CellRefNode,
   FormulaErrorNode as ErrorNode,
   FormulaStructuredRefNode as StructuredRefNode
@@ -212,5 +215,18 @@ describe("X12 / X10: argument errors are FormulaArgumentError with a field", () 
     expect(error).not.toBeInstanceOf(FormulaArgumentError);
     expect(Object.keys(error.toJSON())).not.toContain("detail");
     expect(error.toJSON()).toMatchObject({ position: 3 });
+  });
+});
+
+describe("deprecated unprefixed syntax names", () => {
+  it("are the prefixed values, so an enum member type still names a node", async () => {
+    const entry = await import("@formula/index");
+    expect(entry.TokenType).toBe(entry.FormulaTokenType);
+    expect(entry.NodeType).toBe(entry.FormulaNodeType);
+    const legacy: LegacyAstNode = Formula.parse("1");
+    const node: { type: LegacyNodeType.Number } = { type: entry.NodeType.Number };
+    expect(legacy.type).toBe(node.type);
+    const tokens: LegacyToken[] = Formula.tokenize("1");
+    expect(tokens[0].type).toBe(entry.FormulaTokenType.Number);
   });
 });

@@ -12,7 +12,7 @@
 import { encodePng } from "@archive/png";
 import { Draw } from "@draw/index";
 import * as ChartEntry from "@excel/chart/index";
-import { ChartClassic, ChartEx, ChartOptionsError } from "@excel/chart/index";
+import { ChartClassic, ChartEx, ExcelChartOptionsError } from "@excel/chart/index";
 import { drawChartExPdf } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import { Pdf } from "@pdf/index";
@@ -29,11 +29,11 @@ const ex = ChartEx.createModel({
   series: [{ values: "Sheet1!$B$1:$B$2", literalValues: [10, 20], literalCategories: ["A", "B"] }]
 } as never);
 
-function refusal(run: () => unknown): ChartOptionsError {
+function refusal(run: () => unknown): ExcelChartOptionsError {
   try {
     run();
   } catch (err) {
-    return err as ChartOptionsError;
+    return err as ExcelChartOptionsError;
   }
   throw new Error("expected a refusal");
 }
@@ -70,10 +70,10 @@ describe("ChartRenderOptions.background", () => {
     }
   });
 
-  it("refuses a background Draw would refuse, as a ChartOptionsError naming it", () => {
+  it("refuses a background Draw would refuse, as a ExcelChartOptionsError naming it", () => {
     for (const bad of ["not-a-colour", 42, { r: 2, g: 0, b: 0, a: 1 }]) {
       const err = refusal(() => ChartClassic.toSvg(classic, { background: bad as never }));
-      expect(err).toBeInstanceOf(ChartOptionsError);
+      expect(err).toBeInstanceOf(ExcelChartOptionsError);
       expect(err.field).toMatch(/^options\.background/);
       expect(err.message).toMatch(/^ChartClassic\.toSvg: options\.background/);
     }

@@ -18,7 +18,7 @@ export async function examplePipelineObjectMode(): Promise<void> {
     objectMode: true
   });
 
-  const collector = Streams.createCollector<string>();
+  const collector = new Streams.Collector<string>();
 
   await pipeline(source, upper, collector);
 

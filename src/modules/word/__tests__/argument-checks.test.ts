@@ -1153,7 +1153,9 @@ describe("other namespaces check the values they take", () => {
     Ole.add(doc, Ole.createEmbedding(BYTES, "P", { fileName: "o.bin" }), { widthPt: 0 });
     Template.fill(doc, {}, { delimiters: ["<<", ">>"] });
     Layout.compute(doc, { pageGeometry: { marginTop: -10, pageWidth: 600 } });
-    expect(() => Layout.pageToSvg(doc, 99)).toThrow(RangeError);
+    expect(() => Layout.pageToSvg(doc, 99)).toThrow(
+      expect.objectContaining({ name: "DocxArgumentError", field: "pageNumber" })
+    );
     Transform.split(doc, { by: "heading", headingLevel: 9 });
     const formDoc = Document.create();
     Document.addParagraph(formDoc, Build.paragraph([Build.formTextField({ name: "n" })]));

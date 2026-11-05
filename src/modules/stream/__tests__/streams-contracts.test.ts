@@ -6,9 +6,9 @@
 import { AbortError as ArchiveAbortError } from "@archive/index";
 import {
   AbortError,
-  StreamTypeError,
+  StreamArgumentError,
   Streams,
-  UnsupportedStreamTypeError,
+  StreamUnsupportedTypeError,
   addAbortSignal,
   isStreamError
 } from "@stream/index";
@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 describe("Streams.createReadableFromArray", () => {
   it("refuses a null entry, which would end the stream and drop what follows", () => {
-    expect(() => Streams.createReadableFromArray(["a", null, "b"])).toThrow(StreamTypeError);
+    expect(() => Streams.createReadableFromArray(["a", null, "b"])).toThrow(StreamArgumentError);
     expect(() => Streams.createReadableFromArray([1, null])).toThrow("index 1");
   });
 
@@ -27,7 +27,7 @@ describe("Streams.createReadableFromArray", () => {
   });
 
   it("refuses something that is not an array", () => {
-    expect(() => Streams.createReadableFromArray("abc" as never)).toThrow(StreamTypeError);
+    expect(() => Streams.createReadableFromArray("abc" as never)).toThrow(StreamArgumentError);
   });
 });
 
@@ -49,13 +49,13 @@ describe("Streams argument checks", () => {
   });
 
   it("toWritable refuses something that is not a writable", () => {
-    expect(() => Streams.toWritable(null as never)).toThrow(UnsupportedStreamTypeError);
-    expect(() => Streams.toWritable({} as never)).toThrow(UnsupportedStreamTypeError);
+    expect(() => Streams.toWritable(null as never)).toThrow(StreamUnsupportedTypeError);
+    expect(() => Streams.toWritable({} as never)).toThrow(StreamUnsupportedTypeError);
   });
 
   it("SinkAdapter refuses something that is not a sink", () => {
     expect(() => new Streams.LowLevel.SinkAdapter(null as never)).toThrow(
-      UnsupportedStreamTypeError
+      StreamUnsupportedTypeError
     );
   });
 });
@@ -87,8 +87,8 @@ describe("ChunkedBuilder readers", () => {
 
   it("refuses a piece that is not a string", () => {
     const builder = new Streams.ChunkedBuilder();
-    expect(() => builder.push(42 as never)).toThrow(StreamTypeError);
-    expect(() => builder.pushAll(["a", 1] as never)).toThrow(StreamTypeError);
+    expect(() => builder.push(42 as never)).toThrow(StreamArgumentError);
+    expect(() => builder.pushAll(["a", 1] as never)).toThrow(StreamArgumentError);
     expect(builder.toString()).toBe("");
     expect(builder.stringLength).toBe(0);
   });
@@ -96,7 +96,7 @@ describe("ChunkedBuilder readers", () => {
 
 describe("BufferedStream.readAll", () => {
   it("takes everything buffered, as the deprecated toUint8Array did", () => {
-    const stream = Streams.createBufferedStream();
+    const stream = new Streams.BufferedStream();
     stream.write("hello");
     stream.write(new TextEncoder().encode(" world"));
     expect(new TextDecoder().decode(stream.readAll())).toBe("hello world");
@@ -111,7 +111,7 @@ describe("PullStream.pullUntil", () => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const stream = () => {
-    const pull = Streams.createPullStream();
+    const pull = new Streams.PullStream();
     pull.write(encoder.encode("a\nb\nc"));
     pull.end();
     return pull;
@@ -141,10 +141,10 @@ describe("the remaining Streams entry points check their arguments", () => {
   };
 
   it.each<[string, () => unknown]>([
-    ["BufferedStream.write(1)", () => Streams.createBufferedStream().write(1 as never)],
-    ["PullStream.write('abc')", () => Streams.createPullStream().write("abc" as never)],
-    ["PullStream.pullUntil('x')", () => Streams.createPullStream().pullUntil("x" as never)],
-    ["PullStream.pullUntil(empty)", () => Streams.createPullStream().pullUntil(new Uint8Array(0))],
+    ["BufferedStream.write(1)", () => new Streams.BufferedStream().write(1 as never)],
+    ["PullStream.write('abc')", () => new Streams.PullStream().write("abc" as never)],
+    ["PullStream.pullUntil('x')", () => new Streams.PullStream().pullUntil("x" as never)],
+    ["PullStream.pullUntil(empty)", () => new Streams.PullStream().pullUntil(new Uint8Array(0))],
     ["createTransform(null)", () => Streams.createTransform(null as never)],
     ["filter(null)", () => Streams.filter(null as never)],
     ["createReadableFromGenerator(null)", () => Streams.createReadableFromGenerator(null as never)],
@@ -168,11 +168,11 @@ describe("the remaining Streams entry points check their arguments", () => {
     ],
     [
       "createPullStream({ highWaterMark: -1 })",
-      () => Streams.createPullStream({ highWaterMark: -1 })
+      () => new Streams.PullStream({ highWaterMark: -1 })
     ],
     [
       "createBufferedStream({ batchSize: 0 })",
-      () => Streams.createBufferedStream({ batchSize: 0 } as never)
+      () => new Streams.BufferedStream({ batchSize: 0 } as never)
     ]
   ])("%s is refused with a stream error", async (_name, call) => {
     expect(await refuses(call)).toBe(true);
@@ -184,9 +184,9 @@ describe("the remaining Streams entry points check their arguments", () => {
   });
 
   it("a refused BufferedStream.write keeps what was written before and after", () => {
-    const buffered = Streams.createBufferedStream();
+    const buffered = new Streams.BufferedStream();
     buffered.write("a");
-    expect(() => buffered.write(1 as never)).toThrow(StreamTypeError);
+    expect(() => buffered.write(1 as never)).toThrow(StreamArgumentError);
     buffered.write("b");
     expect(new TextDecoder().decode(buffered.readAll())).toBe("ab");
   });
@@ -205,9 +205,9 @@ describe("argument checks name the field", () => {
 
   it.each<[string, () => unknown]>([
     // The path from the parameter name: an option is `options.<name>`.
-    ["options.highWaterMark", () => Streams.createPullStream({ highWaterMark: -1 })],
-    ["chunk", () => Streams.createPullStream().write("x" as never)],
-    ["pattern", () => Streams.createPullStream().pullUntil("x" as never)],
+    ["options.highWaterMark", () => new Streams.PullStream({ highWaterMark: -1 })],
+    ["chunk", () => new Streams.PullStream().write("x" as never)],
+    ["pattern", () => new Streams.PullStream().pullUntil("x" as never)],
     ["streams", () => Streams.waitForFinished(null as never)],
     ["iterable", () => Streams.createReadableFromAsyncIterable(null as never)],
     ["data", () => Streams.createReadableFromArray("x" as never)],
@@ -225,8 +225,8 @@ describe("argument checks name the field", () => {
     ["sink", () => new Streams.LowLevel.SinkAdapter(null as never)],
     ["piece", () => new Streams.ChunkedBuilder().push(1 as never)],
     ["data", () => Streams.createStringChunk(1 as never)],
-    ["options.batchSize", () => Streams.createBufferedStream({ batchSize: 0 })],
-    ["chunk", () => Streams.createBufferedStream().write(1 as never)]
+    ["options.batchSize", () => new Streams.BufferedStream({ batchSize: 0 })],
+    ["chunk", () => new Streams.BufferedStream().write(1 as never)]
   ])("%s", async (field, call) => {
     expect(await fieldOf(call)).toBe(field);
   });
@@ -239,8 +239,8 @@ describe("argument checks name the field", () => {
     ["Streams.collect", () => Streams.collect(42 as never)],
     ["Streams.createTransform", () => Streams.createTransform(null as never)],
     ["Streams.fromString", () => Streams.fromString(1 as never)],
-    ["Streams.PullStream#pullUntil", () => Streams.createPullStream().pullUntil("x" as never)],
-    ["Streams.BufferedStream#write", () => Streams.createBufferedStream().write(1 as never)],
+    ["Streams.PullStream#pullUntil", () => new Streams.PullStream().pullUntil("x" as never)],
+    ["Streams.BufferedStream#write", () => new Streams.BufferedStream().write(1 as never)],
     ["Streams.toWebWritable", () => Streams.toWebWritable(null as never)]
   ])("starts the message with the public call %s", async (where, call) => {
     const error = await Promise.resolve()
@@ -262,11 +262,11 @@ describe("argument checks name the field", () => {
   });
 
   it("is carried by the constructors", () => {
-    expect(new StreamTypeError("a string", "number", { field: "x" }).field).toBe("x");
-    expect(new UnsupportedStreamTypeError("collect", "null", { field: "stream" }).field).toBe(
+    expect(new StreamArgumentError("a string", "number", { field: "x" }).field).toBe("x");
+    expect(new StreamUnsupportedTypeError("collect", "null", { field: "stream" }).field).toBe(
       "stream"
     );
-    expect(new StreamTypeError("a string", "number").field).toBeUndefined();
+    expect(new StreamArgumentError("a string", "number").field).toBeUndefined();
   });
 });
 
@@ -301,5 +301,106 @@ describe("AbortError", () => {
     const error = await failed;
     expect(error).toBeInstanceOf(AbortError);
     expect(isStreamError(error)).toBe(false);
+  });
+});
+
+describe("Streams constructors and Web adapters check their options", () => {
+  function caught(call: () => unknown): StreamArgumentError {
+    try {
+      call();
+    } catch (error) {
+      expect(error).toBeInstanceOf(StreamArgumentError);
+      return error as StreamArgumentError;
+    }
+    throw new Error("expected a StreamArgumentError");
+  }
+
+  const webReadable = (): ReadableStream<Uint8Array> => new ReadableStream();
+
+  it.each<[string, string, () => unknown]>([
+    ["Streams.PullStream", "options", () => new Streams.PullStream(null as never)],
+    ["Streams.BufferedStream", "options", () => new Streams.BufferedStream(42 as never)],
+    ["Streams.ChunkedBuilder", "options", () => new Streams.ChunkedBuilder(null as never)],
+    [
+      "Streams.ChunkedBuilder",
+      "options.chunkSize",
+      () => new Streams.ChunkedBuilder({ chunkSize: 0 })
+    ],
+    [
+      "Streams.ChunkedBuilder",
+      "options.initialCapacity",
+      () => new Streams.ChunkedBuilder({ initialCapacity: "x" as never })
+    ],
+    [
+      "Streams.TransactionalChunkedBuilder",
+      "options",
+      () => new Streams.TransactionalChunkedBuilder(null as never)
+    ],
+    [
+      "Streams.TransactionalChunkedBuilder",
+      "options.chunkSize",
+      () => new Streams.TransactionalChunkedBuilder({ chunkSize: 1.5 })
+    ],
+    [
+      "Streams.fromWebReadable",
+      "options",
+      () => Streams.fromWebReadable(webReadable(), null as never)
+    ],
+    [
+      "Streams.fromWebReadable",
+      "options.highWaterMark",
+      () => Streams.fromWebReadable(webReadable(), { highWaterMark: -1 })
+    ],
+    [
+      "Streams.fromWebReadable",
+      "options.encoding",
+      () => Streams.fromWebReadable(webReadable(), { encoding: "bogus" })
+    ],
+    [
+      "Streams.fromWebReadable",
+      "options.signal",
+      () => Streams.fromWebReadable(webReadable(), { signal: {} as never })
+    ],
+    [
+      "Streams.fromWebWritable",
+      "options.decodeStrings",
+      () => Streams.fromWebWritable(new WritableStream(), { decodeStrings: 1 as never })
+    ],
+    [
+      "Streams.toWebReadable",
+      "options",
+      () => Streams.toWebReadable(Streams.fromString("a"), 42 as never)
+    ],
+    [
+      "Streams.toWebReadable",
+      "options.strategy",
+      () => Streams.toWebReadable(Streams.fromString("a"), { strategy: 1 as never })
+    ]
+  ])("%s refuses %s", (where, field, call) => {
+    const error = caught(call);
+    expect(error.field).toBe(field);
+    expect(error.message.startsWith(`${where}: `), error.message).toBe(true);
+  });
+
+  it("a refused Web stream is left unlocked", () => {
+    const stream = webReadable();
+    caught(() => Streams.fromWebReadable(stream, { objectMode: "yes" as never }));
+    expect(stream.locked).toBe(false);
+  });
+
+  it("valid options still adapt", async () => {
+    const readable = Streams.fromWebReadable(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("ab"));
+          controller.close();
+        }
+      }),
+      { encoding: "utf8", highWaterMark: 4 }
+    );
+    expect((await Streams.collect(readable)).join("")).toBe("ab");
+    const builder = new Streams.TransactionalChunkedBuilder({ chunkSize: 2 });
+    builder.push("a");
+    expect(builder.toString()).toBe("a");
   });
 });

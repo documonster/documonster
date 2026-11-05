@@ -17,7 +17,7 @@ import {
   DocxError,
   DocxParseError,
   Io,
-  Streaming
+  Stream
 } from "../index";
 import type { BodyContent, Table } from "../types";
 
@@ -42,7 +42,7 @@ async function buildSampleDocx(paragraphCount = 5): Promise<Uint8Array> {
 
 /** Collect all body content yielded by the streaming reader. */
 async function collectStream(bytes: Uint8Array): Promise<BodyContent[]> {
-  const reader = Streaming.createReader(bytes);
+  const reader = new Stream.DocumentReader(bytes);
   const out: BodyContent[] = [];
   for await (const item of reader) {
     out.push(item);
@@ -50,7 +50,7 @@ async function collectStream(bytes: Uint8Array): Promise<BodyContent[]> {
   return out;
 }
 
-describe("StreamingDocxReader", () => {
+describe("Stream.DocumentReader", () => {
   it("yields the same body content as readDocx", async () => {
     const bytes = await buildSampleDocx();
 
@@ -106,7 +106,7 @@ describe("StreamingDocxReader", () => {
     const bytes = await buildSampleDocx(1);
 
     const batch = await Io.read(bytes);
-    const reader = Streaming.createReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
 
     // Drain the iterator so the metadata pass has run.
     for await (const _ of reader) {
@@ -124,7 +124,7 @@ describe("StreamingDocxReader", () => {
 
   it("can only be iterated once", async () => {
     const bytes = await buildSampleDocx(1);
-    const reader = Streaming.createReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
 
     for await (const _ of reader) {
       // drain
@@ -143,7 +143,7 @@ describe("StreamingDocxReader", () => {
     const doc = h;
     const bytes = await Io.toBuffer(doc);
 
-    const reader = Streaming.createReader(bytes, { maxElementBytes: 100 });
+    const reader = new Stream.DocumentReader(bytes, { maxElementBytes: 100 });
     await expect(async () => {
       for await (const _ of reader) {
         // should throw before yielding the oversized paragraph
@@ -154,7 +154,7 @@ describe("StreamingDocxReader", () => {
   it("rejects encrypted (CFB) input without a password as Io.read does", async () => {
     const enc = await WordCrypto.encrypt(await buildSampleDocx(1), "pw", { spinCount: 1 });
 
-    const reader = Streaming.createReader(enc);
+    const reader = new Stream.DocumentReader(enc);
     await expect(async () => {
       for await (const _ of reader) {
         // should throw
@@ -170,7 +170,7 @@ describe("StreamingDocxReader", () => {
     for (const read of [
       () => Io.read(cfb),
       async () => {
-        for await (const _ of Streaming.createReader(cfb)) {
+        for await (const _ of new Stream.DocumentReader(cfb)) {
           // should throw
         }
       }
@@ -189,12 +189,12 @@ describe("StreamingDocxReader", () => {
     const bytes = await buildSampleDocx(3);
     const enc = await WordCrypto.encrypt(bytes, "pw", { spinCount: 1 });
     const streamed: BodyContent[] = [];
-    for await (const item of Streaming.createReader(enc, { password: "pw" })) {
+    for await (const item of new Stream.DocumentReader(enc, { password: "pw" })) {
       streamed.push(item);
     }
     expect(streamed).toEqual((await Io.read(enc, { password: "pw" })).body);
 
-    const wrong = Streaming.createReader(enc, { password: "nope" });
+    const wrong = new Stream.DocumentReader(enc, { password: "nope" });
     await expect(async () => {
       for await (const _ of wrong) {
         // should throw
@@ -251,7 +251,7 @@ async function buildLargeDocx(paraCount: number, paraSize: number): Promise<Uint
   return Io.toBuffer(h);
 }
 
-describe("StreamingDocxReader — true streaming", () => {
+describe("Stream.DocumentReader — true streaming", () => {
   it("emits the first element long before document.xml is fully consumed", async () => {
     // ~3 MB of incompressible body across 800 paragraphs.
     const bytes = await buildLargeDocx(800, 4000);
@@ -260,7 +260,7 @@ describe("StreamingDocxReader — true streaming", () => {
     let totalConsumed = 0;
     let count = 0;
 
-    const reader = Streaming.createReader(bytes, {
+    const reader = new Stream.DocumentReader(bytes, {
       onProgress: consumed => {
         totalConsumed = consumed;
       }
@@ -289,7 +289,7 @@ describe("StreamingDocxReader — true streaming", () => {
     const bytes = await buildLargeDocx(400, 4000);
 
     const samples: number[] = [];
-    const reader = Streaming.createReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
     for await (const _ of reader) {
       samples.push(reader.consumedBytes);
     }
@@ -303,7 +303,7 @@ describe("StreamingDocxReader — true streaming", () => {
   }, 60000);
 });
 
-describe("StreamingDocxReader — leaving the loop early", () => {
+describe("Stream.DocumentReader — leaving the loop early", () => {
   for (const [where, at] of [
     ["first", 0],
     ["middle", 200],
@@ -318,7 +318,7 @@ describe("StreamingDocxReader — leaving the loop early", () => {
         let seen = 0;
         const run = (async () => {
           try {
-            for await (const _ of Streaming.createReader(bytes)) {
+            for await (const _ of new Stream.DocumentReader(bytes)) {
               if (seen++ === stopAt) {
                 if (how === "throw") {
                   throw thrown;

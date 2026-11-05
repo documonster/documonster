@@ -151,6 +151,10 @@ export interface MarkdownFormatOptions {
 /**
  * Unified Markdown options for Workbook integration.
  * Combines parse and format options with worksheet-specific settings.
+ *
+ * Published from `documonster/markdown` only as a deprecated name; the Excel bridge's
+ * deprecated flat forms still take it. Its successors are the bridge's `ExcelMarkdownReadOptions`
+ * and `ExcelMarkdownWriteOptions`.
  */
 export interface MarkdownOptions extends MarkdownParseOptions, MarkdownFormatOptions {
   // === Worksheet ===

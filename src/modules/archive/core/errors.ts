@@ -84,8 +84,8 @@ export class ZipParseError extends ArchiveError {
 /**
  * Error thrown when an invalid ZIP signature is encountered.
  */
-export class InvalidZipSignatureError extends ZipParseError {
-  override name = "InvalidZipSignatureError";
+export class ZipInvalidSignatureError extends ZipParseError {
+  override name = "ZipInvalidSignatureError";
 
   constructor(expected: string, actual: number, context?: string, options?: BaseErrorOptions) {
     const msg = context
@@ -95,11 +95,16 @@ export class InvalidZipSignatureError extends ZipParseError {
   }
 }
 
+/** @deprecated Use {@link ZipInvalidSignatureError}. Removed in 1.0. */
+export const InvalidZipSignatureError = ZipInvalidSignatureError;
+/** @deprecated Use {@link ZipInvalidSignatureError}. Removed in 1.0. */
+export type InvalidZipSignatureError = ZipInvalidSignatureError;
+
 /**
  * Error thrown when End of Central Directory is not found.
  */
-export class EocdNotFoundError extends ZipParseError {
-  override name = "EocdNotFoundError";
+export class ZipEocdNotFoundError extends ZipParseError {
+  override name = "ZipEocdNotFoundError";
 
   constructor(options?: BaseErrorOptions) {
     super("Invalid ZIP file: End of Central Directory not found", options);
@@ -136,8 +141,8 @@ export function isZlibError(error: unknown): boolean {
 /**
  * Error thrown when CRC32 validation fails.
  */
-export class Crc32MismatchError extends ArchiveError {
-  override name = "Crc32MismatchError";
+export class ZipCrc32MismatchError extends ArchiveError {
+  override name = "ZipCrc32MismatchError";
 
   constructor(
     public readonly path: string,
@@ -161,14 +166,14 @@ export class Crc32MismatchError extends ArchiveError {
  * - `too-many-bytes`: ZIP bomb detected - actual size exceeds declared size
  * - `too-few-bytes`: Corruption detected - actual size is less than declared size
  */
-export type EntrySizeMismatchReason = "too-many-bytes" | "too-few-bytes";
+export type ZipEntrySizeMismatchReason = "too-many-bytes" | "too-few-bytes";
 
 /**
  * Error thrown when the actual decompressed size doesn't match the declared size.
  * This is a security feature to detect ZIP bombs and corrupted archives.
  */
-export class EntrySizeMismatchError extends ArchiveError {
-  override name = "EntrySizeMismatchError";
+export class ZipEntrySizeMismatchError extends ArchiveError {
+  override name = "ZipEntrySizeMismatchError";
 
   constructor(
     public readonly path: string,
@@ -178,7 +183,7 @@ export class EntrySizeMismatchError extends ArchiveError {
      * declared size, so no count beyond it exists.
      */
     public readonly actual: number | undefined,
-    public readonly reason: EntrySizeMismatchReason,
+    public readonly reason: ZipEntrySizeMismatchReason,
     options?: BaseErrorOptions
   ) {
     const msg =
@@ -225,7 +230,7 @@ export type ArchiveLimit = "maxOutputLength" | "maxTotalUncompressedSize" | "max
  * Error thrown when decompressing or extracting would exceed a configured limit. `limit` names
  * the option that set the bound and `allowed` is its value, so a caller can tell which limit was
  * hit without reading the message. The per-entry size (`maxEntrySize`) is reported by
- * {@link FileTooLargeError}, which carries the same `limit` / `allowed` fields.
+ * {@link ArchiveFileTooLargeError}, which carries the same `limit` / `allowed` fields.
  */
 export class ArchiveLimitError extends ArchiveError {
   override name = "ArchiveLimitError";
@@ -253,8 +258,8 @@ export class ArchiveLimitError extends ArchiveError {
 /**
  * Error thrown when decryption fails (wrong password or corrupted data).
  */
-export class DecryptionError extends ArchiveError {
-  override name = "DecryptionError";
+export class ZipDecryptionError extends ArchiveError {
+  override name = "ZipDecryptionError";
 
   constructor(path: string, details?: string, options?: BaseErrorOptions) {
     super(
@@ -269,8 +274,8 @@ export class DecryptionError extends ArchiveError {
 /**
  * Error thrown when a password is required but not provided.
  */
-export class PasswordRequiredError extends ArchiveError {
-  override name = "PasswordRequiredError";
+export class ZipPasswordRequiredError extends ArchiveError {
+  override name = "ZipPasswordRequiredError";
 
   constructor(path: string, options?: BaseErrorOptions) {
     super(`File "${path}" is encrypted. Please provide a password to extract.`, options);
@@ -284,8 +289,8 @@ export class PasswordRequiredError extends ArchiveError {
 /**
  * Error thrown when the server doesn't support Range requests.
  */
-export class RangeNotSupportedError extends ArchiveError {
-  override name = "RangeNotSupportedError";
+export class ArchiveRangeNotSupportedError extends ArchiveError {
+  override name = "ArchiveRangeNotSupportedError";
 
   constructor(url: string, options?: BaseErrorOptions) {
     super(`Server does not support Range requests for: ${url}`, options);
@@ -295,8 +300,8 @@ export class RangeNotSupportedError extends ArchiveError {
 /**
  * Error thrown when an HTTP request fails.
  */
-export class HttpRangeError extends ArchiveError {
-  override name = "HttpRangeError";
+export class ArchiveHttpRangeError extends ArchiveError {
+  override name = "ArchiveHttpRangeError";
 
   constructor(
     public readonly url: string,
@@ -312,9 +317,9 @@ export class HttpRangeError extends ArchiveError {
 // ZIP64 / Size Errors
 // -----------------------------------------------------------------------------
 
-/** Options for {@link FileTooLargeError}. */
-export interface FileTooLargeErrorOptions extends BaseErrorOptions {
-  /** The bound the entry exceeds, in bytes; becomes {@link FileTooLargeError.allowed}. */
+/** Options for {@link ArchiveFileTooLargeError}. */
+export interface ArchiveFileTooLargeErrorOptions extends BaseErrorOptions {
+  /** The bound the entry exceeds, in bytes; becomes {@link ArchiveFileTooLargeError.allowed}. */
   allowed?: number;
 }
 
@@ -323,8 +328,8 @@ export interface FileTooLargeErrorOptions extends BaseErrorOptions {
  * carries the same `limit` / `allowed` fields as {@link ArchiveLimitError}, read the same way,
  * plus the entry's `path`; it is not an `ArchiveLimitError`, so catch both to see every limit.
  */
-export class FileTooLargeError extends ArchiveError {
-  override name = "FileTooLargeError";
+export class ArchiveFileTooLargeError extends ArchiveError {
+  override name = "ArchiveFileTooLargeError";
 
   /** The limit that was hit: always `"maxEntrySize"`. */
   readonly limit = "maxEntrySize" as const;
@@ -339,7 +344,7 @@ export class FileTooLargeError extends ArchiveError {
   /** The entry that is too large. */
   readonly path: string;
 
-  constructor(path: string, reason: string, options?: FileTooLargeErrorOptions) {
+  constructor(path: string, reason: string, options?: ArchiveFileTooLargeErrorOptions) {
     const { allowed = Number.NaN, ...errorOptions } = options ?? {};
     super(
       `File "${path}" is too large to extract into memory (${reason})`,
@@ -350,6 +355,37 @@ export class FileTooLargeError extends ArchiveError {
   }
 }
 
+/**
+ * The file system would not let `ArchiveFile.fromFile` / `writeFile` (or their `Sync` forms)
+ * read or write the archive's file — it does not exist, permission is denied, the path is a
+ * directory. The system's own error is the `cause` (its `code`, `ENOENT` or `EACCES`, is
+ * `error.cause.code`), as `ExcelFileError` and `DocxFileError` keep it. A file that was read
+ * but is not a valid archive is a {@link ZipParseError} or a plain {@link ArchiveError}, not
+ * this. The `Fs.*` helpers are file-system functions themselves and pass the platform's
+ * error on unwrapped.
+ */
+export class ArchiveFileError extends ArchiveError {
+  override name = "ArchiveFileError";
+
+  constructor(
+    public readonly path: string,
+    public readonly operation: "read" | "write",
+    details?: string,
+    options?: BaseErrorOptions & {
+      /** What the file is to the archive: the archive itself (the default), a `"source"` read into it, or an `"extracted"` entry. */
+      readonly fileKind?: "archive" | "source" | "extracted";
+    }
+  ) {
+    const kind = options?.fileKind ?? "archive";
+    super(
+      details
+        ? `Failed to ${operation} ${kind} file "${path}": ${details}`
+        : `Failed to ${operation} ${kind} file "${path}"`,
+      options?.cause === undefined ? undefined : { cause: options.cause }
+    );
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Unsupported Feature Errors
 // -----------------------------------------------------------------------------
@@ -357,8 +393,8 @@ export class FileTooLargeError extends ArchiveError {
 /**
  * Error thrown when an unsupported compression method is encountered.
  */
-export class UnsupportedCompressionError extends ArchiveError {
-  override name = "UnsupportedCompressionError";
+export class ZipUnsupportedCompressionError extends ArchiveError {
+  override name = "ZipUnsupportedCompressionError";
 
   constructor(method: number, options?: BaseErrorOptions) {
     super(`Unsupported compression method: ${method}`, options);
@@ -375,6 +411,27 @@ export class UnsupportedCompressionError extends ArchiveError {
  * run the same stream elsewhere. The library's own streams fall back on their own and never
  * report it; a caller of `openStream` can tell it apart with `instanceof`.
  */
-export class WorkerStreamStartError extends ArchiveError {
-  override name = "WorkerStreamStartError";
+export class ArchiveWorkerStreamStartError extends ArchiveError {
+  override name = "ArchiveWorkerStreamStartError";
+}
+
+/**
+ * A `Compression.Workers` member called where the Web Worker pool does not exist — the Node
+ * entry, where zlib already runs on libuv's thread pool. `Compression.hasWorkerSupport()`
+ * answers `false` there; check it first, or call `Compression.deflate` / `inflate`, which pick
+ * the platform's codec on their own.
+ */
+export class ArchiveWorkerUnsupportedError extends ArchiveError {
+  override name = "ArchiveWorkerUnsupportedError";
+  /** The public call that was refused, e.g. `Compression.Workers.deflate`. */
+  readonly operation: string;
+
+  constructor(operation: string, options?: BaseErrorOptions) {
+    super(
+      `${operation}: the Web Worker pool is not available in Node.js, which runs zlib on its ` +
+        "own thread pool; check Compression.hasWorkerSupport() first, or use Compression.deflate / inflate",
+      options
+    );
+    this.operation = operation;
+  }
 }

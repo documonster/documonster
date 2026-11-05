@@ -9,7 +9,10 @@
  * its class and its `field` are the ones that were thrown.
  */
 
+import { checkWorkbook } from "@excel/core/workbook-core";
+import { checkWorksheet } from "@excel/core/worksheet-core";
 import { ExcelArgumentError } from "@excel/errors";
+import { argumentChecks } from "@excel/utils/arguments";
 
 /** A message that already starts with a public call — a dotted or `#` name, `Chart.copyTo: …`. */
 const PUBLIC_PREFIX = /^[A-Za-z][\w]*[.#][\w.#]*: /;
@@ -38,4 +41,42 @@ export function namedCall<T>(where: string, run: () => T): T {
   } catch (err) {
     throw nameCall(err, where);
   }
+}
+
+/**
+ * Refuse a missing argument, or one that is not an object, with an `ExcelArgumentError` naming `argument` — for the
+ * entries whose argument goes straight into the work, where a wrong one used to surface as a `TypeError` from inside.
+ */
+export function checkObjectArgument(
+  where: string,
+  argument: string,
+  value: unknown
+): asserts value is Record<string, unknown> {
+  const check = argumentChecks(where);
+  check.required(argument, value);
+  check.record(argument, value);
+}
+
+/** Refuse a missing argument, or one that is not a string, as {@link checkObjectArgument} refuses an object. */
+export function checkStringArgument(
+  where: string,
+  argument: string,
+  value: unknown
+): asserts value is string {
+  const check = argumentChecks(where);
+  check.required(argument, value);
+  check.string(argument, value);
+}
+
+/**
+ * Check the workbook and `options.worksheet` a cache filler reads from, before anything is filled. Messages start with
+ * `where`, and `field` is the public parameter's name (`workbook`, not the `wb` the shared handle check defaults to).
+ */
+export function checkFillArguments(where: string, workbook: unknown, options: unknown): void {
+  namedCall(where, () => {
+    checkWorkbook(workbook, "workbook");
+    if (argumentChecks(where).record("options", options) && options.worksheet !== undefined) {
+      checkWorksheet(options.worksheet, "options.worksheet");
+    }
+  });
 }

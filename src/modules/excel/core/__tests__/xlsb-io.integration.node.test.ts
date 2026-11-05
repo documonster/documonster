@@ -22,7 +22,7 @@ import { ZipArchive } from "@archive/zip";
 import { Cell, DefinedNames, Workbook, Worksheet } from "@excel";
 import { expectValidXlsb } from "@excel/__tests__/helpers/expect-valid-xlsb";
 import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
-import { ExcelNotSupportedError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
 import { biff, rowHeader } from "@test/biff-fixture";
 import { describeWorkbook } from "@test/workbook-describe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -187,7 +187,7 @@ describe("streams", () => {
           void chunk;
         }
       })()
-    ).rejects.toThrow(ExcelNotSupportedError);
+    ).rejects.toThrow(ExcelUnsupportedFeatureError);
   });
 
   it("does not leave a readable package behind when it refuses", async () => {
@@ -212,7 +212,7 @@ describe("streams", () => {
       end() {}
     };
     await expect(Workbook.writeStream(workbook, sink as never, { format: "xlsb" })).rejects.toThrow(
-      ExcelNotSupportedError
+      ExcelUnsupportedFeatureError
     );
     // **The invariant is "not a package", not "some bytes".** How much reached the sink before the refusal is not the
     // point and is not stable; that it cannot be read back as a workbook is.
@@ -243,7 +243,7 @@ describe("content the writer cannot express", () => {
     Cell.setValue(sheet, "A2", { error: "#SPILL!" } as never);
 
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(
-      ExcelNotSupportedError
+      ExcelUnsupportedFeatureError
     );
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(
       /Hard!A1: formula.*Hard!A2: error value #SPILL!/s
@@ -499,8 +499,10 @@ describe("read diagnostics", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(ExcelNotSupportedError);
-    expect((thrown as ExcelNotSupportedError).items).toEqual(["S1: 1 cell(s) in BrtShortReal"]);
+    expect(thrown).toBeInstanceOf(ExcelUnsupportedFeatureError);
+    expect((thrown as ExcelUnsupportedFeatureError).items).toEqual([
+      "S1: 1 cell(s) in BrtShortReal"
+    ]);
   });
 
   it("reports a declared sheet whose part is not in the package", async () => {

@@ -271,7 +271,7 @@ export const pdfEditTool = defineTool({
       // Only the first face is embedded: `registerEmbeddedFont` replaces rather than chains,
       // so a fallback list cannot be expressed here. Naming the primary is what makes a
       // Chinese watermark possible at all, and a second face would silently displace it.
-      editor.embedFont(ref.bytes, ref.collectionIndex);
+      editor.embedFont({ data: ref.bytes, collectionIndex: ref.collectionIndex });
       break;
     }
 

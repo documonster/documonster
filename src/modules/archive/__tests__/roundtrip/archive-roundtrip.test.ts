@@ -225,7 +225,7 @@ const tarAdapter: ArchiveAdapter = {
     const parsed = parseTar(data);
     for (const entry of parsed) {
       if (entry.info.type === TAR_TYPE.FILE || entry.info.type === TAR_TYPE.FILE_OLD) {
-        files.set(entry.info.path, await entry.data());
+        files.set(entry.info.path, await entry.bytes());
       }
     }
     return files;

@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Build, Io, Layout, Streaming } from "../index";
+import { Build, Io, Layout, Stream } from "../index";
 import type { HeaderDef } from "../index";
 
 const header = (text: string): HeaderDef => ({
@@ -15,7 +15,7 @@ const header = (text: string): HeaderDef => ({
 
 describe("streaming writer header wiring", () => {
   it("turns the title page on for a first-page header", async () => {
-    const w = Streaming.createWriter({ headers: new Map([["first", header("FIRSTMARK")]]) });
+    const w = new Stream.DocumentWriter({ headers: new Map([["first", header("FIRSTMARK")]]) });
     w.add(Build.textParagraph("body"));
     const read = await Io.read(await w.finalize());
     expect(read.sectionProperties?.titlePage).toBe(true);
@@ -23,14 +23,14 @@ describe("streaming writer header wiring", () => {
   });
 
   it("turns even/odd headers on for an even-page footer", async () => {
-    const w = Streaming.createWriter({ footers: new Map([["even", header("EVENMARK")]]) });
+    const w = new Stream.DocumentWriter({ footers: new Map([["even", header("EVENMARK")]]) });
     w.add(Build.textParagraph("body"));
     const read = await Io.read(await w.finalize());
     expect(read.settings?.evenAndOddHeaders).toBe(true);
   });
 
   it("leaves a title page the caller turned off explicitly alone", async () => {
-    const w = Streaming.createWriter({
+    const w = new Stream.DocumentWriter({
       headers: new Map([["first", header("FIRSTMARK")]]),
       sectionProperties: { titlePage: false }
     });

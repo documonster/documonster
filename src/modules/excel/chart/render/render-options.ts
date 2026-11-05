@@ -9,7 +9,7 @@
  */
 
 import { checkTopology } from "@excel/chart/render/topojson";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { checkBackgroundWith } from "@utils/background-check";
 import { describeValue as describe } from "@utils/describe-value";
 import { isNoPaintColor, parseCssColor } from "@utils/svg-lex";
@@ -32,7 +32,7 @@ const THEME_SLOTS: readonly string[] = [
 ];
 
 function fail(where: string, field: string, expected: string, value: unknown): never {
-  throw new ChartOptionsError(
+  throw new ExcelChartOptionsError(
     field,
     `${where}: ${field} must be ${expected}, got ${describe(value)}`
   );
@@ -114,7 +114,7 @@ export function requestsFontControl(options: {
  * Check a renderer's options, naming `where` — the public call (`ChartClassic.toSvg`,
  * `Chart.toPng`, …) — and each field by its path from `options`.
  *
- * @throws {ChartOptionsError} an option has no valid reading.
+ * @throws {ExcelChartOptionsError} an option has no valid reading.
  */
 export function checkChartRenderOptions(where: string, options: unknown): void {
   if (options === undefined) {
@@ -218,12 +218,12 @@ export function checkChartRenderOptions(where: string, options: unknown): void {
  * The surface and destination box the deprecated `drawChartExPdf` draws into: a
  * surface with the marks a chart puts down, and a box of finite numbers with an area.
  *
- * @throws {ChartOptionsError} either has no valid reading.
+ * @throws {ExcelChartOptionsError} either has no valid reading.
  */
 export function checkDrawPdfArguments(where: string, surface: unknown, rect: unknown): void {
   for (const method of ["drawRect", "drawLine", "drawText"] as const) {
     if (typeof (surface as Record<string, unknown> | null)?.[method] !== "function") {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         "surface",
         `${where}: surface must be a PDF page or a surface like one — it has no ${method}()`
       );

@@ -65,7 +65,7 @@ import {
   getSpPrLine,
   getTxPrFontSize
 } from "@excel/chart/shared/shape-properties";
-import { ChartOptionsError, ExcelError } from "@excel/errors";
+import { ExcelChartOptionsError, ExcelError } from "@excel/errors";
 import type { Rgba01 } from "@utils/svg-lex";
 
 export type { PdfColor };
@@ -244,14 +244,14 @@ export interface RegionMapDataOptions {
    * Parsed TopoJSON topology. Compatible with the output of
    * `world-atlas` bundles or any `topojson-server` emitter. One that cannot be read — no
    * `objects`, an arc table or a geometry of the wrong shape — is refused with
-   * `ChartOptionsError` naming the path (`options.regionMap.topology.arcs[3]`); one whose
+   * `ExcelChartOptionsError` naming the path (`options.regionMap.topology.arcs[3]`); one whose
    * features match no category draws the built-in preview instead.
    */
   topology: unknown;
   /**
    * Name of the geometry collection to draw — typically `"countries"`
    * for `world-atlas`. A name the topology does not have is refused with
-   * `ChartOptionsError` (field `options.regionMap.objectName`).
+   * `ExcelChartOptionsError` (field `options.regionMap.objectName`).
    */
   objectName: string;
   /**
@@ -768,7 +768,7 @@ function checkChartModel(where: string, model: unknown): void {
     (model as { chart?: unknown }).chart === null ||
     typeof (model as { chart?: unknown }).chart !== "object"
   ) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "model",
       `${where}: model must be a classic chart model, an object with a \`chart\` — build one with ChartClassic.createModel.`
     );

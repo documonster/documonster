@@ -1,5 +1,5 @@
 /** `Worksheet.merge` keeps only merges the file keeps, and refuses a range on another sheet. */
-import { Cell, InvalidAddressError, Workbook, Worksheet } from "@excel/index";
+import { Cell, ExcelInvalidAddressError, Workbook, Worksheet } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 function sheets() {
@@ -22,8 +22,8 @@ describe("Worksheet.merge", () => {
 
   it("refuses a range qualified by another sheet, and accepts one qualified by this sheet", () => {
     const { ws } = sheets();
-    expect(() => Worksheet.merge(ws, "Other!C1:D2")).toThrow(InvalidAddressError);
-    expect(() => Worksheet.unmerge(ws, "Other!C1:D2")).toThrow(InvalidAddressError);
+    expect(() => Worksheet.merge(ws, "Other!C1:D2")).toThrow(ExcelInvalidAddressError);
+    expect(() => Worksheet.unmerge(ws, "Other!C1:D2")).toThrow(ExcelInvalidAddressError);
     expect(Worksheet.getMergedRegions(ws)).toEqual([]);
     Worksheet.merge(ws, "S!C1:D2");
     expect(Worksheet.getMergedRegions(ws)).toEqual([{ top: 1, left: 3, bottom: 2, right: 4 }]);
@@ -31,7 +31,7 @@ describe("Worksheet.merge", () => {
 
   it("refuses a range that names no cells", () => {
     const { ws } = sheets();
-    expect(() => Worksheet.merge(ws, "garbage")).toThrow(InvalidAddressError);
-    expect(() => Worksheet.merge(ws, 0, 0, 0, 0)).toThrow(InvalidAddressError);
+    expect(() => Worksheet.merge(ws, "garbage")).toThrow(ExcelInvalidAddressError);
+    expect(() => Worksheet.merge(ws, 0, 0, 0, 0)).toThrow(ExcelInvalidAddressError);
   });
 });

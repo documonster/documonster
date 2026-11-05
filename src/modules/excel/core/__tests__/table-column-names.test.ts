@@ -4,7 +4,7 @@
  * free number when one is typed (`a`, `a` → `a`, `a2`). A table read from a file is renamed the same way; a caller's
  * repeated names are refused, since the formulas they write name the columns they chose.
  */
-import { Cell, Table, TableError, Workbook } from "@excel";
+import { Cell, Table, ExcelTableError, Workbook } from "@excel";
 import { describe, expect, it } from "vitest";
 
 describe("table column names", () => {
@@ -18,7 +18,7 @@ describe("table column names", () => {
         columns: [{ name: "a" }, { name: "A" }, { name: "a2" }, { name: "b" }],
         rows: [[1, 2, 3, 4]]
       })
-    ).toThrow(TableError);
+    ).toThrow(ExcelTableError);
     expect(() =>
       Table.add(sheet, {
         name: "D",
@@ -42,9 +42,9 @@ describe("table column names", () => {
       rows: [[1, 2]]
     });
     expect(() => Table.addColumn(t, { name: "A" }, [3])).toThrow(/"A2"/);
-    expect(() => Table.setColumnName(Table.getColumn(t, 1), "A")).toThrow(TableError);
+    expect(() => Table.setColumnName(Table.getColumn(t, 1)!, "A")).toThrow(ExcelTableError);
     // Renaming a column to its own name in another case is not a collision.
-    Table.setColumnName(Table.getColumn(t, 0), "A");
+    Table.setColumnName(Table.getColumn(t, 0)!, "A");
     expect(Table.getModel(t).columns.map(column => column.name)).toEqual(["A", "b"]);
     expect(["A1", "B1", "C1"].map(address => Cell.getValue(sheet, address))).toEqual([
       "A",
@@ -142,7 +142,7 @@ describe("table column names", () => {
   }
 
   it.each(SAME)("Table.add refuses %s beside %s: the same name to Excel", (a, b) => {
-    expect(() => add([a, b])).toThrow(TableError);
+    expect(() => add([a, b])).toThrow(ExcelTableError);
   });
 
   it.each(DIFFERENT)("Table.add accepts %s beside %s: different names to Excel", (a, b) => {

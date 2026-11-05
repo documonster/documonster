@@ -45,7 +45,7 @@ import {
 } from "@excel/chart/shared/chart-utils";
 import { chartColorTransformList, colorTransformsXml } from "@excel/chart/shared/color-transforms";
 import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 
 const REDUNDANT_ROOT_DECLARATION = /\sxmlns:([A-Za-z_][\w.-]*)="([^"]*)"/g;
 
@@ -167,8 +167,8 @@ export function rewriteChartExDataRefsToDefinedNames(
  * the fastest and safest mode for the common "load → save" pipeline.
  *
  * Pass `{ forceStructural: true }` when the caller has mutated
- * structured fields on the model (e.g. via `setSpPrFill` /
- * `setSpPrLine` / direct assignment) and needs the writer to
+ * structured fields on the model (e.g. via `withSpPrFill` /
+ * `withSpPrLine` / direct assignment) and needs the writer to
  * rebuild from the model tree instead of reusing the stale raw bytes.
  * The `Chart.mutateEx` API already clears `model.rawXml` for
  * normal mutations; `forceStructural` is the escape hatch for callers
@@ -1496,7 +1496,7 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
   // Emit the captured raw bytes only when the shape is PURELY a raw
   // capture — `_rawXml` is present AND no structured field has been
   // re-assigned. `isRawXmlShape` performs that check, matching the
-  // semantics of `setSpPrFill`/`setSpPrLine` which drop `_rawXml` on
+  // semantics of `withSpPrFill`/`withSpPrLine` which drop `_rawXml` on
   // structured mutation. Previously this test was `if (spPr._rawXml)`,
   // so `mutate(model => { model.…spPr.fill = {...} })` silently
   // produced output that still emitted the old raw XML and discarded
@@ -2180,7 +2180,7 @@ function renderColor(c: ChartColor): string {
   // exactly one colour child, and the caller is always in a position
   // to provide one — fail so the mistake surfaces in tests rather than
   // shipping silently-wrong colour data into the user's XLSX.
-  throw new ChartOptionsError(
+  throw new ExcelChartOptionsError(
     "model",
     `ChartColor requires exactly one of srgb / theme / schemeName / sysClr / prstClr; got ${JSON.stringify(c)}.`
   );

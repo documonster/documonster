@@ -78,11 +78,7 @@ describe("Package.* read options", () => {
   it("apply STRICT_SECURITY_POLICY", async () => {
     const bytes = await sample();
     await expect(
-      Package.fillTemplate(
-        bytes,
-        { name: "x" },
-        { securityPolicy: Security.STRICT_SECURITY_POLICY }
-      )
+      Package.fillTemplate(bytes, { name: "x" }, { securityPolicy: Security.STRICT_POLICY })
     ).resolves.toBeInstanceOf(Uint8Array);
   });
 

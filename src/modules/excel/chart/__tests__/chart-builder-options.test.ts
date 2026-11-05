@@ -409,9 +409,9 @@ describe("gradient and pattern fill", () => {
     expect(pat!.preset).toBe("smCheck");
   });
 
-  it("setSpPrFill with gradient replaces existing fill", () => {
+  it("withSpPrFill with gradient replaces existing fill", () => {
     const original = DrawingMl.createSpPr({ fill: { solid: { srgb: "FF0000" } } });
-    const updated = DrawingMl.setSpPrFill(original, {
+    const updated = DrawingMl.withSpPrFill(original, {
       gradient: {
         stops: [
           { position: 0, color: { srgb: "000000" } },
@@ -1529,14 +1529,14 @@ describe("anchor types and chart management", () => {
     expect(chart.range.editAs).toBe("twoCell");
   });
 
-  it("Chart.clone creates a deep copy in the same worksheet", () => {
+  it("Chart.copyTo onto the chart's own worksheet creates a deep copy beside it", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "x");
     Cell.setValue(ws, "B1", 1);
     addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
     const original = getCharts(ws)[0];
-    const clonedNumber = Chart.clone(original);
+    const clonedNumber = Chart.copyTo(original, original.worksheet);
     expect(getCharts(ws)).toHaveLength(2);
     expect(clonedNumber).not.toBe(original.chartNumber);
     const cloned = getCharts(ws)[1];
@@ -1572,7 +1572,7 @@ describe("anchor types and chart management", () => {
     const removed = removeChart(ws, charts[0]);
     expect(removed).toBe(true);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(Chart.getChartTypes(getCharts(ws)[0])[0].type).toBe("line");
+    expect(Chart.getTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart by index", () => {
@@ -1582,7 +1582,7 @@ describe("anchor types and chart management", () => {
     addChart(ws, { type: "line", series: [baseSeries("S")] }, "K1:R10");
     removeChart(ws, 0);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(Chart.getChartTypes(getCharts(ws)[0])[0].type).toBe("line");
+    expect(Chart.getTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart returns false for out-of-range", () => {

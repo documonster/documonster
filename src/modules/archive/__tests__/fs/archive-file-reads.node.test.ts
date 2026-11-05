@@ -2,7 +2,7 @@
  * `ArchiveFile` reads answer for both formats, check the name they are given, and honour the
  * entry-size limits the other ZIP readers take.
  */
-import { Archive, ArchiveArgumentError, FileTooLargeError } from "@archive/index";
+import { Archive, ArchiveArgumentError, ArchiveFileTooLargeError } from "@archive/index";
 import { describe, expect, it } from "vitest";
 
 describe("ArchiveFile lookups", () => {
@@ -48,7 +48,7 @@ describe("ArchiveFile limits", () => {
 
   it("maxEntrySize bounds what a read inflates", async () => {
     const file = Archive.ArchiveFile.fromBuffer(zip, { maxEntrySize: 100 });
-    await expect(file.readEntry("big.bin")).rejects.toThrow(FileTooLargeError);
+    await expect(file.readEntry("big.bin")).rejects.toThrow(ArchiveFileTooLargeError);
     expect(file.readAsTextSync("a.txt")).toBe("A");
   });
 

@@ -3,7 +3,7 @@ import {
   ArchiveArgumentError,
   ArchiveError,
   createAbortError,
-  FileTooLargeError,
+  ArchiveFileTooLargeError,
   oneShotSourceReadError,
   createLinkedAbortController,
   throwIfAborted,
@@ -22,7 +22,7 @@ import {
   isArchiveSource,
   isInMemoryArchiveSource,
   resolveArchiveSourceToBuffer,
-  toAsyncIterable,
+  iterateArchiveSource,
   toUint8Array
 } from "@archive/io/archive-source";
 import type { TarReaderProgress } from "@archive/tar/tar-archive";
@@ -241,7 +241,7 @@ export interface UnzipOptions {
 
   /**
    * Whether to verify each entry against its recorded CRC-32 as it is read, throwing
-   * `Crc32MismatchError` on a mismatch — from `bytes()`, or from `stream()` once the
+   * `ZipCrc32MismatchError` on a mismatch — from `bytes()`, or from `stream()` once the
    * entry's last chunk has been produced. Only entries that are read are verified, over any
    * source: a mismatch fails that read, not the iteration. Set `false` to read damaged archives as far as
    * they go. AES entries carry an HMAC instead; ZipCrypto entries are always verified.
@@ -251,7 +251,7 @@ export interface UnzipOptions {
 
   /**
    * Largest uncompressed size, in bytes, of one entry that `bytes()` / `text()` read into
-   * memory (`FileTooLargeError`), as `unpackZip`'s `maxEntrySize`. Over bytes in memory an entry
+   * memory (`ArchiveFileTooLargeError`), as `unpackZip`'s `maxEntrySize`. Over bytes in memory an entry
    * declaring more is refused before inflation and one inflating past its size is stopped; over
    * a stream an entry is refused when its header declares more, or once it has read more.
    * @default 536870912 (512 MiB)
@@ -314,6 +314,18 @@ export class UnzipEntry {
   /** Whether the caller moved past this entry by leaving the iteration, rather than by asking for the next one. */
   private _leftOn = false;
 
+  /** @internal How a reader makes an entry; the constructor is not public API. */
+  static _create(
+    args: ConstructorParameters<typeof UnzipEntry>[0],
+    hooks?: ConstructorParameters<typeof UnzipEntry>[1]
+  ): UnzipEntry {
+    return new UnzipEntry(args, hooks);
+  }
+
+  /**
+   * @deprecated Entries come from a reader — `ZipReader.entries()` / `get()`, or iterating
+   * `Archive.openZip(…)` — and the shapes this takes are the reader's own. Removed in 1.0.
+   */
   constructor(
     args:
       | { kind: "buffer"; data: Uint8Array; info: ZipEntryRecord; password?: string | Uint8Array }
@@ -507,7 +519,7 @@ export class UnzipEntry {
         declared > limit
       ) {
         this._parseEntry.autodrain();
-        throw new FileTooLargeError(
+        throw new ArchiveFileTooLargeError(
           this.path,
           `declares an uncompressed size of ${declared} bytes, more than maxEntrySize (${limit})`,
           { allowed: limit }
@@ -516,7 +528,7 @@ export class UnzipEntry {
       const data = await this._parseEntry.buffer();
       let bytes = asPlainBytes(data);
       if (limit !== undefined && bytes.length > limit) {
-        throw new FileTooLargeError(
+        throw new ArchiveFileTooLargeError(
           this.path,
           `inflates to ${bytes.length} bytes, more than maxEntrySize (${limit})`,
           { allowed: limit }
@@ -878,7 +890,7 @@ export class ZipReader {
               s.entriesEmitted += 1;
               s.currentEntry = { path: info.path, entryType: info.type, bytesOut: 0 };
             });
-            yield new UnzipEntry(
+            yield UnzipEntry._create(
               { kind: "buffer", data: bytes, info, password },
               { onBytesOut, signal, checkCrc32, maxEntrySize: this._options.maxEntrySize }
             );
@@ -915,7 +927,7 @@ export class ZipReader {
 
         const feedPromise = (async () => {
           try {
-            for await (const chunk of toAsyncIterable(this._source, {
+            for await (const chunk of iterateArchiveSource(this._source, {
               signal,
               onChunk: c =>
                 progress.mutate(s => {
@@ -991,7 +1003,7 @@ export class ZipReader {
                 bytesOut: 0
               };
             });
-            current = new UnzipEntry(
+            current = UnzipEntry._create(
               { kind: "stream", entry, password: this._options.password },
               { onBytesOut, signal, checkCrc32, maxEntrySize: this._options.maxEntrySize }
             );
@@ -1135,7 +1147,7 @@ export class ZipReader {
     if (!info) {
       return null;
     }
-    return new UnzipEntry(
+    return UnzipEntry._create(
       { kind: "buffer", data, info, password: this._options.password },
       { checkCrc32: this._options.checkCrc32, maxEntrySize: this._options.maxEntrySize }
     );

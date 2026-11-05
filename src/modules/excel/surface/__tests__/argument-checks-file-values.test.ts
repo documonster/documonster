@@ -18,8 +18,8 @@ import {
   Form,
   HeaderFooterImage,
   Image,
-  ImageError,
-  InvalidAddressError,
+  ExcelImageError,
+  ExcelInvalidAddressError,
   Note,
   Sparkline,
   Watermark,
@@ -120,13 +120,13 @@ const REFUSED: Case[] = [
   [
     "auto filter",
     ({ ws }) => Worksheet.setAutoFilter(ws, "zz"),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /setAutoFilter/
   ],
   [
     "auto filter on another sheet",
     ({ ws }) => Worksheet.setAutoFilter(ws, "S!A1:B2"),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /setAutoFilter/
   ],
   [
@@ -136,11 +136,11 @@ const REFUSED: Case[] = [
     /range\.from\.row/
   ],
   // Other worksheet operations
-  ["unmerge", ({ ws }) => Worksheet.unmerge(ws, "zz"), InvalidAddressError, /unmerge/],
+  ["unmerge", ({ ws }) => Worksheet.unmerge(ws, "zz"), ExcelInvalidAddressError, /unmerge/],
   [
     "fill formula range",
     ({ ws }) => Worksheet.fillFormula(ws, "zz", "1"),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /fillFormula/
   ],
   [
@@ -189,7 +189,7 @@ const REFUSED: Case[] = [
   [
     "empty ref",
     ({ ws }) => ConditionalFormatting.add(ws, { ref: "", rules: [cfExpression] }),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /ref/
   ],
   [
@@ -291,7 +291,7 @@ const REFUSED: Case[] = [
   [
     "sparkline cell",
     ({ ws }) => Sparkline.add(ws, { type: "line", sparklines: [{ ...sparkline, cellRef: "zz" }] }),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /cellRef/
   ],
   [
@@ -348,7 +348,12 @@ const REFUSED: Case[] = [
   ["note created from a number", () => Note.create(bad(5)), ExcelArgumentError, /note/],
   ["note author", () => Note.create("x", { author: bad(5) }), ExcelArgumentError, /author/],
   // Form controls
-  ["checkbox range", ({ ws }) => Form.addCheckbox(ws, "nowhere"), InvalidAddressError, /range/],
+  [
+    "checkbox range",
+    ({ ws }) => Form.addCheckbox(ws, "nowhere"),
+    ExcelInvalidAddressError,
+    /range/
+  ],
   [
     "checkbox position",
     ({ ws }) => Form.addCheckbox(ws, { startCol: NaN, startRow: 0, endCol: 1, endRow: 1 }),
@@ -413,22 +418,22 @@ const REFUSED: Case[] = [
     /state/
   ],
   // Pictures in the header and on the sheet
-  ["watermark image", ({ ws }) => Watermark.add(ws, { imageId: 99 }), ImageError, /no image/],
+  ["watermark image", ({ ws }) => Watermark.set(ws, { imageId: 99 }), ExcelImageError, /no image/],
   [
     "watermark mode",
-    ({ ws, image }) => Watermark.add(ws, bad({ imageId: image, mode: "ghost" })),
+    ({ ws, image }) => Watermark.set(ws, bad({ imageId: image, mode: "ghost" })),
     ExcelArgumentError,
     /mode/
   ],
   [
     "watermark opacity",
-    ({ ws, image }) => Watermark.add(ws, { imageId: image, opacity: 5 }),
+    ({ ws, image }) => Watermark.set(ws, { imageId: image, opacity: 5 }),
     ExcelArgumentError,
     /opacity/
   ],
   [
     "watermark section",
-    ({ ws, image }) => Watermark.add(ws, bad({ imageId: image, mode: "header", position: "XX" })),
+    ({ ws, image }) => Watermark.set(ws, bad({ imageId: image, mode: "header", position: "XX" })),
     ExcelArgumentError,
     /position/
   ],
@@ -441,20 +446,20 @@ const REFUSED: Case[] = [
   [
     "header image",
     ({ ws }) => HeaderFooterImage.set(ws, { imageId: 77, position: "CH" }),
-    ImageError,
+    ExcelImageError,
     /no image/
   ],
   [
     "picture range",
     ({ ws, image }) => Image.place(ws, image, "zz"),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /Image\.place/
   ],
   // Charts
   [
     "chart range",
     ({ ws }) => Chart.add(ws, { type: "bar", series: [{ values: "S!$A$1:$A$2" }] }, "zz"),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     /Chart\.add/
   ],
   [
@@ -660,8 +665,8 @@ describe("values Excel accepts still work, at the boundaries", () => {
       views: [{ state: "frozen", xSplit: 1, ySplit: 1, topLeftCell: "B2" }],
       autoFilter: "A1:C3"
     });
-    Watermark.add(ws, { imageId: image, opacity: 0 });
-    Watermark.add(ws, {
+    Watermark.set(ws, { imageId: image, opacity: 0 });
+    Watermark.set(ws, {
       imageId: image,
       mode: "header",
       position: "RF",

@@ -8,7 +8,7 @@ import { calculateFormulas } from "@excel/core/formula-adapter";
 import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { addTable, findCell, setSheetName } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, ExcelArgumentError, Workbook, Worksheet } from "@excel/index";
 import { excelNameKey } from "@utils/name-key";
 import { describe, it, expect } from "vitest";
 
@@ -3827,5 +3827,19 @@ describe("calculateFormulas", () => {
       expect(Cell.getResult(ws, "B1")).toBe(-5); // IF true branch runs NEGATE
       expect(Cell.getResult(ws, "B2")).toBe(-2); // -5 + 3 = -2
     });
+  });
+});
+
+describe("ExcelFormula.calculate argument errors", () => {
+  it("names the public parameter, wb", () => {
+    let error: unknown;
+    try {
+      calculateFormulas(null as never);
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(ExcelArgumentError);
+    expect((error as ExcelArgumentError).field).toBe("wb");
+    expect((error as Error).message).toMatch(/^ExcelFormula\.calculate: wb must be a workbook/);
   });
 });

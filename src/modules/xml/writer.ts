@@ -35,7 +35,7 @@ interface Snapshot {
   partsLength: number;
   chunksLength: number;
   /**
-   * The open elements, copied: an element closed after `save()` has left the stack, so
+   * The open elements, copied: an element closed after `snapshot()` has left the stack, so
    * restoring only its length brought back a hole where the name was.
    */
   stack: string[];
@@ -263,12 +263,13 @@ class XmlWriter implements XmlSink {
   // ===========================================================================
 
   /**
-   * Save a snapshot of the current writer state.
-   * Call {@link commit} to discard the snapshot or {@link rollback} to restore it.
+   * Take a snapshot of the current writer state.
+   * Call {@link commit} to keep what was written since and drop the snapshot, or
+   * {@link rollback} to return to it — as `Streams.ChunkedBuilder` marks, keeps and undoes.
    *
    * Snapshots can be nested.
    */
-  save(): void {
+  snapshot(): void {
     this._snapshots.push({
       partsLength: this._parts.length,
       chunksLength: this._chunks.length,
@@ -279,6 +280,11 @@ class XmlWriter implements XmlSink {
     });
   }
 
+  /** @deprecated Use {@link snapshot}. Removed in 1.0. */
+  save(): void {
+    this.snapshot();
+  }
+
   /** Discard the most recent snapshot (keep current state). */
   commit(): void {
     if (this._snapshots.length === 0) {
@@ -287,7 +293,7 @@ class XmlWriter implements XmlSink {
     this._snapshots.pop();
   }
 
-  /** Restore to the most recent snapshot (discard changes since save). */
+  /** Restore to the most recent snapshot (discard changes since {@link snapshot}). */
   rollback(): void {
     if (this._snapshots.length === 0) {
       throw new XmlWriteError("rollback", "no snapshot to rollback");

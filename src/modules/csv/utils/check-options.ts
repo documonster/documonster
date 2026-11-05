@@ -80,7 +80,7 @@ function checkEnum(
   }
 }
 
-function checkObject(where: string, value: unknown): void {
+export function checkObject(where: string, value: unknown): void {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     fail(where, "options", "an options object", value);
   }
@@ -138,23 +138,33 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * A `dynamicTyping` setting: a boolean, or a map whose own entries are booleans or converter
  * functions. Only own entries are ever looked up, so a column named `toString` is not read
  * through `Object.prototype`.
+ *
+ * `field` is where the setting sits in the public signature: `options.dynamicTyping` for a
+ * parse option, `dynamicTyping` where it is a parameter of its own
+ * (`Csv.applyDynamicTypingToRow`).
  */
-export function checkDynamicTyping(where: string, dynamicTyping: unknown): void {
+export function checkDynamicTyping(
+  where: string,
+  dynamicTyping: unknown,
+  field = "options.dynamicTyping"
+): void {
   if (dynamicTyping === undefined || typeof dynamicTyping === "boolean") {
     return;
   }
   if (!isPlainRecord(dynamicTyping)) {
-    fail(
-      where,
-      "dynamicTyping",
-      "true, false or a map of column name to boolean or function",
-      dynamicTyping
+    throw new CsvArgumentError(
+      field,
+      `${where}: dynamicTyping must be true, false or a map of column name to boolean or function, got ${describeValue(dynamicTyping)}`
     );
   }
   for (const key of Object.keys(dynamicTyping)) {
     const v = dynamicTyping[key];
     if (typeof v !== "boolean" && typeof v !== "function") {
-      fail(where, `dynamicTyping[${JSON.stringify(key)}]`, "true, false or a function", v);
+      const entry = `[${JSON.stringify(key)}]`;
+      throw new CsvArgumentError(
+        `${field}${entry}`,
+        `${where}: dynamicTyping${entry} must be true, false or a function, got ${describeValue(v)}`
+      );
     }
   }
 }
@@ -271,7 +281,7 @@ export function checkNoStreamingOptions(where: string, options: CsvParseOptions)
     if (options[option] !== undefined) {
       throw new CsvArgumentError(
         `options.${option}`,
-        `${where}: ${option} is only supported by Csv.parseRows and Csv.createParserStream`
+        `${where}: ${option} is only supported by Csv.parseRows and Csv.ParserStream`
       );
     }
   }

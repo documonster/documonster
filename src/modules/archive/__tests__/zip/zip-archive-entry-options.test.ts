@@ -7,6 +7,7 @@
  */
 import { Archive } from "@archive";
 import type { ZipEntryOptions } from "@archive/zip/zip-archive";
+import { concatUint8Arrays } from "@utils/binary";
 import { describe, expect, it } from "vitest";
 
 const MOD = new Date(Date.UTC(2021, 4, 6, 7, 8, 10));
@@ -77,7 +78,7 @@ async function streamed(zip: ReturnType<typeof Archive.createZip>): Promise<Uint
   for await (const chunk of zip.stream()) {
     chunks.push(chunk);
   }
-  return Archive.concatUint8Arrays(chunks);
+  return concatUint8Arrays(chunks);
 }
 
 describe("ZipArchive entry options on every output path", () => {

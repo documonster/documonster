@@ -5,7 +5,10 @@
  * `@utils/fs`.
  */
 
-import type { MarkdownReadOptions, MarkdownWriteOptions } from "@excel/bridge/markdown-bridge";
+import type {
+  ExcelMarkdownReadOptions,
+  ExcelMarkdownWriteOptions
+} from "@excel/bridge/markdown-bridge";
 import {
   formatWorksheet,
   readMarkdown,
@@ -57,7 +60,7 @@ async function markdownText(where: string, filename: string): Promise<string> {
  */
 export async function readMarkdownFileWorkbook(
   filename: string,
-  options?: MarkdownReadOptions
+  options?: ExcelMarkdownReadOptions
 ): Promise<Workbook>;
 /**
  * @deprecated Use `ExcelMarkdown.addWorksheet(workbook, await readFile(filename, "utf8"), options)`, which this
@@ -85,7 +88,7 @@ export async function readMarkdownFileWorkbook(
   return readNewWorkbook(
     "ExcelMarkdown.readFile",
     await markdownText("ExcelMarkdown.readFile", first),
-    second as MarkdownReadOptions | undefined
+    second as ExcelMarkdownReadOptions | undefined
   );
 }
 
@@ -93,9 +96,13 @@ export async function readMarkdownFileWorkbook(
 export async function writeMarkdownFile(
   workbook: Workbook,
   filename: string,
-  options?: MarkdownWriteOptions
+  options?: ExcelMarkdownWriteOptions
 ): Promise<void> {
   checkFilePath("ExcelMarkdown.writeFile", filename);
   const markdownString = formatWorksheet("ExcelMarkdown.writeFile", workbook, options);
-  await writeFileText(filename, markdownString);
+  try {
+    await writeFileText(filename, markdownString);
+  } catch (error) {
+    throw fileSystemError(filename, "write", error, "Markdown");
+  }
 }

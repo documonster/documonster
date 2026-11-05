@@ -34,8 +34,8 @@ function checkNames(check: ReturnType<typeof argumentChecks>, field: string, nam
  * so values changed in it or rows it gained since are there; Excel refreshes it again on open.
  *
  * @throws {ExcelArgumentError} when the model is not of the documented shape.
- * @throws {InvalidAddressError} when `ref` is not a cell or range of this sheet (a sheet name is refused).
- * @throws {PivotTableError} when a field is not found in the source, the metric is not one Excel has, or the pivot
+ * @throws {ExcelInvalidAddressError} when `ref` is not a cell or range of this sheet (a sheet name is refused).
+ * @throws {ExcelPivotTableError} when a field is not found in the source, the metric is not one Excel has, or the pivot
  * table would overlap another one on the sheet — give each its own `ref`, with room to grow.
  */
 export function add(ws: WorksheetData, model: PivotTableModel): PivotTable {
@@ -78,7 +78,7 @@ export function list(ws: WorksheetData): PivotTable[] {
 
 /**
  * Remove a pivot table — the handle {@link add} or {@link list} returned, or its index in that list. Returns `true` if
- * one was removed. A pivot chart or a slicer bound to it keeps it, and this throws a `PivotTableError`.
+ * one was removed. A pivot chart or a slicer bound to it keeps it, and this throws a `ExcelPivotTableError`.
  */
 export function remove(ws: WorksheetData, pivot: PivotTable | number): boolean {
   checkWorksheet(ws);

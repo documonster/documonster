@@ -13,11 +13,7 @@ import {
   formCheckboxSetChecked,
   formCheckboxSetLink,
   formCheckboxSetText,
-  formCheckboxText,
-  formCheckboxVmlAnchor,
-  formCheckboxVmlCheckedValue,
-  formCheckboxVmlStyle,
-  isFormCheckbox
+  formCheckboxText
 } from "@excel/core/form-control";
 import { definedNameProblem } from "@excel/core/table-name";
 import {
@@ -38,8 +34,13 @@ import {
  */
 import { checkWorksheet } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { InvalidAddressError } from "@excel/errors";
+import { ExcelInvalidAddressError } from "@excel/errors";
 import { checkListTarget } from "@excel/surface/argument-checks";
+import {
+  getAnchor as getVmlAnchorImpl,
+  getCheckedValue as getVmlCheckedValueImpl,
+  getStyle as getVmlStyleImpl
+} from "@excel/surface/form-vml";
 import type { ArgumentChecks } from "@excel/utils/arguments";
 import { argumentChecks } from "@excel/utils/arguments";
 
@@ -150,12 +151,12 @@ function checkLink(check: ArgumentChecks, field: string, link: unknown): void {
   } catch (error) {
     // Reported with the link as given: the part after the sheet name alone — often empty — named nothing the caller
     // wrote.
-    if (error instanceof InvalidAddressError && error.address !== link) {
+    if (error instanceof ExcelInvalidAddressError && error.address !== link) {
       // `Form.addCheckbox: Invalid address "B": …` — the call in front, the details after.
       const lead = `Invalid address "${error.address}": `;
       const at = error.message.indexOf(lead);
       const details = error.message.slice(at + lead.length);
-      throw new InvalidAddressError(link, details, {
+      throw new ExcelInvalidAddressError(link, details, {
         cause: error,
         field: error.field,
         ...(at > 2 ? { where: error.message.slice(0, at - 2) } : {})
@@ -169,7 +170,7 @@ function checkLink(check: ArgumentChecks, field: string, link: unknown): void {
  * Add a legacy form checkbox over `range` — a cell (`"B2"`, sized to about two columns), a range (`"B2:D3"`), a
  * `{ tl, br }` pair or 0-based `{ startCol, startRow, endCol, endRow }` — and return it.
  *
- * @throws {InvalidAddressError} when `range` is not a reference.
+ * @throws {ExcelInvalidAddressError} when `range` is not a reference.
  * @throws {ExcelArgumentError} when a position is not a whole number inside the grid, or an option is of the wrong type.
  */
 export function addCheckbox(
@@ -221,42 +222,8 @@ export { formCheckboxLink as getLink };
 /** The label shown next to the checkbox. */
 export { formCheckboxText as getText };
 
-/** The model a VML getter reads: the handle's, or the model itself as the getters used to require. */
-function modelOf(checkbox: FormCheckboxData | FormCheckboxModel): FormCheckboxModel {
-  if (isFormCheckbox(checkbox)) {
-    return checkbox.model;
-  }
-  // A model has its two anchors; anything else is neither, and is refused rather than read as one.
-  const model = checkbox as Partial<FormCheckboxModel> | null | undefined;
-  if (typeof model?.tl !== "object" || model.tl === null || typeof model.br !== "object") {
-    checkFormCheckbox(checkbox);
-  }
-  return checkbox;
-}
-
-/** The VML `<x:Anchor>` text for a checkbox: its cell anchors and pixel offsets. */
-export function getVmlAnchor(checkbox: FormCheckboxData): string;
-/** {@link getVmlAnchor} for a checkbox model. */
-export function getVmlAnchor(model: FormCheckboxModel): string;
-export function getVmlAnchor(checkbox: FormCheckboxData | FormCheckboxModel): string {
-  return formCheckboxVmlAnchor(modelOf(checkbox));
-}
-
-/** The VML positioning `style` for a checkbox. */
-export function getVmlStyle(checkbox: FormCheckboxData): string;
-/** {@link getVmlStyle} for a checkbox model. */
-export function getVmlStyle(model: FormCheckboxModel): string;
-export function getVmlStyle(checkbox: FormCheckboxData | FormCheckboxModel): string {
-  return formCheckboxVmlStyle(modelOf(checkbox));
-}
-
-/** The VML `<x:Checked>` number for a checkbox: `0` unchecked, `1` checked, `2` mixed. */
-export function getVmlCheckedValue(checkbox: FormCheckboxData): number;
-/** {@link getVmlCheckedValue} for a checkbox model. */
-export function getVmlCheckedValue(model: FormCheckboxModel): number;
-export function getVmlCheckedValue(checkbox: FormCheckboxData | FormCheckboxModel): number {
-  return formCheckboxVmlCheckedValue(modelOf(checkbox));
-}
+/** The VML text a checkbox is written as — for a caller producing or checking the VML part. */
+export * as Vml from "@excel/surface/form-vml";
 
 /** A form-checkbox handle. */
 export type { FormCheckboxData as Handle } from "@excel/core/form-control";
@@ -294,12 +261,12 @@ export const checked = formCheckboxChecked;
 export const link = formCheckboxLink;
 /** @deprecated Use {@link getText}. Removed in 1.0. */
 export const text = formCheckboxText;
-/** @deprecated Use {@link getVmlAnchor}. Removed in 1.0. */
-export const vmlAnchor = getVmlAnchor;
-/** @deprecated Use {@link getVmlStyle}. Removed in 1.0. */
-export const vmlStyle = getVmlStyle;
-/** @deprecated Use {@link getVmlCheckedValue}. Removed in 1.0. */
-export const vmlCheckedValue = getVmlCheckedValue;
+/** @deprecated Use `Form.Vml.getAnchor`. Removed in 1.0. */
+export const vmlAnchor = getVmlAnchorImpl;
+/** @deprecated Use `Form.Vml.getStyle`. Removed in 1.0. */
+export const vmlStyle = getVmlStyleImpl;
+/** @deprecated Use `Form.Vml.getCheckedValue`. Removed in 1.0. */
+export const vmlCheckedValue = getVmlCheckedValueImpl;
 /**
  * @deprecated Use {@link list}, which returns a copy. Removed in 1.0. This form
  * returns the sheet's live array, as it always did: before `remove` existed, splicing it was

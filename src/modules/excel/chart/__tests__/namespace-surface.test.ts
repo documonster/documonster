@@ -76,6 +76,24 @@ describe("documonster/chart namespaces", () => {
     expect(ChartEntry.parseSpPr).toBe(DrawingMl.parseSpPr);
     expect(ChartEntry.buildSpPr).toBe(DrawingMl.createSpPr);
     expect(ChartEntry.buildTxPr).toBe(DrawingMl.createTxPr);
-    expect(ChartEntry.setSpPrFill).toBe(DrawingMl.setSpPrFill);
+    expect(ChartEntry.setSpPrFill).toBe(DrawingMl.withSpPrFill);
+    expect(ChartEntry.setSpPrLine).toBe(DrawingMl.withSpPrLine);
+    expect(ChartEntry.EXCEL_CHART_PRESETS).toEqual(Object.keys(ChartEntry.CHART_PRESETS));
+    expect(ChartEntry.EXCEL_CHART_EX_PRESETS).toEqual(Object.keys(ChartEntry.CHART_EX_PRESETS));
+  });
+
+  it("DrawingMl.withSpPr* returns a copy and leaves its input as it was", () => {
+    const original = DrawingMl.createSpPr({ fill: { solid: { srgb: "FF0000" } } });
+    const before = structuredClone(original);
+    const filled = DrawingMl.withSpPrFill(original, { solid: { srgb: "00FF00" } });
+    const lined = DrawingMl.withSpPrLine(original, { width: 12700 });
+    expect(original).toEqual(before);
+    expect(DrawingMl.getSpPrFillColor(filled)).toEqual({ srgb: "00FF00" });
+    expect(lined).not.toBe(original);
+  });
+
+  it("publishes the argument error it throws", () => {
+    expect(() => ChartClassic.createModel(42 as never)).toThrow(ChartEntry.ExcelArgumentError);
+    expect(new ChartEntry.ExcelArgumentError("x", "m")).toBeInstanceOf(ChartEntry.ExcelError);
   });
 });

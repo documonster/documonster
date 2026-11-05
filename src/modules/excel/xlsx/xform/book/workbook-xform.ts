@@ -1,5 +1,5 @@
 import { sheetsInTabOrder } from "@excel/core/sheet-order";
-import { RowOutOfBoundsError } from "@excel/errors";
+import { ExcelRowOutOfBoundsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { resolveRelTarget } from "@excel/utils/ooxml-paths";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
@@ -405,8 +405,8 @@ class WorkbookXform extends BaseXform {
             const decoded: string[] = [];
             for (const rangeStr of effectiveRanges) {
               // Wrap in try/catch: `parsePrintReference` throws
-              // `ColumnOutOfBoundsError` (column past XFD) or
-              // `RowOutOfBoundsError` (row 0 or row past 1048576) for
+              // `ExcelColumnOutOfBoundsError` (column past XFD) or
+              // `ExcelRowOutOfBoundsError` (row 0 or row past 1048576) for
               // out-of-range refs. On the *write* side that throw
               // surfaces a user error, but on this *read* side a
               // malformed file (or one authored by another tool) must
@@ -617,7 +617,7 @@ interface PrintReference {
 // Excel 2007+ row limit. Print-area / print-titles references emitted
 // to OOXML must respect this — Excel rejects definitions that point
 // past the addressable sheet, so the writer normalises every row
-// through `parseRowToken` (which throws `RowOutOfBoundsError` on
+// through `parseRowToken` (which throws `ExcelRowOutOfBoundsError` on
 // overflow). The rest of the codebase tolerates higher row numbers in
 // transient API calls (`getCell("A99999999")`) because those never
 // reach the file format; print references do.
@@ -641,10 +641,10 @@ function parseRowToken(token: string): string {
   // leading zeros the user typed.
   const n = Number(token);
   if (n < 1) {
-    throw new RowOutOfBoundsError(n, `Excel rows are 1-indexed; row ${token} is invalid`);
+    throw new ExcelRowOutOfBoundsError(n, `Excel rows are 1-indexed; row ${token} is invalid`);
   }
   if (n > EXCEL_MAX_ROW) {
-    throw new RowOutOfBoundsError(n, `Excel supports rows from 1 to ${EXCEL_MAX_ROW}`);
+    throw new ExcelRowOutOfBoundsError(n, `Excel supports rows from 1 to ${EXCEL_MAX_ROW}`);
   }
   return String(n);
 }
@@ -670,9 +670,9 @@ function parseRowToken(token: string): string {
  * shapes — callers drop the entry rather than emit corrupt XML.
  *
  * **Throws**:
- *   - `ColumnOutOfBoundsError` when the input parses as a valid shape
+ *   - `ExcelColumnOutOfBoundsError` when the input parses as a valid shape
  *     but references a column letter beyond Excel's XFD (16384) limit.
- *   - `RowOutOfBoundsError` for row 0 (Excel rows are 1-indexed) or
+ *   - `ExcelRowOutOfBoundsError` for row 0 (Excel rows are 1-indexed) or
  *     rows beyond Excel's `1048576` limit.
  *
  * Both errors match what `getCell` and `colCache.l2n` already throw for

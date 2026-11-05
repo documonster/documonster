@@ -5,7 +5,7 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import { StreamStateError, StreamTypeError } from "@stream/errors";
+import { StreamStateError, StreamArgumentError } from "@stream/errors";
 import type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
 import { textEncoder } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
@@ -17,7 +17,7 @@ export type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
  */
 export function createStringChunk(data: string): StreamDataChunk {
   if (typeof data !== "string") {
-    throw new StreamTypeError("a string", data === null ? "null" : typeof data, {
+    throw new StreamArgumentError("a string", data === null ? "null" : typeof data, {
       field: "data",
       where: "Streams.createStringChunk"
     });
@@ -51,7 +51,7 @@ export function createByteChunk(data: Uint8Array): StreamDataChunk {
   if (
     !(ArrayBuffer.isView(data) && (data as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1)
   ) {
-    throw new StreamTypeError("a Uint8Array", data === null ? "null" : typeof data, {
+    throw new StreamArgumentError("a Uint8Array", data === null ? "null" : typeof data, {
       field: "data",
       where: "Streams.createByteChunk"
     });
@@ -145,9 +145,19 @@ export class BufferedStream extends EventEmitter {
 
   constructor(options: BufferedStreamOptions = {}) {
     super();
+    if (typeof options !== "object" || options === null) {
+      throw new StreamArgumentError(
+        "an options object",
+        options === null ? "null" : typeof options,
+        {
+          field: "options",
+          where: "Streams.BufferedStream"
+        }
+      );
+    }
     const { batchSize } = options;
     if (batchSize !== undefined && (!Number.isInteger(batchSize) || batchSize <= 0)) {
-      throw new StreamTypeError("a positive integer batchSize", String(batchSize), {
+      throw new StreamArgumentError("a positive integer batchSize", String(batchSize), {
         field: "options.batchSize",
         where: "Streams.BufferedStream"
       });
@@ -166,7 +176,7 @@ export class BufferedStream extends EventEmitter {
         (chunk as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
       )
     ) {
-      throw new StreamTypeError(
+      throw new StreamArgumentError(
         "a Uint8Array or a string",
         chunk === null ? "null" : typeof chunk,
         {

@@ -47,7 +47,7 @@ import { themeIndexToName } from "@excel/chart/shared/chart-utils";
  */
 import { chartColorTransformList, colorTransformsXml } from "@excel/chart/shared/color-transforms";
 import { definedNamesAddHidden, definedNamesModel } from "@excel/core/defined-names";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import {
   chartPath,
   chartRelsPath,
@@ -4115,7 +4115,7 @@ export async function addCharts(
         await appendToZip(zip, patched, { name: chartPath(n) });
       } else {
         if (requireRawPatch) {
-          throw new ChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
+          throw new ExcelChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
         }
         // Render via buffered path so we can splice preserved leading
         // XML comments (e.g. vendor provenance markers) from the
@@ -4299,7 +4299,9 @@ export async function addChartExEntries(
         await appendToZip(zip, patched, { name: chartExPath(n) });
       } else {
         if (requireRawPatch) {
-          throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
+          throw new ExcelChartOptionsError(
+            buildChartExStrictFailureMessage(n, structuredEntry.model)
+          );
         }
         const renderedXml = renderChartEx(stripChartExRawXml(structuredEntry.model));
         // Splice preserved leading XML comments from original raw

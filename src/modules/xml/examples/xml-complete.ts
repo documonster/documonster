@@ -32,7 +32,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 const w1 = new Xml.Writer();
-w1.openXml(Xml.StdDocAttributes);
+w1.openXml(Xml.DEFAULT_DECLARATION);
 w1.openNode("catalog");
 w1.leafNode("book", { id: "1", lang: "en" }, "The Great Gatsby");
 w1.leafNode("book", { id: "2", lang: "fr" }, "Le Petit Prince");
@@ -48,7 +48,7 @@ console.log(xml1);
 // =============================================================================
 
 const w2 = new Xml.Writer();
-w2.openXml(Xml.StdDocAttributes);
+w2.openXml(Xml.DEFAULT_DECLARATION);
 w2.openNode("employees");
 
 w2.openNode("employee", { id: "101", department: "Engineering" });
@@ -74,7 +74,7 @@ console.log(w2.xml.substring(0, 200) + "...");
 // =============================================================================
 
 const w3 = new Xml.Writer();
-w3.openXml(Xml.StdDocAttributes);
+w3.openXml(Xml.DEFAULT_DECLARATION);
 w3.openNode("page");
 
 w3.writeComment("This is a comment");
@@ -98,11 +98,11 @@ console.log(w3.xml);
 // =============================================================================
 
 const w4 = new Xml.Writer();
-w4.openXml(Xml.StdDocAttributes);
+w4.openXml(Xml.DEFAULT_DECLARATION);
 w4.openNode("root");
 w4.leafNode("kept", undefined, "This stays");
 
-w4.save(); // Save checkpoint
+w4.snapshot(); // Take a checkpoint
 
 w4.leafNode("tentative", undefined, "This might be removed");
 w4.leafNode("also-tentative", undefined, "This too");
@@ -147,7 +147,7 @@ const writeTarget = {
 };
 
 const sw6 = new Xml.StreamWriter(writeTarget);
-sw6.openXml(Xml.StdDocAttributes);
+sw6.openXml(Xml.DEFAULT_DECLARATION);
 sw6.openNode("data");
 for (let i = 0; i < 5; i++) {
   sw6.leafNode("item", { index: i }, `Value ${i}`);
@@ -386,7 +386,7 @@ try {
 // =============================================================================
 
 const w17 = new Xml.Writer();
-w17.openXml(Xml.StdDocAttributes);
+w17.openXml(Xml.DEFAULT_DECLARATION);
 w17.openNode("worksheet", {
   xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
   "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -429,7 +429,7 @@ try {
 // =============================================================================
 
 const w19 = new Xml.Writer();
-w19.openXml(Xml.StdDocAttributes);
+w19.openXml(Xml.DEFAULT_DECLARATION);
 w19.openNode("workbook", {
   xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 });

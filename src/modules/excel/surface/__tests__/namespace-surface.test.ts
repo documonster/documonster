@@ -63,10 +63,10 @@ describe("documonster/excel namespace surface", () => {
     for (const name of [
       "ExcelError",
       "isExcelError",
-      "WorksheetNameError",
-      "InvalidAddressError",
-      "ChartOptionsError",
-      "ColumnOutOfBoundsError"
+      "ExcelWorksheetNameError",
+      "ExcelInvalidAddressError",
+      "ExcelChartOptionsError",
+      "ExcelColumnOutOfBoundsError"
     ]) {
       expect(typeof e[name], name).toBe("function");
     }

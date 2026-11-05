@@ -108,7 +108,7 @@ describe("a splice through a removed sheet's handle", () => {
 
     expect(() => Row.splice(old, 1, 2)).toThrow(ExcelArgumentError);
     expect(() => Column.splice(old, 1, 1)).toThrow(ExcelArgumentError);
-    expect(() => Cell.removeAllNames(old, "A1")).toThrow(ExcelArgumentError);
+    expect(() => Cell.clearNames(old, "A1")).toThrow(ExcelArgumentError);
     expect(() => Cell.removeName(old, "A1", "First")).toThrow(ExcelArgumentError);
     expect(() => Column.setDefinitions(old, [{ width: 3 }])).toThrow(ExcelArgumentError);
     expect(() => Worksheet.unmerge(old, "C1:D1")).toThrow(ExcelArgumentError);

@@ -8,7 +8,7 @@
  *
  * @example
  * ```ts
- * import { Query, type FormatCriteria } from "documonster/word";
+ * import { Query, type DocxFormatCriteria } from "documonster/word";
  *
  * // Find all bold red text
  * const results = Query.searchByFormat(doc, { bold: true, color: "FF0000" });

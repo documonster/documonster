@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { Archive, Crc32MismatchError } from "@archive";
+import { Archive, ZipCrc32MismatchError } from "@archive";
 import { afterAll, describe, expect, it } from "vitest";
 
 const dir = mkdtempSync(path.join(tmpdir(), "documonster-archive-file-"));
@@ -131,8 +131,8 @@ describe("ArchiveFile lookups", () => {
     const at = Buffer.from(zip).indexOf("payload");
     zip[at]! ^= 0x20;
     const strict = Archive.ArchiveFile.fromBuffer(zip);
-    await expect(strict.readEntry("a.txt")).rejects.toBeInstanceOf(Crc32MismatchError);
-    expect(() => strict.readEntrySync("a.txt")).toThrow(Crc32MismatchError);
+    await expect(strict.readEntry("a.txt")).rejects.toBeInstanceOf(ZipCrc32MismatchError);
+    expect(() => strict.readEntrySync("a.txt")).toThrow(ZipCrc32MismatchError);
     const lenient = Archive.ArchiveFile.fromBuffer(zip, { checkCrc32: false });
     expect(await lenient.readAsText("a.txt")).toBe("Payload that is long enough");
     expect(Archive.ArchiveFile.fromBuffer(zip, { checkCrc32: false }).readAsTextSync("a.txt")).toBe(

@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { extractParagraphText } from "../core/text-utils";
-import { Build, Document, Io, Streaming, Transform } from "../index";
+import { Build, Document, Io, Stream, Transform } from "../index";
 import type { BodyContent, FieldContent, Paragraph, Run, Table } from "../types";
 import { buildDocx, packageParts, partText } from "./roundtrip-integrity.helpers";
 
@@ -185,7 +185,7 @@ describe("a complex field read field character by field character", () => {
     async (_name, body) => {
       const source = await buildDocx({ body });
       const streamed: BodyContent[] = [];
-      for await (const block of Streaming.createReader(source)) {
+      for await (const block of new Stream.DocumentReader(source)) {
         streamed.push(block);
       }
       expect(streamed).toEqual((await Io.read(source)).body);

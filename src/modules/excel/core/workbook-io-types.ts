@@ -23,7 +23,7 @@ import type { ArgumentChecks } from "@excel/utils/arguments";
 import { argumentChecks } from "@excel/utils/arguments";
 import { decryptionOf, openWorkbookPackage } from "@excel/utils/container-errors";
 import type { WorkbookDecryption } from "@excel/utils/container-errors";
-import type { IParseStream, XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
+import type { XlsxParseStream, XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
 
 /** What `Workbook.create` takes — and what a read that returns a new workbook accepts beside its own options. */
 export interface WorkbookCreateOptions {
@@ -184,7 +184,7 @@ export interface WorkbookReadReport {
 }
 
 export type { UnrecognizedValue } from "@excel/core/unrecognized-values";
-export type { EncryptOptions } from "@archive/office-crypto/agile";
+export type { EncryptOptions as WorkbookEncryptOptions } from "@archive/office-crypto/agile";
 
 /**
  * Whether the first argument of a read is the workbook to read *into* — the deprecated form — rather than the input.
@@ -460,7 +460,7 @@ export async function readWorkbookWithDiagnostics(
     // report here means "not measured", which `WorkbookReadReport.lost` says in prose.
     //
     // It does *not* mean the reader truncates behind the caller's back: `maxRows` and `maxCols` throw
-    // `MaxItemsExceededError` rather than skipping, which their own documentation used to deny and their tests have
+    // `ExcelLimitExceededError` rather than skipping, which their own documentation used to deny and their tests have
     // always required.
     workbook,
     lost: [],
@@ -480,7 +480,7 @@ export type WorkbookStreamInput =
   | AsyncIterable<Uint8Array | string>
   | ReadableStream<Uint8Array>
   | Iterable<Uint8Array>
-  | IParseStream;
+  | XlsxParseStream;
 
 /**
  * `readStream`, once, for both platforms: an XLSX package is read as it streams; an XLSB one — named by

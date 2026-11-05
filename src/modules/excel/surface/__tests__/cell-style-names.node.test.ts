@@ -7,7 +7,7 @@
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
 import { cellSetStyle, cellSetValue } from "@excel/core/cell";
-import { Cell, Stream, Workbook, WorksheetNameError } from "@excel/index";
+import { Cell, Stream, Workbook, ExcelWorksheetNameError } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 async function stylesXml(bytes: Uint8Array): Promise<string> {
@@ -38,7 +38,7 @@ describe("named cell styles compare without regard to case", () => {
   it("refuses the built-in Normal in any case", () => {
     const wb = Workbook.create();
     for (const name of ["Normal", "normal", "NORMAL"]) {
-      expect(() => Workbook.addCellStyle(wb, name, {}), name).toThrow(WorksheetNameError);
+      expect(() => Workbook.addCellStyle(wb, name, {}), name).toThrow(ExcelWorksheetNameError);
     }
   });
 
@@ -186,7 +186,7 @@ describe("named cell styles compare without regard to case", () => {
     const writer = new Stream.WorkbookWriter({ stream: sink, useStyles: true });
     writer.addCellStyle("Brand Title", { font: { bold: true } });
     expect(writer.addCellStyle("brand title", { font: { italic: true } }).name).toBe("Brand Title");
-    expect(() => writer.addCellStyle("normal", {})).toThrow(WorksheetNameError);
+    expect(() => writer.addCellStyle("normal", {})).toThrow(ExcelWorksheetNameError);
     const sheet = writer.addWorksheet("S");
     const cell = sheet.getCell("A1");
     cellSetValue(cell, "x");

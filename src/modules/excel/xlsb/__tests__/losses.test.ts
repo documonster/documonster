@@ -15,7 +15,7 @@ import { extractAll } from "@archive/unzip/extract";
  */
 import { Cell, DefinedNames, Workbook, type Worksheet } from "@excel";
 import { expectValidXlsb } from "@excel/__tests__/helpers/expect-valid-xlsb";
-import { ExcelNotSupportedError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
 import { iterateBiffRecords, iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { recordSpec } from "@excel/xlsb/spec/records";
 import { workbookLosses, worksheetLosses } from "@excel/xlsb/write/losses";
@@ -328,8 +328,8 @@ describe("the loss report is data, not just a sentence", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(ExcelNotSupportedError);
-    expect((thrown as ExcelNotSupportedError).items).toEqual(["S1: auto filter criteria"]);
+    expect(thrown).toBeInstanceOf(ExcelUnsupportedFeatureError);
+    expect((thrown as ExcelUnsupportedFeatureError).items).toEqual(["S1: auto filter criteria"]);
   });
 
   it("truncates the message and not the items", async () => {
@@ -346,7 +346,7 @@ describe("the loss report is data, not just a sentence", () => {
     } catch (error) {
       thrown = error;
     }
-    const error = thrown as ExcelNotSupportedError;
+    const error = thrown as ExcelUnsupportedFeatureError;
     expect(error.items).toHaveLength(12);
     expect(error.message).toContain(", …");
   });

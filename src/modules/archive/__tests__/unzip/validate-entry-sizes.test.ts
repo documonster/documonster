@@ -1,4 +1,4 @@
-import { EntrySizeMismatchError } from "@archive/core/errors";
+import { ZipEntrySizeMismatchError } from "@archive/core/errors";
 import { processEntryDataStream, readLocalHeaderDataOffset } from "@archive/unzip/zip-extract-core";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { BinaryReader } from "@archive/zip-spec/binary";
@@ -62,7 +62,7 @@ describe("validateEntrySizes", () => {
       expect(new TextDecoder().decode(result)).toBe(content);
     });
 
-    it("should throw EntrySizeMismatchError for too-many-bytes", async () => {
+    it("should throw ZipEntrySizeMismatchError for too-many-bytes", async () => {
       // Create a ZIP with correct content
       const declaredContent = "short";
       const entries: ZipEntry[] = [
@@ -78,20 +78,20 @@ describe("validateEntrySizes", () => {
       // Should throw because actual (5 bytes) > declared (2 bytes)
       await expect(
         collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)))
-      ).rejects.toThrow(EntrySizeMismatchError);
+      ).rejects.toThrow(ZipEntrySizeMismatchError);
 
       try {
         await collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)));
       } catch (err) {
-        expect(err).toBeInstanceOf(EntrySizeMismatchError);
-        const error = err as EntrySizeMismatchError;
+        expect(err).toBeInstanceOf(ZipEntrySizeMismatchError);
+        const error = err as ZipEntrySizeMismatchError;
         expect(error.reason).toBe("too-many-bytes");
         expect(error.expected).toBe(2);
         expect(error.actual).toBeGreaterThan(2);
       }
     });
 
-    it("should throw EntrySizeMismatchError for too-few-bytes", async () => {
+    it("should throw ZipEntrySizeMismatchError for too-few-bytes", async () => {
       const content = "short";
       const entries: ZipEntry[] = [{ name: "test.txt", data: new TextEncoder().encode(content) }];
       const zipData = createZipSync(entries);
@@ -104,13 +104,13 @@ describe("validateEntrySizes", () => {
       // Should throw because actual (5 bytes) < declared (100 bytes)
       await expect(
         collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)))
-      ).rejects.toThrow(EntrySizeMismatchError);
+      ).rejects.toThrow(ZipEntrySizeMismatchError);
 
       try {
         await collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)));
       } catch (err) {
-        expect(err).toBeInstanceOf(EntrySizeMismatchError);
-        const error = err as EntrySizeMismatchError;
+        expect(err).toBeInstanceOf(ZipEntrySizeMismatchError);
+        const error = err as ZipEntrySizeMismatchError;
         expect(error.reason).toBe("too-few-bytes");
         expect(error.expected).toBe(100);
         expect(error.actual).toBe(5);
@@ -164,9 +164,9 @@ describe("validateEntrySizes", () => {
           bytesYielded += chunk.length;
         }
         // Should not reach here
-        expect.fail("Should have thrown EntrySizeMismatchError");
+        expect.fail("Should have thrown ZipEntrySizeMismatchError");
       } catch (err) {
-        expect(err).toBeInstanceOf(EntrySizeMismatchError);
+        expect(err).toBeInstanceOf(ZipEntrySizeMismatchError);
         // Should have aborted early, not after processing all 10000 bytes
         // The error is thrown when bytesYielded > 100
         expect(bytesYielded).toBeLessThanOrEqual(tamperedEntry.uncompressedSize);
@@ -189,7 +189,7 @@ describe("validateEntrySizes", () => {
         await collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)));
         expect.fail("Should have thrown");
       } catch (err) {
-        const error = err as EntrySizeMismatchError;
+        const error = err as ZipEntrySizeMismatchError;
         expect(error.message).toContain("path/to/file.txt");
         expect(error.message).toContain("more bytes");
         expect(error.path).toBe("path/to/file.txt");
@@ -213,7 +213,7 @@ describe("validateEntrySizes", () => {
         await collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)));
         expect.fail("Should have thrown");
       } catch (err) {
-        const error = err as EntrySizeMismatchError;
+        const error = err as ZipEntrySizeMismatchError;
         expect(error.message).toContain("another/file.txt");
         expect(error.message).toContain("fewer bytes");
         expect(error.path).toBe("another/file.txt");
@@ -245,7 +245,7 @@ describe("validateEntrySizes", () => {
 
       await expect(
         collect(processEntryDataStream(tamperedEntry, toAsyncIterable(compressedData)))
-      ).rejects.toThrow(EntrySizeMismatchError);
+      ).rejects.toThrow(ZipEntrySizeMismatchError);
     });
   });
 });

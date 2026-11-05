@@ -54,7 +54,7 @@ export function list(ws: WorksheetData): ConditionalFormattingOptions[] {
  * removed.
  *
  * @throws {ExcelArgumentError} when `target` is none of those — a fractional position, `null`, a boolean.
- * @throws {InvalidAddressError} when a string `target` is not a reference.
+ * @throws {ExcelInvalidAddressError} when a string `target` is not a reference.
  */
 export function remove(ws: WorksheetData, target: ConditionalFormattingTarget | string): boolean {
   checkWorksheet(ws);

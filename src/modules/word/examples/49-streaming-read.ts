@@ -7,8 +7,8 @@
  * incrementally — peak memory is O(largest single body element).
  *
  * Covers:
- *   - Streaming.createReader(bytes)   — factory
- *   - new Streaming.StreamingDocxReader(bytes, opts) — class form, with the
+ *   - new Stream.DocumentReader(bytes)       — plain read
+ *   - new Stream.DocumentReader(bytes, opts) — with the
  *     onProgress callback (reports cumulative uncompressed document.xml bytes)
  *   - `for await (const item of reader)`        — async iteration over body
  *   - reader.metadata / reader.styles           — up-front metadata
@@ -25,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Build, Streaming } from "../index";
+import { Build, Stream } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -36,7 +36,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 // 1. Produce a DOCX buffer with the streaming writer (write side, à la #22)
 // ---------------------------------------------------------------------------
-const writer = Streaming.createWriter({
+const writer = new Stream.DocumentWriter({
   styles: [
     { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true, qFormat: true },
     {
@@ -73,15 +73,15 @@ writer.add({
     }
   ]
 });
-const sourceBuf = await writer.finalize();
+const sourceBuf = await writer.toBuffer();
 fs.writeFileSync(path.join(outDir, "49-streaming-read-source.docx"), sourceBuf);
 console.log(`  → 49-streaming-read-source.docx (${(sourceBuf.length / 1024).toFixed(1)} KB)`);
 
 // ---------------------------------------------------------------------------
-// 2. Read it back with the factory createDocxStreamReader + for-await
+// 2. Read it back with new Stream.DocumentReader + for-await
 // ---------------------------------------------------------------------------
 {
-  const reader = Streaming.createReader(sourceBuf);
+  const reader = new Stream.DocumentReader(sourceBuf);
   let paragraphs = 0;
   let tables = 0;
   let firstConsumed = -1;
@@ -108,13 +108,13 @@ console.log(`  → 49-streaming-read-source.docx (${(sourceBuf.length / 1024).to
 }
 
 // ---------------------------------------------------------------------------
-// 3. Class form with onProgress callback (the factory option bag has no hook).
+// 3. With an onProgress callback.
 //    The callback reports cumulative uncompressed document.xml bytes consumed.
 // ---------------------------------------------------------------------------
 {
   let progressEvents = 0;
   let lastConsumed = 0;
-  const reader = new Streaming.StreamingDocxReader(sourceBuf, {
+  const reader = new Stream.DocumentReader(sourceBuf, {
     onProgress: consumed => {
       progressEvents++;
       lastConsumed = consumed;

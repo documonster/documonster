@@ -6,7 +6,7 @@
 
 ```typescript
 import { Csv } from "documonster/csv";
-// Csv.parse, Csv.format, Csv.createParserStream, …
+// Csv.parse, Csv.format, Csv.ParserStream, …
 ```
 
 ## 功能特性
@@ -15,7 +15,7 @@ import { Csv } from "documonster/csv";
 - **零依赖** — 纯 TypeScript，无外部包
 - **跨平台** — Node.js 和浏览器使用相同 API
 - **高性能** — 基于 indexOf 的扫描器、快速模式检测、批处理
-- **流式处理** — `Csv.createParserStream` / `Csv.createFormatterStream` 处理大文件
+- **流式处理** — `Csv.ParserStream` / `Csv.FormatterStream` 处理大文件
 - **类型安全** — 完整的 TypeScript 泛型和重载签名
 - **自动检测** — 分隔符、换行符和 BOM 检测
 - **动态类型** — 自动类型转换（数字、布尔值、日期）
@@ -232,7 +232,7 @@ Csv.format([
 
 ## 流式 API
 
-### `Csv.createParserStream(options?)`
+### `new Csv.ParserStream(options?)`
 
 转换流，逐块解析 CSV 数据。跨平台（Node.js + 浏览器）。
 
@@ -240,8 +240,8 @@ Csv.format([
 import { Csv } from "documonster/csv";
 import { pipeline } from "documonster/stream";
 
-// 使用工厂函数
-const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
+// 构造流
+const parser = new Csv.ParserStream({ headers: true, dynamicTyping: true });
 
 // 使用转换和验证
 parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
@@ -256,14 +256,14 @@ parser.on("end", () => console.log("完成"));
 await pipeline(readableStream, parser, writable);
 ```
 
-### `Csv.createFormatterStream(options?)`
+### `new Csv.FormatterStream(options?)`
 
 转换流，将行格式化为 CSV 文本。跨平台（Node.js + 浏览器）。
 
 ```typescript
 import { Csv } from "documonster/csv";
 
-const formatter = Csv.createFormatterStream({
+const formatter = new Csv.FormatterStream({
   headers: ["name", "age"],
   delimiter: ";",
   bom: true
@@ -336,11 +336,11 @@ Csv.applyDynamicTyping("007", value => Number(value)); // 7（自定义转换函
 import { Csv } from "documonster/csv";
 
 // 使用区域特定的小数分隔符格式化数字
-Csv.formatNumber(3.14, "."); // "3.14"
-Csv.formatNumber(3.14, ","); // "3,14"
+Csv.formatNumber(3.14); // "3.14"
+Csv.formatNumber(3.14, { decimalSeparator: "," }); // "3,14"
 
 // 使用区域特定的小数分隔符解析数字
-Csv.parseNumber("3,14", ","); // 3.14
+Csv.parseNumber("3,14", { decimalSeparator: "," }); // 3.14
 ```
 
 ---
@@ -410,7 +410,7 @@ const batch2 = gen.generate(100);
 
 ```typescript
 import { Csv } from "documonster/csv";
-import { CsvError, CsvWorkerError } from "documonster/csv";
+import { CsvError } from "documonster/csv";
 
 try {
   Csv.parse(badInput, { headers: true });
@@ -438,10 +438,10 @@ try {
 
 ### 流类
 
-| 类                                    | 描述                           |
-| ------------------------------------- | ------------------------------ |
-| `Csv.createParserStream(options?)`    | 转换流：CSV 字节 -> 已解析的行 |
-| `Csv.createFormatterStream(options?)` | 转换流：行 -> CSV 文本         |
+| 类                                  | 描述                           |
+| ----------------------------------- | ------------------------------ |
+| `new Csv.ParserStream(options?)`    | 转换流：CSV 字节 -> 已解析的行 |
+| `new Csv.FormatterStream(options?)` | 转换流：行 -> CSV 文本         |
 
 ### 工具函数
 
@@ -451,8 +451,8 @@ try {
 | `Csv.detectLinebreak(input)`                   | 自动检测行终止符       |
 | `Csv.stripBom(input)`                          | 去除 UTF-8 BOM         |
 | `Csv.applyDynamicTyping(value, columnConfig?)` | 将字符串转换为原生类型 |
-| `Csv.formatNumber(value, sep)`                 | 按区域格式化数字       |
-| `Csv.parseNumber(value, sep)`                  | 解析区域格式化的数字   |
+| `Csv.formatNumber(value, options?)`            | 按区域格式化数字       |
+| `Csv.parseNumber(value, options?)`             | 解析区域格式化的数字   |
 | `Csv.deduplicateHeaders(headers)`              | 重命名重复表头         |
 
 ### 生成器函数

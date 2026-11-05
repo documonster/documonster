@@ -10,7 +10,7 @@ import { unzip } from "@archive/read-archive";
 import { describe, expect, it } from "vitest";
 
 import { WordHtml } from "../html";
-import { Build, Document, Io, Layout, Streaming, Template, Transform } from "../index";
+import { Build, Document, Io, Layout, Stream, Template, Transform } from "../index";
 import type { DocxDocument } from "../index";
 import { WordMarkdown } from "../markdown";
 
@@ -732,7 +732,7 @@ describe("image references stay bound to their own part's relationships", () => 
     const show = (rId: string) => [
       Build.paragraph([{ content: [{ type: "image" as const, rId, width: 9525, height: 9525 }] }])
     ];
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       images: [a, b],
       headers: new Map([
         ["h1", { content: { children: show("__img_2") } }],

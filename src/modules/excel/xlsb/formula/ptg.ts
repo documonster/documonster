@@ -39,11 +39,11 @@
  *
  * ## Unsupported tokens fail loudly
  *
- * A token this codec does not model throws `ExcelNotSupportedError` naming the token. It never returns a partial
+ * A token this codec does not model throws `ExcelUnsupportedFeatureError` naming the token. It never returns a partial
  * expression: half a formula is worse than no formula, because it looks like it worked.
  */
 
-import { ExcelNotSupportedError, XlsbParseError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError, XlsbParseError } from "@excel/errors";
 import { decodeCol, encodeCol } from "@excel/utils/address";
 import { definedNameListKey } from "@excel/utils/function-names";
 import {
@@ -509,7 +509,7 @@ function decodeToken(state: DecodeState): void {
   // Untagged tokens first: their identifier is the whole byte, so they must be matched
   // before the low-five-bit form or `PtgStr` (0x17) collides with a tagged token.
   if (raw === Ptg.Exp || raw === Ptg.Tbl) {
-    throw new ExcelNotSupportedError(
+    throw new ExcelUnsupportedFeatureError(
       `Read XLSB formula at ${where}`,
       raw === Ptg.Exp
         ? "a PtgExp that is not the whole formula"
@@ -760,7 +760,7 @@ function decodeClassTagged(state: DecodeState, raw: number, base: number): void 
       const functionId = reader.readUint16() & 0x7fff;
       const name = FUNCTION_NAME_BY_ID.get(functionId);
       if (name === undefined) {
-        throw new ExcelNotSupportedError(
+        throw new ExcelUnsupportedFeatureError(
           `Read XLSB formula at ${where}`,
           `built-in function id ${functionId} is not in this codec's table`
         );
@@ -843,7 +843,7 @@ function decodeClassTagged(state: DecodeState, raw: number, base: number): void 
       }
       const name = FUNCTION_NAME_BY_ID.get(functionId);
       if (name === undefined) {
-        throw new ExcelNotSupportedError(
+        throw new ExcelUnsupportedFeatureError(
           `Read XLSB formula at ${where}`,
           `built-in function id ${functionId} is not in this codec's table`
         );
@@ -957,7 +957,7 @@ function decodeClassTagged(state: DecodeState, raw: number, base: number): void 
       reader.skip(2);
       return;
     default:
-      throw new ExcelNotSupportedError(
+      throw new ExcelUnsupportedFeatureError(
         `Read XLSB formula at ${where}`,
         `Ptg token 0x${raw.toString(16).padStart(2, "0")} is not supported yet`
       );
@@ -1038,7 +1038,7 @@ function readNameX(state: DecodeState): AstNode {
     return { type: NodeType.Name, name };
   }
   if (link.kind !== "self") {
-    throw new ExcelNotSupportedError(
+    throw new ExcelUnsupportedFeatureError(
       `Read XLSB formula at ${where}`,
       "a defined name in another workbook is not supported yet"
     );
@@ -1060,7 +1060,7 @@ function readList(reader: BinaryReader, context: PtgContext, where: string): Ast
   // known, because skipping it shifts every field after it.
   const eptg = reader.readUint8();
   if (eptg !== 0x19) {
-    throw new ExcelNotSupportedError(
+    throw new ExcelUnsupportedFeatureError(
       `Read XLSB formula at ${where}`,
       `extended Ptg 0x18 0x${eptg.toString(16)} is not supported yet`
     );
@@ -1077,7 +1077,7 @@ function readList(reader: BinaryReader, context: PtgContext, where: string): Ast
   }
   // `nonresident` (bit 13): a table in another workbook, with its name in a `PtgExtraList` this codec does not read.
   if ((flags & 0x2000) !== 0) {
-    throw new ExcelNotSupportedError(
+    throw new ExcelUnsupportedFeatureError(
       `Read XLSB formula at ${where}`,
       "a structured reference to a table in another workbook is not supported yet"
     );
@@ -1142,7 +1142,7 @@ function readSheetPair(
   const entry = context.externSheets?.[ixti] ?? { first: ixti, last: ixti };
   const link = context.supportingLinks?.[entry.supportingLink ?? 0] ?? { kind: "self" };
   if (link.kind !== "self") {
-    throw new ExcelNotSupportedError(
+    throw new ExcelUnsupportedFeatureError(
       `Read XLSB formula at ${where}`,
       "a reference to another workbook is not supported yet"
     );
@@ -1486,7 +1486,7 @@ export function encodeFormulaAst(
   // A file Excel will not open, however faithfully it is encoded — see `nonReferenceArgument`.
   const refused = nonReferenceArgument(node);
   if (refused !== undefined) {
-    throw new ExcelNotSupportedError(`Write XLSB formula at ${where}`, refused);
+    throw new ExcelUnsupportedFeatureError(`Write XLSB formula at ${where}`, refused);
   }
   // A copy: an invoked call hands its whitespace to the call it applies to, which is a node of the encoder's own.
   const ownLayout: FormulaLayout = new Map(layout);
@@ -2847,7 +2847,7 @@ function internExternSheet(
 }
 
 function unsupported(where: string, what: string): never {
-  throw new ExcelNotSupportedError(
+  throw new ExcelUnsupportedFeatureError(
     `Write XLSB formula at ${where}`,
     `${what} is not supported yet`
   );

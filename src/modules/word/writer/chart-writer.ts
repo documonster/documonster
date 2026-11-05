@@ -24,7 +24,7 @@ import {
 } from "@word/core/chart-kept";
 import { drawingInteger } from "@word/core/drawing-geometry";
 import { DocxRawXmlPolicyError } from "@word/errors";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
   Chart,
   ChartAxis,
@@ -265,7 +265,7 @@ export function renderChartPart(
   xml: XmlSink,
   chart: Chart,
   options: {
-    readonly rawXmlPolicy?: WordSecurityPolicy["rawXmlPolicy"];
+    readonly rawXmlPolicy?: DocxSecurityPolicy["rawXmlPolicy"];
     /** The relationships the part is written with. */
     readonly relationshipIds?: ReadonlySet<string>;
   } = {}

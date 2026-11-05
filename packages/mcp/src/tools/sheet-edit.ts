@@ -15,7 +15,7 @@
 
 import { stat } from "node:fs/promises";
 
-import { Cell, ExcelNotSupportedError, Row, Workbook, Worksheet } from "documonster/excel";
+import { Cell, ExcelUnsupportedFeatureError, Row, Workbook, Worksheet } from "documonster/excel";
 import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
@@ -272,7 +272,7 @@ export const sheetEditTool = defineTool({
         ? await Workbook.toBuffer(wb, { format: container }).then(
             () => [],
             (cause: unknown): string[] =>
-              cause instanceof ExcelNotSupportedError ? [...cause.items] : []
+              cause instanceof ExcelUnsupportedFeatureError ? [...cause.items] : []
           )
         : [];
     await replaceAtomically(writeTarget.path, temporary =>

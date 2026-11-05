@@ -5,7 +5,7 @@
  * modules (e.g. archive) can reuse it without pulling in the whole stream API.
  */
 
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 import type { EventEmitterLike } from "@stream/types";
 
 function off(emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void): void {
@@ -27,7 +27,7 @@ export function onceEvent(emitter: EventEmitterLike, event: string): Promise<voi
     (typeof e.once !== "function" && typeof e.on !== "function")
   ) {
     return Promise.reject(
-      new StreamTypeError("an event emitter", emitter === null ? "null" : typeof emitter, {
+      new StreamArgumentError("an event emitter", emitter === null ? "null" : typeof emitter, {
         field: "emitter",
         where: "Streams.LowLevel.onceEvent"
       })

@@ -246,7 +246,7 @@ try {
 | `ExcelMarkdown.readFile(path, options?)`           | Node.js  | A file's first table (or every one) → new Workbook                                             |
 | `ExcelMarkdown.writeFile(wb, path, options?)`      | Node.js  | Write to file                                                                                  |
 
-**Workbook Options (`MarkdownOptions`)** extends both `MarkdownParseOptions` and `MarkdownFormatOptions`, plus:
+**Workbook options** come from `documonster/excel/markdown`: `ExcelMarkdownReadOptions` (`read`, `readFile`, `addWorksheet`, `addWorksheets`) extends `MarkdownParseOptions`, and `ExcelMarkdownWriteOptions` (`format`, `toBuffer`, `toBufferSync`, `writeFile`) extends `MarkdownFormatOptions`. Beyond those:
 
 | Option             | Type                      | Description                                                                                     |
 | ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------- |

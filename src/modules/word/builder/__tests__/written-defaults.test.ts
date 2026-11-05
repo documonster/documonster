@@ -1,6 +1,6 @@
 import { packageParts, partText } from "@word/__tests__/roundtrip-integrity.helpers";
 import { DocxError } from "@word/errors";
-import { Document, Io, Layout, Streaming } from "@word/index";
+import { Document, Io, Layout, Stream } from "@word/index";
 import type { DocxDocument } from "@word/types";
 /**
  * A document the library builds states current Word's new-document defaults —
@@ -83,7 +83,7 @@ describe("written docDefaults", () => {
   });
 
   it("states them in the streaming writer too", async () => {
-    const stream = Streaming.createDocxStream();
+    const stream = new Stream.DocumentWriter();
     stream.addText("x");
     const xml = await stylesXml(await stream.finalize());
     expect(xml).toContain("<w:rPrDefault>");

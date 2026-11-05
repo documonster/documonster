@@ -7,9 +7,12 @@
 import { Csv, CsvError } from "@csv/index";
 import { describe, expect, it } from "vitest";
 
-function formatStream(options: Parameters<typeof Csv.createFormatterStream>[0], rows: unknown[]) {
+function formatStream(
+  options: ConstructorParameters<typeof Csv.FormatterStream>[0],
+  rows: unknown[]
+) {
   return new Promise<string>((resolve, reject) => {
-    const stream = Csv.createFormatterStream(options);
+    const stream = new Csv.FormatterStream(options);
     let out = "";
     stream.on("data", (chunk: string) => (out += chunk));
     stream.on("end", () => resolve(out));
@@ -111,7 +114,7 @@ describe("Csv.format — options that cannot be read back are refused", () => {
     ["a decimalSeparator inside the delimiter", { delimiter: ",;", decimalSeparator: "," }]
   ])("%s", (_label, options) => {
     expect(() => Csv.format([["a"]], options as never)).toThrow(CsvError);
-    expect(() => Csv.createFormatterStream(options as never)).toThrow(CsvError);
+    expect(() => new Csv.FormatterStream(options as never)).toThrow(CsvError);
   });
 
   it("quotes a field holding a custom lineEnding", () => {

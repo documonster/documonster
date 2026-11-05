@@ -20,7 +20,7 @@ import {
   Package,
   Query,
   Security,
-  Streaming,
+  Stream,
   Template,
   Transform
 } from "../index";
@@ -339,8 +339,13 @@ describe("security policy", () => {
   });
 
   it("does not let a caller change the defaults for everyone", () => {
-    expect(Object.isFrozen(Security.DEFAULT_SECURITY_POLICY)).toBe(true);
-    expect(Object.isFrozen(Security.STRICT_SECURITY_POLICY)).toBe(true);
+    expect(Object.isFrozen(Security.DEFAULT_POLICY)).toBe(true);
+    expect(Object.isFrozen(Security.STRICT_POLICY)).toBe(true);
+  });
+
+  it("keeps the deprecated policy names as the same objects", () => {
+    expect(Security.DEFAULT_SECURITY_POLICY).toBe(Security.DEFAULT_POLICY);
+    expect(Security.STRICT_SECURITY_POLICY).toBe(Security.STRICT_POLICY);
   });
 });
 
@@ -411,13 +416,13 @@ describe("output options", () => {
     );
     refused(
       "stream",
-      () => Streaming.createWriter({ compressionLevel: 99 }),
+      () => new Stream.DocumentWriter({ compressionLevel: 99 }),
       "options.compressionLevel"
     );
   });
 
   it("refuses a streamed element that is not a block, before anything is written", () => {
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     refused("null", () => writer.add(null as never), "element");
     refused("bogus", () => writer.add({ type: "bogus" } as never), "element.type");
     refused("addText", () => writer.addText(42 as never), "content");

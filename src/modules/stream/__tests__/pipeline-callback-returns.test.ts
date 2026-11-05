@@ -10,7 +10,7 @@ const source = () => Streams.createReadableFromArray(["a", "b"]);
 
 describe("pipeline with a callback", () => {
   it("returns the last stage and calls back once it is done", async () => {
-    const sink = Streams.createCollector<string>({ objectMode: true });
+    const sink = new Streams.Collector<string>({ objectMode: true });
     const done = new Promise<Error | null | undefined>(resolve => {
       const returned = pipeline(source(), sink, err => resolve(err));
       expect(returned).toBe(sink);
@@ -20,7 +20,7 @@ describe("pipeline with a callback", () => {
   });
 
   it("returns the last stage when options come before the callback", async () => {
-    const sink = Streams.createCollector<string>({ objectMode: true });
+    const sink = new Streams.Collector<string>({ objectMode: true });
     const done = new Promise<void>(resolve => {
       expect(pipeline(source(), sink, { end: true }, () => resolve())).toBe(sink);
     });
@@ -28,7 +28,7 @@ describe("pipeline with a callback", () => {
   });
 
   it("still returns a promise without a callback", async () => {
-    const sink = Streams.createCollector<string>({ objectMode: true });
+    const sink = new Streams.Collector<string>({ objectMode: true });
     const returned = pipeline(source(), sink);
     expect(returned).toBeInstanceOf(Promise);
     await returned;

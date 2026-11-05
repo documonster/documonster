@@ -24,7 +24,7 @@
  * `Package.patchTemplate`), so importing `Template` does not pull the ZIP
  * reader and writer.
  */
-import { TemplateError as TemplateErrorClass } from "@word/errors";
+import { DocxTemplateError } from "@word/errors";
 import { fillTemplateFromSource as fillTemplateFromSourceImpl } from "@word/template/template-datasource";
 import {
   fill,
@@ -68,10 +68,10 @@ export const fillTemplateFromSource = fillTemplateFromSourceImpl;
 /** @deprecated Use {@link isChart}. Removed in 1.0. */
 export const isTemplateChart = isTemplateChartImpl;
 /**
- * @deprecated Import `TemplateError` from `documonster/word` directly. Removed in 1.0.
+ * @deprecated Import `DocxTemplateError` from `documonster/word` directly. Removed in 1.0.
  */
-export const TemplateError = TemplateErrorClass;
+export const TemplateError = DocxTemplateError;
 /**
- * @deprecated Import `TemplateError` from `documonster/word` directly. Removed in 1.0.
+ * @deprecated Import `DocxTemplateError` from `documonster/word` directly. Removed in 1.0.
  */
-export type TemplateError = TemplateErrorClass;
+export type TemplateError = DocxTemplateError;

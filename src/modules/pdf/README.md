@@ -466,7 +466,8 @@ Page indices are 0-based, and one index names each page for the editor's lifetim
 `pageCount - 1` are the pages the document was read with, and the pages added with `addPage()`
 or `copyPagesFrom()` are numbered after them, in the order added. `getPage`, `removePage`,
 `rotatePage`, `isPageRemoved` and `splitPages` all take the whole range; any index that names
-no page — out of range, fractional, `NaN`, not a number — throws `PdfStructureError`. Removing
+no page — out of range, fractional, `NaN`, not a number — throws `PdfArgumentError` with
+`field` naming the argument (`index`, or `options.pageIndices[i]` for `splitPages`). Removing
 a page renumbers nothing. `pageCount` stays the number of pages the document was read with;
 `outputPageCount` is the number a write produces now. `getPage` returns one handle per page:
 for a read or copied page it draws over the page's content, for a page added with `addPage()`
@@ -622,14 +623,14 @@ The entire PDF engine (core, font, render, reader) has **zero imports from the E
 ## Writer Options
 
 `Pdf.fromTable()` accepts `PdfExportOptions`. `Pdf.fromExcel()` accepts
-`ExcelToPdfOptions`, which extends the same writer options with an optional,
+`PdfFromExcelOptions`, which extends the same writer options with an optional,
 strongly typed formula recalculation hook:
 
 ```typescript
 import { ExcelFormula } from "documonster/excel/formula";
-import { Pdf, type ExcelToPdfOptions } from "documonster/pdf";
+import { Pdf, type PdfFromExcelOptions } from "documonster/pdf";
 
-const options: ExcelToPdfOptions = {
+const options: PdfFromExcelOptions = {
   recalculate: ExcelFormula.calculate,
   fitToPage: true
 };
@@ -643,7 +644,7 @@ in.
 ```typescript
 interface PdfExportOptions {
   // Page layout
-  pageSize?: PageSizeName | PdfPageSize; // "A4", "LETTER", "A3", etc. or { width, height }
+  pageSize?: PdfPageSizeName | PdfPageSize; // "A4", "LETTER", "A3", etc. or { width, height }
   orientation?: "portrait" | "landscape";
   margins?: Partial<PdfMargins>; // { top, right, bottom, left } in points (72pt = 1in)
   horizontalCentered?: boolean; // Center the grid horizontally (default: sheet's pageSetup)
@@ -683,7 +684,6 @@ interface PdfExportOptions {
   modDate?: Date;
 
   // Font
-  font?: Uint8Array; // Legacy single TrueType font shortcut
   fonts?: PdfFontConfig; // Named families, styled faces, TTC selection, and fallback
   defaultFontFamily?: string; // Fallback font family (default: "Helvetica")
   defaultFontSize?: number; // Fallback font size (default: 11)
@@ -741,12 +741,12 @@ name throws `PdfArgumentError`). Numeric positions are deprecated (removed in 1.
 1-based here but 0-based in `WordExcel.toDocx` and sheet ids in `Workbook.getWorksheet`, so the
 same number picks a different sheet in each. They still work exactly as before; a call
 passing a number is struck through in an editor, while options typed as the published
-`ExcelToPdfOptions` are not (they may hold only names).
+`PdfFromExcelOptions` are not (they may hold only names).
 
 ## Reader Options
 
 ```typescript
-interface ReadPdfOptions {
+interface PdfExtractOptions {
   password?: string; // Password for encrypted PDFs (user or owner)
   pages?: number[]; // Which pages to extract (1-based). Omit for all pages
   extractText?: boolean; // Extract text (default: true)
@@ -777,20 +777,20 @@ const result = await Pdf.extract(input.files[0]);
 ### Reader Result
 
 ```typescript
-interface ReadPdfResult {
+interface PdfExtractResult {
   text: string; // All text from all pages
-  pages: ReadPdfPage[]; // Per-page results
+  pages: PdfExtractedPage[]; // Per-page results
   metadata: PdfMetadata; // Document metadata
   formFields: PdfFormField[]; // Form fields (document-level)
   bookmarks: PdfBookmark[]; // Document outline / TOC
 }
 
-interface ReadPdfPage {
+interface PdfExtractedPage {
   pageNumber: number; // 1-based
   text: string; // Page text
-  textLines: TextLine[]; // Structured lines with positions
-  textFragments: TextFragment[]; // Raw fragments with exact coordinates
-  images: ExtractedImage[]; // Extracted images
+  textLines: PdfTextLine[]; // Structured lines with positions
+  textFragments: PdfTextFragment[]; // Raw fragments with exact coordinates
+  images: PdfExtractedImage[]; // Extracted images
   annotations: PdfAnnotation[]; // Annotations (links, comments, highlights)
   width: number; // Page width in points
   height: number; // Page height in points
@@ -1207,7 +1207,7 @@ const page = builder.addPage();
 page.drawText("Report", { x: 72, y: 760, fontFamily: "Noto Sans CJK SC" });
 ```
 
-`font?: Uint8Array` remains available on `Pdf.fromTable()` and `Pdf.fromExcel()` as the legacy single-font shortcut. It behaves as one default regular face and cannot be combined with `fonts`. `Builder.embedFont(bytes)` is the corresponding compatibility method; it replaces any prior Builder font configuration. `embedFont()` and `embedFonts()` must run before the first text command across all pages. Calling `addPage()` first is allowed if no text has yet been drawn.
+`Builder.embedFont(source)` is the single-face shortcut: it is `embedFonts({ default: { regular: source } })`, where `source` is the font bytes or `{ data, collectionIndex }` to pick a face of a `.ttc`, and it replaces any prior Builder font configuration. `embedFont()` and `embedFonts()` must run before the first text command across all pages. Calling `addPage()` first is allowed if no text has yet been drawn.
 
 If no configured face covers a character, the PDF displays that face's `.notdef` glyph, but retains the original Unicode sequence in ToUnicode for copy, search, accessibility, and extraction. One embedded face can encode at most 65,535 distinct Unicode sequences per PDF.
 
@@ -1405,7 +1405,7 @@ pnpm example --filter pdf-signatures
 
 ### `Pdf.extract(data, options?)`
 
-Read a PDF file and extract text, images, and metadata. Returns `Promise<ReadPdfResult>`.
+Read a PDF file and extract text, images, and metadata. Returns `Promise<PdfExtractResult>`.
 
 ```typescript
 import { Pdf } from "documonster/pdf";
@@ -1479,7 +1479,7 @@ const doc = new Pdf.Builder();
 doc.setMetadata({ title, author, subject, keywords, creator, producer });
 doc.setEncryption({ ownerPassword, userPassword?, permissions? });
 doc.setPdfACompliance();       // Enable PDF/A-1b
-doc.embedFont(fontBytes);      // Legacy single-default-font compatibility API
+doc.embedFont(fontBytes);      // One default face: bytes, or { data, collectionIndex } for a .ttc
 // Or: doc.embedFonts(fonts);  // Complete PdfFontConfig; the later call replaces earlier config
 
 const page = doc.addPage({ width?, height? }); // Returns Pdf.PageBuilder
@@ -1634,7 +1634,7 @@ Draw.render(list, Pdf.createDrawSurface(page, { x: 72, y: 500, width: 200, heigh
 
 ### `Pdf.parseSvgPath(d)`
 
-Parse an SVG path `d` attribute into an array of `PathOp` objects for `drawPath()`.
+Parse an SVG path `d` attribute into an array of `PdfPathOp` objects for `drawPath()`.
 
 ```typescript
 import { Pdf } from "documonster/pdf";

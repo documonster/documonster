@@ -28,7 +28,7 @@ import { readCellColumn, readRowNumber } from "@excel/xlsx/xform/sheet/cell-refe
 import { CellXform, formulaResultAsValue } from "@excel/xlsx/xform/sheet/cell-xform";
 import { EventEmitter } from "@utils/event-emitter";
 import { SaxParser } from "@xml/sax";
-import type { ParseOpenTag, SaxTag } from "@xml/types";
+import type { ParseOpenTag, XmlSaxTag } from "@xml/types";
 
 // ============================================================================
 // Internal Types
@@ -407,8 +407,8 @@ class WorksheetReader extends EventEmitter {
     // See `parseXformStream`: the parser counts prefixed attribute names so the normaliser need not search for them.
     let prefixedAttributes = 0;
 
-    parser.on("opentag", (rawNode: SaxTag) => {
-      let node: SaxTag | ParseOpenTag = rawNode;
+    parser.on("opentag", (rawNode: XmlSaxTag) => {
+      let node: XmlSaxTag | ParseOpenTag = rawNode;
       if (normalize) {
         const count = parser.prefixedAttributes;
         node = parserPrefixes.open(rawNode, count !== prefixedAttributes);
@@ -517,7 +517,7 @@ class WorksheetReader extends EventEmitter {
       }
     });
 
-    parser.on("closetag", (rawTag: SaxTag) => {
+    parser.on("closetag", (rawTag: XmlSaxTag) => {
       const tag = normalize ? { name: parserPrefixes.close(rawTag.name) } : rawTag;
       if (cellCol !== 0) {
         cellXform.parseClose(tag.name);

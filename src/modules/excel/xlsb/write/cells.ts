@@ -149,7 +149,7 @@ export function isRefused(
 /**
  * The construct a codec error names, trimmed to the part a caller can act on.
  *
- * `ExcelNotSupportedError` messages read "XLSB: A1 uses an array constant, which this writer cannot
+ * `ExcelUnsupportedFeatureError` messages read "XLSB: A1 uses an array constant, which this writer cannot
  * express" — the address and the framing are already in the report, so only the middle is kept.
  */
 function formulaReason(message: string): string {
@@ -373,9 +373,9 @@ function sharedRange(
 function followerCell(cell: SheetCell, head: Uint8Array): readonly Emitted[] | RefusedCell {
   // **Through `tryDecodeRange`, because `decodeCell` throws and this branch read as though it returned `undefined`.**
   //
-  // The guard below was unreachable: `decodeCell("")` raises `InvalidAddressError`, so a follower whose
+  // The guard below was unreachable: `decodeCell("")` raises `ExcelInvalidAddressError`, so a follower whose
   // `sharedFormula` was malformed took the *whole XLSB write* down instead of degrading to the reported loss the code
-  // claimed. Measured: a cell with `sharedFormula: ""` threw `InvalidAddressError: Invalid address:` out of
+  // claimed. Measured: a cell with `sharedFormula: ""` threw `ExcelInvalidAddressError: Invalid address:` out of
   // `Workbook.toBuffer`. The same shape sat in a local `decodeRange` used by `sharedRange`, whose `ref: ""` case threw
   // identically — while four other range callers in this module remembered the `try`/`catch`.
   const masterRange = tryDecodeRange(cell.sharedFormula!);

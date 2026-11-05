@@ -12,7 +12,7 @@ import {
 } from "@excel/core/cell-region";
 import { rangeAbsoluteShort, rangeCreate, serialisedSheetName } from "@excel/core/range";
 import { definedNameProblem } from "@excel/core/table-name";
-import { DefinedNameError, ExcelArgumentError } from "@excel/errors";
+import { ExcelDefinedNameError, ExcelArgumentError } from "@excel/errors";
 import type { DecodedAddress } from "@excel/types";
 import type { DecodedRange } from "@excel/utils/col-cache";
 import { colCache } from "@excel/utils/col-cache";
@@ -342,7 +342,7 @@ function storageKey(name: string, localSheetId?: number): string {
  */
 function refuseTableName(dn: DefinedNamesData, name: string): void {
   if (dn._tableNames?.has(excelNameKey(name)) === true) {
-    throw new DefinedNameError(
+    throw new ExcelDefinedNameError(
       `Defined name "${name}" is the name of a table in this workbook. ` +
         `Tables and defined names share one namespace, compared as Excel compares them (case-insensitive).`
     );
@@ -363,7 +363,7 @@ export function definedNamesHasName(dn: DefinedNamesData, name: string): boolean
 export function definedNamesCheckName(dn: DefinedNamesData, where: string, name: unknown): void {
   const problem = definedNameProblem(name);
   if (problem !== undefined) {
-    throw new DefinedNameError(
+    throw new ExcelDefinedNameError(
       `${where}: ${JSON.stringify(name)} is not a valid name — ${problem}.`
     );
   }

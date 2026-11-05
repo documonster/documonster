@@ -5,7 +5,7 @@
 
 import { xmlDecode } from "@utils/xml-encode";
 import { rebindRelationshipIds } from "@word/core/relationship-ids";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 import type { PreservedLink } from "@word/types";
 
@@ -641,22 +641,22 @@ export function renumberRawRangeIds(
   return last === 0 ? xml : out + xml.slice(last);
 }
 
-/** Registers a preserved hyperlink in the part being written; see `WordRenderContext.preservedLinkRId`. */
+/** Registers a preserved hyperlink in the part being written; see `DocxRenderContext.preservedLinkRId`. */
 export type PreservedLinkRId = (link: PreservedLink) => string | undefined;
 
 /**
- * Lightweight, content-renderer-facing subset of WordRenderContext.
+ * Lightweight, content-renderer-facing subset of DocxRenderContext.
  *
  * Most leaf renderers (run/paragraph/table/image) only need the rId remap and
- * the hyperlink rId map; passing the full WordRenderContext would couple them
+ * the hyperlink rId map; passing the full DocxRenderContext would couple them
  * to chartRIds/securityPolicy/etc. They take this `RenderHelpers` instead.
  */
 export interface RenderHelpers {
-  /** See WordRenderContext.imageRIdRemap. */
+  /** See DocxRenderContext.imageRIdRemap. */
   readonly imageRemap?: ReadonlyMap<string, string>;
-  /** See WordRenderContext.hyperlinkRIds. */
+  /** See DocxRenderContext.hyperlinkRIds. */
   readonly hyperlinkRIds?: ReadonlyWeakMap<object, string>;
-  /** See WordRenderContext.preservedLinkRId. */
+  /** See DocxRenderContext.preservedLinkRId. */
   readonly preservedLinkRId?: PreservedLinkRId;
   /**
    * Allocates the next document-wide unique drawing object id, used for
@@ -700,7 +700,7 @@ export interface RenderHelpers {
  * part-specific helpers the packager builds), so none of them can bypass the
  * package's bookmark, image and hyperlink maps.
  */
-export function renderHelpersFor(ctx: WordRenderContext): RenderHelpers {
+export function renderHelpersFor(ctx: DocxRenderContext): RenderHelpers {
   return {
     imageRemap: ctx.imageRIdRemap,
     hyperlinkRIds: ctx.hyperlinkRIds,
@@ -722,11 +722,11 @@ interface ReadonlyWeakMap<K extends WeakKey, V> {
 }
 
 /** Render context passed to all writer functions. */
-export interface WordRenderContext {
+export interface DocxRenderContext {
   /** Current part being rendered, fully qualified (e.g. `"/word/document.xml"`). */
   readonly partName: string;
   /** Security policy controlling raw XML, external targets, etc. */
-  readonly securityPolicy: WordSecurityPolicy;
+  readonly securityPolicy: DocxSecurityPolicy;
   /** ID generators (shared across all parts for a single document render). */
   readonly ids: IdGenerators;
   /** Raw XML output policy. If "reject", opaque content throws instead of being written. */
@@ -823,7 +823,7 @@ export function createIdGenerators(startValues?: {
 /** Create a default render context. */
 export function createRenderContext(options?: {
   partName?: string;
-  securityPolicy?: WordSecurityPolicy;
+  securityPolicy?: DocxSecurityPolicy;
   chartRIds?: Map<object, string>;
   imageRIdRemap?: Map<string, string>;
   hyperlinkRIds?: WeakMap<object, string>;
@@ -841,7 +841,7 @@ export function createRenderContext(options?: {
   reservedPermIds?: Iterable<number>;
   /** Revision ids used by markup the writer will not renumber. */
   reservedRevisionIds?: Iterable<number>;
-}): WordRenderContext {
+}): DocxRenderContext {
   const securityPolicy = options?.securityPolicy ?? DEFAULT_SECURITY_POLICY;
 
   return {

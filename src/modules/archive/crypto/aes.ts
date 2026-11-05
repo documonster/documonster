@@ -14,9 +14,10 @@
  * Works in both Node.js and browsers using the Web Crypto API.
  */
 
-import { checkUint } from "@archive/core/entry-checks";
+import { checkBytes, checkUint } from "@archive/core/entry-checks";
 import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import { toArrayBuffer } from "@archive/core/text";
+import { checkZipPassword } from "@archive/crypto/zip-crypto";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { randomBytes } from "@utils/crypto";
 
@@ -26,11 +27,11 @@ import { randomBytes } from "@utils/crypto";
 export type AesKeyStrength = 128 | 192 | 256;
 
 /** Refuse a key strength the AES extra field cannot name, before any table lookup. */
-function checkKeyStrength(where: string, keyStrength: unknown): void {
+export function checkKeyStrength(where: string, keyStrength: unknown, field = "keyStrength"): void {
   if (keyStrength !== 128 && keyStrength !== 192 && keyStrength !== 256) {
     throw new ArchiveArgumentError(
-      "keyStrength",
-      `${where}: keyStrength must be 128, 192 or 256, got ${String(keyStrength)}`
+      field,
+      `${where}: ${field} must be 128, 192 or 256, got ${String(keyStrength)}`
     );
   }
 }
@@ -429,6 +430,8 @@ export async function aesDecrypt(
   password: string | Uint8Array,
   keyStrength: AesKeyStrength
 ): Promise<Uint8Array> {
+  checkBytes("Archive.Crypto.decryptAes", "encryptedData", encryptedData);
+  checkZipPassword("Archive.Crypto.decryptAes", password);
   checkKeyStrength("Archive.Crypto.decryptAes", keyStrength);
   const components = extractAesComponents(encryptedData, keyStrength);
   if (!components) {
@@ -468,6 +471,8 @@ export async function aesEncrypt(
   password: string | Uint8Array,
   keyStrength: AesKeyStrength
 ): Promise<Uint8Array> {
+  checkBytes("Archive.Crypto.encryptAes", "data", data);
+  checkZipPassword("Archive.Crypto.encryptAes", password);
   checkKeyStrength("Archive.Crypto.encryptAes", keyStrength);
   const saltLen = AES_SALT_LENGTH[keyStrength];
 

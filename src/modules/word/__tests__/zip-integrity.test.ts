@@ -1,4 +1,4 @@
-import { Crc32MismatchError } from "@archive/core/errors";
+import { ZipCrc32MismatchError } from "@archive/core/errors";
 import { Document, DocxParseError, Io } from "@word/index";
 import { describe, expect, it } from "vitest";
 
@@ -17,7 +17,7 @@ describe("DOCX package integrity", () => {
       (e: unknown) => e
     );
     expect(error).toBeInstanceOf(DocxParseError);
-    expect((error as Error).cause).toBeInstanceOf(Crc32MismatchError);
+    expect((error as Error).cause).toBeInstanceOf(ZipCrc32MismatchError);
 
     const lenient = await Io.read(bad, { checkCrc32: false });
     expect(JSON.stringify(lenient.body)).toContain("Integrity marker text");

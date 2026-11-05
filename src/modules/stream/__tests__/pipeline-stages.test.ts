@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 describe("pipeline stage kinds", () => {
   it("accepts a generator stage in the middle of the chain", async () => {
     const source = Readable.from([new Uint8Array([1]), new Uint8Array([2])]);
-    const sink = Streams.createCollector<Uint8Array>();
+    const sink = new Streams.Collector<Uint8Array>();
     const doubleUp = async function* (chunks: AsyncIterable<unknown>) {
       for await (const chunk of chunks) {
         yield chunk as Uint8Array;
@@ -28,7 +28,7 @@ describe("pipeline stage kinds", () => {
   });
 
   it("accepts a bare iterable as the source", async () => {
-    const sink = Streams.createCollector<Uint8Array>();
+    const sink = new Streams.Collector<Uint8Array>();
 
     await pipeline([new Uint8Array([1]), new Uint8Array([2])], sink);
 
@@ -36,7 +36,7 @@ describe("pipeline stage kinds", () => {
   });
 
   it("accepts an async iterable as the source", async () => {
-    const sink = Streams.createCollector<Uint8Array>();
+    const sink = new Streams.Collector<Uint8Array>();
     const bytes = async function* () {
       yield new Uint8Array([7]);
     };

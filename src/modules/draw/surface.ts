@@ -47,7 +47,15 @@ export interface DrawSurface {
     paint: DrawPaint
   ): void;
 
-  /** Open or closed polyline. */
+  /**
+   * Open or closed polyline.
+   *
+   * `closed` is a positional boolean, which the API conventions otherwise rule out, on
+   * purpose: this is a backend interface that a surface *implements* rather than calls,
+   * and every primitive here takes its geometry positionally followed by its paint. An
+   * options object would allocate on every node of every render, in the one place the
+   * walker calls per primitive, to name a single flag the walker always passes.
+   */
   polyline(points: readonly DrawPoint[], closed: boolean, paint: DrawPaint): void;
 
   /**

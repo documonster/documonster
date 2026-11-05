@@ -5,16 +5,16 @@
 import {
   Cell,
   Column,
-  DefinedNameError,
+  ExcelDefinedNameError,
   DefinedNames,
   ExcelArgumentError,
   Image,
-  ImageError,
-  InvalidAddressError,
-  InvalidValueTypeError,
+  ExcelImageError,
+  ExcelInvalidAddressError,
+  ExcelInvalidValueTypeError,
   Row,
-  RowOutOfBoundsError,
-  ColumnOutOfBoundsError,
+  ExcelRowOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   Table,
   Workbook,
   Worksheet
@@ -36,21 +36,21 @@ describe("cell values a workbook cannot hold are refused", () => {
   it.each([NaN, Infinity, -Infinity])("%s", value => {
     const { ws } = sheet();
     Cell.setValue(ws, "A1", 1);
-    expect(() => Cell.setValue(ws, "A1", value)).toThrow(InvalidValueTypeError);
+    expect(() => Cell.setValue(ws, "A1", value)).toThrow(ExcelInvalidValueTypeError);
     expect(Cell.getValue(ws, "A1")).toBe(1);
   });
 
   it("in every path that writes a value: rows, tables, formula results", () => {
     const { ws } = sheet();
-    expect(() => Row.add(ws, [1, NaN])).toThrow(InvalidValueTypeError);
+    expect(() => Row.add(ws, [1, NaN])).toThrow(ExcelInvalidValueTypeError);
     expect(() =>
       Table.add(ws, { name: "T", ref: "D1", columns: [{ name: "A" }], rows: [[Infinity]] })
-    ).toThrow(InvalidValueTypeError);
+    ).toThrow(ExcelInvalidValueTypeError);
     expect(() => Cell.setValue(ws, "A5", { formula: "1/0", result: NaN })).toThrow(
       /formula result/
     );
     Cell.setValue(ws, "A6", { formula: "1+1", result: 2 });
-    expect(() => Cell.setResult(ws, "A6", NaN)).toThrow(InvalidValueTypeError);
+    expect(() => Cell.setResult(ws, "A6", NaN)).toThrow(ExcelInvalidValueTypeError);
     expect(Cell.getResult(ws, "A6")).toBe(2);
   });
 
@@ -59,7 +59,7 @@ describe("cell values a workbook cannot hold are refused", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     for (const value of [() => 1, Symbol("s"), 10n, cyclic, { big: 1n }]) {
-      expect(() => Cell.setValue(ws, "A1", value as never)).toThrow(InvalidValueTypeError);
+      expect(() => Cell.setValue(ws, "A1", value as never)).toThrow(ExcelInvalidValueTypeError);
     }
     // A plain object is still the documented JSON value.
     Cell.setValue(ws, "A1", { foo: 1 } as never);
@@ -74,25 +74,25 @@ describe("cell values a workbook cannot hold are refused", () => {
 });
 
 describe("addresses, rows and columns", () => {
-  it("a malformed address is an InvalidAddressError, for writers and readers alike", () => {
+  it("a malformed address is an ExcelInvalidAddressError, for writers and readers alike", () => {
     const { ws } = sheet();
     for (const address of ["1A", "A0", "A99999999", "", "A1B"]) {
-      expect(() => Cell.setValue(ws, address, 1), address).toThrow(InvalidAddressError);
-      expect(() => Cell.getValue(ws, address), address).toThrow(InvalidAddressError);
+      expect(() => Cell.setValue(ws, address, 1), address).toThrow(ExcelInvalidAddressError);
+      expect(() => Cell.getValue(ws, address), address).toThrow(ExcelInvalidAddressError);
     }
   });
 
   it("a row or column number outside the grid", () => {
     const { ws } = sheet();
     for (const row of [0, -1, 1.5, NaN, 1048577]) {
-      expect(() => Cell.getValue(ws, row, 1), String(row)).toThrow(RowOutOfBoundsError);
-      expect(() => Cell.setValue(ws, row, 1, 1), String(row)).toThrow(RowOutOfBoundsError);
-      expect(() => Row.setHeight(ws, row, 10), String(row)).toThrow(RowOutOfBoundsError);
+      expect(() => Cell.getValue(ws, row, 1), String(row)).toThrow(ExcelRowOutOfBoundsError);
+      expect(() => Cell.setValue(ws, row, 1, 1), String(row)).toThrow(ExcelRowOutOfBoundsError);
+      expect(() => Row.setHeight(ws, row, 10), String(row)).toThrow(ExcelRowOutOfBoundsError);
     }
     for (const col of [0, -1, 1.5, 16385]) {
-      expect(() => Cell.setValue(ws, 1, col, 1), String(col)).toThrow(ColumnOutOfBoundsError);
+      expect(() => Cell.setValue(ws, 1, col, 1), String(col)).toThrow(ExcelColumnOutOfBoundsError);
     }
-    expect(() => Row.insert(ws, 0, [1])).toThrow(RowOutOfBoundsError);
+    expect(() => Row.insert(ws, 0, [1])).toThrow(ExcelRowOutOfBoundsError);
     expect(Row.getCount(ws)).toBe(0);
   });
 });
@@ -125,12 +125,12 @@ describe("defined names", () => {
     const { wb } = sheet();
     const dn = Workbook.getDefinedNames(wb);
     for (const name of ["A1", "XFD1048576", "R1C1", "R", "c", "1st", "has space", ""]) {
-      expect(() => DefinedNames.add(dn, "S!$A$1", name), name).toThrow(DefinedNameError);
-      expect(() => DefinedNames.addFormula(dn, name, "1"), name).toThrow(DefinedNameError);
+      expect(() => DefinedNames.add(dn, "S!$A$1", name), name).toThrow(ExcelDefinedNameError);
+      expect(() => DefinedNames.addFormula(dn, name, "1"), name).toThrow(ExcelDefinedNameError);
     }
-    expect(() => DefinedNames.add(dn, "not a ref", "Good")).toThrow(DefinedNameError);
-    expect(() => DefinedNames.add(dn, "S!$A$1:$A$99999999", "Good")).toThrow(DefinedNameError);
-    expect(() => DefinedNames.addFormula(dn, "Good", "")).toThrow(DefinedNameError);
+    expect(() => DefinedNames.add(dn, "not a ref", "Good")).toThrow(ExcelDefinedNameError);
+    expect(() => DefinedNames.add(dn, "S!$A$1:$A$99999999", "Good")).toThrow(ExcelDefinedNameError);
+    expect(() => DefinedNames.addFormula(dn, "Good", "")).toThrow(ExcelDefinedNameError);
     expect(DefinedNames.list(dn)).toEqual([]);
   });
 
@@ -148,8 +148,8 @@ describe("defined names", () => {
 describe("images", () => {
   it("placing or using as background an image the workbook does not have", () => {
     const { wb, ws } = sheet();
-    expect(() => Image.place(ws, 999, "A1:B2")).toThrow(ImageError);
-    expect(() => Image.setBackground(ws, 3)).toThrow(ImageError);
+    expect(() => Image.place(ws, 999, "A1:B2")).toThrow(ExcelImageError);
+    expect(() => Image.setBackground(ws, 3)).toThrow(ExcelImageError);
     expect(Image.list(ws)).toEqual([]);
     const id = Image.add(wb, { buffer: PNG, extension: "png" });
     Image.place(ws, id, "A1:B2");
@@ -209,7 +209,7 @@ describe("style values outside the schema's vocabulary", () => {
   it("refusing a style leaves no new cell behind", () => {
     const { ws } = sheet();
     expect(() => Cell.setFont(ws, "C9", { size: -1 })).toThrow(ExcelArgumentError);
-    expect(() => Cell.setValue(ws, "C9", NaN)).toThrow(InvalidValueTypeError);
+    expect(() => Cell.setValue(ws, "C9", NaN)).toThrow(ExcelInvalidValueTypeError);
     expect(Cell.has(ws, "C9")).toBe(false);
   });
 

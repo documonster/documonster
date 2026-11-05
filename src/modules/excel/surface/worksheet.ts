@@ -82,7 +82,11 @@ import type {
   WorksheetPanes
 } from "@excel/core/worksheet-core";
 import { setSheetModel } from "@excel/core/worksheet-load";
-import { ColumnOutOfBoundsError, InvalidAddressError, RowOutOfBoundsError } from "@excel/errors";
+import {
+  ExcelColumnOutOfBoundsError,
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError
+} from "@excel/errors";
 import { checkAutoFilter } from "@excel/surface/argument-checks";
 import { add as addConditionalFormattingChecked } from "@excel/surface/conditional-formatting";
 import { checkWorksheetModel } from "@excel/surface/model-checks";
@@ -129,7 +133,7 @@ export function toJson(
  * `{ header: "A" }`. `range` limits the read to an `A1:C9` range, or starts it at a 0-based row.
  *
  * @throws {ExcelArgumentError} when `header` is not one of those forms or `range` is a negative or fractional row.
- * @throws {InvalidAddressError} when `range` is text that is not a bounded range.
+ * @throws {ExcelInvalidAddressError} when `range` is text that is not a bounded range.
  */
 export function toJson(
   ws: WorksheetData,
@@ -184,16 +188,20 @@ function mergeRange(where: string, ws: WorksheetData, cells: RangeInput[]): Rang
     range.bottom > MAX_ROW ||
     range.right > MAX_COL
   ) {
-    throw new InvalidAddressError(describe(), "the range must name cells inside A1:XFD1048576", {
-      field: "cells",
-      where
-    });
+    throw new ExcelInvalidAddressError(
+      describe(),
+      "the range must name cells inside A1:XFD1048576",
+      {
+        field: "cells",
+        where
+      }
+    );
   }
   if (
     range.sheetName !== undefined &&
     sheetNameKey(range.sheetName) !== sheetNameKey(getSheetName(ws))
   ) {
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       describe(),
       `the range names sheet "${range.sheetName}", not this sheet ("${getSheetName(ws)}")`,
       { field: "cells", where }
@@ -209,8 +217,8 @@ function mergeRange(where: string, ws: WorksheetData, cells: RangeInput[]): Rang
  * A single cell is left as it is: there is nothing to merge, and Excel stores no such merge. It used to be recorded
  * and reported by `getMergedRegions`, then dropped when the workbook was written.
  *
- * @throws {MergeConflictError} when the range overlaps a merge already on the sheet.
- * @throws {InvalidAddressError} when the range is outside the grid or names another sheet.
+ * @throws {ExcelMergeConflictError} when the range overlaps a merge already on the sheet.
+ * @throws {ExcelInvalidAddressError} when the range is outside the grid or names another sheet.
  */
 export function merge(ws: WorksheetData, ...cells: RangeInput[]): void {
   const range = mergeRange("Worksheet.merge", ws, cells);
@@ -298,6 +306,7 @@ export function protect(
   legacyOptions?: Partial<SheetProtection>
 ): Promise<void> {
   try {
+    checkWorksheet(ws);
     if (isRecordArgument(passwordOrOptions)) {
       checkProtectionOptions(
         "Worksheet.protect",
@@ -359,13 +368,13 @@ function checkExtent(
   const lastRow = start.row + rows - 1;
   const lastCol = start.col + columns - 1;
   if (rows > 0 && lastRow > MAX_ROW) {
-    throw new RowOutOfBoundsError(lastRow, "the data reaches past the last row, 1048576", {
+    throw new ExcelRowOutOfBoundsError(lastRow, "the data reaches past the last row, 1048576", {
       field: "data",
       where
     });
   }
   if (columns > 0 && lastCol > MAX_COL) {
-    throw new ColumnOutOfBoundsError(
+    throw new ExcelColumnOutOfBoundsError(
       lastCol,
       "the data reaches past the last column, XFD (16384)",
       {
@@ -535,7 +544,7 @@ export function split(
  * Put an auto-filter over a range — an `A1:C4` string or a `{ from, to }` pair — or remove it with `null` or
  * `undefined` (what {@link getAutoFilter} answers for a sheet with none, so its result can be given back).
  *
- * @throws {InvalidAddressError} when the range is not a cell range of this sheet: a sheet-qualified or malformed
+ * @throws {ExcelInvalidAddressError} when the range is not a cell range of this sheet: a sheet-qualified or malformed
  * reference was written as given, and Excel repaired the file.
  */
 export function setAutoFilter(ws: WorksheetData, range: AutoFilter | null | undefined): void {
@@ -560,7 +569,7 @@ export function setAutoFilter(ws: WorksheetData, range: AutoFilter | null | unde
  * it follow.
  *
  * @throws {ExcelArgumentError} when the model is malformed.
- * @throws {WorksheetNameError} when `name` is taken or not a name Excel accepts.
+ * @throws {ExcelWorksheetNameError} when `name` is taken or not a name Excel accepts.
  */
 export function setModel(ws: WorksheetData, value: WorksheetModel): void {
   checkWorksheetAttached(ws);

@@ -24,7 +24,7 @@ import { isReadTarget } from "@excel/core/workbook-io-types";
 import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
 import { eachRow } from "@excel/core/worksheet";
-import { ExcelArgumentError, WorksheetNameError } from "@excel/errors";
+import { ExcelArgumentError, ExcelWorksheetNameError } from "@excel/errors";
 import type { CellValue, CellValueInput } from "@excel/types";
 import { argumentChecks } from "@excel/utils/arguments";
 import { checkFormatArguments } from "@markdown/arguments";
@@ -123,10 +123,10 @@ function populateMarkdownWorksheet(
  * What a Markdown read takes: the text, or its UTF-8 bytes — what `ExcelMarkdown.toBuffer` and `toBufferSync`
  * produce. A byte-order mark is dropped.
  */
-export type MarkdownInput = string | ArrayBufferView | ArrayBuffer;
+export type ExcelMarkdownInput = string | ArrayBufferView | ArrayBuffer;
 
 /** Options for reading a Markdown table into a worksheet — `ExcelMarkdown.read`, `readFile`, `addWorksheet`, … */
-export interface MarkdownReadOptions extends MarkdownParseOptions {
+export interface ExcelMarkdownReadOptions extends MarkdownParseOptions {
   /** The name of the worksheet the table is written to (`name`, `name_2`, … for several tables). */
   sheetName?: string;
   /**
@@ -144,7 +144,7 @@ export interface MarkdownReadOptions extends MarkdownParseOptions {
 }
 
 /** Options for writing a worksheet as a Markdown table — `ExcelMarkdown.format`, `toBuffer`, `writeFile`, … */
-export interface MarkdownWriteOptions extends MarkdownFormatOptions {
+export interface ExcelMarkdownWriteOptions extends MarkdownFormatOptions {
   /** The worksheet written, by name. Default: the first. */
   sheetName?: string;
   /** The worksheet written, by id, when no `sheetName` is given. */
@@ -226,10 +226,10 @@ const UTF8 = new TextDecoder("utf-8");
 /** Refuse a `tables` that is not one of its two values, or that contradicts what the call returns. */
 function checkTables(
   where: string,
-  options: MarkdownReadOptions | MarkdownOptions | undefined,
+  options: ExcelMarkdownReadOptions | MarkdownOptions | undefined,
   only?: "first" | "all"
 ): void {
-  const tables = (options as MarkdownReadOptions | undefined)?.tables;
+  const tables = (options as ExcelMarkdownReadOptions | undefined)?.tables;
   if (tables === undefined) {
     return;
   }
@@ -256,7 +256,7 @@ function checkTables(
  */
 function readSettings(
   where: string,
-  options: MarkdownReadOptions | MarkdownOptions | undefined,
+  options: ExcelMarkdownReadOptions | MarkdownOptions | undefined,
   typed: boolean
 ): { parse: MarkdownParseOptions; map?: (text: string, column: number) => CellValueInput } {
   checkMarkdownOptions(where, options);
@@ -288,8 +288,8 @@ function readSettings(
 /** {@link readMarkdown}, reading values as the `ExcelMarkdown` namespace does when `typed`. */
 export function readMarkdownInto(
   workbook: Workbook,
-  input: MarkdownInput,
-  options: MarkdownReadOptions | MarkdownOptions | undefined,
+  input: ExcelMarkdownInput,
+  options: ExcelMarkdownReadOptions | MarkdownOptions | undefined,
   typed: boolean,
   where = "ExcelMarkdown.addWorksheet"
 ): Worksheet {
@@ -322,8 +322,8 @@ function derivedSheetName(name: string, t: number): string {
 /** {@link readMarkdownAll}, reading values as the `ExcelMarkdown` namespace does when `typed`. */
 export function readMarkdownAllInto(
   workbook: Workbook,
-  input: MarkdownInput,
-  options: MarkdownReadOptions | MarkdownOptions | undefined,
+  input: ExcelMarkdownInput,
+  options: ExcelMarkdownReadOptions | MarkdownOptions | undefined,
   typed: boolean,
   where = "ExcelMarkdown.addWorksheets"
 ): Worksheet[] {
@@ -345,7 +345,7 @@ export function readMarkdownAllInto(
       validateSheetName(workbook, name);
       const key = sheetNameKey(name);
       if (seen.has(key)) {
-        throw new WorksheetNameError(`Sheet name already exists: ${name}`);
+        throw new ExcelWorksheetNameError(`Sheet name already exists: ${name}`);
       }
       seen.add(key);
     }
@@ -375,8 +375,8 @@ export function readMarkdownAllInto(
  */
 export function addMarkdownWorksheet(
   workbook: Workbook,
-  input: MarkdownInput,
-  options?: MarkdownReadOptions
+  input: ExcelMarkdownInput,
+  options?: ExcelMarkdownReadOptions
 ): Worksheet {
   checkMarkdownOptions("ExcelMarkdown.addWorksheet", options);
   checkTables("ExcelMarkdown.addWorksheet", options, "first");
@@ -386,8 +386,8 @@ export function addMarkdownWorksheet(
 /** Read every Markdown table in `input`, one new worksheet each, read as {@link addMarkdownWorksheet} reads one. */
 export function addMarkdownWorksheets(
   workbook: Workbook,
-  input: MarkdownInput,
-  options?: MarkdownReadOptions
+  input: ExcelMarkdownInput,
+  options?: ExcelMarkdownReadOptions
 ): Worksheet[] {
   checkMarkdownOptions("ExcelMarkdown.addWorksheets", options);
   checkTables("ExcelMarkdown.addWorksheets", options, "all");
@@ -430,7 +430,10 @@ export function readMarkdownAll(
  * const everyTable = ExcelMarkdown.read(document, { tables: "all", sheetName: "Table" });
  * ```
  */
-export function readMarkdownWorkbook(input: MarkdownInput, options?: MarkdownReadOptions): Workbook;
+export function readMarkdownWorkbook(
+  input: ExcelMarkdownInput,
+  options?: ExcelMarkdownReadOptions
+): Workbook;
 /**
  * @deprecated Use `ExcelMarkdown.addWorksheet(workbook, input, options)`, which this form does — it adds a
  * worksheet to `workbook` and returns it. `ExcelMarkdown.read(input)` returns a new workbook. Removed in 1.0.
@@ -441,21 +444,25 @@ export function readMarkdownWorkbook(
   options?: MarkdownOptions
 ): Worksheet;
 export function readMarkdownWorkbook(
-  first: Workbook | MarkdownInput,
+  first: Workbook | ExcelMarkdownInput,
   second?: string | MarkdownOptions,
   third?: MarkdownOptions
 ): Workbook | Worksheet {
   if (isReadTarget(first)) {
     return readMarkdownInto(first, second as string, third, false, "ExcelMarkdown.read");
   }
-  return readNewWorkbook("ExcelMarkdown.read", first, second as MarkdownReadOptions | undefined);
+  return readNewWorkbook(
+    "ExcelMarkdown.read",
+    first,
+    second as ExcelMarkdownReadOptions | undefined
+  );
 }
 
 /** A new workbook holding the first table of `input`, or every one with `{ tables: "all" }`. */
 export function readNewWorkbook(
   where: string,
-  input: MarkdownInput,
-  options: MarkdownReadOptions | undefined
+  input: ExcelMarkdownInput,
+  options: ExcelMarkdownReadOptions | undefined
 ): Workbook {
   const workbook = createWorkbook();
   if (isRecord(options) && options.tables === "all") {
@@ -479,13 +486,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * workbook with no sheets.
  *
  * A date cell is written as the calendar value it holds — ISO 8601 in UTC, or `dateFormat` filled from the UTC
- * fields — unless `dateUTC: false`; see {@link MarkdownWriteOptions.dateUTC}.
+ * fields — unless `dateUTC: false`; see {@link ExcelMarkdownWriteOptions.dateUTC}.
  *
  * @throws {ExcelArgumentError} for an argument or option this bridge cannot use — the message names the function
  * called and `field` the option — including a worksheet name or id the workbook does not have (that used to write
  * `""`, so a misspelt name produced an empty table without a word).
  */
-export function writeMarkdown(workbook: Workbook, options?: MarkdownWriteOptions): string {
+export function writeMarkdown(workbook: Workbook, options?: ExcelMarkdownWriteOptions): string {
   return formatWorksheet("ExcelMarkdown.format", workbook, options);
 }
 
@@ -493,7 +500,7 @@ export function writeMarkdown(workbook: Workbook, options?: MarkdownWriteOptions
 export function formatWorksheet(
   where: string,
   workbook: Workbook,
-  options?: MarkdownWriteOptions
+  options?: ExcelMarkdownWriteOptions
 ): string {
   if (!isReadTarget(workbook)) {
     fail(where, "workbook", "a workbook", workbook);
@@ -589,7 +596,7 @@ export function formatWorksheet(
  */
 export function writeMarkdownBuffer(
   workbook: Workbook,
-  options?: MarkdownWriteOptions
+  options?: ExcelMarkdownWriteOptions
 ): Uint8Array {
   return new TextEncoder().encode(formatWorksheet("ExcelMarkdown.toBufferSync", workbook, options));
 }
@@ -602,7 +609,7 @@ export function writeMarkdownBuffer(
  */
 export async function markdownToBuffer(
   workbook: Workbook,
-  options?: MarkdownWriteOptions
+  options?: ExcelMarkdownWriteOptions
 ): Promise<Uint8Array> {
   return new TextEncoder().encode(formatWorksheet("ExcelMarkdown.toBuffer", workbook, options));
 }

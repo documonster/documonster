@@ -26,12 +26,18 @@ export * as WordMarkdown from "@word/surface/markdown";
 export { DocxArgumentError, DocxError, DocxInvalidImageError, isDocxError } from "@word/errors";
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";
-export type {
-  MarkdownRenderOptions,
-  MarkdownImportOptions,
-  MarkdownImageData,
-  MarkdownBodyResult
+import type {
+  MarkdownRenderOptions as DocxMarkdownRenderOptions,
+  MarkdownImportOptions as DocxMarkdownImportOptions,
+  MarkdownImageData as DocxMarkdownImageData,
+  MarkdownBodyResult as DocxMarkdownBodyResult
 } from "@word/convert/markdown/markdown";
+export type {
+  DocxMarkdownRenderOptions,
+  DocxMarkdownImportOptions,
+  DocxMarkdownImageData,
+  DocxMarkdownBodyResult
+};
 
 /** @deprecated Use {@link WordMarkdown.fromDocx}. Removed in 1.0. */
 export const renderToMarkdown = renderToMarkdownImpl;
@@ -39,3 +45,16 @@ export const renderToMarkdown = renderToMarkdownImpl;
 export const markdownToDocx = markdownToDocxImpl;
 /** @deprecated Use {@link WordMarkdown.toDocxBody}. Removed in 1.0. */
 export const markdownToDocxBody = markdownToDocxBodyImpl;
+
+// =============================================================================
+// Deprecated unprefixed type names — every flat operation type of this entry carries `Docx`
+// =============================================================================
+
+/** @deprecated Use {@link DocxMarkdownRenderOptions}. Removed in 1.0. */
+export type MarkdownRenderOptions = DocxMarkdownRenderOptions;
+/** @deprecated Use {@link DocxMarkdownImportOptions}. Removed in 1.0. */
+export type MarkdownImportOptions = DocxMarkdownImportOptions;
+/** @deprecated Use {@link DocxMarkdownImageData}. Removed in 1.0. */
+export type MarkdownImageData = DocxMarkdownImageData;
+/** @deprecated Use {@link DocxMarkdownBodyResult}. Removed in 1.0. */
+export type MarkdownBodyResult = DocxMarkdownBodyResult;

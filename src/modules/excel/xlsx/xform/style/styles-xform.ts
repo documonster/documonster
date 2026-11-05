@@ -1,6 +1,6 @@
 import { Enums } from "@excel/core/enums";
 import type { NamedStyleEntry } from "@excel/core/workbook-core";
-import { ExcelNotSupportedError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
 import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
@@ -15,7 +15,7 @@ import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { StyleXform } from "@excel/xlsx/xform/style/style-xform";
 import { excelNameKey } from "@utils/name-key";
-import type { SaxTag, XmlSink } from "@xml/types";
+import type { XmlSaxTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // custom numfmt ids start here
@@ -605,7 +605,7 @@ class StylesXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: SaxTag): boolean {
+  parseOpen(node: XmlSaxTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -1177,7 +1177,7 @@ class StylesXformMock extends StylesXform {
       case Enums.ValueType.Checkbox:
         // Checkbox rendering relies on style extensions (extLst) and workbook-level parts.
         // The mock style manager intentionally does not build those structures.
-        throw new ExcelNotSupportedError(
+        throw new ExcelUnsupportedFeatureError(
           "Checkbox cells",
           "require styles to be enabled (useStyles: true)"
         );

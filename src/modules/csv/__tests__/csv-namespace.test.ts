@@ -42,11 +42,29 @@ describe("Csv namespace", () => {
     expect(Csv.generateAsync).toBe(csvGenerateAsync);
   });
 
-  it("factories build the stream classes, whose deprecated value exports remain", () => {
-    expect(Csv.createParserStream()).toBeInstanceOf(CsvParserStream);
-    expect(Csv.createFormatterStream()).toBeInstanceOf(CsvFormatterStream);
+  it("publishes the stream classes, built with their constructors", () => {
     expect(Csv.ParserStream).toBe(CsvParserStream);
     expect(Csv.FormatterStream).toBe(CsvFormatterStream);
+    expect(new Csv.ParserStream()).toBeInstanceOf(CsvParserStream);
+    expect(new Csv.FormatterStream()).toBeInstanceOf(CsvFormatterStream);
+  });
+
+  it("keeps the deprecated factories, which build the same classes", async () => {
+    expect(Csv.createParserStream({ headers: true })).toBeInstanceOf(Csv.ParserStream);
+    expect(Csv.createFormatterStream()).toBeInstanceOf(Csv.FormatterStream);
+    expect(() => Csv.createParserStream({ delimiter: 5 as never })).toThrow(
+      /^new Csv\.ParserStream: /
+    );
+
+    const rows = await new Promise<unknown[]>((resolve, reject) => {
+      const out: unknown[] = [];
+      const parser = Csv.createParserStream({ headers: true });
+      parser.on("data", row => out.push(row));
+      parser.on("end", () => resolve(out));
+      parser.on("error", reject);
+      parser.end("a,b\n1,2\n");
+    });
+    expect(rows).toEqual([{ a: "1", b: "2" }]);
   });
 
   it("detectDelimiter takes an options object and still accepts the positional form", () => {

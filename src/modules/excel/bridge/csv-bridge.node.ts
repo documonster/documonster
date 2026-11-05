@@ -8,7 +8,7 @@
 import { open, stat } from "node:fs/promises";
 import type { Readable, Writable } from "node:stream";
 
-import type { CsvReadOptions, CsvWriteOptions } from "@excel/bridge/csv-bridge";
+import type { ExcelCsvReadOptions, ExcelCsvWriteOptions } from "@excel/bridge/csv-bridge";
 import {
   checkCsvReadArguments,
   checkCsvWriteArguments,
@@ -30,7 +30,7 @@ import { createReadStream, createWriteStream, safeStats } from "@utils/fs";
 export async function readCsvFile(
   workbook: Workbook,
   filename: string,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet> {
   checkFilePath("ExcelCsv.readFile", filename);
   checkCsvReadArguments("ExcelCsv.readFile", options);
@@ -61,7 +61,7 @@ export async function readCsvFile(
  */
 export async function readCsvFileWorkbook(
   filename: string,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): Promise<Workbook>;
 /**
  * @deprecated Use `ExcelCsv.addWorksheet(workbook, createReadStream(filename, "utf8"), options)`, which
@@ -71,29 +71,29 @@ export async function readCsvFileWorkbook(
 export async function readCsvFileWorkbook(
   workbook: Workbook,
   filename: string,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet>;
 export async function readCsvFileWorkbook(
   first: Workbook | string,
-  second?: string | CsvReadOptions,
-  third?: CsvReadOptions
+  second?: string | ExcelCsvReadOptions,
+  third?: ExcelCsvReadOptions
 ): Promise<Workbook | Worksheet> {
   if (isReadTarget(first)) {
     return readCsvFile(first, second as string, third);
   }
   const workbook = createWorkbook();
-  await readCsvFile(workbook, first, second as CsvReadOptions | undefined);
+  await readCsvFile(workbook, first, second as ExcelCsvReadOptions | undefined);
   return workbook;
 }
 
 /**
  * Write a worksheet to a CSV file path (Node.js only). With `append`, a file that exists and is not empty is continued
- * with every row; `writeHeaders: false` leaves out the sheet's first (header) row. See {@link CsvWriteOptions.append}.
+ * with every row; `writeHeaders: false` leaves out the sheet's first (header) row. See {@link ExcelCsvWriteOptions.append}.
  */
 export async function writeCsvFile(
   workbook: Workbook,
   filename: string,
-  options?: CsvWriteOptions
+  options?: ExcelCsvWriteOptions
 ): Promise<void> {
   checkFilePath("ExcelCsv.writeFile", filename);
   // Before the file is opened: a refused option used to leave it created, or truncated.
@@ -118,10 +118,19 @@ export async function writeCsvFile(
     highWaterMark: options?.highWaterMark ?? 64 * 1024,
     flags: options?.append ? "a" : "w"
   });
+  // Only the file stream's own failure is a file-system error; one from the formatter is passed on as it is.
+  let fileFailure: unknown;
+  writeStream.once("error", error => {
+    fileFailure = error;
+  });
   if (breakFirst) {
     writeStream.write(options?.lineEnding ?? "\n");
   }
-  return streamWorksheet("ExcelCsv.writeFile", workbook, writeStream as never, options, true);
+  try {
+    await streamWorksheet("ExcelCsv.writeFile", workbook, writeStream as never, options, true);
+  } catch (error) {
+    throw error === fileFailure ? fileSystemError(filename, "write", error, "CSV") : error;
+  }
 }
 
 /**
@@ -194,7 +203,7 @@ async function needsLineBreak(
  */
 export function createCsvReadStream(
   workbook: Workbook,
-  options?: CsvWriteOptions
+  options?: ExcelCsvWriteOptions
 ): IReadable<Uint8Array> & Readable {
   return createCsvByteStream(workbook, options);
 }
@@ -206,7 +215,7 @@ export function createCsvReadStream(
  */
 export function createCsvImportStream(
   workbook: Workbook,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): IWritable<Uint8Array | string> & Writable {
   return createCsvImportParser(workbook, options);
 }

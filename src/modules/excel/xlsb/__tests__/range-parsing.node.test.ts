@@ -13,7 +13,7 @@
  * the same rectangle — so refusing lost a range the caller had described perfectly well.
  *
  * **And `decodeCell` throws.** Three guards written as `if (x === undefined) return …` were therefore unreachable, and a
- * malformed `ref` or `sharedFormula` took the whole write down with `InvalidAddressError` instead of degrading to the
+ * malformed `ref` or `sharedFormula` took the whole write down with `ExcelInvalidAddressError` instead of degrading to the
  * reported loss the code claimed.
  */
 import { Workbook, Worksheet } from "@excel";
@@ -87,7 +87,7 @@ describe("a malformed reference degrades instead of crashing the write", () => {
     ["a follower with an empty master", { formula: "SUM(B1:B2)", result: 3, sharedFormula: "" }],
     ["a follower with a nonsense master", { formula: "SUM(B1:B2)", result: 3, sharedFormula: "@@" }]
   ])("survives %s", async (_label, value) => {
-    // Each of these threw `InvalidAddressError` out of `Workbook.toBuffer` — not a reported loss, the entire write.
+    // Each of these threw `ExcelInvalidAddressError` out of `Workbook.toBuffer` — not a reported loss, the entire write.
     const workbook = Workbook.create();
     // `Cell.setValue` refuses a malformed shared formula at the call now; the writer still has to survive one a model
     // carries, so the value comes in through the cell model, which keeps what it is given.

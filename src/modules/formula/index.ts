@@ -13,6 +13,9 @@
  * ```
  */
 
+import type { AstNode as AstNodeImpl } from "@formula/syntax/ast";
+import type { Token as TokenImpl } from "@formula/syntax/token-types";
+
 // Public value API — the `Formula` domain namespace. Tree-shaken per-member
 // on rolldown / rspack; a consumer that references only `Formula.tokenize`
 // never pulls in the evaluator.
@@ -27,13 +30,21 @@ export {
 } from "@formula/errors";
 
 // Syntax types, so callers can name what `tokenize` / `parse` return and switch
-// exhaustively over token / node kinds. Each member of the `Token` and `AstNode` unions is
-// published too, so a visitor can name the node it handles. Members carry the module prefix
-// (`FormulaCellRefNode`), as every flat type of an entry with generic vocabulary does;
-// `Token`, `AstNode`, `TokenType` and `NodeType` were published before that rule.
+// exhaustively over token / node kinds. Each member of the `FormulaToken` and `FormulaAstNode`
+// unions is published too, so a visitor can name the node it handles. Every flat type carries
+// the module prefix (`FormulaCellRefNode`), as every flat type of an entry with generic
+// vocabulary does; `Token`, `AstNode`, `TokenType` and `NodeType` were published before that
+// rule and stay as deprecated names.
+export { TokenType as FormulaTokenType } from "@formula/syntax/token-types";
+/**
+ * @deprecated Use {@link FormulaTokenType}. Removed in 1.0.
+ *
+ * An export specifier rather than the usual `const` + `type` pair: those would lose the enum's
+ * member types, so `TokenType.Number` in a type position would stop compiling.
+ */
 export { TokenType } from "@formula/syntax/token-types";
 export type {
-  Token,
+  Token as FormulaToken,
   NumberToken as FormulaNumberToken,
   StringToken as FormulaStringToken,
   BooleanToken as FormulaBooleanToken,
@@ -59,9 +70,14 @@ export type {
   AtSignToken as FormulaAtSignToken,
   IntersectToken as FormulaIntersectToken
 } from "@formula/syntax/token-types";
+export { NodeType as FormulaNodeType } from "@formula/syntax/ast";
+/**
+ * @deprecated Use {@link FormulaNodeType}. Removed in 1.0. An export specifier for the reason
+ * given at `TokenType`.
+ */
 export { NodeType } from "@formula/syntax/ast";
 export type {
-  AstNode,
+  AstNode as FormulaAstNode,
   NumberNode as FormulaNumberNode,
   StringNode as FormulaStringNode,
   BooleanNode as FormulaBooleanNode,
@@ -80,6 +96,11 @@ export type {
   MissingNode as FormulaMissingNode,
   UnionRefNode as FormulaUnionRefNode
 } from "@formula/syntax/ast";
+
+/** @deprecated Use {@link FormulaToken}. Removed in 1.0. */
+export type Token = TokenImpl;
+/** @deprecated Use {@link FormulaAstNode}. Removed in 1.0. */
+export type AstNode = AstNodeImpl;
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";

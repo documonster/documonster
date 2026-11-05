@@ -50,7 +50,7 @@ import { pipeline, Streams } from "documonster/stream";
 // Create a pipeline that doubles numbers
 const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
 const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(source, double, collector);
 console.log(collector.chunks); // [2, 4, 6, 8, 10]
@@ -307,7 +307,7 @@ client.on("data", data => console.log("Client received:", data));
 import { pipeline, finished, Streams } from "documonster/stream";
 
 // Collect objects
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 collector.write(1);
 collector.write(2);
 collector.write(3);
@@ -318,13 +318,13 @@ console.log(collector.chunks); // [1, 2, 3]
 
 // Use in pipeline
 const source = Streams.createReadableFromArray(["a", "b", "c"], { objectMode: true });
-const collector2 = Streams.createCollector<string>({ objectMode: true });
+const collector2 = new Streams.Collector<string>({ objectMode: true });
 
 await pipeline(source, collector2);
 console.log(collector2.chunks); // ["a", "b", "c"]
 
 // Collect binary data and convert
-const binaryCollector = Streams.createCollector<Uint8Array>();
+const binaryCollector = new Streams.Collector<Uint8Array>();
 binaryCollector.write(new Uint8Array([1, 2, 3]));
 binaryCollector.write(new Uint8Array([4, 5, 6]));
 binaryCollector.end();
@@ -343,7 +343,7 @@ const text = binaryCollector.toString(); // Decode as UTF-8 string
 ```typescript
 import { Streams } from "documonster/stream";
 
-const pull = Streams.createPullStream();
+const pull = new Streams.PullStream();
 
 // Write data
 pull.write(Buffer.from("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"));
@@ -373,7 +373,7 @@ console.log(pull.matchPosition);
 **模式匹配：**
 
 ```typescript
-const pull = Streams.createPullStream();
+const pull = new Streams.PullStream();
 pull.write(Buffer.from("key1=value1&key2=value2"));
 pull.end();
 
@@ -393,7 +393,7 @@ const val2 = await pull.pull(Infinity); // "value2" (rest of stream)
 ```typescript
 import { Streams } from "documonster/stream";
 
-const buffered = Streams.createBufferedStream();
+const buffered = new Streams.BufferedStream();
 
 // Write various data types
 buffered.write("Hello ");
@@ -494,7 +494,7 @@ const filter = Streams.createTransform<number, number>(
   { objectMode: true }
 );
 const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 // Chain multiple streams
 await pipeline(source, filter, double, collector);
@@ -528,7 +528,7 @@ await finished(readable);
 console.log("Stream completed");
 
 // Also works with writables
-const writable = Streams.createCollector();
+const writable = new Streams.Collector();
 writable.write("data");
 writable.end();
 await finished(writable);
@@ -555,7 +555,7 @@ const square = Streams.createTransform<number, number>(n => n * n, { objectMode:
 const combined = compose(addOne, double, square);
 
 const source = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(source, combined, collector);
 console.log(collector.chunks); // [16, 36, 64]
@@ -948,7 +948,7 @@ badTransform.on("error", err => {
 stream.destroy(new Error("Manual destruction"));
 ```
 
-本模块拒绝的参数抛出 `StreamTypeError` 或 `UnsupportedStreamTypeError`(都是 `StreamError`,`isStreamError` 能识别):`field` 指出参数(`options.highWaterMark`、`stream`),消息以调用名开头(`Streams.bytes: …`)。被中止的流以 `AbortError` 失败,它与 `documonster/archive` 导出的是同一个类;它不是 `StreamError`。
+本模块拒绝的参数抛出 `StreamArgumentError` 或 `StreamUnsupportedTypeError`(都是 `StreamError`,`isStreamError` 能识别):`field` 指出参数(`options.highWaterMark`、`stream`),消息以调用名开头(`Streams.bytes: …`)。被中止的流以 `AbortError` 失败,它与 `documonster/archive` 导出的是同一个类;它不是 `StreamError`。
 
 ---
 
@@ -1008,7 +1008,7 @@ const toCsv = Streams.createTransform<Person, string>(row => `${row.name},${row.
   objectMode: true
 });
 
-const collector = Streams.createCollector<string>({ objectMode: true });
+const collector = new Streams.Collector<string>({ objectMode: true });
 
 await pipeline(source, toCsv, collector);
 console.log(collector.chunks.join(""));
@@ -1031,7 +1031,7 @@ const filterEven = Streams.createTransform<number, number>(
 
 const square = Streams.createTransform<number, number>(n => n * n, { objectMode: true });
 
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(numbers, filterEven, square, collector);
 console.log(collector.chunks); // [4, 16, 36, 64, 100]
@@ -1059,7 +1059,7 @@ const fetchData = Streams.createTransform<string, object>(
   { objectMode: true }
 );
 
-const collector = Streams.createCollector<object>({ objectMode: true });
+const collector = new Streams.Collector<object>({ objectMode: true });
 
 await pipeline(urls, fetchData, collector);
 console.log(collector.chunks); // Array of user objects
@@ -1073,7 +1073,7 @@ console.log(collector.chunks); // Array of user objects
 import { Streams } from "documonster/stream";
 
 // Parse a simple protocol: LENGTH:DATA
-const pull = Streams.createPullStream();
+const pull = new Streams.PullStream();
 pull.write(Buffer.from("5:Hello3:World"));
 pull.end();
 
@@ -1129,7 +1129,7 @@ const response = await fetch("/api/large-data");
 // 它原样接受 Web 流）
 const readable = Streams.fromWebReadable(response.body!);
 
-const collector = Streams.createCollector<Uint8Array>();
+const collector = new Streams.Collector<Uint8Array>();
 
 await pipeline(readable, collector);
 const data = collector.toUint8Array();
@@ -1141,20 +1141,20 @@ const data = collector.toUint8Array();
 
 ### 类
 
-| 类                                                  | 描述                   |
-| --------------------------------------------------- | ---------------------- |
-| `Readable`                                          | 可读流类               |
-| `Writable`                                          | 可写流类               |
-| `Transform`                                         | 转换流类               |
-| `Duplex`                                            | 双工流类               |
-| `PassThrough`                                       | 直通转换（无操作）     |
-| `Streams.Collector` / `createCollector()`           | 将流数据收集到数组中   |
-| `Streams.PullStream` / `createPullStream()`         | 支持模式匹配的拉取式流 |
-| `Streams.BufferedStream` / `createBufferedStream()` | 带内部缓冲的流         |
-| `new Streams.ChunkedBuilder()`                      | 高效字符串构建器       |
-| `new Streams.TransactionalChunkedBuilder()`         | 支持快照/回滚的构建器  |
-| `Streams.createStringChunk()`                       | 字符串数据块工厂函数   |
-| `Streams.createByteChunk()`                         | 二进制数据块工厂函数   |
+| 类                                          | 描述                   |
+| ------------------------------------------- | ---------------------- |
+| `Readable`                                  | 可读流类               |
+| `Writable`                                  | 可写流类               |
+| `Transform`                                 | 转换流类               |
+| `Duplex`                                    | 双工流类               |
+| `PassThrough`                               | 直通转换（无操作）     |
+| `new Streams.Collector()`                   | 将流数据收集到数组中   |
+| `new Streams.PullStream()`                  | 支持模式匹配的拉取式流 |
+| `new Streams.BufferedStream()`              | 带内部缓冲的流         |
+| `new Streams.ChunkedBuilder()`              | 高效字符串构建器       |
+| `new Streams.TransactionalChunkedBuilder()` | 支持快照/回滚的构建器  |
+| `Streams.createStringChunk()`               | 字符串数据块工厂函数   |
+| `Streams.createByteChunk()`                 | 二进制数据块工厂函数   |
 
 类本身作为值公开（`Streams.Collector`、`Streams.PullStream` 等），可用于 `instanceof` 判断和继承；`create*` 工厂是构造实例的常用方式。
 
@@ -1192,9 +1192,6 @@ await sink.end();
 | `Streams.createTransform()`                 | 使用函数创建转换流         |
 | `Streams.createDuplex()`                    | 创建双工流                 |
 | `Streams.createPassThrough()`               | 创建直通转换流             |
-| `Streams.createCollector()`                 | 创建数据收集器             |
-| `Streams.createPullStream()`                | 创建拉取式流               |
-| `Streams.createBufferedStream()`            | 创建带缓冲的流             |
 | `duplexPair()`                              | 创建已连接的双工流对       |
 
 ### 工具函数
@@ -1214,13 +1211,7 @@ await sink.end();
 
 ### 二进制工具
 
-以下辅助函数从 `documonster/archive` 重新导出（并非 `documonster/stream`）。
-
-| 函数                   | 描述                   |
-| ---------------------- | ---------------------- |
-| `stringToUint8Array()` | 将字符串转换为字节数组 |
-| `uint8ArrayToString()` | 将字节数组转换为字符串 |
-| `concatUint8Arrays()`  | 拼接多个数组           |
+请直接使用平台内置 API —— 见上文「二进制工具」一节。
 
 ### 类型守卫
 

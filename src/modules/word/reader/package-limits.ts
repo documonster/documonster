@@ -1,5 +1,5 @@
 /**
- * The limits a {@link WordSecurityPolicy} sets on a package, applied the same
+ * The limits a {@link DocxSecurityPolicy} sets on a package, applied the same
  * way by every reader of one — `Io.read`, the `Package` functions — so a
  * limit cannot hold in one and not in the other.
  */
@@ -8,7 +8,7 @@ import { parseFlatOpc } from "@word/convert/flat-opc";
 import { checkBoolean, checkRecord, checkString } from "@word/core/argument-checks";
 import { DocxLimitExceededError } from "@word/errors";
 import { checkSecurityPolicy } from "@word/security/policy";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 
 /**
  * The read options every reader of a package takes (`Io.read`, the `Package`
@@ -28,7 +28,7 @@ export function checkReadOptions(options: unknown, where: string): void {
 }
 
 /** A package larger than the policy's `maxPackageSize` is refused before anything reads it. */
-export function checkPackageSize(buffer: Uint8Array, policy: Required<WordSecurityPolicy>): void {
+export function checkPackageSize(buffer: Uint8Array, policy: Required<DocxSecurityPolicy>): void {
   if (buffer.length > policy.maxPackageSize) {
     throw new DocxLimitExceededError(
       "packageSize",
@@ -44,7 +44,7 @@ export function checkPackageSize(buffer: Uint8Array, policy: Required<WordSecuri
  * and `maxPackageSize` (cumulative, uncompressed) as they are read — one
  * budget for every reader of a ZIP's entries.
  */
-export function createPartBudget(policy: Required<WordSecurityPolicy>): {
+export function createPartBudget(policy: Required<DocxSecurityPolicy>): {
   /** Count one more part, before its bytes are read. */
   count(): void;
   /** Charge a part's uncompressed bytes. */
@@ -89,7 +89,7 @@ export function createPartBudget(policy: Required<WordSecurityPolicy>): {
 /** The parts of a Flat OPC document, held to the limits a ZIP's entries are. */
 export function flatOpcEntries(
   buffer: Uint8Array,
-  policy: Required<WordSecurityPolicy>
+  policy: Required<DocxSecurityPolicy>
 ): Map<string, Uint8Array> {
   const entries = parseFlatOpc(buffer);
   if (entries.size > policy.maxPartCount) {

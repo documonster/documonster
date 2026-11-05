@@ -5,7 +5,7 @@
  *
  * 1. names only — not deprecated;
  * 2. `sheets` required and able to hold numbers — `@deprecated`;
- * 3. the published `ExcelToDocxOptions` — not deprecated, so a variable typed with it is not
+ * 3. the published `DocxFromExcelOptions` — not deprecated, so a variable typed with it is not
  *    struck through whatever it holds.
  *
  * Deprecation is read from the type-aware lint rule `typescript/no-deprecated` (TypeScript 7
@@ -49,10 +49,10 @@ describe("WordExcel.toDocx sheets: names, numbers deprecated", () => {
     const lines = [
       'import type { Workbook } from "@excel/index";',
       'import { WordExcel } from "@word/excel";',
-      'import type { ExcelToDocxOptions } from "@word/excel";',
+      'import type { DocxFromExcelOptions } from "@word/excel";',
       "declare const wb: Workbook.Handle;",
       'const names: readonly string[] = ["A"];',
-      'const published: ExcelToDocxOptions = { sheets: ["Sales"] };',
+      'const published: DocxFromExcelOptions = { sheets: ["Sales"] };',
       "const inferred = { sheets: [1, 2] };",
       // 8: names, a names variable, `{}`, no options — not deprecated.
       'void WordExcel.toDocx(wb, { sheets: ["Sales"] });',

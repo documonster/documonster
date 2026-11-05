@@ -35,7 +35,7 @@ import {
   fail
 } from "@draw/arguments";
 import { cssColor, relativeLuminance, translucent } from "@draw/colour";
-import { readRasterFont } from "@draw/raster/glyph-outline";
+import { isByteSource, readRasterFont } from "@draw/raster/glyph-outline";
 import type { RasterFont } from "@draw/raster/glyph-outline";
 import { rasterizeToRgba } from "@draw/raster/surface";
 import type { RasterizedImage, RasterizeOptions } from "@draw/raster/surface";
@@ -46,6 +46,7 @@ import type { ToSvgOptions } from "@draw/svg";
 import { measureText as measureTextImpl, widestText, wrapText as wrapTextImpl } from "@draw/text";
 import type { DrawList, DrawTextStyle } from "@draw/types";
 import { isSimpleText as isSimpleTextImpl, textFeaturesOf } from "@utils/complex-text";
+import { isRecordArgument } from "@utils/object";
 import type { Rgba01 } from "@utils/svg-lex";
 
 // --- Backends ---
@@ -230,16 +231,29 @@ export function getTextFeatures(text: string): { scripts: string[]; rtl: boolean
 
 /**
  * Parse a `.ttf` / `.ttc` file into a face the rasteriser can draw with — parse once and
- * pass it in `RasterizeOptions.fonts` for every render.
+ * pass it in `DrawRasterizeOptions.fonts` for every render.
  *
- * `collectionIndex` selects a face inside a `.ttc`, and matters: macOS keeps `Songti SC`
- * at Black in face 0 of `Songti.ttc`, so always reading face 0 draws a heavier weight.
+ * `source` is the file's bytes, or `{ data, collectionIndex }` to select a face inside a
+ * `.ttc` — which matters: macOS keeps `Songti SC` at Black in face 0 of `Songti.ttc`, so
+ * always reading face 0 draws a heavier weight.
  *
- * @throws {DrawArgumentError} `data` is not bytes, or `collectionIndex` names no face.
+ * @throws {DrawArgumentError} `source` is not bytes or `{ data, collectionIndex }`, or
+ *   `source.collectionIndex` names no face.
  * @throws {DrawError} the bytes are not a TrueType font with glyph outlines.
  */
-export function parseRasterFont(data: Uint8Array, collectionIndex?: number): RasterFont {
-  return readRasterFont(data, collectionIndex);
+export function parseRasterFont(
+  source: Uint8Array | { readonly data: Uint8Array; readonly collectionIndex?: number }
+): RasterFont {
+  if (isByteSource(source)) {
+    return readRasterFont(source, 0, { data: "source", collectionIndex: "source" });
+  }
+  if (!isRecordArgument(source)) {
+    fail("Draw.parseRasterFont", "source", "font bytes or { data, collectionIndex }", source);
+  }
+  return readRasterFont(source.data, source.collectionIndex ?? 0, {
+    data: "source.data",
+    collectionIndex: "source.collectionIndex"
+  });
 }
 
 // --- Low level ---

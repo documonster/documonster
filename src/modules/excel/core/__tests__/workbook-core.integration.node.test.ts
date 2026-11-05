@@ -19,7 +19,7 @@ import { definedNamesGetRanges, definedNamesModel } from "@excel/core/defined-na
 import { ValueType } from "@excel/core/enums";
 import { loadWorkbookModel } from "@excel/core/model-load";
 import { getDefinedNames, getWorkbookModel, getWorksheets } from "@excel/core/workbook";
-import type { CsvOptions } from "@excel/core/workbook";
+import type { ExcelCsvOptions } from "@excel/core/workbook";
 import { addWorkbookImage } from "@excel/core/workbook-core";
 import {
   addImage,
@@ -1114,7 +1114,7 @@ describe("Workbook", () => {
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe("A1:A1");
       });
 
-      it("printArea with column past XFD throws ColumnOutOfBoundsError on write", async () => {
+      it("printArea with column past XFD throws ExcelColumnOutOfBoundsError on write", async () => {
         // `AAAA` is column 18,279 — past Excel's hard XFD (16,384) limit.
         // Excel cannot represent the column at all, so emitting it would
         // produce a workbook Excel rejects. We surface the same error
@@ -1309,8 +1309,8 @@ describe("Workbook", () => {
         // Mirror image of the column-OOB read-side test: a hand-edited
         // file with a row past 1048576 must not abort the load. The
         // `try/catch` around `parsePrintReference` in the read path
-        // catches `RowOutOfBoundsError` the same way it catches
-        // `ColumnOutOfBoundsError`.
+        // catches `ExcelRowOutOfBoundsError` the same way it catches
+        // `ExcelColumnOutOfBoundsError`.
         const cleanWb = Workbook.create();
         Cell.setValue(Workbook.addWorksheet(cleanWb, "Sheet1"), "A1", "x");
         const cleanBuf = await Workbook.toBuffer(cleanWb);
@@ -1558,8 +1558,8 @@ describe("Workbook", () => {
         sheetName: "sheet1",
         delimiter: "\t",
         quote: false
-      } as unknown as CsvOptions;
-      const readOptions: CsvOptions = {
+      } as unknown as ExcelCsvOptions;
+      const readOptions: ExcelCsvOptions = {
         dateFormats: ["DD/MM/YYYY HH:mm:ss"],
         sheetName: "sheet1",
         delimiter: "\t",

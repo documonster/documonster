@@ -10,7 +10,7 @@
  * - As readable stream: feed data into writable part and read from it
  */
 
-import { ExcelNotSupportedError, InvalidValueTypeError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError, ExcelInvalidValueTypeError } from "@excel/errors";
 import { getTextDecoder, uint8ArrayToNodeBufferView } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 import { StringBuf } from "@utils/string-buf";
@@ -329,7 +329,7 @@ class StreamBuf extends EventEmitter {
     } else if (typeof data === "string") {
       chunk = new StringChunk(data);
     } else {
-      throw new InvalidValueTypeError(
+      throw new ExcelInvalidValueTypeError(
         typeof data,
         "Chunk must be one of type String, Uint8Array, ArrayBuffer or StringBuf."
       );
@@ -627,14 +627,14 @@ class StreamBuf extends EventEmitter {
    * Put data back at the front (not implemented)
    */
   unshift(): void {
-    throw new ExcelNotSupportedError("unshift", "Not implemented");
+    throw new ExcelUnsupportedFeatureError("unshift", "Not implemented");
   }
 
   /**
    * Wrap a stream (not implemented)
    */
   wrap(): void {
-    throw new ExcelNotSupportedError("wrap", "Not implemented");
+    throw new ExcelUnsupportedFeatureError("wrap", "Not implemented");
   }
 
   /**

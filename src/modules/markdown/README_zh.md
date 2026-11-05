@@ -245,7 +245,7 @@ try {
 | `ExcelMarkdown.readFile(path, options?)`           | Node.js | 从文件读取第一个（或所有）表格 → 新工作簿                                            |
 | `ExcelMarkdown.writeFile(wb, path, options?)`      | Node.js | 写入文件                                                                             |
 
-**Workbook 选项(`MarkdownOptions`)** 同时继承 `MarkdownParseOptions` 与 `MarkdownFormatOptions`,并额外包含:
+**Workbook 选项**来自 `documonster/excel/markdown`:`ExcelMarkdownReadOptions`(`read`、`readFile`、`addWorksheet`、`addWorksheets`)继承 `MarkdownParseOptions`,`ExcelMarkdownWriteOptions`(`format`、`toBuffer`、`toBufferSync`、`writeFile`)继承 `MarkdownFormatOptions`。此外还包含:
 
 | 选项               | 类型                      | 描述                                                                    |
 | ------------------ | ------------------------- | ----------------------------------------------------------------------- |

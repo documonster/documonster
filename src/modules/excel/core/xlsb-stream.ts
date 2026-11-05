@@ -127,7 +127,7 @@ export async function streamXlsbPackage(
   await finished;
   // `finish` on the zip means "every byte has been handed to the sink", which is not the same as "the sink has
   // finished with them". A file stream still has bytes in flight, so a caller that read the file as soon as
-  // `writeStream` resolved got `EocdNotFoundError` on a package that was written perfectly.
+  // `writeStream` resolved got `ZipEocdNotFoundError` on a package that was written perfectly.
   await settled(stream);
   return { unsupported: written.unsupported };
 }

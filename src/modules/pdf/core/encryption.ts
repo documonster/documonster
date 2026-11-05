@@ -15,49 +15,13 @@
  */
 
 import { pdfSha256 } from "@pdf/core/pdf-kdf";
+import type { PdfEncryptionOptions, PdfPermissions } from "@pdf/types";
 import { concatUint8Arrays } from "@utils/binary";
 import { aesCbcEncrypt, aesCbcEncryptRaw, aesEcbEncrypt, randomBytes } from "@utils/crypto";
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/**
- * PDF encryption options.
- */
-export interface PdfEncryptionOptions {
-  /** User password (required to open the document). Empty string = no open password. */
-  userPassword?: string;
-
-  /** Owner password (grants full permissions). Required. */
-  ownerPassword: string;
-
-  /** Permissions to grant when opened with user password. */
-  permissions?: Partial<PdfPermissions>;
-}
-
-/**
- * PDF document permissions (what a user-password holder can do).
- * All default to false.
- */
-export interface PdfPermissions {
-  /** Allow printing */
-  print: boolean;
-  /** Allow modifying content */
-  modify: boolean;
-  /** Allow copying text/images */
-  copy: boolean;
-  /** Allow adding/modifying annotations */
-  annotate: boolean;
-  /** Allow filling form fields */
-  fillForms: boolean;
-  /** Allow extracting content for accessibility */
-  accessibility: boolean;
-  /** Allow assembling (insert/rotate/delete pages) */
-  assemble: boolean;
-  /** Allow high-quality printing */
-  printHighQuality: boolean;
-}
 
 /**
  * Encryption state used during PDF generation (V=5, R=5, AES-256).

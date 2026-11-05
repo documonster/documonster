@@ -146,7 +146,7 @@ const probes: {
   {
     name: "08-watermark-overlay",
     build: ({ workbook, sheet }) => {
-      Watermark.add(sheet, {
+      Watermark.set(sheet, {
         imageId: Image.add(workbook, { buffer: PNG, extension: "png" }),
         mode: "overlay",
         opacity: 0.25

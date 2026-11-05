@@ -8,7 +8,7 @@
 import { STRICT_TO_TRANSITIONAL_REL } from "@word/constants";
 import type { OpenFieldPiece } from "@word/reader/field-pieces";
 import { parsePartXml } from "@word/reader/part-xml";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 import type { FormField, RangeMarker, RunProperties } from "@word/types";
 import type { XmlElement } from "@xml/types";
@@ -88,7 +88,7 @@ export interface ReaderContext {
    * pieces of information that may be dangerous in untrusted documents.
    * Defaults to `DEFAULT_SECURITY_POLICY` when not set.
    */
-  securityPolicy: Required<WordSecurityPolicy>;
+  securityPolicy: Required<DocxSecurityPolicy>;
 }
 
 /**
@@ -110,7 +110,7 @@ export function createFieldState(): FieldParseState {
 /**
  * Create a fresh reader context for a new parse session.
  */
-export function createReaderContext(securityPolicy?: Required<WordSecurityPolicy>): ReaderContext {
+export function createReaderContext(securityPolicy?: Required<DocxSecurityPolicy>): ReaderContext {
   return {
     relMap: new Map(),
     field: createFieldState(),

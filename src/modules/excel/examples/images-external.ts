@@ -88,12 +88,12 @@ Image.place(ws, urlImageId, "G4:J11");
 const wmSheet = Workbook.addWorksheet(wb, "linked-watermark");
 Cell.setValue(wmSheet, "A1", "This sheet has a linked overlay watermark.");
 const wmImageId = Image.add(wb, { extension: "png", link: LOCAL_FILE_URL });
-Watermark.add(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
+Watermark.set(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
 
 // The following would THROW — background and header watermarks must be embedded:
 //   wmSheet.addWatermark({ imageId: wmImageId, mode: "header" });
 //   ws.addBackgroundImage(wmImageId);
-//   // ImageError: ...cannot be external (linked) images.
+//   // ExcelImageError: ...cannot be external (linked) images.
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();

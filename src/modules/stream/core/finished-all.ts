@@ -4,7 +4,7 @@
  * Shared implementation for waiting on multiple streams to finish.
  */
 
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 import type { PipelineStreamLike } from "@stream/types";
 
 /**
@@ -15,10 +15,14 @@ export function createFinishedAll(
 ): (streams: ReadonlyArray<PipelineStreamLike>) => Promise<void> {
   return async function finishedAll(streams: ReadonlyArray<PipelineStreamLike>): Promise<void> {
     if (!Array.isArray(streams)) {
-      throw new StreamTypeError("an array of streams", streams === null ? "null" : typeof streams, {
-        field: "streams",
-        where: "Streams.waitForFinished"
-      });
+      throw new StreamArgumentError(
+        "an array of streams",
+        streams === null ? "null" : typeof streams,
+        {
+          field: "streams",
+          where: "Streams.waitForFinished"
+        }
+      );
     }
     for (let i = 0; i < streams.length; i++) {
       const stream = streams[i] as {
@@ -33,7 +37,7 @@ export function createFinishedAll(
           typeof stream.getReader !== "function" &&
           typeof stream.getWriter !== "function")
       ) {
-        throw new StreamTypeError("a stream", stream === null ? "null" : typeof stream, {
+        throw new StreamArgumentError("a stream", stream === null ? "null" : typeof stream, {
           field: `streams[${i}]`,
           where: "Streams.waitForFinished"
         });

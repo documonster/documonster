@@ -8,7 +8,7 @@
  */
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
-import { ConditionalFormatting, ExcelNotSupportedError, Workbook, Worksheet } from "@excel";
+import { ConditionalFormatting, ExcelUnsupportedFeatureError, Workbook, Worksheet } from "@excel";
 import { describe, expect, it } from "vitest";
 
 type Block = { ref: string; rules: Record<string, unknown>[] };
@@ -137,7 +137,7 @@ describe("a comparison or expression rule with no formula", () => {
         ]);
         blocksOf(workbook)[0]!.rules[0] = rule;
         await expect(Workbook.toBuffer(workbook, { format })).rejects.toBeInstanceOf(
-          ExcelNotSupportedError
+          ExcelUnsupportedFeatureError
         );
         const written = await Workbook.toBuffer(workbook, { format, unsupported: "ignore" });
         const reopened = Workbook.create();
@@ -164,7 +164,7 @@ describe("a comparison or expression rule with no formula", () => {
       });
     const damaged = Workbook.create();
     await Workbook.read(damaged, await createZip(entries));
-    await expect(Workbook.toBuffer(damaged)).rejects.toBeInstanceOf(ExcelNotSupportedError);
+    await expect(Workbook.toBuffer(damaged)).rejects.toBeInstanceOf(ExcelUnsupportedFeatureError);
     const written = await Workbook.toBuffer(damaged, { unsupported: "ignore" });
     expect(await sheetXml(written)).not.toContain("<cfRule");
   });

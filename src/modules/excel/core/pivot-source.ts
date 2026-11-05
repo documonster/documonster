@@ -9,7 +9,7 @@ import type { PivotTable } from "@excel/core/pivot-table";
 import type { TableData } from "@excel/core/table";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { PivotTableError } from "@excel/errors";
+import { ExcelPivotTableError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { excelNameKey, sheetNameKey } from "@utils/name-key";
 
@@ -37,7 +37,7 @@ function tableNames(table: TableData): Set<string> {
  * Refuse to remove `target.table` — or, with no table, the sheet `target.sheet` — while a pivot table reads from it.
  * A pivot table on the sheet being removed goes with it, so it does not hold the sheet.
  *
- * @throws {PivotTableError} naming the pivot table and what it reads.
+ * @throws {ExcelPivotTableError} naming the pivot table and what it reads.
  */
 export function checkNotPivotSource(
   wb: WorkbookData,
@@ -59,7 +59,7 @@ export function checkNotPivotSource(
     }
     const sourceTable = sourceTableOf(pivot);
     if (sourceTable !== undefined && tableKeys.has(excelNameKey(sourceTable))) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `${where}: pivot table "${pivotName(pivot)}" reads its data from table "${sourceTable}"; remove the pivot table first (Pivot.remove).`
       );
     }
@@ -70,7 +70,7 @@ export function checkNotPivotSource(
       sourceSheet !== undefined &&
       sheetNameKey(sourceSheet) === sheetKey
     ) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `${where}: pivot table "${pivotName(pivot)}" reads its data from sheet "${target.sheet._name}"; remove the pivot table first (Pivot.remove).`
       );
     }
@@ -127,7 +127,7 @@ export function checkPivotPlacement(sheetPivots: readonly PivotTable[], pivot: P
       block.top <= o.bottom &&
       o.top <= block.bottom
     ) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `Pivot table "${pivotName(pivot)}" at ${pivot.ref ?? "A3"} overlaps pivot table "${pivotName(other)}" at ` +
           `${other.ref ?? "A3"}; give each pivot table on a sheet its own \`ref\`, with room to grow.`
       );

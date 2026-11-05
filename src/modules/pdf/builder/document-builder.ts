@@ -23,7 +23,7 @@ import { discoverDrawnTextFonts, withDrawnTextFontBuild } from "@pdf/builder/dra
 import { assertImageFormat, checkImageData, writeImageXObject } from "@pdf/builder/image-utils";
 import {
   checkFinite,
-  checkFontBytes,
+  readFontSourceArgument,
   checkFontOptions,
   checkOptionalBoolean,
   checkPdfFontConfig,
@@ -53,11 +53,11 @@ import { PdfWriter } from "@pdf/core/pdf-writer";
 import { writePdfAMetadata, writePdfAOutputIntent } from "@pdf/core/pdfa";
 import { PdfArgumentError, PdfError } from "@pdf/errors";
 import { compilePdfFontConfig } from "@pdf/font/font-config";
-import type { PdfFontConfig } from "@pdf/font/font-config";
+import type { PdfFontConfig, PdfFontSource } from "@pdf/font/font-config";
 import { FontManager } from "@pdf/font/font-manager";
 import { parseTtf } from "@pdf/font/ttf-parser";
 import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
-import type { PdfColor, PdfExportOptions } from "@pdf/types";
+import type { PdfColor, PdfEncryptionOptions, PdfExportOptions } from "@pdf/types";
 import type { CjkLanguage } from "@utils/cjk";
 import {
   parseCssColor,
@@ -361,7 +361,8 @@ export interface PdfDocumentBuilderOptions {
 
   /**
    * System font families auto-discovery should prefer, in order, when `fonts`
-   * is not given. Equivalent to calling `preferSystemFonts()`.
+   * is not given. Equivalent to calling `preferSystemFonts()`. No effect in a browser,
+   * which has no system fonts to search.
    *
    * @see {@link PdfDocumentBuilder.preferSystemFonts}
    */
@@ -369,7 +370,8 @@ export interface PdfDocumentBuilderOptions {
 
   /**
    * The East Asian written language of the document, so auto-discovery picks a
-   * face drawn in that regional hand. Equivalent to calling `textLanguage()`.
+   * face drawn in that regional hand. Equivalent to calling `setTextLanguage()`. No effect
+   * in a browser, which has no system fonts to search.
    *
    * @see {@link PdfDocumentBuilder.setTextLanguage}
    */
@@ -377,7 +379,7 @@ export interface PdfDocumentBuilderOptions {
 
   /**
    * Turn off the host font scan entirely. Equivalent to calling
-   * `disableFontAutoDiscovery()`.
+   * `disableFontAutoDiscovery()`. No effect in a browser, which has no such scan.
    *
    * Accepted here as well as through the method so a bridge can forward the
    * caller's `PdfExportOptions` in one object, rather than reaching for a chained
@@ -1973,7 +1975,7 @@ export class PdfDocumentBuilder {
   /**
    * Set encryption options (AES-256).
    */
-  setEncryption(encryption: PdfExportOptions["encryption"]): this {
+  setEncryption(encryption: PdfEncryptionOptions | undefined): this {
     checkEncryptionOptions("Pdf.Builder#setEncryption", "encryption", encryption);
     // A copy of what was checked, as for every other setting.
     this._encryption =
@@ -1996,17 +1998,23 @@ export class PdfDocumentBuilder {
    * and must be called before the first `drawText()` command. Pages may already
    * have been added if no text has been drawn yet.
    *
-   * @param fontBytes - Raw .ttf or .ttc file bytes
-   * @param collectionIndex - Which face, for a `.ttc`. Defaults to 0, which is rarely the
-   *   one wanted: macOS `Songti.ttc` runs Black, Bold, TC-Bold, Light, …, so face 0 sets
-   *   body text in the family's heaviest weight. Ignored for a single-face `.ttf`.
+   * @param source - Raw .ttf or .ttc file bytes, or `{ data, collectionIndex }` to pick a
+   *   face of a `.ttc`. The index defaults to 0, which is rarely the one wanted: macOS
+   *   `Songti.ttc` runs Black, Bold, TC-Bold, Light, …, so face 0 sets body text in the
+   *   family's heaviest weight. Ignored for a single-face `.ttf`.
+   * @throws {PdfArgumentError} `source` is not font bytes or `{ data, collectionIndex }`.
    */
-  embedFont(fontBytes: Uint8Array, collectionIndex?: number): this {
-    checkFontBytes("Pdf.Builder#embedFont", fontBytes);
-    checkOptionalInteger("Pdf.Builder#embedFont", "collectionIndex", collectionIndex, 0);
+  embedFont(source: PdfFontSource): this;
+  /**
+   * @deprecated Pass `{ data: fontBytes, collectionIndex }` as one {@link PdfFontSource}. The
+   * positional `collectionIndex` is removed in 1.0.
+   */
+  embedFont(fontBytes: Uint8Array, collectionIndex: number | undefined): this;
+  embedFont(source: PdfFontSource, collectionIndex?: number): this {
+    const face = readFontSourceArgument("Pdf.Builder#embedFont", source, collectionIndex);
     this._assertFontsMutable();
     const manager = new FontManager();
-    manager.registerEmbeddedFont(parseTtf(fontBytes, collectionIndex));
+    manager.registerEmbeddedFont(parseTtf(face.data, face.collectionIndex));
     this._replaceFontManager(manager);
     return this;
   }
@@ -2052,6 +2060,9 @@ export class PdfDocumentBuilder {
    * font was explicitly embedded. Use this to keep output byte-stable
    * across hosts: one machine may have SimSun installed while another
    * does not.
+   *
+   * No effect in a browser, which has no system font scan to disable: there, the output
+   * never depends on the host's fonts.
    */
   disableFontAutoDiscovery(): this {
     this._disableFontAutoDiscovery = true;
@@ -2079,8 +2090,8 @@ export class PdfDocumentBuilder {
    * {@link embedFonts} when a specific face is a requirement rather than a
    * preference.
    *
-   * Node-only, and ignored when a font is embedded explicitly or
-   * {@link disableFontAutoDiscovery} is set.
+   * No effect in a browser, which has no system fonts to search; ignored as well when a
+   * font is embedded explicitly or {@link disableFontAutoDiscovery} is set.
    */
   preferSystemFonts(families: readonly string[]): this {
     checkStringList("Pdf.Builder#preferSystemFonts", "families", families);
@@ -2109,8 +2120,8 @@ export class PdfDocumentBuilder {
    * in that case — which is a default, not a detection, and the reason to state
    * the language when you know it.
    *
-   * Node-only, and ignored when a font is embedded explicitly or
-   * {@link disableFontAutoDiscovery} is set.
+   * No effect in a browser, which has no system fonts to search; ignored as well when a
+   * font is embedded explicitly or {@link disableFontAutoDiscovery} is set.
    */
   setTextLanguage(language: CjkLanguage): this {
     checkOptionalEnum("Pdf.Builder#setTextLanguage", "language", language, CJK_LANGUAGES);
@@ -2163,6 +2174,12 @@ export class PdfDocumentBuilder {
    * 2. Compute the byte ranges and sign with RSA PKCS#1 v1.5 + SHA-256
    * 3. Return the fully signed PDF bytes
    *
+   * This only records the signature and returns the builder; nothing is signed until
+   * `toBuffer()`. `Pdf.Editor#sign`, with the same options, is different in kind: it
+   * performs the write itself and resolves to the signed bytes. The builder defers because
+   * a signature covers the finished file, and a builder's file does not exist until
+   * `toBuffer()` assembles it; an editor's document already does.
+   *
    * @param options - Certificate, private key, and optional signer metadata
    *
    * @example
@@ -2193,6 +2210,8 @@ export class PdfDocumentBuilder {
    * @param pageIndex - Zero-based page index
    * @param parent - Index of a previously added top-level bookmark to nest under (zero-based in insertion order). Omit for top-level.
    * @returns this for chaining
+   * @throws {PdfArgumentError} An argument is not of its type, or `parent` names no top-level
+   *   bookmark (field `parent`).
    */
   addBookmark(title: string, pageIndex: number, parent?: number): this {
     const where = "Pdf.Builder#addBookmark";
@@ -2205,9 +2224,11 @@ export class PdfDocumentBuilder {
     const node: BookmarkNode = { title, pageIndex, children: [] };
     if (parent !== undefined) {
       if (parent < 0 || parent >= this._bookmarks.length) {
-        // A `RangeError`, as it has always been (callers catch it); the message used to read
-        // "out of range (0..-1)" when there was no bookmark yet.
-        throw new RangeError(
+        // A `PdfArgumentError` like every other argument this call refuses; it was a
+        // `RangeError`. The message used to read "out of range (0..-1)" when there was no
+        // bookmark yet.
+        throw new PdfArgumentError(
+          "parent",
           this._bookmarks.length === 0
             ? `Pdf.Builder#addBookmark: parent ${parent} names no bookmark — none has been added yet`
             : `Pdf.Builder#addBookmark: parent ${parent} is out of range (0..${this._bookmarks.length - 1}) — it is the index of a top-level bookmark`

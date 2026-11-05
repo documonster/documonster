@@ -1,9 +1,9 @@
 /**
  * The chart PNG renderers check `dpi` and `scale` themselves, before choosing a backend, so a bad value is the same
- * `ChartOptionsError` in Node and in a browser — not an archive error from the PNG encoder on one side and a silently
+ * `ExcelChartOptionsError` in Node and in a browser — not an archive error from the PNG encoder on one side and a silently
  * dropped resolution on the other.
  */
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { Cell, Chart, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
@@ -26,15 +26,18 @@ function chartHandle(type: "bar" | "waterfall") {
 }
 
 describe.each(["bar", "waterfall"] as const)("Chart.toPng (%s) raster options", type => {
-  it.each([NaN, 0, -72, Infinity, "300"])("refuses dpi %s with ChartOptionsError", async dpi => {
-    await expect(Chart.toPng(chartHandle(type), { dpi: dpi as number })).rejects.toBeInstanceOf(
-      ChartOptionsError
-    );
-  });
+  it.each([NaN, 0, -72, Infinity, "300"])(
+    "refuses dpi %s with ExcelChartOptionsError",
+    async dpi => {
+      await expect(Chart.toPng(chartHandle(type), { dpi: dpi as number })).rejects.toBeInstanceOf(
+        ExcelChartOptionsError
+      );
+    }
+  );
 
-  it.each([NaN, 0, -1])("refuses scale %s with ChartOptionsError", async scale => {
+  it.each([NaN, 0, -1])("refuses scale %s with ExcelChartOptionsError", async scale => {
     await expect(Chart.toPng(chartHandle(type), { scale })).rejects.toBeInstanceOf(
-      ChartOptionsError
+      ExcelChartOptionsError
     );
   });
 

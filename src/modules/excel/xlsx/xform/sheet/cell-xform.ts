@@ -1,6 +1,6 @@
 import { Enums } from "@excel/core/enums";
 import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/core/range";
-import { InvalidValueTypeError, ExcelError } from "@excel/errors";
+import { ExcelInvalidValueTypeError, ExcelError } from "@excel/errors";
 import type { RichText } from "@excel/types";
 import { claimArrayRange, type ArrayRange } from "@excel/utils/array-ranges";
 import { fromFileFormula, hasUnnamedThisRow, toFileFormula } from "@excel/utils/future-functions";
@@ -42,7 +42,7 @@ function getValueType(v) {
   if (v.error) {
     return Enums.ValueType.Error;
   }
-  throw new InvalidValueTypeError(typeof v, "Could not understand type of value");
+  throw new ExcelInvalidValueTypeError(typeof v, "Could not understand type of value");
 }
 
 function getEffectiveCellType(cell) {
@@ -447,7 +447,7 @@ class CellXform extends BaseXform {
       // case Enums.ValueType.Hyperlink: // ??
       // case Enums.ValueType.Formula:
       default:
-        throw new InvalidValueTypeError(
+        throw new ExcelInvalidValueTypeError(
           String(getValueType(model.result)),
           "Could not understand type of value"
         );

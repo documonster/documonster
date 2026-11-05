@@ -1,4 +1,8 @@
-import { ColumnOutOfBoundsError, InvalidAddressError, RowOutOfBoundsError } from "@excel/errors";
+import {
+  ExcelColumnOutOfBoundsError,
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError
+} from "@excel/errors";
 import type { DecodedAddress, Location } from "@excel/types";
 
 /** The last row a worksheet has. */
@@ -105,7 +109,7 @@ const colCache: ColCache = {
       // higher level. Both callers validate before reaching here; if
       // this branch fires it indicates a programming error in a future
       // caller, not a user input problem — surface that clearly rather
-      // than reusing `ColumnOutOfBoundsError` (which would lie about
+      // than reusing `ExcelColumnOutOfBoundsError` (which would lie about
       // the offending column, since `level` is a letter-count, not a
       // column number).
       throw new Error(
@@ -163,18 +167,18 @@ const colCache: ColCache = {
       // what the equivalent `n2l(n > 16384)` and `decodeAddress` paths
       // already report.
       if (l.length > 3) {
-        throw new ColumnOutOfBoundsError(l, "Excel supports columns from 1 to 16384");
+        throw new ExcelColumnOutOfBoundsError(l, "Excel supports columns from 1 to 16384");
       }
       this._fill(l.length);
     }
     if (!this._l2n[l]) {
-      throw new ColumnOutOfBoundsError(l, `Invalid column letter: ${l}`);
+      throw new ExcelColumnOutOfBoundsError(l, `Invalid column letter: ${l}`);
     }
     return this._l2n[l];
   },
   n2l(n: number): string {
     if (n < 1 || n > 16384) {
-      throw new ColumnOutOfBoundsError(n);
+      throw new ExcelColumnOutOfBoundsError(n);
     }
     if (!this._n2l[n]) {
       this._fill(this._level(n));
@@ -260,7 +264,7 @@ const colCache: ColCache = {
       ok = c >= 48 && c <= 57;
     }
     if (!ok) {
-      throw new InvalidAddressError(value);
+      throw new ExcelInvalidAddressError(value);
     }
     return true;
   },
@@ -268,7 +272,7 @@ const colCache: ColCache = {
   // convert address string into structure
   decodeAddress(value: string): CachedAddress {
     if (!value || typeof value !== "string") {
-      throw new InvalidAddressError(String(value));
+      throw new ExcelInvalidAddressError(String(value));
     }
     const addr = value.length < 5 && this._hash[value];
     if (addr) {
@@ -319,9 +323,9 @@ const colCache: ColCache = {
       const col = value.slice(0, colEnd);
       // More than three letters and no row is a word, not a reference: it is malformed, not out of range.
       if (!hasRow && colEnd - colStart > 3) {
-        throw new InvalidAddressError(value);
+        throw new ExcelInvalidAddressError(value);
       }
-      throw new ColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
+      throw new ExcelColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
     }
     if (!hasRow) {
       rowNumber = undefined;
@@ -353,10 +357,10 @@ const colCache: ColCache = {
   getAddress(r: number | string, c?: number): CachedAddress {
     if (c !== undefined) {
       if (typeof r === "number" && (!Number.isInteger(r) || r < 1 || r > MAX_ROW)) {
-        throw new RowOutOfBoundsError(r, `Excel rows are whole numbers from 1 to ${MAX_ROW}`);
+        throw new ExcelRowOutOfBoundsError(r, `Excel rows are whole numbers from 1 to ${MAX_ROW}`);
       }
       if (!Number.isInteger(c)) {
-        throw new ColumnOutOfBoundsError(c, "Excel columns are whole numbers from 1 to 16384");
+        throw new ExcelColumnOutOfBoundsError(c, "Excel columns are whole numbers from 1 to 16384");
       }
       const address = this.n2l(c) + r;
       return this.decodeAddress(address);
@@ -367,7 +371,7 @@ const colCache: ColCache = {
   // convert [address], [tl:br] into address structures
   decode(value: string) {
     if (!value || typeof value !== "string") {
-      throw new InvalidAddressError(String(value));
+      throw new ExcelInvalidAddressError(String(value));
     }
     const parts = value.split(":");
     if (parts.length === 2) {
@@ -394,7 +398,7 @@ const colCache: ColCache = {
   // convert [sheetName!][$]col[$]row[[$]col[$]row] into address or range structures
   decodeEx(value: string): DecodeExResult {
     if (!value || typeof value !== "string") {
-      throw new InvalidAddressError(String(value));
+      throw new ExcelInvalidAddressError(String(value));
     }
     // Use possessive quantifiers to prevent catastrophic backtracking (ReDoS)
     const groups = value.match(/^(?:(?:(?:'((?:[^']|'')+?)')|([^'^ !]+?))!)?(.*)$/);
@@ -459,7 +463,10 @@ const colCache: ColCache = {
       case 4:
         return `${colCache.encodeAddress(args[0], args[1])}:${colCache.encodeAddress(args[2], args[3])}`;
       default:
-        throw new InvalidAddressError(String(args.length), "Can only encode with 2 or 4 arguments");
+        throw new ExcelInvalidAddressError(
+          String(args.length),
+          "Can only encode with 2 or 4 arguments"
+        );
     }
   },
 

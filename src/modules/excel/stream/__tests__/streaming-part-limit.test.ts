@@ -1,4 +1,4 @@
-import { FileTooLargeError } from "@archive/core/errors";
+import { ArchiveFileTooLargeError } from "@archive/core/errors";
 /**
  * The streaming reader holds the workbook, styles, shared strings and
  * relationship parts in memory, so it bounds each of them like the buffered
@@ -38,7 +38,7 @@ async function readAll(buffer: Uint8Array, maxEntrySize?: number): Promise<numbe
 describe("streaming reader part-size limit", () => {
   it("rejects a cached part larger than maxEntrySize while it inflates", async () => {
     const buffer = await workbookWithStrings(2000);
-    await expect(readAll(buffer, 4096)).rejects.toBeInstanceOf(FileTooLargeError);
+    await expect(readAll(buffer, 4096)).rejects.toBeInstanceOf(ArchiveFileTooLargeError);
     // It says which limit and what it allows, as the archive's own refusal of the same entry does.
     await expect(readAll(buffer, 4096)).rejects.toMatchObject({
       limit: "maxEntrySize",

@@ -104,7 +104,7 @@ describe("ArchiveArgumentError", () => {
     ["source", "unpackZip", () => Archive.unpackZip(42 as never)],
     ["source", "openZip", () => Archive.openZip(42 as never)],
     ["url", "HttpRangeReader.open", () => Archive.HttpRangeReader.open(42 as never)],
-    ["source", "editZip", () => Archive.editZip(42 as never)],
+    ["source", "ZipEditor.open", () => Archive.ZipEditor.open(42 as never)],
     [
       "source",
       "Archive.toAsyncIterable",
@@ -136,7 +136,7 @@ describe("handles are checked where they are given", () => {
   const zip = Archive.packZipSync([["a", "A"]]);
 
   it.each<[string, string, () => unknown]>([
-    ["plan", "ZipEditor.apply", async () => (await Archive.editZip(zip)).apply(42 as never)],
+    ["plan", "ZipEditor.apply", async () => (await Archive.ZipEditor.open(zip)).apply(42 as never)],
     ["other", "ZipEditPlan.concat", () => new Archive.ZipEditPlan().concat(42 as never)],
     [
       "target",

@@ -102,15 +102,15 @@ A sector is first-class rather than lowered to a path because the three backends
 
 ```typescript
 interface DrawPaint {
-  readonly fill?: Rgba01;
-  readonly stroke?: Rgba01;
+  readonly fill?: DrawRgba01;
+  readonly stroke?: DrawRgba01;
   readonly strokeWidth?: number; // user units, defaults to 1 when stroked
   readonly dash?: readonly number[]; // alternating on/off, SVG semantics
   readonly fillRule?: "nonzero" | "evenodd";
 }
 ```
 
-Colours are `Rgba01` — channels in `0..1`, alpha included. `Draw.parseColor("#3366cc")` parses a CSS token into one — hex, `rgb()`, `hsl()` or a named colour; `none` and `transparent` are fully transparent, and an unreadable token is black. `Draw.withAlpha("#3366cc", 0.5)` parses and sets alpha in one step.
+Colours are `DrawRgba01` — channels in `0..1`, alpha included. `Draw.parseColor("#3366cc")` parses a CSS token into one — hex, `rgb()`, `hsl()` or a named colour; `none` and `transparent` are fully transparent, and an unreadable token is black. `Draw.withAlpha("#3366cc", 0.5)` parses and sets alpha in one step.
 
 A text node with no `style.fill` is not drawn, on any backend — the same rule as a paint with no `fill`.
 
@@ -158,7 +158,7 @@ Writing another backend means implementing `DrawSurface`. The walker owns transf
 
 ### Pixels, not a PNG
 
-`Draw.toRgba` returns an `RgbaImage` — `{ width, height, data }`, with `width * height * 4` bytes of straight-alpha RGBA — not an encoded file. Encoding a PNG needs DEFLATE, which lives a layer above this module, and pulling a compression library down here would make every consumer of the drawing engine pay for it.
+`Draw.toRgba` returns an `DrawRgbaImage` — `{ width, height, data }`, with `width * height * 4` bytes of straight-alpha RGBA — not an encoded file. Encoding a PNG needs DEFLATE, which lives a layer above this module, and pulling a compression library down here would make every consumer of the drawing engine pay for it.
 
 The seam is therefore at the image, and the pairing is two lines. `documonster/archive` owns DEFLATE and CRC-32, which is all a PNG is:
 
@@ -199,7 +199,7 @@ const image = Draw.toRgba(list, { fonts: [notoSansScBytes] });
 ```typescript
 import { Draw } from "documonster/draw";
 
-const regular = Draw.parseRasterFont(songtiTtcBytes, 3); // a face inside a .ttc
+const regular = Draw.parseRasterFont({ data: songtiTtcBytes, collectionIndex: 3 }); // a face inside a .ttc
 const image = Draw.toRgba(list, { fonts: [regular] });
 
 // Equivalently, without parsing yourself:

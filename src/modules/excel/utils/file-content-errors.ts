@@ -2,8 +2,8 @@
  * How a reader reports a position in a file's content that is outside the grid or not where it is written.
  *
  * The readers decode positions with the same checked helpers the API uses (`colCache`, `getCell`, `addRow`, the
- * `<row r>` / `<c r>` decoders), and those throw the position errors — `RowOutOfBoundsError`,
- * `ColumnOutOfBoundsError`, `InvalidAddressError` — which are `ExcelArgumentError`s, because at an API call they are a
+ * `<row r>` / `<c r>` decoders), and those throw the position errors — `ExcelRowOutOfBoundsError`,
+ * `ExcelColumnOutOfBoundsError`, `ExcelInvalidAddressError` — which are `ExcelArgumentError`s, because at an API call they are a
  * wrong argument. A file is not an argument: the same error from a read is translated where the reader knows what it
  * was reading — a part, a sheet's model, a row — into the error that reader uses for malformed content, the position
  * error kept as `cause` and its text in the message.
@@ -12,10 +12,10 @@
  * reader keeps meaning "wrong argument" when the caller wrote the position.
  */
 import {
-  ColumnOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   ExcelFileError,
-  InvalidAddressError,
-  RowOutOfBoundsError,
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError,
   XlsbParseError,
   XlsxParseError
 } from "@excel/errors";
@@ -23,11 +23,11 @@ import {
 /** A position error: a row, a column or an address outside the grid, or not where it is written. */
 export function isPositionError(
   error: unknown
-): error is RowOutOfBoundsError | ColumnOutOfBoundsError | InvalidAddressError {
+): error is ExcelRowOutOfBoundsError | ExcelColumnOutOfBoundsError | ExcelInvalidAddressError {
   return (
-    error instanceof RowOutOfBoundsError ||
-    error instanceof ColumnOutOfBoundsError ||
-    error instanceof InvalidAddressError
+    error instanceof ExcelRowOutOfBoundsError ||
+    error instanceof ExcelColumnOutOfBoundsError ||
+    error instanceof ExcelInvalidAddressError
   );
 }
 

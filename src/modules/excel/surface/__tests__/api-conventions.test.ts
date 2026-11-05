@@ -207,18 +207,18 @@ describe("collections", () => {
 });
 
 describe("Form — the VML getters take the handle like the other getters", () => {
-  it("getVmlAnchor / getVmlStyle / getVmlCheckedValue accept a handle or its model", () => {
+  it("Form.Vml getters accept a handle or its model", () => {
     const { ws } = sheet();
     const cb = Form.addCheckbox(ws, "B2:C3", { text: "Ok", checked: true });
-    expect(Form.getVmlAnchor(cb)).toBe(Form.getVmlAnchor(cb.model));
-    expect(Form.getVmlAnchor(cb)).toMatch(/^\d+, \d+, \d+, \d+, \d+, \d+, \d+, \d+$/);
-    expect(Form.getVmlStyle(cb)).toBe(Form.getVmlStyle(cb.model));
-    expect(Form.getVmlStyle(cb)).toContain("position:absolute");
-    expect(Form.getVmlCheckedValue(cb)).toBe(1);
-    expect(Form.getVmlCheckedValue(cb.model)).toBe(1);
+    expect(Form.Vml.getAnchor(cb)).toBe(Form.Vml.getAnchor(cb.model));
+    expect(Form.Vml.getAnchor(cb)).toMatch(/^\d+, \d+, \d+, \d+, \d+, \d+, \d+, \d+$/);
+    expect(Form.Vml.getStyle(cb)).toBe(Form.Vml.getStyle(cb.model));
+    expect(Form.Vml.getStyle(cb)).toContain("position:absolute");
+    expect(Form.Vml.getCheckedValue(cb)).toBe(1);
+    expect(Form.Vml.getCheckedValue(cb.model)).toBe(1);
     // The deprecated names keep taking the model, as they always did.
-    expect(Form.vmlAnchor(cb.model)).toBe(Form.getVmlAnchor(cb));
-    expect(Form.vmlStyle(cb.model)).toBe(Form.getVmlStyle(cb));
+    expect(Form.vmlAnchor(cb.model)).toBe(Form.Vml.getAnchor(cb));
+    expect(Form.vmlStyle(cb.model)).toBe(Form.Vml.getStyle(cb));
     expect(Form.vmlCheckedValue(cb.model)).toBe(1);
   });
 });

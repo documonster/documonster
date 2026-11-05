@@ -1,10 +1,10 @@
 /**
  * A region map's topology is the caller's data, so a topology that cannot be read is an
- * argument error naming where it is wrong — `ChartOptionsError` with the exact path from the
+ * argument error naming where it is wrong — `ExcelChartOptionsError` with the exact path from the
  * public parameter (`options.regionMap.topology.arcs[3]`) and the call — not a plain `Error`,
  * a `TypeError` from deep inside the decoder, or a silent fall-back to the centroid preview.
  */
-import { ChartClassic, ChartEx, ChartOptionsError, drawChartExPdf } from "@excel/chart/index";
+import { ChartClassic, ChartEx, ExcelChartOptionsError, drawChartExPdf } from "@excel/chart/index";
 import { describe, expect, it } from "vitest";
 
 const SQUARE = [
@@ -35,14 +35,14 @@ const model = ChartEx.createModel({
   layout: { projection: "miller", regionLabels: "showAll", geoMappingLevel: "country" }
 });
 
-function refusal(run: () => unknown): ChartOptionsError {
+function refusal(run: () => unknown): ExcelChartOptionsError {
   try {
     run();
   } catch (err) {
-    expect(err).toBeInstanceOf(ChartOptionsError);
-    return err as ChartOptionsError;
+    expect(err).toBeInstanceOf(ExcelChartOptionsError);
+    return err as ExcelChartOptionsError;
   }
-  throw new Error("expected a ChartOptionsError");
+  throw new Error("expected a ExcelChartOptionsError");
 }
 
 const BAD: Array<[string, Record<string, unknown>, string, string]> = [
@@ -132,8 +132,8 @@ describe("a region map topology is checked as the caller's data", () => {
           () => undefined,
           (thrown: unknown) => thrown
         );
-      expect(err).toBeInstanceOf(ChartOptionsError);
-      expect((err as ChartOptionsError).field).toBe("options.regionMap.topology.arcs");
+      expect(err).toBeInstanceOf(ExcelChartOptionsError);
+      expect((err as ExcelChartOptionsError).field).toBe("options.regionMap.topology.arcs");
       expect((err as Error).message.startsWith(`${where}: `)).toBe(true);
     }
   });

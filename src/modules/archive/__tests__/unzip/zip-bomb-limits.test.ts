@@ -17,7 +17,11 @@ import {
 } from "@archive/compression/compress";
 import { decompressWithStream } from "@archive/compression/compress.base";
 import { inflateRaw } from "@archive/compression/deflate-fallback";
-import { ArchiveLimitError, EntrySizeMismatchError, FileTooLargeError } from "@archive/core/errors";
+import {
+  ArchiveLimitError,
+  ZipEntrySizeMismatchError,
+  ArchiveFileTooLargeError
+} from "@archive/core/errors";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { createZipSync } from "@archive/zip/zip-bytes";
 import { describe, expect, it } from "vitest";
@@ -101,21 +105,21 @@ describe("ZipParser bomb protection", () => {
   it("rejects an entry that inflates past its declared size (async)", async () => {
     const parser = new ZipParser(bomb);
     const err = await parser.extractAll().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(EntrySizeMismatchError);
-    expect((err as EntrySizeMismatchError).isZipBomb()).toBe(true);
-    expect((err as EntrySizeMismatchError).actual).toBeUndefined();
+    expect(err).toBeInstanceOf(ZipEntrySizeMismatchError);
+    expect((err as ZipEntrySizeMismatchError).isZipBomb()).toBe(true);
+    expect((err as ZipEntrySizeMismatchError).actual).toBeUndefined();
     expect((err as Error).message).toMatch(`exceeds its declared ${LIED_SIZE} bytes`);
     expect((err as Error).cause).toBeInstanceOf(ArchiveLimitError);
   });
 
   it("rejects an entry that inflates past its declared size (sync)", () => {
-    expect(() => new ZipParser(bomb).extractAllSync()).toThrow(EntrySizeMismatchError);
+    expect(() => new ZipParser(bomb).extractAllSync()).toThrow(ZipEntrySizeMismatchError);
   });
 
   it("rejects a declared size above maxEntrySize before inflating", async () => {
     const zip = createZipSync([{ name: "a.bin", data: new Uint8Array(2048) }]);
     await expect(new ZipParser(zip, { maxEntrySize: 1024 }).extract("a.bin")).rejects.toThrow(
-      FileTooLargeError
+      ArchiveFileTooLargeError
     );
   });
 

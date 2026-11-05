@@ -9,8 +9,9 @@
  * browser; the Node file adds file and Node streams.
  */
 
-import { Archive, ArchiveError, Crc32MismatchError } from "@archive";
+import { Archive, ArchiveError, ZipCrc32MismatchError } from "@archive";
 import { parseTarGzStream as deprecatedParseTarGzStream } from "@archive/tar/tar-gzip";
+import { concatUint8Arrays } from "@utils/binary";
 import { describe, expect, it } from "vitest";
 
 import { createDataDescriptorZip } from "./test-helpers";
@@ -154,7 +155,7 @@ async function readAll(iterable: AsyncIterable<Uint8Array>): Promise<Uint8Array>
   for await (const part of iterable) {
     parts.push(part);
   }
-  return Archive.concatUint8Arrays(parts);
+  return concatUint8Arrays(parts);
 }
 
 export type LeaveMode = "unread" | "read" | "partly read" | "throw";
@@ -388,11 +389,11 @@ export function defineZipEarlyExitSuite(sources: Record<string, SourceFactory>):
       "skipped unread": async () => {},
       discarded: async entry => entry.discard(),
       "read, failure caught": async (entry, seen) => {
-        await expect(entry.bytes()).rejects.toBeInstanceOf(Crc32MismatchError);
+        await expect(entry.bytes()).rejects.toBeInstanceOf(ZipCrc32MismatchError);
         seen.push("caught");
       },
       "streamed, failure caught": async (entry, seen) => {
-        await expect(readAll(entry.stream())).rejects.toBeInstanceOf(Crc32MismatchError);
+        await expect(readAll(entry.stream())).rejects.toBeInstanceOf(ZipCrc32MismatchError);
         seen.push("caught");
       }
     };
@@ -430,8 +431,10 @@ export function defineZipEarlyExitSuite(sources: Record<string, SourceFactory>):
             await entry.bytes();
           }
         };
-        await expect(walk(zip)).rejects.toBeInstanceOf(Crc32MismatchError);
-        await expect(settleWithin(walk(tracked.source))).rejects.toBeInstanceOf(Crc32MismatchError);
+        await expect(walk(zip)).rejects.toBeInstanceOf(ZipCrc32MismatchError);
+        await expect(settleWithin(walk(tracked.source))).rejects.toBeInstanceOf(
+          ZipCrc32MismatchError
+        );
         await settleWithin(tracked.released(), 10_000, "releasing the source");
       });
     }
@@ -443,7 +446,7 @@ export function defineZipEarlyExitSuite(sources: Record<string, SourceFactory>):
         kept.push(entry);
       }
       const victim = kept.find(entry => entry.path === "3-c.txt")!;
-      await expect(victim.bytes()).rejects.toBeInstanceOf(Crc32MismatchError);
+      await expect(victim.bytes()).rejects.toBeInstanceOf(ZipCrc32MismatchError);
       expectBytes(await kept[0]!.bytes(), f.data.get("1-a.txt"));
     });
   });
@@ -490,16 +493,16 @@ export function defineTarEarlyExitSuite(sources: Record<string, SourceFactory>):
   }
 
   function fromTarEntries(
-    iterable: AsyncIterable<{ info: { path: string }; data(): Promise<Uint8Array> }>
+    iterable: AsyncIterable<{ info: { path: string }; bytes(): Promise<Uint8Array> }>
   ): AsyncIterable<EntryLike> {
     return {
       async *[Symbol.asyncIterator]() {
         for await (const entry of iterable) {
           yield {
             path: entry.info.path,
-            bytes: () => entry.data(),
+            bytes: () => entry.bytes(),
             async *stream() {
-              yield await entry.data();
+              yield await entry.bytes();
             }
           };
         }

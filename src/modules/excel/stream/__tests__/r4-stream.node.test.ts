@@ -5,12 +5,12 @@
  */
 import { Readable, Writable } from "node:stream";
 
-import { Archive, Crc32MismatchError } from "@archive";
+import { Archive, ZipCrc32MismatchError } from "@archive";
 import {
   ExcelArgumentError,
   ExcelFileError,
   ExcelStreamStateError,
-  InvalidValueTypeError,
+  ExcelInvalidValueTypeError,
   Stream,
   Workbook,
   Worksheet,
@@ -112,8 +112,8 @@ describe("WorksheetWriter#addRows adds nothing when a value is refused", () => {
     } catch (e) {
       error = e;
     }
-    expect(error).toBeInstanceOf(InvalidValueTypeError);
-    expect((error as InvalidValueTypeError).field).toBe("values[1][1]");
+    expect(error).toBeInstanceOf(ExcelInvalidValueTypeError);
+    expect((error as ExcelInvalidValueTypeError).field).toBe("values[1][1]");
     expect(ws.findRow(1)).toBeUndefined();
     expect(() => ws.addRow([Number.NaN])).toThrow(expect.objectContaining({ field: "value[0]" }));
     expect(ws.findRow(1)).toBeUndefined();
@@ -185,7 +185,7 @@ describe("X3 a damaged package is an ExcelFileError in every Excel reader", () =
       for (const error of errors) {
         expect(error).toBeInstanceOf(ExcelFileError);
         expect(isExcelError(error)).toBe(true);
-        expect((error as Error).cause).toBeInstanceOf(Crc32MismatchError);
+        expect((error as Error).cause).toBeInstanceOf(ZipCrc32MismatchError);
       }
     }
   );

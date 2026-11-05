@@ -6,6 +6,10 @@
  * as the Node stream it actually returns.
  */
 
+import type {
+  ExcelCsvInput as ExcelCsvInputType,
+  ExcelCsvOptions as ExcelCsvOptionsType
+} from "@excel/bridge/csv-bridge";
 import {
   createCsvWriteStream as createCsvWriteStreamImpl,
   readCsv as readCsvImpl,
@@ -28,19 +32,27 @@ export {
   ExcelDownloadError,
   ExcelError,
   ExcelFileError,
-  InvalidValueTypeError,
+  ExcelInvalidValueTypeError,
   isExcelError,
+  ExcelWorksheetNameError,
+  // Deprecated pre-prefix names; removed in 1.0.
+  InvalidValueTypeError,
   WorksheetNameError
 } from "@excel/errors";
 export type { ExcelFileErrorOptions, InvalidValueTypeErrorOptions } from "@excel/errors";
 export { CsvError, isCsvError } from "@csv/errors";
 export type { BaseErrorOptions } from "@utils/errors";
+// Prefixed with the namespace they belong to, so they cannot be read as `documonster/csv`'s own options.
 export type {
-  CsvInput,
-  CsvOptions,
-  CsvReadOptions,
-  CsvWriteOptions
+  ExcelCsvInput,
+  ExcelCsvOptions,
+  ExcelCsvReadOptions,
+  ExcelCsvWriteOptions
 } from "@excel/bridge/csv-bridge";
+/** @deprecated Use {@link ExcelCsvInput}. Removed in 1.0. */
+export type CsvInput = ExcelCsvInputType;
+/** @deprecated Use {@link ExcelCsvOptions}. Removed in 1.0. */
+export type CsvOptions = ExcelCsvOptionsType;
 
 /** @deprecated Use {@link ExcelCsv.addWorksheet}. Removed in 1.0. */
 export const readCsv = readCsvImpl;

@@ -1130,7 +1130,7 @@ describe("Workbook Markdown integration", () => {
 
   describe("readMarkdownFile / writeMarkdownFile browser stubs", () => {
     it("readMarkdownFile should throw in browser context simulation", async () => {
-      // The base class (browser) throws ExcelNotSupportedError.
+      // The base class (browser) throws ExcelUnsupportedFeatureError.
       // In Node.js test environment, the Node override will actually try to read the file.
       // We test that readMarkdownFile with non-existent file throws.
       await expect(readMarkdownFile(workbook, "/nonexistent/path.md")).rejects.toThrow();

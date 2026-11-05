@@ -35,7 +35,7 @@ export async function exampleTransformBasic(): Promise<void> {
 export function exampleBufferedStream(): void {
   console.log("\n=== BufferedStream Example ===");
 
-  const buffered = Streams.createBufferedStream({ batchSize: 1024 });
+  const buffered = new Streams.BufferedStream({ batchSize: 1024 });
 
   // Write some data
   buffered.write("Hello ");
@@ -104,7 +104,7 @@ export function exampleTransactionalBuilder(): void {
 export async function examplePullStream(): Promise<void> {
   console.log("\n=== PullStream Example ===");
 
-  const stream = Streams.createPullStream();
+  const stream = new Streams.PullStream();
 
   // Write some data
   stream.write(stringToUint8Array("Line1\nLine2\nLine3\n"));

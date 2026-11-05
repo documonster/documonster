@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { htmlToDocxBody } from "../convert/html/html-import";
 import { utf8Decoder, utf8Encoder } from "../core/internal-utils";
-import { Build, Document, Io, Package, Streaming } from "../index";
+import { Build, Document, Io, Package, Stream } from "../index";
 import type { BodyContent, DocxDocument, Paragraph, Run } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -364,7 +364,7 @@ describe("Med-9: hyphenation minLeft boundary", () => {
 
 describe("Bug-6: streaming-writer parity with packager", () => {
   it("registers a hyperlink rId in document.xml.rels", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add({
       type: "paragraph",
       children: [
@@ -391,7 +391,7 @@ describe("Bug-6: streaming-writer parity with packager", () => {
       0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
       0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
     ]);
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       images: [{ rId: "rId99", fileName: "tiny.png", mediaType: "png", data: png }]
     });
     stream.add({

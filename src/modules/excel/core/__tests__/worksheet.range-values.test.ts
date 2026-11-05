@@ -7,7 +7,7 @@
  */
 import { getColumnCount, getRowCount, getSheetDimensions } from "@excel/core/worksheet";
 import { findCell, findRow, getRangeValues } from "@excel/core/worksheet-core";
-import { ExcelError, InvalidAddressError } from "@excel/errors";
+import { ExcelError, ExcelInvalidAddressError } from "@excel/errors";
 import { Cell, Range, Row, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
@@ -282,22 +282,22 @@ describe("getRangeValues", () => {
     it("rejects whole-column and whole-row references", () => {
       const ws = sheet();
 
-      expect(() => getRangeValues(ws, "A:A")).toThrow(InvalidAddressError);
-      expect(() => getRangeValues(ws, "A:C")).toThrow(InvalidAddressError);
-      expect(() => getRangeValues(ws, "1:5")).toThrow(InvalidAddressError);
+      expect(() => getRangeValues(ws, "A:A")).toThrow(ExcelInvalidAddressError);
+      expect(() => getRangeValues(ws, "A:C")).toThrow(ExcelInvalidAddressError);
+      expect(() => getRangeValues(ws, "1:5")).toThrow(ExcelInvalidAddressError);
     });
 
     it("rejects an undecodable range string", () => {
       const ws = sheet();
 
-      expect(() => getRangeValues(ws, "nope")).toThrow(InvalidAddressError);
-      expect(() => getRangeValues(ws, "")).toThrow(InvalidAddressError);
+      expect(() => getRangeValues(ws, "nope")).toThrow(ExcelInvalidAddressError);
+      expect(() => getRangeValues(ws, "")).toThrow(ExcelInvalidAddressError);
     });
 
     it("rejects an unset range handle", () => {
       const ws = sheet();
 
-      expect(() => getRangeValues(ws, Range.create())).toThrow(InvalidAddressError);
+      expect(() => getRangeValues(ws, Range.create())).toThrow(ExcelInvalidAddressError);
       expect(() => getRangeValues(ws, Range.create())).toThrow(/unset or empty/);
     });
 
@@ -332,7 +332,7 @@ describe("getRangeValues", () => {
       const ws = sheet();
 
       expect(() => getRangeValues(ws, { top: 1.5, left: 1, bottom: 2, right: 2 })).toThrow(
-        InvalidAddressError
+        ExcelInvalidAddressError
       );
     });
   });

@@ -9,7 +9,7 @@
  *   without implicitly destroying the underlying stream.
  */
 
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 
 /**
  * Listener accepted by {@link EventedReadableLike}. The events consumed here
@@ -37,7 +37,7 @@ export function eventedReadableToAsyncIterableNoDestroy<T>(
   stream: EventedReadableLike<T>
 ): AsyncIterable<T> {
   if (typeof (stream as { on?: unknown } | null)?.on !== "function") {
-    throw new StreamTypeError("an evented readable", stream === null ? "null" : typeof stream, {
+    throw new StreamArgumentError("an evented readable", stream === null ? "null" : typeof stream, {
       field: "stream",
       where: "Streams.LowLevel.eventsToAsyncIterableNoDestroy"
     });

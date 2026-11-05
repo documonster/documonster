@@ -6,7 +6,7 @@
  * - Callback-to-promise conversion (promisify)
  */
 
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 
 // =============================================================================
 // State Inspection
@@ -38,7 +38,7 @@ export function promisify<T>(
 ): Promise<T> {
   if (typeof fn !== "function") {
     return Promise.reject(
-      new StreamTypeError("a function", fn === null ? "null" : typeof fn, {
+      new StreamArgumentError("a function", fn === null ? "null" : typeof fn, {
         field: "fn",
         where: "Streams.LowLevel.fromCallback"
       })

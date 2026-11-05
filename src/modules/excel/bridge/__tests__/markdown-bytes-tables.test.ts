@@ -4,9 +4,9 @@
  * declare `map` the way they call it: the cell's text and its 0-based column in, a cell value out, checked as
  * `Cell.setValue` checks one.
  */
-import { Cell, ExcelArgumentError, InvalidValueTypeError, Workbook, Worksheet } from "@excel";
-import { ExcelCsv, type CsvReadOptions } from "@excel/bridge/csv";
-import { ExcelMarkdown, type MarkdownReadOptions } from "@excel/bridge/markdown";
+import { Cell, ExcelArgumentError, ExcelInvalidValueTypeError, Workbook, Worksheet } from "@excel";
+import { ExcelCsv, type ExcelCsvReadOptions } from "@excel/bridge/csv";
+import { ExcelMarkdown, type ExcelMarkdownReadOptions } from "@excel/bridge/markdown";
 import type { CellValueInput } from "@excel/types";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
@@ -87,13 +87,15 @@ describe("ExcelMarkdown.read({ tables })", () => {
 
 describe("map is declared as it is called", () => {
   it("text and a 0-based column in, a checked cell value out — both bridges", async () => {
-    expectTypeOf<NonNullable<MarkdownReadOptions["map"]>>().toEqualTypeOf<
+    expectTypeOf<NonNullable<ExcelMarkdownReadOptions["map"]>>().toEqualTypeOf<
       (text: string, column: number) => CellValueInput
     >();
-    expectTypeOf<Parameters<NonNullable<CsvReadOptions["map"]>>>().toEqualTypeOf<
+    expectTypeOf<Parameters<NonNullable<ExcelCsvReadOptions["map"]>>>().toEqualTypeOf<
       [text: string, column: number]
     >();
-    expectTypeOf<ReturnType<NonNullable<CsvReadOptions["map"]>>>().toEqualTypeOf<CellValueInput>();
+    expectTypeOf<
+      ReturnType<NonNullable<ExcelCsvReadOptions["map"]>>
+    >().toEqualTypeOf<CellValueInput>();
 
     const calls: [unknown, number][] = [];
     const map = (text: string, column: number): CellValueInput => {
@@ -117,8 +119,8 @@ describe("map is declared as it is called", () => {
   it("a value a cell cannot hold is refused, in both", async () => {
     const map = (): CellValueInput => Number.NaN;
     expect(() => ExcelMarkdown.read("| a |\n| --- |\n| 1 |\n", { map })).toThrow(
-      InvalidValueTypeError
+      ExcelInvalidValueTypeError
     );
-    await expect(ExcelCsv.read("1", { map })).rejects.toThrow(InvalidValueTypeError);
+    await expect(ExcelCsv.read("1", { map })).rejects.toThrow(ExcelInvalidValueTypeError);
   });
 });

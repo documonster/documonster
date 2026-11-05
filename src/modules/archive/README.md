@@ -69,7 +69,7 @@ const data = await reader.bytes("hello.txt");
 ```typescript
 import { Archive } from "documonster/archive";
 
-const editor = await Archive.editZip(existingZipBytes, { preserve: "best-effort" });
+const editor = await Archive.ZipEditor.open(existingZipBytes, { preserve: "best-effort" });
 editor.delete("old.txt");
 editor.rename("a.txt", "renamed.txt");
 editor.set("new.txt", "new content");
@@ -298,13 +298,13 @@ entry.discard(); // Skip without reading
 | `onProgress`   | `(p: UnzipProgress) => void` | -         | Progress callback                         |
 
 **Limits.** Every reader takes the same two limits: `maxEntrySize` (the largest entry read into
-memory, `FileTooLargeError`) and, for ZIP, `maxEntries` (`ArchiveLimitError`) — `unpackZip`,
+memory, `ArchiveFileTooLargeError`) and, for ZIP, `maxEntries` (`ArchiveLimitError`) — `unpackZip`,
 `openZip`, `RemoteZipReader` and `ArchiveFile` alike; the TAR readers take `maxEntrySize` too
 (100 MiB by default; `maxFileSize` is its deprecated name). Set them when reading archives you
 did not write. Every reader checks them when called: a limit that is not a whole number from 0 (or
 `Infinity`) is an `ArchiveArgumentError` naming `options.<limit>`. A limit that is hit is an
 `ArchiveLimitError` whose `limit` names the option and `allowed` its value — except `maxEntrySize`,
-which is a `FileTooLargeError` carrying the same `limit` (`"maxEntrySize"`) and `allowed` fields,
+which is a `ArchiveFileTooLargeError` carrying the same `limit` (`"maxEntrySize"`) and `allowed` fields,
 plus the entry's `path`.
 
 **Strings.** A string given to a reader is the archive's content, encoded as UTF-8 — never a file
@@ -315,7 +315,7 @@ binary content does not survive a JavaScript string.
 added (`ArchiveArgumentError`). An archive written elsewhere with a name twice is read the way
 extractors read it — the later entry is the one `get`, `bytes`, `unpackZip` and
 `RemoteZipReader.extract` return, as `TarReader.get` and `unpackTar` do for TAR — and an
-unedited `editZip` writes every entry back.
+unedited `ZipEditor.open` writes every entry back.
 
 **One-shot sources.** A `ReadableStream`, a Node stream or an async iterable can be read once.
 `openZip` / `openTar` over one read it either with one `entries()` pass, or by buffering it the
@@ -324,7 +324,7 @@ that); anything else is an `ArchiveError` saying the stream was consumed. `openT
 the decompressed archive and can be read any number of times.
 
 **Integrity.** Every ZIP read verifies each entry against the CRC-32 the archive records for
-it and throws `Crc32MismatchError` on a mismatch — `Archive.openZip` / `ZipReader` (buffered
+it and throws `ZipCrc32MismatchError` on a mismatch — `Archive.openZip` / `ZipReader` (buffered
 and streaming sources, `bytes()` and `stream()`), `Archive.unpackZip` / `unpackZipSync`,
 `RemoteZipReader` and `ArchiveFile`. `stream()` reports a mismatch after the entry's
 last chunk, since the checksum covers the whole entry. Pass `checkCrc32: false` to read a
@@ -360,14 +360,14 @@ Filesystem-like editing of existing ZIP archives. Unchanged entries are passed t
 import { Archive } from "documonster/archive";
 
 // From bytes
-const editor = await Archive.editZip(zipBytes, {
+const editor = await Archive.ZipEditor.open(zipBytes, {
   reproducible: true,
   preserve: "best-effort",
   onWarning: w => console.warn(w.code, w.entry, w.message)
 });
 
 // From URL (HTTP Range requests)
-const editor = await Archive.editZipUrl("https://example.com/archive.zip");
+const editor = await Archive.ZipEditor.openUrl("https://example.com/archive.zip");
 
 // Operations
 editor.has("file.txt"); // Check existence
@@ -595,7 +595,7 @@ for await (const chunk of archive.stream()) {
 // Parse .tar.gz
 const entries = await Archive.parseTarGz(tgzBytes);
 for (const entry of entries) {
-  console.log(entry.info.path, await entry.data());
+  console.log(entry.info.path, await entry.bytes());
 }
 
 // Extract .tar.gz to Map
@@ -603,7 +603,7 @@ const files = await Archive.unpackTarGz(tgzBytes);
 
 // Large .tar.gz: decompress and parse incrementally, one entry in memory at a time
 for await (const entry of Archive.parseTarGzStream(response.body!)) {
-  console.log(entry.info.path, (await entry.data()).length);
+  console.log(entry.info.path, (await entry.bytes()).length);
 }
 ```
 
@@ -697,8 +697,10 @@ by path is written back gzip-compressed. `writeFile` refuses an existing file un
 `overwrite` says otherwise, for TAR as for ZIP.
 
 The helpers it is built on — `Fs.glob`, `Fs.traverseDirectory`, `Fs.ensureDir`,
-`Fs.readFileBytes`, `Fs.createReadStream`, … — are published on the Node-only `Fs`
-namespace:
+`Fs.readFileBytes`, … — are published on the Node-only `Fs` namespace. A wrong argument is an
+`ArchiveArgumentError` naming the call and the parameter; what the file system then refuses
+(`ENOENT`, `EACCES`, …) is passed on as the platform's error. For file streams use
+`createReadStream` / `createWriteStream` from `node:fs`:
 
 ```typescript
 import { Fs } from "documonster/archive";
@@ -741,18 +743,20 @@ import {
   ArchiveError,
   ArchiveArgumentError, // a wrong argument or option; `.field` names it
   ZipParseError,
-  InvalidZipSignatureError,
-  EocdNotFoundError,
-  DecryptionError,
-  PasswordRequiredError,
-  FileTooLargeError,
-  UnsupportedCompressionError,
-  EntrySizeMismatchError,
-  Crc32MismatchError,
-  RangeNotSupportedError,
-  HttpRangeError,
+  ZipInvalidSignatureError,
+  ZipEocdNotFoundError,
+  ZipDecryptionError,
+  ZipPasswordRequiredError,
+  ArchiveFileTooLargeError,
+  ZipUnsupportedCompressionError,
+  ZipEntrySizeMismatchError,
+  ZipCrc32MismatchError,
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError,
   ArchiveLimitError,
-  WorkerStreamStartError,
+  ArchiveWorkerStreamStartError,
+  ArchiveWorkerUnsupportedError, // a Compression.Workers call on Node; `.operation` names it
+  ArchiveFileError, // ArchiveFile.fromFile / writeFile refused by the file system; `.cause` is its error
   AbortError,
   isArchiveError // Type guard: (err: unknown) => err is ArchiveError
 } from "documonster/archive";
@@ -794,8 +798,8 @@ try {
 | `Archive.openZip(source, options?)`        | Open a ZIP for reading         |
 | `Archive.openTar(source, options?)`        | Open a TAR for reading         |
 | `Archive.openTarGz(source, options?)`      | Open a tar.gz for reading      |
-| `Archive.editZip(source, options?)`        | Open a ZIP for editing         |
-| `Archive.editZipUrl(url, options?)`        | Open a remote ZIP for editing  |
+| `Archive.ZipEditor.open(source, options?)` | Open a ZIP for editing         |
+| `Archive.ZipEditor.openUrl(url, options?)` | Open a remote ZIP for editing  |
 | `Archive.packZip(entries, options?)`       | Entries → ZIP bytes (async)    |
 | `Archive.packZipSync(entries, options?)`   | Entries → ZIP bytes (sync)     |
 | `Archive.packTar(entries, options?)`       | Entries → TAR bytes (async)    |

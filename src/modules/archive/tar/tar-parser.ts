@@ -10,7 +10,7 @@ import { checkReadOptions, TAR_READ_LIMITS } from "@archive/core/entry-checks";
 import {
   ArchiveArgumentError,
   ArchiveError,
-  FileTooLargeError,
+  ArchiveFileTooLargeError,
   createAbortError
 } from "@archive/core/errors";
 import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
@@ -19,7 +19,7 @@ import {
   isArchiveBytes,
   isArchiveSource,
   isInMemoryArchiveSource,
-  toAsyncIterable,
+  iterateArchiveSource,
   toUint8Array
 } from "@archive/io/archive-source";
 import { TAR_BLOCK_SIZE, TAR_TYPE } from "@archive/tar/tar-constants";
@@ -72,7 +72,7 @@ function applyPaxAttributes(info: TarEntryInfo, pax: Record<string, string>): vo
 
 export interface TarParseOptions {
   /**
-   * Largest entry, in bytes, that may be read into memory (`FileTooLargeError`). The same
+   * Largest entry, in bytes, that may be read into memory (`ArchiveFileTooLargeError`). The same
    * option as ZIP's `maxEntrySize`.
    * @default 104857600 (100 MiB)
    */
@@ -95,18 +95,60 @@ export function entrySizeLimit(options: {
 
 const DEFAULT_MAX_TAR_ENTRY_SIZE = 100 * 1024 * 1024;
 
+/**
+ * One entry of {@link parseTar} / {@link parseTarStream} (and their tar.gz forms). Its reading
+ * methods carry the names `TarReaderEntry` and `UnzipEntry` use.
+ */
 export interface TarEntry {
   /** Entry metadata */
   info: TarEntryInfo;
 
-  /** Extract entry data as Uint8Array */
-  data(): Promise<Uint8Array>;
+  /** The entry's data. */
+  bytes(): Promise<Uint8Array>;
 
-  /** Extract entry data as string (UTF-8) */
+  /** The entry's data as a string (UTF-8). */
   text(): Promise<string>;
 
-  /** Skip this entry without reading data */
+  /**
+   * Let go of this entry without reading it. A parse reads each entry's data as it reaches
+   * it, so there is nothing left to skip; this exists so code written against
+   * `TarReaderEntry` / `UnzipEntry` works unchanged.
+   */
+  discard(): void;
+
+  /** @deprecated Use {@link TarEntry.bytes}. Removed in 1.0. */
+  data(): Promise<Uint8Array>;
+
+  /** @deprecated Use {@link TarEntry.discard}. Removed in 1.0. */
   skip(): Promise<void>;
+}
+
+/** One entry of {@link untar} / {@link untarSync} (and their tar.gz forms): its header and its data. */
+export interface UnpackedTarEntry {
+  info: TarEntryInfo;
+  data: Uint8Array;
+}
+
+/** A parsed entry over data already read. */
+function createTarEntry(info: TarEntryInfo, entryData: Uint8Array): TarEntry {
+  return {
+    info,
+    async bytes(): Promise<Uint8Array> {
+      return entryData;
+    },
+    async text(): Promise<string> {
+      return textDecoder.decode(entryData);
+    },
+    discard(): void {
+      // Data already read
+    },
+    async data(): Promise<Uint8Array> {
+      return entryData;
+    },
+    async skip(): Promise<void> {
+      // Data already read
+    }
+  };
 }
 
 /**
@@ -127,18 +169,9 @@ export function parseTar(data: ArchiveBytes, options: TarParseOptions = {}): Tar
 }
 
 function parseTarBytes(data: Uint8Array, options: TarParseOptions): TarEntry[] {
-  return parseTarRecords(data, options).map(({ info, start, end }) => ({
-    info,
-    async data(): Promise<Uint8Array> {
-      return data.subarray(start, end);
-    },
-    async text(): Promise<string> {
-      return textDecoder.decode(data.subarray(start, end));
-    },
-    async skip(): Promise<void> {
-      // No-op for in-memory parsing
-    }
-  }));
+  return parseTarRecords(data, options).map(({ info, start, end }) =>
+    createTarEntry(info, data.subarray(start, end))
+  );
 }
 
 /** One entry located by {@link parseTarRecords}: its header and the byte range of its data. */
@@ -251,7 +284,7 @@ function parseTarRecords(data: Uint8Array, options: TarParseOptions): TarRecord[
 
     // Check file size limit
     if (dataSize > maxFileSize) {
-      throw new FileTooLargeError(
+      throw new ArchiveFileTooLargeError(
         info.path,
         `exceeds maximum file size (${dataSize} > ${maxFileSize})`,
         { allowed: maxFileSize }
@@ -278,7 +311,7 @@ function parseTarRecords(data: Uint8Array, options: TarParseOptions): TarRecord[
 export function parseTarStream(
   source: ArchiveSource | ArchiveBytes,
   options: TarParseOptions = {}
-): AsyncGenerator<TarEntry & { data(): Promise<Uint8Array> }> {
+): AsyncGenerator<TarEntry> {
   if (!isArchiveSource(source)) {
     throw new ArchiveArgumentError(
       "source",
@@ -296,7 +329,7 @@ export function parseTarStream(
 export async function* readTarStream(
   source: ArchiveSource | ArchiveBytes,
   options: TarParseOptions
-): AsyncGenerator<TarEntry & { data(): Promise<Uint8Array> }> {
+): AsyncGenerator<TarEntry> {
   const { signal } = options;
   const maxFileSize = entrySizeLimit(options);
 
@@ -313,7 +346,7 @@ export async function* readTarStream(
 
   // Helper to read exactly n bytes from buffer
   async function* readFromSource(): AsyncGenerator<Uint8Array> {
-    for await (const chunk of toAsyncIterable(source, { signal })) {
+    for await (const chunk of iterateArchiveSource(source, { signal })) {
       if (signal?.aborted) {
         throw createAbortError();
       }
@@ -480,7 +513,7 @@ export async function* readTarStream(
 
       // Check file size limit
       if (dataSize > maxFileSize) {
-        throw new FileTooLargeError(
+        throw new ArchiveFileTooLargeError(
           info.path,
           `exceeds maximum file size (${dataSize} > ${maxFileSize})`,
           { allowed: maxFileSize }
@@ -497,18 +530,7 @@ export async function* readTarStream(
         skipBytes(padding);
       }
 
-      yield {
-        info,
-        async data(): Promise<Uint8Array> {
-          return entryData;
-        },
-        async text(): Promise<string> {
-          return textDecoder.decode(entryData);
-        },
-        async skip(): Promise<void> {
-          // Data already read
-        }
-      };
+      yield createTarEntry(info, entryData);
     }
   } finally {
     // The parse owns its source, so leaving it before the source's end — the consumer stopped
@@ -575,7 +597,7 @@ function parsePaxHeader(data: string): Record<string, string> {
 export async function untar(
   source: ArchiveSource | ArchiveBytes,
   options: TarParseOptions = {}
-): Promise<Map<string, { info: TarEntryInfo; data: Uint8Array }>> {
+): Promise<Map<string, UnpackedTarEntry>> {
   if (!isArchiveSource(source)) {
     throw new ArchiveArgumentError(
       "source",
@@ -586,11 +608,11 @@ export async function untar(
   if (isInMemoryArchiveSource(source)) {
     return untarSync(await toUint8Array(source), options);
   }
-  const result = new Map<string, { info: TarEntryInfo; data: Uint8Array }>();
+  const result = new Map<string, UnpackedTarEntry>();
   for await (const entry of readTarStream(source, options)) {
     result.set(entry.info.path, {
       info: entry.info,
-      data: await entry.data()
+      data: await entry.bytes()
     });
   }
   return result;
@@ -604,7 +626,7 @@ export async function untar(
 export function untarSync(
   source: ArchiveBytes,
   options: Omit<TarParseOptions, "signal"> = {}
-): Map<string, { info: TarEntryInfo; data: Uint8Array }> {
+): Map<string, UnpackedTarEntry> {
   if (!isArchiveBytes(source)) {
     throw new ArchiveArgumentError(
       "source",
@@ -614,7 +636,7 @@ export function untarSync(
   }
   checkReadOptions("Archive.unpackTarSync", options, TAR_READ_LIMITS);
   const bytes = archiveBytesToUint8Array(source);
-  const result = new Map<string, { info: TarEntryInfo; data: Uint8Array }>();
+  const result = new Map<string, UnpackedTarEntry>();
   for (const { info, start, end } of parseTarRecords(bytes, options)) {
     result.set(info.path, { info, data: bytes.subarray(start, end) });
   }

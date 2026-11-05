@@ -17,7 +17,7 @@
 import path from "node:path";
 
 import { Io, Template } from "documonster/word";
-import type { BodyContent, TemplateImage } from "documonster/word";
+import type { BodyContent, DocxTemplateImage } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -506,7 +506,7 @@ function firstFree(preferred: string, taken: (candidate: string) => boolean): st
  *    assigned down the path instead.
  * 2. **A collision must be refused, not silently won.** With `{{logo}}` and
  *    `{{%logo}}` in one template, a flat spread overwrote the text value with the
- *    image object — and the plain placeholder rendered the whole `TemplateImage` as
+ *    image object — and the plain placeholder rendered the whole `DocxTemplateImage` as
  *    JSON, pixel bytes included, into the document. Nine hundred characters of
  *    `{"0":137,"1":80,…}` where a client's name belonged.
  */
@@ -531,12 +531,12 @@ function mergeTemplateData(
   return merged;
 }
 
-/** The `TemplateImage` values, keyed by placeholder path. */
+/** The `DocxTemplateImage` values, keyed by placeholder path. */
 function imageValues(
   images: Map<string, ResolvedImage>,
   media: Map<string, MediaName>
-): Map<string, TemplateImage> {
-  const values = new Map<string, TemplateImage>();
+): Map<string, DocxTemplateImage> {
+  const values = new Map<string, DocxTemplateImage>();
   for (const [name, entry] of media) {
     const image = images.get(name);
     if (image === undefined) {

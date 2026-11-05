@@ -59,8 +59,9 @@ export * as ConditionalFormatting from "@excel/surface/conditional-formatting";
 // the same type would be worse than none. Cell / row / column handles have no
 // such alias, so their declared names are public (see below).
 //
-// The two platform-specific groups (workbook IO / streaming option types) are
-// added by `index.ts` and `index.browser.ts`, next to their namespaces.
+// The workbook IO and streaming option types are listed here too: they are the
+// same type on every platform, so only the `Workbook` and `Stream` namespaces
+// differ between `index.ts` and `index.browser.ts`.
 // ---------------------------------------------------------------------------
 
 // Style vocabulary — `Cell.setStyle`, `Row.setStyle`, `Column.setStyle`,
@@ -126,7 +127,11 @@ export type {
  * a date-time is how a `[h]:mm:ss` cell came back as a moment in 1899.
  */
 export type { DateFormatKind } from "@excel/utils/cell-format";
-export type { CellModel, CellValueType, CellValueInputType, FormulaResult } from "@excel/core/cell";
+export type { CellModel, FormulaResult } from "@excel/core/cell";
+/** @deprecated Use {@link CellValue}. Removed in 1.0. */
+export type { CellValueType } from "@excel/core/cell";
+/** @deprecated Use {@link CellValueInput}. Removed in 1.0. */
+export type { CellValueInputType } from "@excel/core/cell";
 // The cell / row handles belong to the streaming API, where they are published as
 // `Stream.CellHandle` and `Stream.RowHandle`. These flat names stay nameable while
 // deprecated members still mention them.
@@ -151,7 +156,10 @@ export type { RowDimensions, RowModel } from "@excel/core/row";
 /** @deprecated Use `Stream.RowHandle`. Removed in 1.0. */
 export type { RowData } from "@excel/core/row";
 export type { ColumnDefn, ColumnHeaderValue, ColumnModel } from "@excel/core/column";
-/** @deprecated Address columns by key, letter or number through the `Column` namespace. Removed in 1.0. */
+/**
+ * @deprecated Address columns by key, letter or number through the `Column` namespace; a streamed sheet's column is a
+ * `Stream.ColumnHandle`. Removed in 1.0.
+ */
 export type { ColumnData } from "@excel/core/column";
 /**
  * @deprecated Only the deprecated `Worksheet.columns` / `lastColumn` return it; every field
@@ -324,13 +332,14 @@ export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/core/xlsx-io";
 export type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
 export type { WorkbookWritable } from "@excel/core/xlsx-sink";
 // The browser build's deprecated `Workbook.readStream(wb, stream)` takes this event-emitter shape.
-export type { IParseStream } from "@excel/xlsx/types";
+export type { XlsxParseStream } from "@excel/xlsx/types";
 export type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 // Format-aware IO. `WorkbookFormat` is the choice; the option bags are what carry it.
 export type { WorkbookFormat } from "@excel/core/workbook-format";
 export type {
-  // The `encryption` write option: the same type Word's `Io.toBuffer` and `WordCrypto.encrypt` take.
-  EncryptOptions,
+  // The `encryption` write option: the same type Word's `Io.toBuffer` and `WordCrypto.encrypt` take (`DocxEncryptOptions`).
+  // `Workbook`-prefixed like the option bag carrying it, because it applies to XLSX and XLSB alike.
+  WorkbookEncryptOptions,
   UnrecognizedValue,
   WorkbookCreateOptions,
   WorkbookStreamInput
@@ -371,25 +380,39 @@ export type { StyledBlankRangeModel } from "@excel/core/styled-blanks";
 export {
   ExcelError,
   isExcelError,
+  ExcelWorksheetNameError,
+  ExcelInvalidAddressError,
+  ExcelColumnOutOfBoundsError,
+  ExcelRowOutOfBoundsError,
+  ExcelMergeConflictError,
+  ExcelInvalidValueTypeError,
+  ExcelArgumentError,
+  ExcelUnsupportedFeatureError,
+  ExcelDecryptionError,
+  ExcelEncryptedError,
+  ExcelFileError,
+  ExcelStreamStateError,
+  ExcelDownloadError,
+  ExcelPivotTableError,
+  ExcelChartOptionsError,
+  ExcelTableError,
+  ExcelDefinedNameError,
+  ExcelImageError,
+  ExcelLimitExceededError,
+  // Deprecated names (pre-prefix, or renamed to match the other modules); removed in 1.0.
   WorksheetNameError,
   InvalidAddressError,
   ColumnOutOfBoundsError,
   RowOutOfBoundsError,
   MergeConflictError,
   InvalidValueTypeError,
-  ExcelArgumentError,
-  ExcelNotSupportedError,
-  ExcelDecryptionError,
-  ExcelEncryptedError,
-  ExcelFileError,
-  ExcelStreamStateError,
-  ExcelDownloadError,
   PivotTableError,
   ChartOptionsError,
   TableError,
   DefinedNameError,
   ImageError,
   MaxItemsExceededError,
+  ExcelNotSupportedError,
   // Thrown by the XLSB reader for a malformed record stream, and reachable now that
   // `Workbook.read` dispatches to it.
   XlsbParseError,

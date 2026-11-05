@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Build, Document, Io, Streaming, Transform } from "../index";
+import { Build, Document, Io, Stream, Transform } from "../index";
 import type { DocxDocument, PermEnd, PermStart } from "../index";
 import { packageIssues, packageParts, partText } from "./roundtrip-integrity.helpers";
 
@@ -99,7 +99,7 @@ describe("range markers that cannot be paired", () => {
   });
 
   it("a streamed body closes a range left open at its end", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.paragraph([Build.bookmarkStart(3, "tail"), Build.text("open")]));
     stream.add(Build.paragraph([Build.text("later")]));
     const parts = await packageParts(await stream.finalize());

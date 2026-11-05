@@ -25,7 +25,10 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
-import { ExcelNotSupportedError, XlsbFormulaDecodeError } from "../src/modules/excel/errors.ts";
+import {
+  ExcelUnsupportedFeatureError,
+  XlsbFormulaDecodeError
+} from "../src/modules/excel/errors.ts";
 import { Cell, Row, Workbook, Worksheet } from "../src/modules/excel/index.ts";
 import type { XlsbReadDiagnostics } from "../src/modules/excel/xlsb/read/package.ts";
 
@@ -436,7 +439,7 @@ async function main(): Promise<void> {
     const xlsxLosses = await Workbook.toBuffer(handle, { format: "xlsx", validate: false }).then(
       () => [] as readonly string[],
       (cause: unknown) =>
-        cause instanceof ExcelNotSupportedError ? cause.items : Promise.reject(cause)
+        cause instanceof ExcelUnsupportedFeatureError ? cause.items : Promise.reject(cause)
     );
     const expectedXlsxLosses = EXPECTED_XLSX_LOSSES[key] ?? [];
     if (xlsxLosses.join("\n") !== expectedXlsxLosses.join("\n")) {

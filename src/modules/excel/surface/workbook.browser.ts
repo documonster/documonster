@@ -1,3 +1,14 @@
+import {
+  addCellStyle as addCellStyleImpl,
+  createStreamReader as createStreamReaderImpl,
+  createStreamWriter as createStreamWriterImpl,
+  eachWorksheet as eachWorksheetImpl,
+  getChartsheets as listChartsheetsImpl,
+  getWorksheets as listWorksheetsImpl,
+  importWorksheet as importWorksheetImpl,
+  renameChartsheet as renameChartsheetImpl,
+  useBuiltInCellStyle as useBuiltInCellStyleImpl
+} from "@excel/core/workbook.browser";
 /**
  * `Workbook` namespace surface — browser entry.
  *
@@ -6,15 +17,11 @@
  * Node file-path `readFile` / `writeFile`). The `.browser` same-name swap
  * selects the browser xlsx binding.
  */
-import {
-  addCellStyle as addCellStyleImpl,
-  eachWorksheet as eachWorksheetImpl,
-  getChartsheets as listChartsheetsImpl,
-  getWorksheets as listWorksheetsImpl,
-  importWorksheet as importWorksheetImpl,
-  renameChartsheet as renameChartsheetImpl,
-  useBuiltInCellStyle as useBuiltInCellStyleImpl
-} from "@excel/core/workbook.browser";
+import type {
+  XlsxReadable as XlsxReadableType,
+  XlsxWritable as XlsxWritableType
+} from "@excel/core/xlsx-io-types";
+import type { XlsxStreamOptions as XlsxStreamOptionsType } from "@excel/core/xlsx-stream";
 
 export {
   addWorksheet,
@@ -52,9 +59,7 @@ export {
   listCellStyles,
   removeCellStyle,
   useBuiltInCellStyle,
-  getWorkbookModel as getModel,
-  createStreamWriter,
-  createStreamReader
+  getWorkbookModel as getModel
 } from "@excel/core/workbook.browser";
 
 export {
@@ -65,9 +70,20 @@ export {
   readStream,
   writeStream
 } from "@excel/core/xlsx-io";
-export type { XlsxReadable, XlsxWritable, XlsxStreamOptions } from "@excel/core/xlsx-io";
+// Published flat from `documonster/excel`; the namespace copies were a second name for each.
+/** @deprecated Use the flat `XlsxReadable` type. Removed in 1.0. */
+export type XlsxReadable = XlsxReadableType;
+/** @deprecated Use the flat `XlsxWritable` type. Removed in 1.0. */
+export type XlsxWritable = XlsxWritableType;
+/** @deprecated Use the flat `XlsxStreamOptions` type. Removed in 1.0. */
+export type XlsxStreamOptions = XlsxStreamOptionsType;
 
 export { setModel } from "@excel/surface/workbook-model";
+
+/** @deprecated Use `new Stream.WorkbookWriter(options)`. Removed in 1.0. */
+export const createStreamWriter = createStreamWriterImpl;
+/** @deprecated Use `new Stream.WorkbookReader(input, options)`. Removed in 1.0. */
+export const createStreamReader = createStreamReaderImpl;
 
 /** @deprecated Use `Chartsheet.setName(Workbook.getChartsheet(wb, nameOrIndex), name)`. Removed in 1.0. */
 export const renameChartsheet = renameChartsheetImpl;

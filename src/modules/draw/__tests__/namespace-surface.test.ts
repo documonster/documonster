@@ -15,7 +15,7 @@ describe("documonster/draw namespaces", () => {
   it("Backend.SvgSurface accumulates markup", () => {
     const surface = new Draw.Backend.SvgSurface();
     surface.rect(0, 0, 2, 2, 0, { fill: Draw.parseColor("#f00") });
-    expect(surface.markup()).toContain("<rect");
+    expect(surface.format()).toContain("<rect");
   });
 
   it("createRasterSurface takes { scale }", () => {
@@ -80,5 +80,37 @@ describe("documonster/draw namespaces", () => {
     expect(drawn(null)).toEqual([["fillRect", 0, 0, 0, 0, "#ff0000ff"]]);
     expect(drawn(undefined)).toEqual([["fillRect", 2, 3, 4, 5, "#ff0000ff"]]);
     expect(drawn("2")).toEqual([["fillRect", 4, 6, 8, 10, "#ff0000ff"]]);
+  });
+
+  // Expected values observed against v0.21.1's flat `flattenPath(commands, scale = 1)`.
+  it("the deprecated flattenPath keeps its positional scale", () => {
+    const square = [
+      { op: "move", x: 0, y: 0 },
+      { op: "line", x: 10, y: 0 },
+      { op: "line", x: 10, y: 5 },
+      { op: "close" }
+    ] as const;
+    const doubled = [
+      {
+        points: [
+          { x: 0, y: 0 },
+          { x: 20, y: 0 },
+          { x: 20, y: 10 }
+        ],
+        closed: true
+      }
+    ];
+    expect(DrawEntry.flattenPath(square, 2)).toEqual(doubled);
+    expect(Draw.Geometry.flattenPath(square, { scale: 2 })).toEqual(doubled);
+    expect(DrawEntry.flattenPath(square)).toEqual(Draw.Geometry.flattenPath(square));
+    // Unchecked, as it was: a `null` placeholder multiplied every point to the origin.
+    expect(DrawEntry.flattenPath(square, null as never)[0].points).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+      { x: 0, y: 0 }
+    ]);
+    expect(() => Draw.Geometry.flattenPath(square, { scale: null as never })).toThrow(
+      /^Draw\.Geometry\.flattenPath: options\.scale must be/
+    );
   });
 });

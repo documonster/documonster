@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Package, Template, TemplateError, Units } from "../index";
+import { Document, Build, Io, Package, Template, DocxTemplateError, Units } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -316,17 +316,17 @@ function buildTemplate(): DocxDocument {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Strict mode → TemplateError when a placeholder is missing
+// 7. Strict mode → DocxTemplateError when a placeholder is missing
 // ---------------------------------------------------------------------------
 {
   const tpl = buildTemplate();
   try {
     Template.fill(tpl, { customer: { name: "Strict Co." } /* most fields missing */ });
-    console.log("  ERROR: expected TemplateError to be thrown in strict mode");
+    console.log("  ERROR: expected DocxTemplateError to be thrown in strict mode");
   } catch (err) {
-    if (err instanceof TemplateError) {
+    if (err instanceof DocxTemplateError) {
       console.log(
-        `  TemplateError caught: placeholder=${JSON.stringify(err.placeholder)}, location=${err.location}, tagName=${err.tagName ?? "(none)"}`
+        `  DocxTemplateError caught: placeholder=${JSON.stringify(err.placeholder)}, location=${err.location}, tagName=${err.tagName ?? "(none)"}`
       );
     } else {
       throw err;

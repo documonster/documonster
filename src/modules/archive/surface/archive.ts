@@ -1,3 +1,7 @@
+import {
+  createAbortError as createAbortErrorImpl,
+  isAbortError as isAbortErrorImpl
+} from "@archive/core/errors";
 import { zip as zipImpl } from "@archive/create-archive";
 /**
  * `Archive` namespace surface — ZIP / TAR / tar.gz creation and extraction,
@@ -8,7 +12,7 @@ import { zip as zipImpl } from "@archive/create-archive";
  *   `Archive.createZip()` / `Archive.openZip(bytes)` (builder / reader),
  *   `Archive.packZip(entries)` / `Archive.unpackZip(bytes)` (one-shot bytes / path map),
  *   the same four verbs for `Tar` and `TarGz`, `Archive.parseTar(bytes)`,
- *   `Archive.editZip(...)`, `Archive.crc32(bytes)`, …
+ *   `Archive.ZipEditor.open(...)`, `Archive.crc32(bytes)`, …
  *
  * Every member here exists on both platforms, and compression-backed members resolve to
  * the platform's codec through the build's platform variants. The Node entry adds
@@ -39,14 +43,24 @@ import {
   getAesKeyStrength as getAesKeyStrengthImpl,
   encryptionMethodFromAesKeyStrength as encryptionMethodFromAesKeyStrengthImpl
 } from "@archive/crypto";
+import type { ZipEncryptionMethod } from "@archive/crypto/types";
 import { unzip as unzipImpl } from "@archive/read-archive";
+import {
+  base64ToUint8Array as base64ToUint8ArrayImpl,
+  uint8ArrayToBase64 as uint8ArrayToBase64Impl,
+  concatUint8Arrays as concatUint8ArraysImpl,
+  stringToUint8Array as stringToUint8ArrayImpl,
+  uint8ArrayToString as uint8ArrayToStringImpl
+} from "@archive/surface/bytes";
 import {
   createTarArchive as createTarArchiveImpl,
   createTarReader as createTarReaderImpl,
   tar as tarImpl,
   tarSync as tarSyncImpl
 } from "@archive/tar/tar-archive";
+import { TAR_TYPE as TAR_TYPEImpl } from "@archive/tar/tar-constants";
 import { untar as untarImpl } from "@archive/tar/tar-parser";
+import { editZip as editZipImpl, editZipUrl as editZipUrlImpl } from "@archive/zip";
 
 // Unified archive I/O adapters
 export { toAsyncIterable, toReadableStream } from "@archive/io/archive-source";
@@ -57,9 +71,6 @@ export { HttpRangeReader, createBufferReader } from "@archive/io/random-access";
 // Remote ZIP reading over HTTP range requests
 export { RemoteZipReader } from "@archive/unzip/remote-zip-reader";
 
-// Abort helpers
-export { createAbortError, isAbortError, throwIfAborted } from "@archive/core/errors";
-
 // The format matrix — one verb per operation, the format in the name:
 //
 //              builder      reader      entries → bytes          bytes → path map              entry list
@@ -69,7 +80,7 @@ export { createAbortError, isAbortError, throwIfAborted } from "@archive/core/er
 //
 // Random access: `RemoteZipReader.open(url)` / `RemoteZipReader.fromReader(reader)` (central
 // directory only), over a reader from `HttpRangeReader.open(url)` or `createBufferReader(bytes)`;
-// `editZip` / `editZipUrl` open a `ZipEditor`. Node adds `ArchiveFile` (see `archive-node.ts`).
+// `ZipEditor.open` / `ZipEditor.openUrl` open an editor. Node adds `ArchiveFile` (see `archive-node.ts`).
 export { createZip } from "@archive/create-archive";
 export { openZip } from "@archive/read-archive";
 export { packZip, packZipSync, unpackZip, unpackZipSync } from "@archive/zip-one-shot";
@@ -98,11 +109,11 @@ export {
 } from "@archive/tar/tar-gzip";
 
 // ZIP editing
-export { ZipEditor, editZip, editZipUrl, ZipEditPlan } from "@archive/zip";
+export { ZipEditor, ZipEditPlan } from "@archive/zip";
 export { UnzipEntry } from "@archive/unzip";
 
 // TAR entries and constants
-export { TAR_BLOCK_SIZE, TAR_TYPE } from "@archive/tar/tar-constants";
+export { TAR_BLOCK_SIZE, TarType } from "@archive/tar/tar-constants";
 export { createTarReaderEntry, type TarReaderEntry } from "@archive/tar/tar-archive";
 export {
   isFile as isTarFile,
@@ -119,15 +130,10 @@ export { crc32, crc32Update, crc32Finalize } from "@archive/surface/bytes";
 // drawing engine stops at pixels (`rasterizeToRgba`), and encoding needs DEFLATE.
 export { encodePng } from "@archive/png";
 
-// Binary / encoding utilities — re-exported so archive can be used standalone
-// without reaching into internal @utils modules.
-export {
-  base64ToUint8Array,
-  uint8ArrayToBase64,
-  concatUint8Arrays,
-  stringToUint8Array,
-  uint8ArrayToString
-} from "@archive/surface/bytes";
+// Cancellation: `signal.throwIfAborted()` throws the signal's reason as-is (a `DOMException`
+// by default, or whatever was passed to `abort()`); this always throws the `AbortError` class
+// `documonster/archive` and `documonster/stream` export, with the reason as its `cause`.
+export { throwIfAborted } from "@archive/core/errors";
 
 // Encryption primitives and constants — low level; see `archive-crypto.ts`
 export * as Crypto from "@archive/surface/archive-crypto";
@@ -161,6 +167,14 @@ export const zip = zipImpl;
  * `unzip` named a reader while `untar` named a map. Removed in 1.0.
  */
 export const unzip = unzipImpl;
+/**
+ * @deprecated Use {@link ZipEditor.open}; this only forwards to it. Removed in 1.0.
+ */
+export const editZip = editZipImpl;
+/**
+ * @deprecated Use {@link ZipEditor.openUrl}; this only forwards to it. Removed in 1.0.
+ */
+export const editZipUrl = editZipUrlImpl;
 /** @deprecated Use {@link createTar}. Removed in 1.0. */
 export const createTarArchive = createTarArchiveImpl;
 /** @deprecated Use {@link openTar}. Removed in 1.0. */
@@ -171,6 +185,40 @@ export const tar = tarImpl;
 export const tarSync = tarSyncImpl;
 /** @deprecated Use {@link unpackTar}. Removed in 1.0. */
 export const untar = untarImpl;
+/** @deprecated Use {@link TarType}. Removed in 1.0. */
+export const TAR_TYPE = TAR_TYPEImpl;
+/**
+ * @deprecated Use `new AbortError(reason)` (a flat export of `documonster/archive` and
+ * `documonster/stream`); this one returns `reason` itself when it already is an `AbortError`.
+ * Removed in 1.0.
+ */
+export const createAbortError = createAbortErrorImpl;
+/** @deprecated Use the flat `isAbortError` export. Removed in 1.0. */
+export const isAbortError = isAbortErrorImpl;
+/**
+ * @deprecated Not an archive operation. Decode natively: `Uint8Array.fromBase64(s)` where the
+ * runtime has it (not Node 22), `Buffer.from(s, "base64")` on Node, or `atob` and a loop in a
+ * browser. Removed in 1.0.
+ */
+export const base64ToUint8Array = base64ToUint8ArrayImpl;
+/**
+ * @deprecated Not an archive operation. Encode natively: `bytes.toBase64()` where the runtime
+ * has it (not Node 22), `Buffer.from(bytes).toString("base64")` on Node, or `btoa` over the
+ * bytes in a browser. Removed in 1.0.
+ */
+export const uint8ArrayToBase64 = uint8ArrayToBase64Impl;
+/**
+ * @deprecated Not an archive operation. Natively: `const out = new Uint8Array(total)`, then
+ * `out.set(part, offset)` for each part (or `Buffer.concat(parts)` on Node). Removed in 1.0.
+ */
+export const concatUint8Arrays = concatUint8ArraysImpl;
+/** @deprecated Not an archive operation. Use `new TextEncoder().encode(str)`. Removed in 1.0. */
+export const stringToUint8Array = stringToUint8ArrayImpl;
+/**
+ * @deprecated Not an archive operation. Use `new TextDecoder(encoding).decode(bytes)`.
+ * Removed in 1.0.
+ */
+export const uint8ArrayToString = uint8ArrayToStringImpl;
 /** @deprecated Use {@link Crypto.ZIP_CRYPTO_HEADER_SIZE}. Removed in 1.0. */
 export const ZIP_CRYPTO_HEADER_SIZE = ZIP_CRYPTO_HEADER_SIZEImpl;
 /** @deprecated Use {@link Crypto.createZipCryptoKeys}. Removed in 1.0. */
@@ -208,10 +256,22 @@ export const aesEncrypt = aesEncryptImpl;
 export const aesEncryptedSize = aesEncryptedSizeImpl;
 /** @deprecated Use {@link Crypto.createAesExtraField}. Removed in 1.0. */
 export const buildAesExtraField = buildAesExtraFieldImpl;
-/** @deprecated Use {@link Crypto.randomBytes}. Removed in 1.0. */
+/**
+ * @deprecated Not an archive operation. Use the platform's generator:
+ * `crypto.getRandomValues(new Uint8Array(length))` (at most 65,536 bytes per call). Removed in 1.0.
+ */
 export const randomBytes = randomBytesImpl;
-/** @deprecated Use {@link Crypto.getEncryptionMethodName}. Removed in 1.0. */
-export const getEncryptionMethodName = getEncryptionMethodNameImpl;
+/**
+ * @deprecated Use {@link Crypto.getEncryptionMethodName}, which refuses a method it has no name for. This
+ * name keeps answering such a method with `undefined`, as it always did. Removed in 1.0.
+ */
+export function getEncryptionMethodName(method: ZipEncryptionMethod): string {
+  try {
+    return getEncryptionMethodNameImpl(method);
+  } catch {
+    return undefined as never;
+  }
+}
 /** @deprecated Use {@link Crypto.isAesEncryption}. Removed in 1.0. */
 export const isAesEncryption = isAesEncryptionImpl;
 /** @deprecated Use {@link Crypto.getAesKeyStrength}. Removed in 1.0. */

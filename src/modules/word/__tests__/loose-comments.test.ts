@@ -7,7 +7,7 @@
 import { zip } from "@archive/create-archive";
 import { describe, expect, it } from "vitest";
 
-import { Build, Document, Io, Streaming } from "../index";
+import { Build, Document, Io, Stream } from "../index";
 import { packageParts, partText } from "./roundtrip-integrity.helpers";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -92,7 +92,7 @@ describe("comments nothing anchors", () => {
   });
 
   it("are written by the streaming writer", async () => {
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       comments: [{ id: 2, author: "B", content: [Build.textParagraph("loose")] }]
     });
     stream.add(Build.textParagraph("body"));

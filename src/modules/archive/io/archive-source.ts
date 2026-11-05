@@ -2,6 +2,7 @@ import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { ArchiveArgumentError, createAbortError, toError } from "@archive/core/errors";
 import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
 import { stringToUint8Array as encodeUtf8, concatUint8Arrays } from "@utils/binary";
+import { describeValue } from "@utils/describe-value";
 
 /**
  * Anything an archive can be read from, or an entry's content taken from. A string is content,
@@ -30,7 +31,8 @@ export function toReadableStream(
   options: { signal?: AbortSignal } = {}
 ): ReadableStream<Uint8Array> {
   checkSourceArgument("Archive.toReadableStream", source);
-  const iterable = toAsyncIterable(source, options);
+  checkSourceOptions("Archive.toReadableStream", options);
+  const iterable = iterateArchiveSource(source, options);
   const iterator = iterable[Symbol.asyncIterator]();
 
   return new ReadableStream<Uint8Array>({
@@ -105,6 +107,41 @@ export function checkSourceArgument(where: string, source: unknown): void {
   }
 }
 
+/**
+ * Refuse, where it is given, options that are not `{ signal?, onChunk? }`: read later, inside the
+ * iteration, a `null` failed to destructure and a non-signal failed on `addEventListener`.
+ */
+export function checkSourceOptions(where: string, options: unknown): void {
+  if (options === undefined) {
+    return;
+  }
+  if (typeof options !== "object" || options === null) {
+    throw new ArchiveArgumentError(
+      "options",
+      `${where}: options must be an options object, got ${describeValue(options)}`
+    );
+  }
+  const { signal, onChunk } = options as { signal?: unknown; onChunk?: unknown };
+  if (
+    signal !== undefined &&
+    (typeof signal !== "object" ||
+      signal === null ||
+      typeof (signal as AbortSignal).aborted !== "boolean" ||
+      typeof (signal as AbortSignal).addEventListener !== "function")
+  ) {
+    throw new ArchiveArgumentError(
+      "options.signal",
+      `${where}: options.signal must be an AbortSignal, got ${describeValue(signal)}`
+    );
+  }
+  if (onChunk !== undefined && typeof onChunk !== "function") {
+    throw new ArchiveArgumentError(
+      "options.onChunk",
+      `${where}: options.onChunk must be a function, got ${describeValue(onChunk)}`
+    );
+  }
+}
+
 /** `true` for every value {@link toAsyncIterable} can read: the {@link ArchiveSource} union. */
 export function isArchiveSource(value: unknown): value is ArchiveSource {
   return (
@@ -141,7 +178,8 @@ function normalizeChunk(value: unknown): Uint8Array | null {
   // Strict mode: reject unknown chunk types.
   // Treating arbitrary array-like values as bytes can silently corrupt data
   // (e.g. number[] values get clamped to 0-255 when copied into Uint8Array).
-  throw new TypeError(
+  throw new ArchiveArgumentError(
+    "source",
     `Unsupported archive source chunk type: ${Object.prototype.toString.call(value)}`
   );
 }
@@ -193,7 +231,7 @@ export async function resolveArchiveSourceToBuffer(
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
 
-  for await (const chunk of toAsyncIterable(source, options)) {
+  for await (const chunk of iterateArchiveSource(source, options)) {
     chunks.push(chunk);
     totalLength += chunk.length;
   }
@@ -224,7 +262,17 @@ export async function collectUint8ArrayStream(
  * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
  *   read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
  */
-export async function* toAsyncIterable(
+export function toAsyncIterable(
+  source: ArchiveSource | ArchiveBytes,
+  options: { signal?: AbortSignal; onChunk?: (chunk: Uint8Array) => void } = {}
+): AsyncIterable<Uint8Array> {
+  checkSourceArgument("Archive.toAsyncIterable", source);
+  checkSourceOptions("Archive.toAsyncIterable", options);
+  return iterateArchiveSource(source, options);
+}
+
+/** {@link toAsyncIterable} once its arguments are checked; the iteration starts on the first `next()`. */
+export async function* iterateArchiveSource(
   source: ArchiveSource | ArchiveBytes,
   options: { signal?: AbortSignal; onChunk?: (chunk: Uint8Array) => void } = {}
 ): AsyncIterable<Uint8Array> {
@@ -259,7 +307,7 @@ export async function* toAsyncIterable(
       const stream = source.stream();
       let ended = false;
       try {
-        yield* toAsyncIterable(stream, options);
+        yield* iterateArchiveSource(stream, options);
         ended = true;
       } finally {
         if (!ended) {

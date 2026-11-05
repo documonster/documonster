@@ -7,7 +7,7 @@ import {
   Archive,
   ArchiveArgumentError,
   ArchiveError,
-  FileTooLargeError,
+  ArchiveFileTooLargeError,
   type ArchiveBytes
 } from "@archive/index";
 import { describe, expect, it } from "vitest";
@@ -205,12 +205,12 @@ describe("duplicate entry names", () => {
     expect(withDir.getFileCount()).toBe(1);
   });
 
-  it("an unedited editZip keeps every entry, and an edit of the name leaves one", async () => {
-    const untouched = await (await Archive.editZip(dupZip)).toBuffer();
+  it("an unedited ZipEditor keeps every entry, and an edit of the name leaves one", async () => {
+    const untouched = await (await Archive.ZipEditor.open(dupZip)).toBuffer();
     expect(await Archive.openZip(untouched).list()).toEqual(["a.txt", "a.txt"]);
-    expect((await Archive.editZip(dupZip)).getEntries().length).toBe(2);
+    expect((await Archive.ZipEditor.open(dupZip)).getEntries().length).toBe(2);
 
-    const edited = await Archive.editZip(dupZip);
+    const edited = await Archive.ZipEditor.open(dupZip);
     edited.set("a.txt", "third");
     const out = await edited.toBuffer();
     expect(await Archive.openZip(out).list()).toEqual(["a.txt"]);
@@ -240,7 +240,7 @@ describe("lookup names are checked", () => {
   it.each([42, undefined, ""])("every reader refuses %j as a name", async bad => {
     const name = bad as never;
     const remote = await Archive.RemoteZipReader.fromReader(Archive.createBufferReader(zip));
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     for (const call of [
       () => Archive.openZip(zip).get(name),
       () => Archive.openZip(zip).bytes(name),
@@ -279,7 +279,7 @@ describe("entry-size limits", () => {
 
   it("openZip honours maxEntrySize over bytes and over a stream", async () => {
     await expect(Archive.openZip(zip, { maxEntrySize: 100 }).bytes("big.bin")).rejects.toThrow(
-      FileTooLargeError
+      ArchiveFileTooLargeError
     );
     const streamed = Archive.openZip(streamOf(zip), { maxEntrySize: 100 });
     await expect(
@@ -288,7 +288,7 @@ describe("entry-size limits", () => {
           await entry.bytes();
         }
       })()
-    ).rejects.toThrow(FileTooLargeError);
+    ).rejects.toThrow(ArchiveFileTooLargeError);
     expect((await Archive.openZip(zip, { maxEntrySize: 4096 }).bytes("big.bin"))!.length).toBe(
       4096
     );
@@ -298,7 +298,7 @@ describe("entry-size limits", () => {
     const remote = await Archive.RemoteZipReader.fromReader(Archive.createBufferReader(zip), {
       maxEntrySize: 100
     });
-    await expect(remote.extract("big.bin")).rejects.toThrow(FileTooLargeError);
+    await expect(remote.extract("big.bin")).rejects.toThrow(ArchiveFileTooLargeError);
     await expect(
       Archive.RemoteZipReader.fromReader(Archive.createBufferReader(Archive.packZipSync(ENTRIES)), {
         maxEntries: 1
@@ -307,12 +307,16 @@ describe("entry-size limits", () => {
   });
 
   it("TAR takes the same name, maxEntrySize, and keeps maxFileSize", async () => {
-    await expect(Archive.unpackTar(tar, { maxEntrySize: 100 })).rejects.toThrow(FileTooLargeError);
-    await expect(Archive.openTar(tar, { maxEntrySize: 100 }).list()).rejects.toThrow(
-      FileTooLargeError
+    await expect(Archive.unpackTar(tar, { maxEntrySize: 100 })).rejects.toThrow(
+      ArchiveFileTooLargeError
     );
-    expect(() => Archive.parseTar(tar, { maxEntrySize: 100 })).toThrow(FileTooLargeError);
-    await expect(Archive.unpackTar(tar, { maxFileSize: 100 })).rejects.toThrow(FileTooLargeError);
+    await expect(Archive.openTar(tar, { maxEntrySize: 100 }).list()).rejects.toThrow(
+      ArchiveFileTooLargeError
+    );
+    expect(() => Archive.parseTar(tar, { maxEntrySize: 100 })).toThrow(ArchiveFileTooLargeError);
+    await expect(Archive.unpackTar(tar, { maxFileSize: 100 })).rejects.toThrow(
+      ArchiveFileTooLargeError
+    );
   });
 
   it("refuses a limit that is not a count", () => {
@@ -391,7 +395,7 @@ describe("byte readers take any ArrayBufferView or ArrayBuffer", () => {
     expect([...Archive.unpackZipSync(bytes).keys()]).toEqual(["a.txt", "b.txt"]);
     expect([...(await Archive.unpackZip(bytes)).keys()]).toEqual(["a.txt", "b.txt"]);
     expect(await Archive.openZip(bytes).list()).toEqual(["a.txt", "b.txt"]);
-    expect((await Archive.editZip(bytes)).getEntries().length).toBe(2);
+    expect((await Archive.ZipEditor.open(bytes)).getEntries().length).toBe(2);
     const remote = await Archive.RemoteZipReader.fromReader(Archive.createBufferReader(bytes));
     expect(text(await remote.extract("b.txt"))).toBe("B");
   });

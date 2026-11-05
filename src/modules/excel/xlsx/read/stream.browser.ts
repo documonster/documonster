@@ -1,6 +1,6 @@
 import type { Workbook } from "@excel/core/workbook.browser";
 import { readXlsxBytesInto } from "@excel/xlsx/read/package";
-import type { IParseStream, XlsxReadOptions } from "@excel/xlsx/types";
+import type { XlsxParseStream, XlsxReadOptions } from "@excel/xlsx/types";
 import { concatUint8Arrays } from "@utils/binary";
 
 /**
@@ -11,7 +11,7 @@ import { concatUint8Arrays } from "@utils/binary";
  */
 export async function readXlsxStreamInto(
   workbook: Workbook,
-  stream: IParseStream,
+  stream: XlsxParseStream,
   options?: XlsxReadOptions
 ): Promise<Workbook> {
   // Collect all stream data into a single buffer

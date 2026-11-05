@@ -41,7 +41,7 @@ import { renderMathBlock } from "@word/writer/math-writer";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import { renderDocumentBackground } from "@word/writer/parts-writer";
 import { renderRangeMarkers } from "@word/writer/range-marker-writer";
-import type { RenderHelpers, WordRenderContext } from "@word/writer/render-context";
+import type { RenderHelpers, DocxRenderContext } from "@word/writer/render-context";
 import {
   createRenderContext,
   enterRevisionIds,
@@ -70,7 +70,7 @@ import type { XmlSink } from "@xml/types";
 export function renderSdt(
   xml: XmlSink,
   sdt: StructuredDocumentTag,
-  ctx: WordRenderContext | undefined,
+  ctx: DocxRenderContext | undefined,
   helpers?: RenderHelpers
 ): void {
   xml.openNode("w:sdt");
@@ -119,7 +119,7 @@ function isSharedFloat(item: BodyContent | undefined): boolean {
 export function renderBodyContent(
   xml: XmlSink,
   content: BodyContent,
-  ctx?: WordRenderContext
+  ctx?: DocxRenderContext
 ): void {
   // Without a context the content is rendered on its own, or as part of
   // whatever write is in effect: its revision ids follow that write's map.
@@ -138,7 +138,7 @@ export function renderBodyContent(
 function renderBodyContentIn(
   xml: XmlSink,
   content: BodyContent,
-  renderCtx: WordRenderContext
+  renderCtx: DocxRenderContext
 ): void {
   if (typeof content !== "object" || content === null) {
     unwritableNode("", "a body block", content);
@@ -209,7 +209,7 @@ function renderBodyContentIn(
 }
 
 /** Render the complete word/document.xml. */
-export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRenderContext): void {
+export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: DocxRenderContext): void {
   // If no ctx provided (e.g. minimal renders), create a fresh one so id
   // counters are local to this call rather than module-global.
   const renderCtx = ctx ?? createRenderContext();
@@ -221,7 +221,7 @@ export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRender
   }
 }
 
-function renderDocumentIn(xml: XmlSink, doc: DocxDocument, renderCtx: WordRenderContext): void {
+function renderDocumentIn(xml: XmlSink, doc: DocxDocument, renderCtx: DocxRenderContext): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:document", DOCUMENT_NAMESPACES);
 
@@ -317,7 +317,7 @@ function renderDocumentIn(xml: XmlSink, doc: DocxDocument, renderCtx: WordRender
 // DrawingML Shape Writer
 // =============================================================================
 
-function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderContext): void {
+function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: DocxRenderContext): void {
   // Wrap in w:p > w:r > w:drawing > wp:anchor > a:graphic > a:graphicData > wps:wsp
   // Note: shape.rawXml (if present) carries advanced DrawingML fragments that
   // belong inside wps:spPr (gradient/pattern fills, effect lists, etc.). It is
@@ -349,7 +349,7 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
 // Opaque Drawing Writer
 // =============================================================================
 
-function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing, ctx: WordRenderContext): void {
+function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing, ctx: DocxRenderContext): void {
   if (ctx.rawXmlPolicy === "reject") {
     throw new DocxRawXmlPolicyError("opaqueDrawing");
   }
@@ -396,7 +396,7 @@ interface InlineChartOptions {
 
 function renderInlineChartDrawing(
   xml: XmlSink,
-  ctx: WordRenderContext,
+  ctx: DocxRenderContext,
   opts: InlineChartOptions
 ): void {
   xml.openNode("w:p");
@@ -426,7 +426,7 @@ function renderInlineChartDrawing(
   xml.closeNode(); // w:p
 }
 
-function renderChartDrawing(xml: XmlSink, content: ChartContent, ctx: WordRenderContext): void {
+function renderChartDrawing(xml: XmlSink, content: ChartContent, ctx: DocxRenderContext): void {
   // The chart part is written apart from the body; its model checks run here,
   // where the chart's place in the document is known.
   within("chart", () => checkWritableChart(content.chart));
@@ -452,7 +452,7 @@ function renderChartDrawing(xml: XmlSink, content: ChartContent, ctx: WordRender
   });
 }
 
-function renderChartExDrawing(xml: XmlSink, content: ChartExContent, ctx: WordRenderContext): void {
+function renderChartExDrawing(xml: XmlSink, content: ChartExContent, ctx: DocxRenderContext): void {
   const rId = ctx.chartRIds.get(content);
   if (!rId) {
     throw new DocxWriteError(

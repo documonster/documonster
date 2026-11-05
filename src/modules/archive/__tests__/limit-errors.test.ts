@@ -1,6 +1,6 @@
 /**
  * Every limit an archive reader enforces says which limit (`limit`, the option's name) and its
- * value (`allowed`). The per-entry limit is a `FileTooLargeError`, which said both only in its
+ * value (`allowed`). The per-entry limit is a `ArchiveFileTooLargeError`, which said both only in its
  * message; it now carries the same `limit` / `allowed` fields as `ArchiveLimitError` (plus the
  * entry's `path`), while staying outside that class so the published `ArchiveLimit` union is
  * unchanged.
@@ -9,7 +9,7 @@ import {
   Archive,
   ArchiveError,
   ArchiveLimitError,
-  FileTooLargeError,
+  ArchiveFileTooLargeError,
   type ArchiveLimit
 } from "@archive/index";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -30,11 +30,11 @@ async function failure(run: () => unknown): Promise<unknown> {
 }
 
 function expectEntryLimit(error: unknown, allowed: number): void {
-  expect(error).toBeInstanceOf(FileTooLargeError);
+  expect(error).toBeInstanceOf(ArchiveFileTooLargeError);
   expect(error).toBeInstanceOf(ArchiveError);
   expect(error).not.toBeInstanceOf(ArchiveLimitError);
   expect(error).toMatchObject({ limit: "maxEntrySize", allowed, path: "big.bin" });
-  expect((error as Error).name).toBe("FileTooLargeError");
+  expect((error as Error).name).toBe("ArchiveFileTooLargeError");
 }
 
 describe("maxEntrySize is an ArchiveLimitError naming the limit and its value", () => {
@@ -74,18 +74,18 @@ describe("maxEntrySize is an ArchiveLimitError naming the limit and its value", 
   });
 
   it("the constructor keeps its signature; `allowed` is NaN when the thrower does not give it", () => {
-    const plain = new FileTooLargeError("x.bin", "holds more than 10 bytes");
+    const plain = new ArchiveFileTooLargeError("x.bin", "holds more than 10 bytes");
     expect(plain.message).toBe(
       'File "x.bin" is too large to extract into memory (holds more than 10 bytes)'
     );
     expect(plain.limit).toBe("maxEntrySize");
     expect(plain.allowed).toBeNaN();
-    expect(new FileTooLargeError("x.bin", "r", { allowed: 10 }).allowed).toBe(10);
+    expect(new ArchiveFileTooLargeError("x.bin", "r", { allowed: 10 }).allowed).toBe(10);
   });
 
   it("reads like an ArchiveLimitError: the same field names and meaning", () => {
     const limitError = new ArchiveLimitError("maxEntries", 3);
-    const sizeError = new FileTooLargeError("x.bin", "r", { allowed: 10 });
+    const sizeError = new ArchiveFileTooLargeError("x.bin", "r", { allowed: 10 });
     const describeLimit = (e: { limit: string; allowed: number }) => `${e.limit}=${e.allowed}`;
     expect(describeLimit(limitError)).toBe("maxEntries=3");
     expect(describeLimit(sizeError)).toBe("maxEntrySize=10");

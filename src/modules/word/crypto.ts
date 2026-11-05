@@ -38,20 +38,28 @@ import {
   parseEncryptionInfoXml as parseEncryptionInfoXmlImpl,
   verifyPassword as verifyPasswordImpl
 } from "@word/security/encryption";
-import type { AgileEncryptionInfo } from "@word/security/encryption";
 
 export * as WordCrypto from "@word/surface/crypto";
-export type { AgileEncryptionInfo, EncryptOptions } from "@word/security/encryption";
-export type { CfbEntry } from "@word/security/cfb-reader";
-export type { DigitalSignatureInfo } from "@word/security/digital-signatures";
+import type {
+  AgileEncryptionInfo as DocxAgileEncryptionInfo,
+  EncryptOptions as DocxEncryptOptions
+} from "@word/security/encryption";
+export type { DocxAgileEncryptionInfo, DocxEncryptOptions };
+import type { CfbEntry as DocxCfbEntry } from "@word/security/cfb-reader";
+export type { DocxCfbEntry };
+import type { DigitalSignatureInfo as DocxDigitalSignatureInfo } from "@word/security/digital-signatures";
+export type { DocxDigitalSignatureInfo };
 
 // The errors this entry's functions throw (also exported from the main entry):
 // `Io.read` → `DocxEncryptedError`, `WordCrypto.decrypt` → `DocxDecryptionError`,
-// a wrong argument → `DocxArgumentError`.
+// a file that is not a readable compound file (`WordCrypto.Cfb.read`, `WordCrypto.decrypt`)
+// → `DocxParseError`, a wrong argument → `DocxArgumentError`; all of them are a `DocxError`.
 export {
   DocxArgumentError,
   DocxDecryptionError,
   DocxEncryptedError,
+  DocxError,
+  DocxParseError,
   isDocxError
 } from "@word/errors";
 
@@ -83,7 +91,7 @@ export const verifyPassword = verifyPasswordImpl;
  */
 export const decryptPackage = (
   encryptedPackage: Uint8Array,
-  info: AgileEncryptionInfo,
+  info: DocxAgileEncryptionInfo,
   password: string,
   maxDecryptedSize?: number
 ): Promise<Uint8Array> => {
@@ -94,7 +102,10 @@ export const decryptPackage = (
 };
 /** @deprecated Use {@link WordCrypto.Agile.parseEncryptionInfo}. Removed in 1.0. */
 export const parseEncryptionInfoXml = parseEncryptionInfoXmlImpl;
-/** @deprecated Use {@link WordCrypto.Agile.deriveKey}. Removed in 1.0. */
+/**
+ * @deprecated Use {@link WordCrypto.Agile.deriveKey}, which takes
+ * `(info, password, blockKey)` instead of `(password, info, blockKey)`. Removed in 1.0.
+ */
 export const deriveEncryptionKey = deriveEncryptionKeyImpl;
 /** @deprecated Use {@link WordCrypto.Agile.BLOCK_KEYS}. Removed in 1.0. */
 export const AGILE_BLOCK_KEYS = AGILE_BLOCK_KEYS_IMPL;
@@ -111,3 +122,16 @@ export const generateFontKey = generateFontKeyImpl;
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";
+
+// =============================================================================
+// Deprecated unprefixed type names — every flat operation type of this entry carries `Docx`
+// =============================================================================
+
+/** @deprecated Use {@link DocxAgileEncryptionInfo}. Removed in 1.0. */
+export type AgileEncryptionInfo = DocxAgileEncryptionInfo;
+/** @deprecated Use {@link DocxEncryptOptions}. Removed in 1.0. */
+export type EncryptOptions = DocxEncryptOptions;
+/** @deprecated Use {@link DocxCfbEntry}. Removed in 1.0. */
+export type CfbEntry = DocxCfbEntry;
+/** @deprecated Use {@link DocxDigitalSignatureInfo}. Removed in 1.0. */
+export type DigitalSignatureInfo = DocxDigitalSignatureInfo;

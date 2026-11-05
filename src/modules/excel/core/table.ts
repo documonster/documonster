@@ -20,7 +20,7 @@ import {
   rowGetCell
 } from "@excel/core/worksheet-core";
 import type { WorksheetData as Worksheet } from "@excel/core/worksheet-core";
-import { ExcelArgumentError, TableError } from "@excel/errors";
+import { ExcelArgumentError, ExcelTableError } from "@excel/errors";
 import type {
   DecodedAddress,
   CellFormulaValue,
@@ -254,7 +254,7 @@ function checkNoOverlap(t: TableData, layout: Layout, self: TableData = t): void
       layout.row <= lastRowOf(o) &&
       o.row <= last
     ) {
-      throw new TableError(
+      throw new ExcelTableError(
         `Table "${t.table.name}" would cover ${colCache.encode(layout.row, layout.col, last, layout.col + layout.width - 1)}, ` +
           `which overlaps table "${other.table.name}" (${other.table.tableRef ?? other.table.ref}); tables cannot share cells.`
       );
@@ -274,7 +274,7 @@ export function tableGetFormula(t: TableData, column: TableColumnProperties): st
   if (fnNum !== undefined) {
     return `SUBTOTAL(${fnNum},${t.table.name}[${column.name}])`;
   }
-  throw new TableError(`Invalid Totals Row Function: ${column.totalsRowFunction}`);
+  throw new ExcelTableError(`Invalid Totals Row Function: ${column.totalsRowFunction}`);
 }
 
 function hasTotalsFunction(column: TableColumnProperties): boolean {
@@ -336,7 +336,7 @@ export function tableValidate(t: TableData): void {
 
   const assert = (test: boolean, message: string) => {
     if (!test) {
-      throw new TableError(message);
+      throw new ExcelTableError(message);
     }
   };
   assert(!!table.name, "Table must have a name");
@@ -898,12 +898,12 @@ export function tableApplyModel(t: TableData, value: TableModel): void {
   const newKey = excelNameKey(candidate.name);
   if (registeredAs !== undefined && newKey !== excelNameKey(registeredAs)) {
     if (workbook?._tableNames.has(newKey)) {
-      throw new TableError(
+      throw new ExcelTableError(
         `Table name "${candidate.name}" already exists in the workbook (case-insensitive).`
       );
     }
     if (workbook && definedNamesHasName(workbook._definedNames, candidate.name)) {
-      throw new TableError(
+      throw new ExcelTableError(
         `Table name "${candidate.name}" is a defined name in the workbook (case-insensitive).`
       );
     }
@@ -1132,7 +1132,7 @@ function checkIndex(
   what: string
 ): void {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max) {
-    throw new TableError(
+    throw new ExcelTableError(
       max < 0
         ? `Table "${t.table.name}" has no ${what.replace(/^an? /, "")} at ${String(value)}: it has none.`
         : `Table "${t.table.name}": ${argument} must be ${what} from 0 to ${max}, got ${String(value)}.`
@@ -1143,7 +1143,7 @@ function checkIndex(
 /** Refuse a count of rows or columns that is not a whole number of at least 0. */
 function checkCount(t: TableData, count: unknown): void {
   if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table "${t.table.name}": count must be a whole number of at least 0, got ${String(count)}.`
     );
   }
@@ -1152,12 +1152,12 @@ function checkCount(t: TableData, count: unknown): void {
 /** Refuse a data row that is not an array, has more values than the table has columns, or holds a value no cell can. */
 function checkRowValues(t: TableData, where: string, argument: string, values: unknown): void {
   if (!Array.isArray(values)) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table "${t.table.name}": ${argument} must be an array of cell values, got ${String(values)}.`
     );
   }
   if (values.length > t.table.columns.length) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table "${t.table.name}" has ${t.table.columns.length} column(s); a row of ${values.length} value(s) was given.`
     );
   }
@@ -1216,22 +1216,6 @@ export function tableRemoveRows(t: TableData, rowIndex: number, count: number = 
   );
 }
 
-/**
- * A view of the column at `colIndex`.
- *
- * @throws {TableError} when the table has no such column. The deprecated `Table.column` returns a view with no column
- * instead, which every setter then fails on.
- */
-export function tableGetColumnChecked(t: TableData, colIndex: number): TableColumnView {
-  checkTable(t);
-  if (!Number.isInteger(colIndex) || colIndex < 0 || colIndex >= t.table.columns.length) {
-    throw new TableError(
-      `Table "${t.table.name}" has no column ${colIndex}; it has ${t.table.columns.length}.`
-    );
-  }
-  return tableGetColumn(t, colIndex);
-}
-
 export function tableGetColumn(t: TableData, colIndex: number): TableColumnView {
   checkTable(t);
   const column = t.table.columns[colIndex];
@@ -1247,17 +1231,17 @@ export function tableAddColumn(
   checkTable(t);
   const width = t.table.columns.length;
   if (column === null || typeof column !== "object") {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table "${t.table.name}": the column must be an object with a name, got ${String(column)}.`
     );
   }
   if (!Array.isArray(values)) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table "${t.table.name}": the column's values must be an array, got ${String(values)}.`
     );
   }
   if (values.length > t.table.rows.length) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table "${t.table.name}" has ${t.table.rows.length} data row(s); ${values.length} value(s) were given for the new column.`
     );
   }
@@ -1324,7 +1308,7 @@ export function tableSetRef(t: TableData, value: string): void {
 export function checkTableName(where: string, field: string, name: unknown): void {
   const problem = tableNameProblem(name);
   if (problem !== undefined) {
-    throw new TableError(
+    throw new ExcelTableError(
       `${where}: ${field} ${JSON.stringify(name)} is not a valid table name — ${problem}.`
     );
   }
@@ -1354,7 +1338,7 @@ export function tableSetName(t: TableData, value: string): void {
   const oldKey = excelNameKey(oldName);
   if (registered) {
     if (newKey !== oldKey && tableNames?.has(newKey)) {
-      throw new TableError(
+      throw new ExcelTableError(
         `Table name "${newName}" already exists in the workbook (case-insensitive).`
       );
     }
@@ -1364,7 +1348,7 @@ export function tableSetName(t: TableData, value: string): void {
       definedNames !== undefined &&
       definedNamesHasName(definedNames, newName)
     ) {
-      throw new TableError(
+      throw new ExcelTableError(
         `Table name "${newName}" is a defined name in the workbook (case-insensitive).`
       );
     }
@@ -1425,14 +1409,14 @@ export function checkTableNameFree(
         (name): name is string => typeof name === "string"
       );
       if (names.some(name => excelNameKey(name) === key)) {
-        throw new TableError(
+        throw new ExcelTableError(
           `Table ${field} "${value}" already exists in the workbook (case-insensitive): table "${other.table.name}" uses it.`
         );
       }
     }
   }
   if (definedNamesHasName(workbook._definedNames, value)) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table ${field} "${value}" is a defined name in the workbook (case-insensitive).`
     );
   }

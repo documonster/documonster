@@ -37,7 +37,7 @@ import type {
 } from "@excel/core/workbook-model";
 import type { Worksheet } from "@excel/core/worksheet";
 import { describeHandle, getSheetName } from "@excel/core/worksheet-core";
-import { ExcelArgumentError, ImageError, WorksheetNameError } from "@excel/errors";
+import { ExcelArgumentError, ExcelImageError, ExcelWorksheetNameError } from "@excel/errors";
 import type {
   Font,
   ImageData,
@@ -234,10 +234,10 @@ export function checkWorkbook(wb: unknown, field = "wb"): asserts wb is Workbook
  */
 export function validateCellStyleName(name: string): void {
   if (typeof name !== "string" || name === "") {
-    throw new WorksheetNameError("Named cell style name must be a non-empty string.");
+    throw new ExcelWorksheetNameError("Named cell style name must be a non-empty string.");
   }
   if (isNormalCellStyleName(name)) {
-    throw new WorksheetNameError('The built-in "Normal" cell style cannot be redefined.');
+    throw new ExcelWorksheetNameError('The built-in "Normal" cell style cannot be redefined.');
   }
 }
 
@@ -509,7 +509,7 @@ export function getChartExStructuredEntry(
  */
 export function refuseLongSheetName(name: unknown): void {
   if (typeof name === "string" && name.length > 31) {
-    throw new WorksheetNameError(
+    throw new ExcelWorksheetNameError(
       `Sheet name ${JSON.stringify(name)} is ${name.length} characters long; Excel allows at most 31.`
     );
   }
@@ -521,13 +521,15 @@ export function validateSheetName(
   existing?: Worksheet | { name: string }
 ): string {
   if (typeof name !== "string") {
-    throw new WorksheetNameError("The name has to be a string.");
+    throw new ExcelWorksheetNameError("The name has to be a string.");
   }
   if (name === "") {
-    throw new WorksheetNameError("The name can't be empty.");
+    throw new ExcelWorksheetNameError("The name can't be empty.");
   }
   if (name === "History") {
-    throw new WorksheetNameError('The name "History" is protected. Please use a different name.');
+    throw new ExcelWorksheetNameError(
+      'The name "History" is protected. Please use a different name.'
+    );
   }
   // Illegal characters per Excel's own naming rules: asterisk (*),
   // question mark (?), colon (:), forward slash (/), backslash (\),
@@ -535,12 +537,12 @@ export function validateSheetName(
   // to omit `\\`; unified here so both families enforce the same
   // char set.
   if (/[*?:/\\[\]]/.test(name)) {
-    throw new WorksheetNameError(
+    throw new ExcelWorksheetNameError(
       `Sheet name ${name} cannot include any of the following characters: * ? : \\ / [ ]`
     );
   }
   if (/(^')|('$)/.test(name)) {
-    throw new WorksheetNameError(
+    throw new ExcelWorksheetNameError(
       `The first or last character of sheet name cannot be a single quotation mark: ${name}`
     );
   }
@@ -558,7 +560,7 @@ export function validateSheetName(
     cs => cs && cs !== existing && sheetNameKey(cs.name) === nameKey
   );
   if (duplicateWorksheet || duplicateChartsheet) {
-    throw new WorksheetNameError(`Sheet name already exists: ${name}`);
+    throw new ExcelWorksheetNameError(`Sheet name already exists: ${name}`);
   }
   return name;
 }
@@ -587,7 +589,7 @@ export function getDefinedNames(wb: WorkbookData): DefinedNamesData {
 const IMAGE_EXTENSIONS: readonly string[] = ["png", "jpeg", "gif", "jpg"];
 
 /**
- * Throw {@link ImageError} unless `extension` is one an added image may carry. An omitted extension is
+ * Throw {@link ExcelImageError} unless `extension` is one an added image may carry. An omitted extension is
  * left to the writers, which name such a part `.png`.
  */
 export function assertImageExtension(extension: unknown): void {
@@ -595,7 +597,7 @@ export function assertImageExtension(extension: unknown): void {
     return;
   }
   if (typeof extension !== "string" || !IMAGE_EXTENSIONS.includes(extension.toLowerCase())) {
-    throw new ImageError(
+    throw new ExcelImageError(
       `Invalid image extension ${JSON.stringify(extension)}; expected one of ${IMAGE_EXTENSIONS.join(", ")} (a file extension, not a MIME type)`
     );
   }
@@ -613,12 +615,12 @@ export function addWorkbookImage(wb: WorkbookData, image: ImageData): number {
  */
 export function checkImageData(where: string, image: unknown): void {
   if (image === null || typeof image !== "object") {
-    throw new ImageError(`${where}: the image must be an object, got ${String(image)}.`);
+    throw new ExcelImageError(`${where}: the image must be an object, got ${String(image)}.`);
   }
   const record = image as Record<string, unknown>;
   // The type requires it, and the XLSX writer named the part `image1.undefined` and failed on its content type.
   if (record.extension === undefined) {
-    throw new ImageError(
+    throw new ExcelImageError(
       `${where}: the image needs an extension, one of ${IMAGE_EXTENSIONS.join(", ")}.`
     );
   }
@@ -631,15 +633,15 @@ export function checkImageData(where: string, image: unknown): void {
       (record.buffer as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
     )
   ) {
-    throw new ImageError(`${where}: the image's buffer must be bytes (a Uint8Array).`);
+    throw new ExcelImageError(`${where}: the image's buffer must be bytes (a Uint8Array).`);
   }
   for (const key of ["base64", "filename", "link"]) {
     if (record[key] != null && typeof record[key] !== "string") {
-      throw new ImageError(`${where}: the image's ${key} must be a string.`);
+      throw new ExcelImageError(`${where}: the image's ${key} must be a string.`);
     }
   }
   if (sources.length === 0 && record.link == null) {
-    throw new ImageError(
+    throw new ExcelImageError(
       `${where}: the image has no bytes; give one of buffer, base64 or filename, or a link.`
     );
   }
@@ -660,7 +662,7 @@ export function registerWorkbookImage(wb: WorkbookData, image: ImageData): numbe
   ) {
     // An SVG companion needs an embedded raster fallback; a *linked* (external)
     // raster has no package part to attach the svgBlip extension to.
-    throw new ImageError(
+    throw new ExcelImageError(
       "An SVG image requires an embedded raster fallback (buffer/base64/filename); it cannot be combined with an external link."
     );
   }

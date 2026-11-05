@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 /**
  * Word reads and writes encrypted packages through one implementation shared with Excel: `Io.read` /
- * `Streaming.createReader` / `WordCrypto.decrypt` open what Word 16 saved with "Encrypt with Password"
+ * `Stream.DocumentReader` / `WordCrypto.decrypt` open what Word 16 saved with "Encrypt with Password"
  * (`data/office-encrypted/word-encrypted.docx`, password `Word-pw1`), and `Io.toBuffer` / `toBase64` / `writeFile`
  * encrypt with `{ password }`.
  */
@@ -19,7 +19,7 @@ import {
   DocxEncryptedError,
   Io,
   Query,
-  Streaming
+  Stream
 } from "../index";
 import type { DocxDocument } from "../index";
 
@@ -62,9 +62,9 @@ describe("a document Word encrypted", () => {
     expect([...zip.subarray(0, 2)]).toEqual([0x50, 0x4b]);
   });
 
-  it("Streaming.createReader opens it with its password", async () => {
+  it("Stream.DocumentReader opens it with its password", async () => {
     const body: unknown[] = [];
-    for await (const item of Streaming.createReader(OFFICE, { password: "Word-pw1" })) {
+    for await (const item of new Stream.DocumentReader(OFFICE, { password: "Word-pw1" })) {
       body.push(item);
     }
     expect(body).toEqual((await Io.read(OFFICE, { password: "Word-pw1" })).body);

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Build, Document, Io, Streaming } from "../index";
+import { Build, Document, Io, Stream } from "../index";
 import type { DocxDocument, HeaderDef, ImageDef, Watermark } from "../index";
 import { packageIssues, packageParts, partText } from "./roundtrip-integrity.helpers";
 
@@ -65,7 +65,7 @@ function buffered(c: Case): DocxDocument {
 }
 
 async function streamed(c: Case): Promise<Uint8Array> {
-  const stream = Streaming.createWriter({
+  const stream = new Stream.DocumentWriter({
     watermark: c.watermark,
     headers: c.headers,
     images: c.watermark.type === "image" ? [IMAGE] : undefined

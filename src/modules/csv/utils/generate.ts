@@ -663,7 +663,7 @@ function normalizeColumns(columns: number | readonly ColumnDef[]): readonly Colu
 // Generator Class
 // =============================================================================
 
-class CsvGenerator {
+class RowGenerator {
   private random: () => number;
   private seeded: boolean;
   private options: Required<
@@ -1137,7 +1137,7 @@ export function csvGenerate(options: CsvGenerateOptions = {}): CsvGenerateResult
     );
   }
 
-  const generator = new CsvGenerator(seed, options);
+  const generator = new RowGenerator(seed, options);
   const colDefs = normalizeColumns(columns);
   const headerNames = generateHeaderNames(colDefs, headers);
 
@@ -1213,7 +1213,7 @@ export function* csvGenerateRows(
   checkGenerateOptions(options, "Csv.generateRows");
   const { columns = 5, seed, headers, transform, skipRows = 0 } = options;
 
-  const generator = new CsvGenerator(seed, options);
+  const generator = new RowGenerator(seed, options);
   const shouldStop = createStopChecker(options);
   const startTime = Date.now();
   const colDefs = normalizeColumns(columns);
@@ -1275,7 +1275,7 @@ export async function* csvGenerateAsync(
   checkGenerateOptions(options, "Csv.generateRowsAsync");
   const { columns = 5, seed, headers, delay = 0, transform, skipRows = 0 } = options;
 
-  const generator = new CsvGenerator(seed, options);
+  const generator = new RowGenerator(seed, options);
   const shouldStop = createStopChecker(options);
   const startTime = Date.now();
   const colDefs = normalizeColumns(columns);
@@ -1356,7 +1356,7 @@ export function csvGenerateData<T extends CsvGenerateOptions>(
     );
   }
 
-  const generator = new CsvGenerator(seed, opts);
+  const generator = new RowGenerator(seed, opts);
   const colDefs = normalizeColumns(columns);
   const headerNames = generateHeaderNames(colDefs, opts.headers);
   const totalRows = rows + skipRows;
@@ -1387,6 +1387,26 @@ export function csvGenerateData<T extends CsvGenerateOptions>(
   return data as T extends { objectMode: true } ? Record<string, unknown>[] : unknown[][];
 }
 
+/** The reusable generator {@link createCsvGenerator} returns: `Csv.createGenerator(options)`. */
+export interface CsvGenerator {
+  /** Generate CSV synchronously; a number is the row count, an object overrides the base options. */
+  generate(rowsOrOptions?: number | Partial<CsvGenerateOptions>): CsvGenerateResult;
+  /** Generate CSV rows as an iterator. */
+  rows(rowsOrOptions?: number | Partial<CsvGenerateOptions>): Generator<string, void, undefined>;
+  /** Generate the raw data: arrays, or objects under `objectMode: true`. */
+  data<O extends Partial<CsvGenerateOptions>>(
+    rowsOrOptions?: number | O
+  ): O extends { objectMode: true } ? Record<string, unknown>[] : unknown[][];
+  /** Generate CSV rows as an async iterator, `delay` milliseconds apart: the async sibling of {@link rows}. */
+  rowsAsync(
+    options?: Partial<CsvGenerateOptions> & { delay?: number }
+  ): AsyncGenerator<string, void, undefined>;
+  /** @deprecated Use {@link rowsAsync}. Removed in 1.0. */
+  asyncRows(
+    options?: Partial<CsvGenerateOptions> & { delay?: number }
+  ): AsyncGenerator<string, void, undefined>;
+}
+
 /**
  * Create a reusable generator instance with preset configuration.
  *
@@ -1407,7 +1427,7 @@ export function csvGenerateData<T extends CsvGenerateOptions>(
  * }
  * ```
  */
-export function createCsvGenerator(baseOptions: CsvGenerateOptions = {}) {
+export function createCsvGenerator(baseOptions: CsvGenerateOptions = {}): CsvGenerator {
   checkGenerateOptions(baseOptions, "Csv.createGenerator");
   return {
     /**
@@ -1448,6 +1468,12 @@ export function createCsvGenerator(baseOptions: CsvGenerateOptions = {}) {
     /**
      * Generate CSV rows as async iterator
      */
+    async *rowsAsync(
+      options?: Partial<CsvGenerateOptions> & { delay?: number }
+    ): AsyncGenerator<string, void, undefined> {
+      yield* csvGenerateAsync({ ...baseOptions, ...options });
+    },
+
     async *asyncRows(
       options?: Partial<CsvGenerateOptions> & { delay?: number }
     ): AsyncGenerator<string, void, undefined> {

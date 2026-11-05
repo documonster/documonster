@@ -12,10 +12,10 @@ const names = (els: { name: string; attributes: Record<string, string> }[]) =>
   els.map(e => e.name + (e.attributes.id ? `#${e.attributes.id}` : ""));
 
 describe("Xml.Writer#rollback", () => {
-  it("restores elements closed after save()", () => {
+  it("restores elements closed after snapshot()", () => {
     const w = new Xml.Writer();
     w.openNode("a");
-    w.save();
+    w.snapshot();
     w.closeNode();
     w.rollback();
     w.leafNode("b");
@@ -28,12 +28,34 @@ describe("Xml.Writer#rollback", () => {
     w.openNode("a");
     w.openNode("b");
     w.writeText("x");
-    w.save();
+    w.snapshot();
     w.closeNode();
     w.closeNode();
     w.rollback();
     w.closeAll();
     expect(w.toString()).toBe("<a><b>x</b></a>");
+  });
+});
+
+describe("Xml.Writer#save (deprecated)", () => {
+  it("takes the same snapshot as snapshot()", () => {
+    const viaSave = new Xml.Writer();
+    const viaSnapshot = new Xml.Writer();
+    for (const [w, mark] of [
+      [viaSave, () => viaSave.save()],
+      [viaSnapshot, () => viaSnapshot.snapshot()]
+    ] as const) {
+      w.openNode("a");
+      mark();
+      w.leafNode("dropped");
+      w.rollback();
+      mark();
+      w.leafNode("kept");
+      w.commit();
+      w.closeAll();
+    }
+    expect(viaSave.toString()).toBe("<a><kept/></a>");
+    expect(viaSave.toString()).toBe(viaSnapshot.toString());
   });
 });
 

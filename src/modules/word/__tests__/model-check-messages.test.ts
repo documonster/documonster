@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Build, Document, DocxArgumentError, Io, Streaming } from "../index";
+import { Build, Document, DocxArgumentError, Io, Stream } from "../index";
 import type { BodyContent, DocxDocument } from "../index";
 
 async function writeError(doc: DocxDocument): Promise<DocxArgumentError> {
@@ -47,7 +47,7 @@ describe("model checks at write time", () => {
   });
 
   it("the streaming writer reports the same model check the same way", () => {
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     let error: unknown;
     try {
       writer.addText("x", { alignment: "bogus" as never });
@@ -55,7 +55,7 @@ describe("model checks at write time", () => {
       error = e;
     }
     // `addText` checks its own argument and names itself …
-    expect((error as Error).message).toMatch(/^Streaming\.StreamingDocxWriter#addText: /);
+    expect((error as Error).message).toMatch(/^Stream\.DocumentWriter#addText: /);
     // … while the model check behind `add` states the problem alone.
     const para = { ...Build.paragraph([]), properties: { alignment: "bogus" } };
     try {

@@ -208,7 +208,7 @@ describe("TAR Gzip Module", () => {
       const entries = await parseTarGz(compressed);
 
       expect(entries[0].info.size).toBe(256);
-      expect(await entries[0].data()).toEqual(binaryData);
+      expect(await entries[0].bytes()).toEqual(binaryData);
     });
 
     it("should roundtrip Unicode content through tar.gz", async () => {

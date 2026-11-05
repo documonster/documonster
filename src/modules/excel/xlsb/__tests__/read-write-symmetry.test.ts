@@ -243,7 +243,7 @@ const FEATURES: readonly Feature[] = [
   {
     name: "header watermark",
     build: (workbook, sheet) => {
-      Watermark.add(sheet, {
+      Watermark.set(sheet, {
         imageId: Image.add(workbook, { buffer: PNG, extension: "png" }),
         mode: "header"
       } as never);

@@ -9,7 +9,11 @@
  * helpers interoperate with — unlike the `Cell`, `Row` and `Column` namespaces, which number from 1. Each one refuses
  * a coordinate or a reference outside the grid instead of answering with `undefined`, `NaN` or a negative row.
  */
-import { ColumnOutOfBoundsError, InvalidAddressError, RowOutOfBoundsError } from "@excel/errors";
+import {
+  ExcelColumnOutOfBoundsError,
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError
+} from "@excel/errors";
 import type { CellAddress, SheetRange } from "@excel/utils/address";
 import {
   decodeCell as decodeCellImpl,
@@ -43,10 +47,14 @@ function checkCol(where: string, field: string, col: number): void {
     argumentChecks(where).fail(field, "a 0-based column number", col);
   }
   if (!Number.isInteger(col) || col < 0 || col >= MAX_COL) {
-    throw new ColumnOutOfBoundsError(col, "a 0-based column is a whole number from 0 to 16383", {
-      field,
-      where
-    });
+    throw new ExcelColumnOutOfBoundsError(
+      col,
+      "a 0-based column is a whole number from 0 to 16383",
+      {
+        field,
+        where
+      }
+    );
   }
 }
 
@@ -55,7 +63,7 @@ function checkRow(where: string, field: string, row: number): void {
     argumentChecks(where).fail(field, "a 0-based row number", row);
   }
   if (!Number.isInteger(row) || row < 0 || row >= MAX_ROW) {
-    throw new RowOutOfBoundsError(row, "a 0-based row is a whole number from 0 to 1048575", {
+    throw new ExcelRowOutOfBoundsError(row, "a 0-based row is a whole number from 0 to 1048575", {
       field,
       where
     });
@@ -69,10 +77,14 @@ function checkRow(where: string, field: string, row: number): void {
  */
 export function decodeCol(colstr: string): number {
   if (typeof colstr !== "string" || !/^[A-Za-z]{1,3}$/.test(colstr)) {
-    throw new InvalidAddressError(String(colstr), "a column is one to three letters, A to XFD", {
-      field: "colstr",
-      where: "Address.decodeCol"
-    });
+    throw new ExcelInvalidAddressError(
+      String(colstr),
+      "a column is one to three letters, A to XFD",
+      {
+        field: "colstr",
+        where: "Address.decodeCol"
+      }
+    );
   }
   return decodeColImpl(colstr);
 }
@@ -94,7 +106,7 @@ export function encodeCol(col: number): string {
 export function decodeRow(rowstr: string): number {
   const row = typeof rowstr === "string" && /^\d+$/.test(rowstr) ? decodeRowImpl(rowstr) : NaN;
   if (!Number.isInteger(row) || row < 0 || row >= MAX_ROW) {
-    throw new InvalidAddressError(String(rowstr), "a row is a number from 1 to 1048576", {
+    throw new ExcelInvalidAddressError(String(rowstr), "a row is a number from 1 to 1048576", {
       field: "rowstr",
       where: "Address.decodeRow"
     });
@@ -120,8 +132,8 @@ export function decodeCell(cstr: string): CellAddress {
 }
 
 function decodeCellAt(where: string, field: string, cstr: string): CellAddress {
-  // The shape first, so anything that is not a reference is an `InvalidAddressError`, whatever its letters; a
-  // well-formed reference past XFD is then the decoder's `ColumnOutOfBoundsError`.
+  // The shape first, so anything that is not a reference is an `ExcelInvalidAddressError`, whatever its letters; a
+  // well-formed reference past XFD is then the decoder's `ExcelColumnOutOfBoundsError`.
   const cell =
     typeof cstr === "string" && /^\$?[A-Za-z]+\$?\d+$/.test(cstr)
       ? decodeCellImpl(cstr)
@@ -134,7 +146,7 @@ function decodeCellAt(where: string, field: string, cstr: string): CellAddress {
     cell.r < 0 ||
     cell.r >= MAX_ROW
   ) {
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       String(cstr),
       "a cell reference is column letters then a row number, inside A1:XFD1048576",
       { field, where }

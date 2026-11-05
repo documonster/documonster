@@ -69,7 +69,7 @@ const data = await reader.bytes("hello.txt");
 ```typescript
 import { Archive } from "documonster/archive";
 
-const editor = await Archive.editZip(existingZipBytes, { preserve: "best-effort" });
+const editor = await Archive.ZipEditor.open(existingZipBytes, { preserve: "best-effort" });
 editor.delete("old.txt");
 editor.rename("a.txt", "renamed.txt");
 editor.set("new.txt", "new content");
@@ -282,16 +282,16 @@ entry.discard(); // 跳过不读取
 | `signal`       | `AbortSignal`                | -         | 中止信号                     |
 | `onProgress`   | `(p: UnzipProgress) => void` | -         | 进度回调                     |
 
-**限制。** 所有读取器使用同样的两个限制:`maxEntrySize`(读入内存的最大条目,超出抛 `FileTooLargeError`),以及 ZIP 的 `maxEntries`(`ArchiveLimitError`)——`unpackZip`、`openZip`、`RemoteZipReader` 和 `ArchiveFile` 都一样;TAR 读取器也接受 `maxEntrySize`(默认 100 MiB;`maxFileSize` 是它已弃用的旧名)。读取不是自己写出的归档时请设置它们。每个读取器在调用时检查这些限制:不是从 0 起的整数(或 `Infinity`)的限制会抛 `ArchiveArgumentError`,其字段为 `options.<限制名>`。触及限制时抛 `ArchiveLimitError`,其 `limit` 是选项名,`allowed` 是它的值——`maxEntrySize` 除外:它抛 `FileTooLargeError`,带有同样的 `limit`(`"maxEntrySize"`)和 `allowed` 字段,另带条目的 `path`。
+**限制。** 所有读取器使用同样的两个限制:`maxEntrySize`(读入内存的最大条目,超出抛 `ArchiveFileTooLargeError`),以及 ZIP 的 `maxEntries`(`ArchiveLimitError`)——`unpackZip`、`openZip`、`RemoteZipReader` 和 `ArchiveFile` 都一样;TAR 读取器也接受 `maxEntrySize`(默认 100 MiB;`maxFileSize` 是它已弃用的旧名)。读取不是自己写出的归档时请设置它们。每个读取器在调用时检查这些限制:不是从 0 起的整数(或 `Infinity`)的限制会抛 `ArchiveArgumentError`,其字段为 `options.<限制名>`。触及限制时抛 `ArchiveLimitError`,其 `limit` 是选项名,`allowed` 是它的值——`maxEntrySize` 除外:它抛 `ArchiveFileTooLargeError`,带有同样的 `limit`(`"maxEntrySize"`)和 `allowed` 字段,另带条目的 `path`。
 
 **字符串。** 传给读取器的字符串是归档的内容,按 UTF-8 编码——绝不是文件路径或 URL。请先读出文件的字节,或在 Node 中用 `ArchiveFile.fromFile` 打开;ZIP 的二进制内容无法完整保存在 JavaScript 字符串中。
 
-**名字。** 一个 ZIP 中每个名字只有一个条目:`ZipArchive.add` 与 `packZip` 拒绝已加入过的名字(`ArchiveArgumentError`)。其他程序写出的、同名出现两次的归档按解压工具的方式读取——`get`、`bytes`、`unpackZip` 与 `RemoteZipReader.extract` 返回后一个条目,与 TAR 的 `TarReader.get`、`unpackTar` 一致——未做修改的 `editZip` 会原样写回每个条目。
+**名字。** 一个 ZIP 中每个名字只有一个条目:`ZipArchive.add` 与 `packZip` 拒绝已加入过的名字(`ArchiveArgumentError`)。其他程序写出的、同名出现两次的归档按解压工具的方式读取——`get`、`bytes`、`unpackZip` 与 `RemoteZipReader.extract` 返回后一个条目,与 TAR 的 `TarReader.get`、`unpackTar` 一致——未做修改的 `ZipEditor.open` 会原样写回每个条目。
 
 **一次性数据源。** `ReadableStream`、Node 流或异步可迭代对象只能读一次。`openZip` / `openTar` 读取这类数据源时,要么由一次 `entries()` 读完,要么在 `list`、`get` 或 `bytes` 第一次需要时缓冲下来(之后的每次调用,包括 `entries()`,都使用缓冲);其他情况抛出 `ArchiveError`,说明流已被读完。`openTarGz` 会保留解压后的归档,可以任意多次读取。
 
 **完整性。** 所有 ZIP 读取都会用归档记录的 CRC-32 校验每个条目，不一致时抛出
-`Crc32MismatchError`——包括 `Archive.openZip` / `ZipReader`（内存与流式数据源，`bytes()` 与
+`ZipCrc32MismatchError`——包括 `Archive.openZip` / `ZipReader`（内存与流式数据源，`bytes()` 与
 `stream()`）、`Archive.unpackZip` / `unpackZipSync`、`RemoteZipReader` 和 `ArchiveFile`。
 校验和覆盖整个条目，因此 `stream()` 在产出最后一块之后才报告不一致。传入 `checkCrc32: false`
 可以尽量读取已损坏的归档。AES 条目改由其 HMAC 认证，ZipCrypto 条目则始终校验。
@@ -319,14 +319,14 @@ entry.discard(); // 跳过不读取
 import { Archive } from "documonster/archive";
 
 // 从字节
-const editor = await Archive.editZip(zipBytes, {
+const editor = await Archive.ZipEditor.open(zipBytes, {
   reproducible: true,
   preserve: "best-effort",
   onWarning: w => console.warn(w.code, w.entry, w.message)
 });
 
 // 从 URL（HTTP Range 请求）
-const editor = await Archive.editZipUrl("https://example.com/archive.zip");
+const editor = await Archive.ZipEditor.openUrl("https://example.com/archive.zip");
 
 // 操作
 editor.has("file.txt"); // 检查存在
@@ -551,7 +551,7 @@ for await (const chunk of archive.stream()) {
 // 解析 .tar.gz
 const entries = await Archive.parseTarGz(tgzBytes);
 for (const entry of entries) {
-  console.log(entry.info.path, await entry.data());
+  console.log(entry.info.path, await entry.bytes());
 }
 
 // 提取 .tar.gz 到 Map
@@ -559,7 +559,7 @@ const files = await Archive.unpackTarGz(tgzBytes);
 
 // 大型 .tar.gz：增量解压并解析，内存中每次只保留一个条目
 for await (const entry of Archive.parseTarGzStream(response.body!)) {
-  console.log(entry.info.path, (await entry.data()).length);
+  console.log(entry.info.path, (await entry.bytes()).length);
 }
 ```
 
@@ -641,7 +641,9 @@ await tar.writeFile("archive.tar");
 除非 `overwrite` 另有指定，TAR 与 ZIP 相同。
 
 其底层的文件系统辅助函数 — `Fs.glob`、`Fs.traverseDirectory`、`Fs.ensureDir`、
-`Fs.readFileBytes`、`Fs.createReadStream` 等 — 发布在仅 Node.js 可用的 `Fs` 命名空间上:
+`Fs.readFileBytes` 等 — 发布在仅 Node.js 可用的 `Fs` 命名空间上。参数错误抛出 `ArchiveArgumentError`，
+指明调用与参数名；文件系统随后的拒绝（`ENOENT`、`EACCES` 等）按平台错误原样传出。文件流请使用
+`node:fs` 的 `createReadStream` / `createWriteStream`:
 
 ```typescript
 import { Fs } from "documonster/archive";
@@ -684,18 +686,20 @@ import {
   ArchiveError,
   ArchiveArgumentError, // 参数或选项错误；`.field` 指出是哪一个
   ZipParseError,
-  InvalidZipSignatureError,
-  EocdNotFoundError,
-  DecryptionError,
-  PasswordRequiredError,
-  FileTooLargeError,
-  UnsupportedCompressionError,
-  EntrySizeMismatchError,
-  Crc32MismatchError,
-  RangeNotSupportedError,
-  HttpRangeError,
+  ZipInvalidSignatureError,
+  ZipEocdNotFoundError,
+  ZipDecryptionError,
+  ZipPasswordRequiredError,
+  ArchiveFileTooLargeError,
+  ZipUnsupportedCompressionError,
+  ZipEntrySizeMismatchError,
+  ZipCrc32MismatchError,
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError,
   ArchiveLimitError,
-  WorkerStreamStartError,
+  ArchiveWorkerStreamStartError,
+  ArchiveWorkerUnsupportedError, // 在 Node 上调用 Compression.Workers;`.operation` 指出是哪一个
+  ArchiveFileError, // ArchiveFile.fromFile / writeFile 被文件系统拒绝;`.cause` 是系统错误
   AbortError,
   isArchiveError // Type guard: (err: unknown) => err is ArchiveError
 } from "documonster/archive";
@@ -734,8 +738,8 @@ try {
 | `Archive.openZip(source, options?)`        | 打开 ZIP 进行读取         |
 | `Archive.openTar(source, options?)`        | 打开 TAR 进行读取         |
 | `Archive.openTarGz(source, options?)`      | 打开 tar.gz 进行读取      |
-| `Archive.editZip(source, options?)`        | 打开 ZIP 进行编辑         |
-| `Archive.editZipUrl(url, options?)`        | 打开远程 ZIP 进行编辑     |
+| `Archive.ZipEditor.open(source, options?)` | 打开 ZIP 进行编辑         |
+| `Archive.ZipEditor.openUrl(url, options?)` | 打开远程 ZIP 进行编辑     |
 | `Archive.packZip(entries, options?)`       | 从条目创建 ZIP（异步）    |
 | `Archive.packZipSync(entries, options?)`   | 从条目创建 ZIP（同步）    |
 | `Archive.packTar(entries, options?)`       | 从条目创建 TAR（异步）    |

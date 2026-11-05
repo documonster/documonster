@@ -98,11 +98,11 @@ export interface HttpRangeReaderStats {
 /**
  * Error thrown when the server doesn't support Range requests.
  */
-export { RangeNotSupportedError, HttpRangeError } from "@archive/core/errors";
+export { ArchiveRangeNotSupportedError, ArchiveHttpRangeError } from "@archive/core/errors";
 import {
   ArchiveArgumentError,
-  RangeNotSupportedError,
-  HttpRangeError,
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError,
   ArchiveError
 } from "@archive/core/errors";
 import {
@@ -190,8 +190,8 @@ export class HttpRangeReader implements RandomAccessReader {
    * @param options - Reader options
    * @returns A configured HttpRangeReader instance
    *
-   * @throws {RangeNotSupportedError} If the server doesn't support Range requests
-   * @throws {HttpRangeError} If the HTTP request fails
+   * @throws {ArchiveRangeNotSupportedError} If the server doesn't support Range requests
+   * @throws {ArchiveHttpRangeError} If the HTTP request fails
    */
   static async open(url: string, options: HttpRangeReaderOptions = {}): Promise<HttpRangeReader> {
     if (
@@ -234,7 +234,7 @@ export class HttpRangeReader implements RandomAccessReader {
         // 206: Range supported
         // 200: server ignored Range but reader can still work (will cache on first read)
         if (response.status !== 206 && response.status !== 200) {
-          throw new RangeNotSupportedError(url);
+          throw new ArchiveRangeNotSupportedError(url);
         }
       }
       const instance = new HttpRangeReader(url, options.size, options);
@@ -252,7 +252,7 @@ export class HttpRangeReader implements RandomAccessReader {
     });
 
     if (!headResponse.ok) {
-      throw new HttpRangeError(url, headResponse.status, headResponse.statusText);
+      throw new ArchiveHttpRangeError(url, headResponse.status, headResponse.statusText);
     }
 
     // Check if server supports Range requests
@@ -271,7 +271,7 @@ export class HttpRangeReader implements RandomAccessReader {
       });
 
       if (testResponse.status !== 206 && testResponse.status !== 200) {
-        throw new RangeNotSupportedError(url);
+        throw new ArchiveRangeNotSupportedError(url);
       }
     }
 
@@ -322,7 +322,7 @@ export class HttpRangeReader implements RandomAccessReader {
           });
 
           if (!full.ok) {
-            throw new HttpRangeError(url, full.status, full.statusText);
+            throw new ArchiveHttpRangeError(url, full.status, full.statusText);
           }
 
           const data = new Uint8Array(await full.arrayBuffer());
@@ -359,7 +359,7 @@ export class HttpRangeReader implements RandomAccessReader {
    *
    * @throws {ArchiveArgumentError} If `start` or `end` is not an integer (`field` names it)
    * @throws {RangeError} If `start` or `end` is outside the file (the message names it)
-   * @throws {HttpRangeError} If the HTTP request fails
+   * @throws {ArchiveHttpRangeError} If the HTTP request fails
    */
   async read(start: number, end: number): Promise<Uint8Array> {
     checkRange("Archive.HttpRangeReader#read", start, end, this._size);
@@ -396,7 +396,7 @@ export class HttpRangeReader implements RandomAccessReader {
     }
 
     if (response.status !== 206) {
-      throw new HttpRangeError(this.url, response.status, response.statusText);
+      throw new ArchiveHttpRangeError(this.url, response.status, response.statusText);
     }
 
     const data = new Uint8Array(await response.arrayBuffer());

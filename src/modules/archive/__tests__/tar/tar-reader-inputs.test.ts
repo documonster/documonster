@@ -77,7 +77,7 @@ describe("TAR reader sources", () => {
       const paths: string[] = [];
       for await (const entry of Archive.parseTarStream(make() as never)) {
         paths.push(entry.info.path);
-        await entry.skip();
+        entry.discard();
       }
       expect(paths).toEqual(["a.txt", "big.bin"]);
     }

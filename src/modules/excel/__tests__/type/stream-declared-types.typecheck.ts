@@ -89,11 +89,11 @@ function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
   kept.write(1);
 
   // --- interfaces match the objects the factories return ----------------------
-  const collected = S.Streams.createCollector<number>();
+  const collected = new S.Streams.Collector<number>();
   const joined: Uint8Array = collected.toUint8Array();
   const text: string = collected.toString();
   const finished: boolean = collected.isFinished;
-  const pull: IPullStream = S.Streams.createPullStream();
+  const pull: IPullStream = new S.Streams.PullStream();
   // @ts-expect-error PullStream has no stream() method
   pull.stream(1);
 
@@ -128,7 +128,7 @@ function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
 
   // --- pipeline: a middle stage must be an async generator --------------------
   const source = S.Streams.createReadableFromArray([1, 2]);
-  const sink = S.Streams.createCollector<number>();
+  const sink = new S.Streams.Collector<number>();
   void S.pipeline(
     source,
     async function* (input: AsyncIterable<number>) {

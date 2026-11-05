@@ -1,5 +1,5 @@
 import type { WorkbookData } from "@excel/core/workbook-core";
-import { refuseLongSheetName } from "@excel/core/workbook-core";
+import { checkWorkbook, refuseLongSheetName } from "@excel/core/workbook-core";
 import type { ExternalLinkModel } from "@excel/core/workbook-model";
 /**
  * The `Workbook` operations that take values ending up in the file, checked where they are passed. Shared by the
@@ -66,6 +66,7 @@ export function protect(
 ): Promise<void> {
   const flags = WORKBOOK_PROTECTION_FLAGS;
   try {
+    checkWorkbook(wb);
     if (isRecordArgument(passwordOrOptions)) {
       checkProtectionOptions(
         "Workbook.protect",

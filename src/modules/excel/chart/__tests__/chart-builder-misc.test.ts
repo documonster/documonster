@@ -201,7 +201,7 @@ describe("supplementary edge cases", () => {
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(getCharts(ws2)).toHaveLength(16);
     for (let i = 0; i < types.length; i++) {
-      expect(Chart.getChartTypes(getCharts(ws2)[i])[0].type).toBe(types[i]);
+      expect(Chart.getTypes(getCharts(ws2)[i])[0].type).toBe(types[i]);
     }
   });
 });
@@ -272,14 +272,14 @@ describe("ChartEx structured spPr / txPr", () => {
     expect(series.spPr?.line?.dash).toBe("dash");
   });
 
-  it("structural mutation via setSpPrFill drops rawXml and writes the new fill", () => {
+  it("structural mutation via withSpPrFill drops rawXml and writes the new fill", () => {
     const model = ChartEx.fromXml(makeWaterfallWithSpPr("FF0000"));
     const region = model.chartSpace.chart.plotArea.plotAreaRegion!;
 
     // Mutate: replace the fill using the shape-properties API. This returns
     // a new ShapeProperties object without `_rawXml`, which forces the
     // spPr writer to take the structured path.
-    region.series[0].spPr = DrawingMl.setSpPrFill(region.series[0].spPr, {
+    region.series[0].spPr = DrawingMl.withSpPrFill(region.series[0].spPr, {
       solid: { srgb: "1122AA" }
     });
     expect(region.series[0].spPr._rawXml).toBeUndefined();

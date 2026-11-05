@@ -151,9 +151,9 @@ console.log("Typed (per-column):", rowSelective);
 // { id: "1", score: 98.5, label: "42" }
 
 // With castDate: ISO date strings become Date objects on listed columns.
-const rowDates = Csv.applyDynamicTypingToRow({ joined: "2024-03-01", note: "2024-03-01" }, true, [
-  "joined"
-]);
+const rowDates = Csv.applyDynamicTypingToRow({ joined: "2024-03-01", note: "2024-03-01" }, true, {
+  castDate: ["joined"]
+});
 console.log("joined is Date:", rowDates.joined instanceof Date); // true
 console.log("note stays string:", rowDates.note); // 2024-03-01 (string)
 

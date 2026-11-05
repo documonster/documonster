@@ -4,7 +4,7 @@ import { buildCmsSignedData, certificateCommonName } from "../core/digital-signa
 import { buildIncremental } from "../core/pdf-writer";
 import { findSignatureContents } from "../core/signature-dict";
 import { generateSelfSignedCertificate } from "../examples/utils/self-signed-certificate";
-import type { Asn1Node } from "../index";
+import type { PdfAsn1Node } from "../index";
 import { Pdf } from "../index";
 import { initDecryption } from "../reader/pdf-decrypt";
 import { PdfDocument } from "../reader/pdf-document";
@@ -196,7 +196,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function encodeNode(node: Asn1Node): Uint8Array {
+function encodeNode(node: PdfAsn1Node): Uint8Array {
   return der(node.tag, node.bytes);
 }
 

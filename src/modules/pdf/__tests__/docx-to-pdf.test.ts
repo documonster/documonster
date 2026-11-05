@@ -9,7 +9,7 @@
 
 import { buildWordChartExXml } from "@word/bridge/excel-bridge";
 import { Document, Build, Io, Layout } from "@word/index";
-import type { DocxDocument, PageContent } from "@word/index";
+import type { DocxDocument, DocxPageContent } from "@word/index";
 import { describe, it, expect } from "vitest";
 
 import { docxToPdf } from "../word-bridge";
@@ -663,7 +663,7 @@ describe("docxToPdf — flow layout fidelity", () => {
 
     const layout = Layout.compute(h);
     let bulletInCell = false;
-    const visit = (items: readonly PageContent[]): void => {
+    const visit = (items: readonly DocxPageContent[]): void => {
       for (const c of items) {
         if (c.type === "paragraph") {
           const joined = c.lines

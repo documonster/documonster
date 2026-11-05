@@ -216,15 +216,15 @@ const probe = (text: string): boolean => {
 const wb = Workbook.create({ formulaSyntaxProbe: probe });
 ```
 
-### `Formula.tokenize(source: string): Token[]`
+### `Formula.tokenize(source: string): FormulaToken[]`
 
 纯词法分析 — 接受公式字符串(带不带前导 `=` 都行),返回扁平 token 流。遇到任何 token 都不以之开头的字符、或 Excel 没有的错误值(`#FOOBAR!`)时抛 `FormulaParseError`。溢出区域运算符 `A1#` 是值为 `"#"` 的 `Operator` token,只在紧跟单元格引用时识别。
 
-### `Formula.parse(source: string | Token[]): AstNode`
+### `Formula.parse(source: string | FormulaToken[]): FormulaAstNode`
 
 Pratt 解析器 — 从公式文本(自动分词)或 token 流构建类型化 AST。结构错误时抛异常。`A1#` 解析为包住该单元格引用的 `UnaryOp`(`op: "#"`);文件里保存的形式 `_xlfn.ANCHORARRAY(A1)` 仍是函数调用。两者都按原样打印回去,计算引擎都按锚点单元格溢出的区域求值。
 
-### `Formula.format(ast: AstNode): string`
+### `Formula.format(ast: FormulaAstNode): string`
 
 `parse` 的逆操作:把 AST 打印回公式文本(不带前导 `=`),括号最少化。
 
@@ -234,7 +234,7 @@ Pratt 解析器 — 从公式文本(自动分词)或 token 流构建类型化 AS
 
 ### 导出的类型
 
-`documonster/formula`:`Token`、`TokenType`、`AstNode`、`NodeType`,以及这两个联合类型的每个成员,带 `Formula` 前缀(`FormulaCellRefNode`、`FormulaFunctionCallNode`、`FormulaCellRefToken` 等)。
+`documonster/formula`,全部带 `Formula` 前缀:`FormulaToken`、`FormulaTokenType`、`FormulaAstNode`、`FormulaNodeType`,以及这两个联合类型的每个成员(`FormulaCellRefNode`、`FormulaFunctionCallNode`、`FormulaCellRefToken` 等)。
 
 `documonster/excel/formula`:`FormulaFunction`、`FormulaValue`,以及构造自定义函数返回值所需的 `FormulaValueKind` tag 映射。
 

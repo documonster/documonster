@@ -9,7 +9,7 @@
  * with filesystem-specific features (filename input + temp-file buffering).
  */
 
-import { FileTooLargeError } from "@archive/core/errors";
+import { ArchiveFileTooLargeError } from "@archive/core/errors";
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
 import { ExcelArgumentError, ExcelFileError, ExcelStreamStateError } from "@excel/errors";
@@ -114,7 +114,7 @@ import { EventEmitter } from "@utils/event-emitter";
 import { assertLimitOption } from "@utils/limits";
 import { decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser, saxStream } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
+import type { XmlSaxTag } from "@xml/types";
 
 // ============================================================================
 // Types
@@ -238,7 +238,7 @@ export interface WorkbookReaderOptions {
    * shared strings, metadata and relationship parts it caches. Worksheets are
    * streamed and not subject to it. A streamed ZIP may not declare sizes up
    * front, so the bytes are counted as they inflate and the read fails with
-   * `FileTooLargeError` the moment a part exceeds it — the same per-part
+   * `ArchiveFileTooLargeError` the moment a part exceeds it — the same per-part
    * bound the buffered reader applies.
    * @default 512 MiB (536870912)
    */
@@ -246,7 +246,7 @@ export interface WorkbookReaderOptions {
   /**
    * Whether each part is checked against the CRC-32 the package records for it, failing
    * the read on a mismatch with an `ExcelFileError` whose `cause` is the archive's
-   * `Crc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
    * @default true
    */
   checkCrc32?: boolean;
@@ -259,7 +259,7 @@ export interface WorkbookReaderOptions {
 }
 
 /**
- * `entry`'s bytes, failing with `FileTooLargeError` as soon as more than
+ * `entry`'s bytes, failing with `ArchiveFileTooLargeError` as soon as more than
  * `limit` arrive — before a hostile part can be held in memory.
  */
 function boundedPart(entry: ZipEntry, limit: number): Transform {
@@ -273,9 +273,13 @@ function boundedPart(entry: ZipEntry, limit: number): Transform {
       seen += chunk.length;
       if (seen > limit) {
         callback(
-          new FileTooLargeError(entry.path, `holds more than ${limit} bytes (maxEntrySize)`, {
-            allowed: limit
-          })
+          new ArchiveFileTooLargeError(
+            entry.path,
+            `holds more than ${limit} bytes (maxEntrySize)`,
+            {
+              allowed: limit
+            }
+          )
         );
         return;
       }
@@ -435,16 +439,16 @@ function resolveReaderOptions(options: WorkbookReaderOptions): {
   const password = (options as Record<string, unknown>).password;
   if (password !== undefined && typeof password !== "string") {
     throw new ExcelArgumentError(
-      "password",
-      `WorkbookReader: password must be a string, got ${JSON.stringify(password) ?? String(password)}.`
+      "options.password",
+      `WorkbookReader: options.password must be a string, got ${JSON.stringify(password) ?? String(password)}.`
     );
   }
   for (const [key, choices] of Object.entries(READER_CHOICES)) {
     const value = (options as Record<string, unknown>)[key];
     if (value !== undefined && !(choices as readonly unknown[]).includes(value)) {
       throw new ExcelArgumentError(
-        key,
-        `WorkbookReader: ${key} must be one of ${choices.map(choice => JSON.stringify(choice)).join(", ")}, got ${JSON.stringify(value)}.`
+        `options.${key}`,
+        `WorkbookReader: options.${key} must be one of ${choices.map(choice => JSON.stringify(choice)).join(", ")}, got ${JSON.stringify(value)}.`
       );
     }
   }
@@ -540,12 +544,12 @@ export abstract class WorkbookReaderBase<
     this.input = input;
     this.WorksheetReaderClass = WorksheetReaderClass;
     this.HyperlinkReaderClass = HyperlinkReaderClass;
+    // Resolved first: it is what refuses an options value that is not an object, before anything reads a field of it.
+    this.options = resolveReaderOptions(options);
     this._maxBufferedBytes = options.maxBufferedWorksheetBytes ?? 256 * 1024 * 1024;
     assertLimitOption("maxEntrySize", options.maxEntrySize);
     this._maxEntrySize = options.maxEntrySize ?? 512 * 1024 * 1024;
     this._checkCrc32 = options.checkCrc32;
-
-    this.options = resolveReaderOptions(options);
 
     this.styles = new StylesXform();
     this.styles.init();
@@ -743,7 +747,7 @@ export abstract class WorkbookReaderBase<
       // Prefixes normalised to the ones matched below — see `namespace-prefixes.ts`.
       const parserPrefixes = createPrefixNormalizer({ lazy: true });
 
-      parser.on("opentag", (rawNode: SaxTag) => {
+      parser.on("opentag", (rawNode: XmlSaxTag) => {
         const node = parserPrefixes.open(rawNode);
         switch (node.name) {
           case "b":
@@ -818,7 +822,7 @@ export abstract class WorkbookReaderBase<
         text = text ? text + value : value;
       });
 
-      parser.on("closetag", (rawTag: SaxTag) => {
+      parser.on("closetag", (rawTag: XmlSaxTag) => {
         const closed = parserPrefixes.close(rawTag.name);
         const tag = closed === rawTag.name ? rawTag : { name: closed };
         switch (tag.name) {
@@ -855,7 +859,7 @@ export abstract class WorkbookReaderBase<
     const emitDecoder = createPartDecoder();
     let pendingEmits: Array<{ index: number; text: SharedStringValue }> = [];
 
-    emitParser.on("opentag", (rawNode: SaxTag) => {
+    emitParser.on("opentag", (rawNode: XmlSaxTag) => {
       const node = emitParserPrefixes.open(rawNode);
       switch (node.name) {
         case "b":
@@ -930,7 +934,7 @@ export abstract class WorkbookReaderBase<
       text = text ? text + value : value;
     });
 
-    emitParser.on("closetag", (rawTag: SaxTag) => {
+    emitParser.on("closetag", (rawTag: XmlSaxTag) => {
       const closed = emitParserPrefixes.close(rawTag.name);
       const tag = closed === rawTag.name ? rawTag : { name: closed };
       switch (tag.name) {

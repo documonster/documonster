@@ -6,7 +6,7 @@ A high-performance, RFC 4180 compliant CSV parser and formatter with zero depend
 
 ```typescript
 import { Csv } from "documonster/csv";
-// Csv.parse, Csv.format, Csv.createParserStream, …
+// Csv.parse, Csv.format, Csv.ParserStream, …
 ```
 
 ## Features
@@ -15,7 +15,7 @@ import { Csv } from "documonster/csv";
 - **Zero Dependencies** - Pure TypeScript, no external packages
 - **Cross-Platform** - Same API in Node.js and browsers
 - **High Performance** - indexOf-based scanner, fast-mode detection, batch processing
-- **Streaming** - `Csv.createParserStream` / `Csv.createFormatterStream` for large files
+- **Streaming** - `Csv.ParserStream` / `Csv.FormatterStream` for large files
 - **Type-Safe** - Full TypeScript generics with overloaded signatures
 - **Auto-Detection** - Delimiter, linebreak, and BOM detection
 - **Dynamic Typing** - Automatic type coercion (numbers, booleans, dates)
@@ -232,7 +232,7 @@ Csv.format([
 
 ## Streaming API
 
-### `Csv.createParserStream(options?)`
+### `new Csv.ParserStream(options?)`
 
 Transform stream that parses CSV data chunk-by-chunk. Cross-platform (Node.js + browser).
 
@@ -240,8 +240,8 @@ Transform stream that parses CSV data chunk-by-chunk. Cross-platform (Node.js + 
 import { Csv } from "documonster/csv";
 import { pipeline } from "documonster/stream";
 
-// Using factory function
-const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
+// Construct the stream
+const parser = new Csv.ParserStream({ headers: true, dynamicTyping: true });
 
 // With transform and validation
 parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
@@ -256,14 +256,14 @@ parser.on("end", () => console.log("Done"));
 await pipeline(readableStream, parser, writable);
 ```
 
-### `Csv.createFormatterStream(options?)`
+### `new Csv.FormatterStream(options?)`
 
 Transform stream that formats rows to CSV text. Cross-platform (Node.js + browser).
 
 ```typescript
 import { Csv } from "documonster/csv";
 
-const formatter = Csv.createFormatterStream({
+const formatter = new Csv.FormatterStream({
   headers: ["name", "age"],
   delimiter: ";",
   bom: true
@@ -336,11 +336,11 @@ Csv.applyDynamicTyping("007", value => Number(value)); // 7 (your own converter)
 import { Csv } from "documonster/csv";
 
 // Format numbers with locale-specific decimal separator
-Csv.formatNumber(3.14, "."); // "3.14"
-Csv.formatNumber(3.14, ","); // "3,14"
+Csv.formatNumber(3.14); // "3.14"
+Csv.formatNumber(3.14, { decimalSeparator: "," }); // "3,14"
 
 // Parse numbers with locale-specific decimal separator
-Csv.parseNumber("3,14", ","); // 3.14
+Csv.parseNumber("3,14", { decimalSeparator: "," }); // 3.14
 ```
 
 ---
@@ -410,7 +410,7 @@ const batch2 = gen.generate(100);
 
 ```typescript
 import { Csv } from "documonster/csv";
-import { CsvError, CsvWorkerError } from "documonster/csv";
+import { CsvError } from "documonster/csv";
 
 try {
   Csv.parse(badInput, { headers: true });
@@ -438,10 +438,10 @@ try {
 
 ### Stream Classes
 
-| Class                                 | Description                                |
-| ------------------------------------- | ------------------------------------------ |
-| `Csv.createParserStream(options?)`    | Transform stream: CSV bytes -> parsed rows |
-| `Csv.createFormatterStream(options?)` | Transform stream: rows -> CSV text         |
+| Class                               | Description                                |
+| ----------------------------------- | ------------------------------------------ |
+| `new Csv.ParserStream(options?)`    | Transform stream: CSV bytes -> parsed rows |
+| `new Csv.FormatterStream(options?)` | Transform stream: rows -> CSV text         |
 
 ### Utilities
 
@@ -451,8 +451,8 @@ try {
 | `Csv.detectLinebreak(input)`                   | Auto-detect line terminator   |
 | `Csv.stripBom(input)`                          | Strip UTF-8 BOM               |
 | `Csv.applyDynamicTyping(value, columnConfig?)` | Convert string to native type |
-| `Csv.formatNumber(value, sep)`                 | Format number for locale      |
-| `Csv.parseNumber(value, sep)`                  | Parse locale-formatted number |
+| `Csv.formatNumber(value, options?)`            | Format number for locale      |
+| `Csv.parseNumber(value, options?)`             | Parse locale-formatted number |
 | `Csv.deduplicateHeaders(headers)`              | Rename duplicate headers      |
 
 ### Generator Functions

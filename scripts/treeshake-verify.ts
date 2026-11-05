@@ -349,10 +349,10 @@ function officeEncryptionScenarios(): Scenario[] {
       use: "console.log(Io.read, Io.toBuffer)"
     },
     {
-      label: "word: Streaming",
+      label: "word: Stream",
       from: "word",
-      imports: ["Streaming"],
-      use: "console.log(Streaming.createReader)"
+      imports: ["Stream"],
+      use: "console.log(Stream.DocumentReader)"
     }
   ];
   return entries.flatMap(({ label, from, imports, use }) =>
@@ -477,7 +477,7 @@ const scenarios: Scenario[] = [
   // The deprecated `Security.encrypt` forward loads the shared Office encryption with `import()`, which a single-file
   // esbuild bundle inlines — as for `Io` above.
   ns("word", "Security", [], undefined, ["esbuild"]),
-  ns("word", "Streaming", ["modules/archive/", "modules/xml/", "modules/stream/"]),
+  ns("word", "Stream", ["modules/archive/", "modules/xml/", "modules/stream/"]),
   ns("word", "Styles", []),
   ns("word", "Template", ["modules/xml/"]), // parses template content (dom/sax)
   ns("word", "Transform", ["modules/xml/"]), // resolveDataBindings parses custom XML parts
@@ -727,7 +727,7 @@ const scenarios: Scenario[] = [
   ns("word", "Query", ["modules/xml/"], "browser"),
   ns("word", "RenderContext", [], "browser"),
   ns("word", "Security", [], "browser", ["esbuild"]), // see the node scenario
-  ns("word", "Streaming", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  ns("word", "Stream", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
   ns("word", "Styles", [], "browser"),
   ns("word", "Template", ["modules/xml/"], "browser"),
   ns("word", "Transform", ["modules/xml/"], "browser"),

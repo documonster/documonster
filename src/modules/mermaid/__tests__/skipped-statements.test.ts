@@ -1,5 +1,5 @@
 import { Mermaid, MermaidError } from "@mermaid/index";
-import type { GanttDiagram, MermaidDiagram } from "@mermaid/index";
+import type { MermaidGanttDiagram, MermaidDiagram } from "@mermaid/index";
 import { parseDate } from "@mermaid/parse/dates";
 import { describe, expect, it } from "vitest";
 
@@ -94,7 +94,7 @@ describe("gantt dates that do not exist", () => {
   it("leave the task out and report it, instead of drawing it somewhere else", () => {
     const diagram = Mermaid.parse(
       "gantt\ndateFormat YYYY-MM-DD\nsection S\nA :a1, 2024-01-01, 3d\nB :b1, 2024-13-45, 3d"
-    ) as GanttDiagram;
+    ) as MermaidGanttDiagram;
     expect(diagram.tasks.map(task => task.label)).toEqual(["A"]);
     expect(diagram.skipped).toEqual([{ text: "B :b1, 2024-13-45, 3d", line: 5, column: 1 }]);
   });
@@ -102,7 +102,7 @@ describe("gantt dates that do not exist", () => {
   it("report a dependency on a task that does not exist", () => {
     const diagram = Mermaid.parse(
       "gantt\nsection S\nA :a1, 2024-01-01, 3d\nB :b1, after nope, 2d"
-    ) as GanttDiagram;
+    ) as MermaidGanttDiagram;
     expect(diagram.skipped).toEqual([{ text: "B :b1, after nope, 2d", line: 4, column: 1 }]);
   });
 });

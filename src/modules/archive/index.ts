@@ -186,9 +186,7 @@ export type {
 export type {
   FileEntry as FsFileEntry,
   TraverseOptions as FsTraverseOptions,
-  GlobOptions as FsGlobOptions,
-  ReadStreamOptions as FsReadStreamOptions,
-  WriteStreamOptions as FsWriteStreamOptions
+  GlobOptions as FsGlobOptions
 } from "@utils/fs";
 /** @deprecated Use {@link FsFileEntry}. Removed in 1.0. */
 export type FileEntry = FsFileEntryImpl;
@@ -196,9 +194,15 @@ export type FileEntry = FsFileEntryImpl;
 export type TraverseOptions = FsTraverseOptionsImpl;
 /** @deprecated Use {@link FsGlobOptions}. Removed in 1.0. */
 export type GlobOptions = FsGlobOptionsImpl;
-/** @deprecated Use {@link FsReadStreamOptions}. Removed in 1.0. */
+/**
+ * @deprecated Use `ReadStreamOptions` from `node:fs`, as `createReadStream` from `node:fs`
+ * replaces this module's. Removed in 1.0.
+ */
 export type ReadStreamOptions = FsReadStreamOptionsImpl;
-/** @deprecated Use {@link FsWriteStreamOptions}. Removed in 1.0. */
+/**
+ * @deprecated Use `WriteStreamOptions` from `node:fs`, as `createWriteStream` from `node:fs`
+ * replaces this module's. Removed in 1.0.
+ */
 export type WriteStreamOptions = FsWriteStreamOptionsImpl;
 
 /** @deprecated Use {@link WorkerTaskOptions}. Removed in 1.0. */
@@ -342,9 +346,9 @@ export const removeSync = removeSyncImpl;
 export const copyFile = copyFileImpl;
 /** @deprecated Use {@link Fs.copyFileSync}. Removed in 1.0. */
 export const copyFileSync = copyFileSyncImpl;
-/** @deprecated Use {@link Fs.createReadStream}. Removed in 1.0. */
+/** @deprecated Use createReadStream from node:fs; this only forwards to it. Removed in 1.0. */
 export const createReadStream = createReadStreamImpl;
-/** @deprecated Use {@link Fs.createWriteStream}. Removed in 1.0. */
+/** @deprecated Use createWriteStream from node:fs; this only forwards to it. Removed in 1.0. */
 export const createWriteStream = createWriteStreamImpl;
 /** @deprecated Use {@link Fs.createTempDir}. Removed in 1.0. */
 export const createTempDir = createTempDirImpl;

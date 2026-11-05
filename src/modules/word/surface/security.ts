@@ -6,11 +6,15 @@
  *   `Security.protect(...)`, `Security.isProtected(doc)`,
  *   `Security.verifyPassword(doc, pw)` (the protection password; the file-encryption
  *   password is `WordCrypto.verifyPassword`),
- *   `Security.DEFAULT_SECURITY_POLICY`, … — tree-shaken via
+ *   `Security.DEFAULT_POLICY`, … — tree-shaken via
  *   `export * as Security`.
  */
 import type { encryptDocx } from "@word/security/encryption";
-import { resolveSecurityPolicy as resolveSecurityPolicyImpl } from "@word/security/policy";
+import {
+  DEFAULT_SECURITY_POLICY as DEFAULT_SECURITY_POLICY_IMPL,
+  STRICT_SECURITY_POLICY as STRICT_SECURITY_POLICY_IMPL,
+  resolveSecurityPolicy as resolveSecurityPolicyImpl
+} from "@word/security/policy";
 
 export {
   protectDocument as protect,
@@ -20,8 +24,8 @@ export {
   verifyProtectionPassword as verifyPassword
 } from "@word/security/document-protection";
 export {
-  DEFAULT_SECURITY_POLICY,
-  STRICT_SECURITY_POLICY,
+  DEFAULT_SECURITY_POLICY as DEFAULT_POLICY,
+  STRICT_SECURITY_POLICY as STRICT_POLICY,
   resolveSecurityPolicy as resolvePolicy
 } from "@word/security/policy";
 
@@ -34,3 +38,7 @@ export const encrypt: typeof encryptDocx = async (zipBytes, password, options) =
   (await import("@word/security/encryption")).encryptDocx(zipBytes, password, options);
 /** @deprecated Use {@link resolvePolicy}. Removed in 1.0. */
 export const resolveSecurityPolicy = resolveSecurityPolicyImpl;
+/** @deprecated Use {@link DEFAULT_POLICY}. Removed in 1.0. */
+export const DEFAULT_SECURITY_POLICY = DEFAULT_SECURITY_POLICY_IMPL;
+/** @deprecated Use {@link STRICT_POLICY}. Removed in 1.0. */
+export const STRICT_SECURITY_POLICY = STRICT_SECURITY_POLICY_IMPL;

@@ -2,8 +2,8 @@ import type { RandomAccessReader } from "@archive/io/random-access";
 import {
   HttpRangeReader,
   createBufferReader,
-  RangeNotSupportedError,
-  HttpRangeError
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError
 } from "@archive/io/random-access";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -137,7 +137,7 @@ describe("HttpRangeReader", () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
-    it("should throw RangeNotSupportedError when server does not support Range", async () => {
+    it("should throw ArchiveRangeNotSupportedError when server does not support Range", async () => {
       // HEAD response without Accept-Ranges
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -157,10 +157,10 @@ describe("HttpRangeReader", () => {
 
       await expect(
         HttpRangeReader.open("https://example.com/test.zip", { fetch: mockFetch })
-      ).rejects.toThrow(RangeNotSupportedError);
+      ).rejects.toThrow(ArchiveRangeNotSupportedError);
     });
 
-    it("should throw HttpRangeError on HTTP error", async () => {
+    it("should throw ArchiveHttpRangeError on HTTP error", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 404,
@@ -170,7 +170,7 @@ describe("HttpRangeReader", () => {
 
       await expect(
         HttpRangeReader.open("https://example.com/test.zip", { fetch: mockFetch })
-      ).rejects.toThrow(HttpRangeError);
+      ).rejects.toThrow(ArchiveHttpRangeError);
     });
 
     it("should skip HEAD request when size is pre-known", async () => {
@@ -327,7 +327,7 @@ describe("HttpRangeReader", () => {
       expect(mockFetch.mock.calls.length).toBe(beforeCalls);
     });
 
-    it("should throw HttpRangeError on HTTP error", async () => {
+    it("should throw ArchiveHttpRangeError on HTTP error", async () => {
       const reader = await createReader();
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -335,7 +335,7 @@ describe("HttpRangeReader", () => {
         statusText: "Internal Server Error"
       });
 
-      await expect(reader.read(0, 100)).rejects.toThrow(HttpRangeError);
+      await expect(reader.read(0, 100)).rejects.toThrow(ArchiveHttpRangeError);
     });
 
     it("should throw RangeError on invalid range", async () => {
@@ -404,16 +404,16 @@ describe("RandomAccessReader interface", () => {
 });
 
 describe("Error classes", () => {
-  it("RangeNotSupportedError should have correct properties", () => {
-    const error = new RangeNotSupportedError("https://example.com/test.zip");
-    expect(error.name).toBe("RangeNotSupportedError");
+  it("ArchiveRangeNotSupportedError should have correct properties", () => {
+    const error = new ArchiveRangeNotSupportedError("https://example.com/test.zip");
+    expect(error.name).toBe("ArchiveRangeNotSupportedError");
     expect(error.message).toContain("Range requests");
     expect(error.message).toContain("https://example.com/test.zip");
   });
 
-  it("HttpRangeError should have correct properties", () => {
-    const error = new HttpRangeError("https://example.com/test.zip", 404, "Not Found");
-    expect(error.name).toBe("HttpRangeError");
+  it("ArchiveHttpRangeError should have correct properties", () => {
+    const error = new ArchiveHttpRangeError("https://example.com/test.zip", 404, "Not Found");
+    expect(error.name).toBe("ArchiveHttpRangeError");
     expect(error.url).toBe("https://example.com/test.zip");
     expect(error.status).toBe(404);
     expect(error.statusText).toBe("Not Found");

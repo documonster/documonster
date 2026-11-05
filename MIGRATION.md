@@ -4,6 +4,207 @@ Breaking changes for `documonster` will be documented here as they occur.
 
 ## Unreleased
 
+### Every public function checks its arguments (behaviour change)
+
+A wrong argument to a public function is now the module's own `…ArgumentError`, naming the parameter as the
+signature does and starting its message with the call. A sweep over every namespace member of every entry found
+about seventy that let a raw `TypeError` (or Node's `ERR_INVALID_ARG_TYPE`) escape instead, and four that accepted
+`{}` as a worksheet and wrote onto it; `src/test/__tests__/public-argument-errors.node.test.ts` now runs that sweep.
+Valid arguments behave exactly as before. A deprecated name keeps the behaviour it was published with.
+
+- **Excel.** `Workbook.toBuffer`, `toStream`, `writeStream` and `writeFile` check the workbook first
+  (`field: "wb"`). `Worksheet.protect`, `Worksheet.freeze` and `Worksheet.split` refuse something that is not a
+  worksheet instead of writing onto it. `new Stream.WorkbookWriter(options)` and
+  `new Stream.WorkbookReader(input, options)` refuse an `options` that is not an object (`WorkbookWriter(42)` was
+  accepted), and the reader names a wrong option by its path (`options.password`, `options.worksheets`; it said
+  `password`). `ChartClassic.fillNumRef` / `fillStrRef` / `fillCaches` / `toColorsXml` / `toStyleXml` /
+  `fromColorsXml` / `fromStyleXml` / `createOptionsFrom*`, `ChartEx.toXml` / `fillCaches` / `createOptionsFrom*`
+  and the `DrawingMl` readers and `create*` builders check their arguments.
+- **Word.** `Font.createHyphenator` checks the pattern set, not only its type: `patterns.patterns` and
+  `patterns.exceptions` must be arrays of strings (`field: "patterns.patterns[3]"`), `options.minLeft` /
+  `options.minRight` integers ≥ 0 (a `NaN` quietly disabled hyphenation). `Font.shapeText`, `Font.detectScript`,
+  `Font.detectDirection`, `Template.fill`, `Package.patchTemplate` and `WordCrypto.Agile.parseEncryptionInfo`
+  throw `DocxArgumentError`. `WordExcel.toDocx` refuses a value that is not a workbook with `DocxArgumentError`
+  (`field: "workbook"`) rather than Excel's `ExcelArgumentError`.
+- **Draw and PDF.** `Draw.Geometry.roundedRectToPath` names its own parameters (`x`, `y`, `width`, `height`; it
+  reported `box.x`, a path no caller wrote). `Draw.Backend.SvgSurface`, `Draw.Backend.BasicRasterCanvas` and the
+  surfaces `Draw.Backend.createRasterSurface` and `Pdf.createDrawSurface` return throw `DrawArgumentError` /
+  `PdfArgumentError` naming the call (`Draw.Backend.BasicRasterCanvas#fillRect: x must be a number, got
+Symbol(x)`); a `NaN` coordinate still draws nothing on the SVG and raster surfaces, and the PDF surface refuses it
+  under its own name rather than `Pdf.PageBuilder#drawRect`'s. `Draw.Backend.normalizeSamples` names itself.
+  `Pdf.Editor#splitPages` refuses a value that is neither options nor a list of indices (`field: "options"`).
+- **`BasicRasterCanvas` no longer hangs** on a far or `NaN` line end, or a large circle or ellipse: `drawLine`
+  clips to the canvas and `fillCircle` / `fillEllipse` stop at its edge. `Draw.toRgba` of a line reaching `1e9`
+  took 18 s, and of an ellipse of radius `1e5` did not finish.
+- **Archive.** `Archive.toAsyncIterable` checks its arguments when it is called, not on the first `next()`
+  (`field: "source"` / `"options"` / `"options.signal"` / `"options.onChunk"`); `toReadableStream` and
+  `toNodeReadable` check `options` the same way, and a source chunk that is not bytes or a string is an
+  `ArchiveArgumentError` (`field: "source"`). `Archive.Crypto.encryptZipCrypto`, `decryptZipCrypto`,
+  `createZipCryptoKeys`, `encryptAes` and `decryptAes` check their data, password, `crc32`, `lastModTime` and
+  `getRandomBytes` (which must return at least 11 bytes — a short one produced wrong ciphertext);
+  `Archive.Crypto.getEncryptionMethodName` throws for a method it has no name for (it returned `undefined`, or a
+  function for `"toString"`; the deprecated flat `Archive.getEncryptionMethodName` still answers `undefined`), and
+  `getEncryptionMethodForAesKeyStrength` for a strength other than 128, 192 or 256. `new Archive.ZipEditPlan(ops)`
+  checks every operation (`field: "ops[0].name"`) and needs an array; a plan's `delete`, `deleteDirectory` and
+  `rename` check their names, and `ZipEditPlan.deserialize` reports `data.ops[i]`.
+  `new Archive.ArchiveFile(null)` throws `ArchiveArgumentError` (`field: "options"`).
+- **`Fs.*` check their arguments**: a wrong path, option, `data`, `content`, `encoding`, `mtime` or `prefix` is an
+  `ArchiveArgumentError` (`Fs.readFileBytes: filePath must be …`); what the file system refuses is still passed on
+  as it is. `Fs` does not publish `createReadStream` / `createWriteStream` (they only forwarded to `node:fs`; use
+  those).
+- **CSV.** `Csv.applyDynamicTyping` requires a string `value` and a boolean or function `columnConfig`;
+  `Csv.applyDynamicTypingToRow` requires `dynamicTyping` and string values (`field: 'row["a"]'`), checked before the
+  row is changed; `new Csv.FormatterStream(null)` throws `CsvArgumentError`.
+- **Streams.** `Streams.fromWebReadable` / `fromWebWritable` / `toWebReadable` throw `StreamArgumentError` for
+  options that are not an object or carry a wrong `objectMode`, `highWaterMark`, `encoding`, `decodeStrings`,
+  `signal` or `strategy`, and leave the Web stream unlocked; `new Streams.PullStream`, `BufferedStream`,
+  `ChunkedBuilder` and `TransactionalChunkedBuilder` check their `options` (and `chunkSize` / `initialCapacity`).
+
+**Settings move into options objects** (the positional forms of published names are deprecated overloads with the
+same results):
+
+| Deprecated                                                           | Use                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `Font.hyphenateWord(word, hyphenator, "-")`, `hyphenateText(…, "-")` | `Font.hyphenateWord(word, hyphenator, { hyphenChar: "-" })` (`DocxHyphenateOptions`) |
+| `HyphenationOptions.hyphenChar`                                      | none — `Font.createHyphenator` never read it                                         |
+| `flattenPath(commands, scale)` (flat)                                | `Draw.Geometry.flattenPath(commands, { scale })` (`DrawFlattenPathOptions`)          |
+| `parseRasterFont(data, index)` (flat)                                | `Draw.parseRasterFont(data)` or `Draw.parseRasterFont({ data, collectionIndex })`    |
+
+**Excel's streaming writers stop advertising their internals.** These fields were only ever used by the library
+itself and are deprecated (internal; removed in 1.0): `WorkbookWriter.sharedStrings` / `styles` / `zipOptions` /
+`xlsbTables` / `compressionLevel` / `media` / `commentRefs` / `dynamicArrayCount` / `zip` / `stream` / `promise`, and
+`WorksheetWriter._retainedComments` / `tables` / `pivotTables` / `threadedComments` / `formControls` / `_charts` /
+`_shapes` / `_sparklineGroups` / `_worksheetMcIgnorable` / `_sortStateAutoFilterRef` / `orderNo` / `sheetNo` /
+`conditionalFormattings` / `hasComments` / `startedData` / `rId`. `WorksheetWriter.xlsbUnsupported` is deprecated in
+favour of `unsupported`, as on `WorkbookWriter`.
+
+- **`WorksheetWriter#workbook` is typed as the `Stream.WorkbookWriter` that made the sheet.** It was typed as the
+  internal protocol the sheet uses — shared strings, styles, `_openStream`, `packageSink` — so `ws.workbook` offered
+  those and not `addWorksheet` or `commit`. The object is the same; only its declared type changed.
+- **`new Stream.WorkbookReader(path)` reports a file the system will not open as `ExcelFileError`** (`path`,
+  `operation: "read"`, the system error as `cause`), as `Workbook.readFile` does. It was the platform's own `ENOENT`
+  error, which `isExcelError` did not recognise.
+- **`new Archive.UnzipEntry(…)` is deprecated.** Entries come from a reader (`ZipReader.entries()` / `get()`, or
+  iterating `Archive.openZip(…)`); the shapes the constructor takes are the reader's own. The class stays, for
+  `instanceof`.
+
+### Public API: the remaining inconsistencies across modules
+
+A second pass over every entry point against the conventions in `AGENTS.md`. As before, **nothing is removed**:
+every renamed name stays as a `@deprecated` forward with its old behaviour until 1.0. The behaviour changes come
+first.
+
+**Behaviour changes**
+
+- **A wrong page index is an argument error in `Pdf.Editor`.** `getPage`, `removePage`, `isPageRemoved` and
+  `rotatePage` throw `PdfArgumentError` for an index that names no page — not a number, fractional, `NaN` or out of
+  range — with `field: "index"`, and `rotatePage` for a rotation other than 0, 90, 180 or 270 with
+  `field: "degrees"`. They threw `PdfStructureError`, which describes a malformed file, while an index naming a
+  removed page was already a `PdfArgumentError`. Messages start with the call
+  (`Pdf.Editor#getPage: index 3 names no page (0-2)`). The deprecated positional `splitPages(indices)` /
+  `copyPagesFrom(pdf, indices)` keep `PdfStructureError`.
+- **`Pdf.Builder#addBookmark`** throws `PdfArgumentError` (`field: "parent"`) for a `parent` that names no top-level
+  bookmark. It threw `RangeError`.
+- **`Layout.pageToSvg` / `Layout.computedPageToSvg`** throw `DocxArgumentError` (`field: "pageNumber"`) for a page
+  number out of range, instead of `RangeError`; `computedPageToSvg` also checks its `layout` (`field: "layout"`,
+  `"layout.pages"`, `"layout.totalPages"`).
+- **`Transform.map`** throws `DocxArgumentError` (`field: "transformer.transformBodyContent"`) when a transform puts a
+  non-paragraph into a text box, a shape's text or a TOC's cached paragraphs; **`Diff.compare`** throws `DocxError`
+  (`Diff.compare: …`) when the documents are too large to compare, and checks `newDoc` as it checks `oldDoc`. Both
+  threw a plain `Error`, which `isDocxError` did not recognise. `WordCrypto.parseSignature` and
+  `WordCrypto.isWellFormedSignature` check their arguments.
+- **`ArchiveFile` wraps every file-system refusal in the new `ArchiveFileError`** (`path`, `operation: "read" |
+"write"`, the system error as `cause` — read `err.cause.code` where you read `err.code`): opening
+  (`fromFile` / `fromFileSync`), writing (`writeFile`, `writeFileSync`, `streamToFile`), a local source read while
+  building (`toBuffer`, `toBufferSync`, `stream`, `pipeTo`; the message says "source file") and extraction
+  (`extractTo`, `extractToSync`, `extractEntryTo`, `extractEntryToSync`; "extracted file"). An `overwrite` refusal is
+  still a plain `ArchiveError`, a missing file or permission error that extraction reports through `onWarning` is
+  still a warning, and `Fs.*` still pass the platform's error on.
+- **`Compression.Workers.*` on Node** throw (or reject with) `ArchiveWorkerUnsupportedError` instead of a plain
+  `ArchiveError`; guard isomorphic code with `Compression.hasWorkerSupport()`, which is `false` there.
+- **Error names aligned with the other modules:** `ExcelNotSupportedError` → `ExcelUnsupportedFeatureError` (as
+  `DocxUnsupportedFeatureError`) and `MaxItemsExceededError` → `ExcelLimitExceededError` (as `DocxLimitExceededError`
+  / `PdfLimitExceededError`). The old names are deprecated aliases of the same class; the error's `name` is the new
+  one.
+- `WorksheetWriter.removeWatermark()` returns `true` if the sheet had a watermark, as `Watermark.remove` does.
+- Argument errors name the public parameter: `ExcelFormula.calculate` reports `field: "wb"` (was `"workbook"`);
+  `Csv.applyDynamicTypingToRow` reports its second argument as `dynamicTyping` (was `options.dynamicTyping`);
+  `Pdf.verifySignatures` names its first parameter `data`, the field it already reported.
+
+**Deprecated, with the replacement**
+
+| Deprecated                                                                                  | Use                                                                                      |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `CellValueType`, `CellValueInputType`, `Cell.Value`                                         | `CellValue`, `CellValueInput`                                                            |
+| `HeaderFooterImage.Entry` / `Options` / `Position`                                          | the flat `HeaderFooterImageEntry` / `…Options` / `…Position`                             |
+| `Sparkline.AddSparklineGroupOptions`, `Sparkline.SparklineGroup`                            | the flat `AddSparklineGroupOptions`, `SparklineGroup`                                    |
+| `Workbook.XlsxReadable` / `XlsxWritable` / `XlsxStreamOptions`                              | the flat types of the same names                                                         |
+| `Row.commit(ws, n)`                                                                         | `Stream.commitRow(ws.getRow(n))` — a document-model sheet has nothing to commit          |
+| `Cell.setName(ws, addr, n)`, `Cell.removeAllNames(ws, addr)`                                | `Cell.setNames(ws, addr, [n])`, `Cell.clearNames(ws, addr)`                              |
+| `EXCEL_CHART_PRESETS`, `EXCEL_CHART_EX_PRESETS`                                             | `Object.keys(CHART_PRESETS)`, `Object.keys(CHART_EX_PRESETS)`                            |
+| `VECTOR_PDF_CHART_EX_LAYOUT_IDS`                                                            | deprecated with `canRenderChartExAsVectorPdf`                                            |
+| `WorkbookWriter.nextId`, `WorksheetWriter.stream` / `drawing` / `_name`                     | internal; removed in 1.0                                                                 |
+| `CsvInput`, `CsvOptions` (`documonster/excel/csv`)                                          | `ExcelCsvInput`, `ExcelCsvOptions` (with `ExcelCsvReadOptions` / `ExcelCsvWriteOptions`) |
+| `MarkdownOptions` (`documonster/markdown`)                                                  | `ExcelMarkdownReadOptions` / `ExcelMarkdownWriteOptions` (`documonster/excel/markdown`)  |
+| `WordSecurityPolicy`, `WordRenderContext`, `WordChartExOptions`                             | `DocxSecurityPolicy`, `DocxRenderContext`, `DocxChartExOptions`                          |
+| `Query.StyleIndex`                                                                          | `DocxStyleIndex`                                                                         |
+| `HtmlToDocxResult` (`documonster/word/html`)                                                | `WordHtml.toDocxBody`, whose result is `DocxHtmlBodyResult`                              |
+| `PdfExportOptions.font`                                                                     | `fonts: { default: { regular: bytes } }`                                                 |
+| `Pdf.Builder#embedFont(bytes, index)`, `Pdf.Editor#embedFont(bytes, index)`                 | `embedFont(bytes)` or `embedFont({ data, collectionIndex })`                             |
+| `BasicRasterCanvas` positional `drawText` / `drawPolyline` / `strokeEllipse` / `strokeRect` | the options forms: `drawText(x, y, text, { fontSize, color, anchor, … })`, …             |
+| `BasicRasterCanvas#textWarnings()`, `SvgSurface#markup()`                                   | `getTextWarnings()`, `format()`                                                          |
+| `Archive.editZip`, `Archive.editZipUrl`                                                     | `Archive.ZipEditor.open`, `Archive.ZipEditor.openUrl`                                    |
+| `Archive.randomBytes`                                                                       | `crypto.getRandomValues(new Uint8Array(n))`                                              |
+| `EOCDInfo`, `ZIP64EOCDInfo`                                                                 | none — no public signature uses them                                                     |
+| a TAR entry's `data()` / `skip()`                                                           | `bytes()` / `discard()`, as `TarReaderEntry` and `UnzipEntry` name them                  |
+| `Csv.formatNumber(v, sep)`, `Csv.parseNumber(v, sep)`                                       | `Csv.formatNumber(v, { decimalSeparator })`, `Csv.parseNumber(v, { decimalSeparator })`  |
+| `Csv.applyDynamicTypingToRow(row, typing, castDate)`                                        | `Csv.applyDynamicTypingToRow(row, typing, { castDate })` (also takes `decimalSeparator`) |
+| `Csv.createGenerator(…).asyncRows()`                                                        | `rowsAsync()`                                                                            |
+| `Xml.Writer#save()`                                                                         | `Xml.Writer#snapshot()` (`commit` / `rollback` are unchanged)                            |
+| `SaxTag`, `SaxEvent`, `SaxEventAny`, `SaxHandlers`, `SaxOptions`                            | `XmlSaxTag`, `XmlSaxEvent`, `XmlSaxEventAny`, `XmlSaxHandlers`, `XmlSaxOptions`          |
+| `Token`, `AstNode`, `TokenType`, `NodeType` (`documonster/formula`)                         | `FormulaToken`, `FormulaAstNode`, `FormulaTokenType`, `FormulaNodeType`                  |
+
+**Order and naming fixes in names that had not been released:** `WordCrypto.Agile.deriveKey` takes
+`(info, password, blockKey)`, matching `Agile.verifyPassword(info, password)` (the deprecated flat
+`deriveEncryptionKey(password, info, blockKey)` keeps its order); `Chart.getTypes`, `Form.Vml.getAnchor` /
+`getStyle` / `getCheckedValue`, `DrawingMl.withSpPrFill` / `withSpPrLine` (they return a copy, which `set` did not
+say), `WorkbookEncryptOptions`, `XlsxParseStream`, `DocxChartSvgOptions`; `Table.getColumn` returns `undefined` for
+an index the table has no column at.
+
+**New:** `Stream.ColumnHandle`; `ExcelArgumentError` from `documonster/chart`; `DocxError` / `DocxParseError` from
+`documonster/word/crypto`; `ArchiveFileError`, `ArchiveWorkerUnsupportedError`, `UnpackedTarEntry`;
+`CsvGenerator`, `CsvNumberOptions`, `CsvDynamicTypingOptions`; `PdfEncryptionOptions`, `PdfPermissions`,
+`PdfCellCommentMode`; `DrawRasterTextOptions`, `DrawRasterTextRotation`, `DrawRasterStrokeOptions`,
+`DrawRasterLineOptions`, `DrawGlyphPoint`.
+
+### File-system errors are typed; Word's `Io` has no file-path members in the browser
+
+- **`Io.readFile` / `Io.writeFile` wrap a file-system failure in `DocxFileError`** (new, a `DocxError`, with `path`
+  and `operation`). It was the platform's own error, which `isDocxError` did not recognise; its code is now
+  `error.cause.code`, as for `ExcelFileError`. A file that was read but is not a document is still a `DocxParseError`.
+- **`Workbook.writeFile`, `ExcelCsv.writeFile` and `ExcelMarkdown.writeFile` wrap a file-system failure in
+  `ExcelFileError`** (`operation: "write"`, system error as `cause`), as their `readFile` counterparts already did.
+- **The browser build of `documonster/word` publishes no `Io.readFile` / `Io.writeFile`.** They threw at runtime
+  there; read the bytes yourself and use `Io.read`, and persist the bytes of `Io.toBuffer`.
+- Renamed: `InvalidZipSignatureError` → `ZipInvalidSignatureError` (`documonster/archive`) and
+  `UnsupportedStreamTypeError` → `StreamUnsupportedTypeError` (`documonster/stream`). The old names are deprecated
+  aliases of the same class, removed in 1.0; the error's `name` is now the new one.
+
+### Excel: facet readers return copies; `Row.commit` creates nothing; `Chart.clone` deprecated
+
+- **`Cell.getFont`, `getAlignment`, `getBorder`, `getFill`, `getProtection` and `getNumFmt` always return a copy
+  (behaviour change).** Editing the object returned for an existing cell used to change the cell, while the same
+  edit on an absent cell changed nothing, and `Row`/`Column` readers always returned copies. Change a facet with its
+  setter (`Cell.setFont(ws, "A1", { ...Cell.getFont(ws, "A1"), bold: true })`) or edit the live record
+  `Cell.getStyle(ws, "A1")` returns.
+- **`Row.commit` no longer creates the row on a document-model sheet.** It is still a no-op there, and still writes
+  the row out on a `Stream.WorksheetWriter`.
+- Deprecated: `Chart.clone(c, range)` — use `Chart.copyTo(c, c.worksheet, range)`, which places the same copy at the
+  same default position and returns the same part number. `clone` suggested an independent copy, as
+  `Document.clone` returns.
+- `Anchor.setCol` / `Anchor.setRow` name their second parameter `value`, matching the `field` their argument
+  errors report.
+
 ### Excel: inserting, deleting and renaming keep references consistent (behaviour change)
 
 `Row.insert`, `Row.insertMany`, `Row.splice`, `Row.duplicate`, `Column.splice` (and the deprecated
@@ -513,7 +714,7 @@ WorkbookCreateOptions)`. `Workbook.removeChartsheet` / `copyChartsheet` / `repla
   returns); both returned `void`.
 - The deprecated `Table.columnSetName` forwards to `Table.setColumnName`, so a colliding name is refused rather than
   renumbered. The deprecated `column*` / `show*` / `headerRow` getters and setters forward to the checked functions,
-  and the deprecated `Form.vmlAnchor` / `vmlStyle` / `vmlCheckedValue` to `Form.getVml*`, which also take the handle.
+  and the deprecated `Form.vmlAnchor` / `vmlStyle` / `vmlCheckedValue` to `Form.Vml.getAnchor` / `getStyle` / `getCheckedValue`, which also take the handle.
 - `Stream.WorkbookReader`'s `parse(input, options)` / `read(input, options)` apply the defaults to what the call
   leaves out. `{ styles: "cache" }` dropped `worksheets: "emit"`, so no sheet was read.
 - A committed `WorksheetWriter`'s `findRow` / `eachRow` return nothing instead of throwing; `mergeCells("A1")` does
@@ -668,8 +869,8 @@ WorkbookCreateOptions)`. `Workbook.removeChartsheet` / `copyChartsheet` / `repla
   `fillChartExCaches` keep the positional form). A chart goes onto a PDF page as its display list
   (`toDrawList` + `Pdf.createDrawSurface` + `Draw.render`); see "PDF, drawing and Mermaid".
 - Types used in published signatures: `Chart.PresetOptions`, `Chart.TableExOptions`, `Chart.RowsExOptions`,
-  `Stream.WriterImageModel`, `Stream.PackageSink`, `Stream.EventListener`; `MarkdownReadOptions` /
-  `MarkdownWriteOptions` from `documonster/excel/markdown` (`MarkdownOptions` is still accepted everywhere).
+  `Stream.WriterImageModel`, `Stream.PackageSink`, `Stream.EventListener`; `ExcelMarkdownReadOptions` /
+  `ExcelMarkdownWriteOptions` from `documonster/excel/markdown` (`MarkdownOptions` is still accepted everywhere, deprecated).
 - `Chartsheet.getModel`, `getPageMargins`, `getPageSetup` and `getHeaderFooter` return copies; the deprecated
   `Chartsheet.model`, `pageMargins`, … still return the live objects.
 - Deprecated with no replacement, because each builds a handle that is attached to nothing and never written:
@@ -684,7 +885,7 @@ WorkbookCreateOptions)`. `Workbook.removeChartsheet` / `copyChartsheet` / `repla
   type: `{ kind, val? }`, raw OOXML values) in document order. The six named fields (`tint`, `shade`, `satMod`,
   `lumMod`, `lumOff`, `alpha`) stay and are views of it; a named field that is present wins (replaces the first entry
   of its kind, or is appended), an absent one leaves the list as it is. Before, only those six survived parsing:
-  `DrawingMl.parseSpPr`, every structured edit of a read `spPr` (`setSpPrLine`, `setSpPrFill`, `createSpPr`) and
+  `DrawingMl.parseSpPr`, every structured edit of a read `spPr` (`withSpPrLine`, `withSpPrFill`, `createSpPr`) and
   `ChartClassic.fromColorsXml` → `toColorsXml` dropped `satOff`, `hue` / `hueMod` / `hueOff`, `sat`, `lum`,
   `alphaMod`, `alphaOff`, `comp`, `inv`, `gray`, `gamma`, `invGamma` and `red` / `green` / `blue` with their `Mod` /
   `Off`, and the chart renderers (SVG, PNG, PDF) ignored them. They are now read in order, written back in order by
@@ -696,12 +897,12 @@ WorkbookCreateOptions)`. `Workbook.removeChartsheet` / `copyChartsheet` / `repla
   index early, and a write from the model shifted every gradient colour.
 - `Form.removeCheckbox` (unpublished) is `Form.remove(ws, control)`, the `remove` paired with `Form.list`.
 - `ExcelMarkdown.read`, `readFile`, `addWorksheet` and `addWorksheets` take the text or its UTF-8 bytes
-  (`MarkdownInput`) — what `toBuffer` / `toBufferSync` produce read back; bytes were refused. The unpublished
+  (`ExcelMarkdownInput`) — what `toBuffer` / `toBufferSync` produce read back; bytes were refused. The unpublished
   `ExcelMarkdown.readAll` / `readAllFile` are `read` / `readFile` with `{ tables: "all" }`; `addWorksheet` refuses
   `tables: "all"` and `addWorksheets` `tables: "first"`.
-- The read-side `map` of `CsvReadOptions` and `MarkdownReadOptions` is declared as it is called:
+- The read-side `map` of `ExcelCsvReadOptions` and `ExcelMarkdownReadOptions` is declared as it is called:
   `(text: string, column: number) => CellValueInput` — the field's text and its 0-based column; what it returns is
-  checked as `Cell.setValue` checks a value. The write-side `CsvWriteOptions.map` and the combined `CsvOptions.map`
+  checked as `Cell.setValue` checks a value. The write-side `ExcelCsvWriteOptions.map` and the combined `ExcelCsvOptions.map`
   keep `(value: CellValue, index: number) => CellValue`.
 - `Stream.applyCellStyle(cell, name)` applies a named style registered with `WorkbookWriter#addCellStyle` /
   `useBuiltInCellStyle`, checked as `Cell.applyStyle` checks one; setting `cell.style.styleName` by hand was the only
@@ -1113,7 +1314,7 @@ element is ignored by `createXmlDataSource`; fields missing from `mailMerge` dat
   assumed (`#4472C4`) — and against the new `ChartRenderOptions.themeColors` for a model rendered on its own. A
   chart's automatic series colours are its theme's accents too (they were the default theme's whatever the workbook
   said). Word charts follow the document's theme (`doc.theme.colorScheme`) in `Pdf.fromDocx`, in
-  `WordExcel.toChartSvg(chart, { themeColors })` (new `WordChartSvgOptions`, checked as `DocxArgumentError`) and, through
+  `WordExcel.toChartSvg(chart, { themeColors })` (new `DocxChartSvgOptions`, checked as `DocxArgumentError`) and, through
   the new second argument of `RenderOptions.renderChart` (`RenderChartContext.themeColors`), in `Layout.toSvg` /
   `Layout.pageToSvg`.
 - Excel cell tints (`Pdf.fromExcel` / `Pdf.fromTable` cell colors with `tint`, ECMA-376 §18.8.19) and Word's
@@ -1441,7 +1642,7 @@ match?, projection?, strokeColor? }`, each checked. `drawChartExPdf` needs a sur
 `options.`) for a wrong argument or option, while damaged data and state errors stay `ArchiveError`; in
 `documonster/stream`, `StreamTypeError` / `UnsupportedStreamTypeError` with a `field`. Messages start with the public
 call: `Archive.packZip: …`, `Archive.ZipArchive#add: …`, `Archive.ArchiveFile#addText: …`,
-`Archive.Crypto.randomBytes: …`, `Streams.bytes: …`, `Streams.createTransform: expected a function, got null` (they
+`Streams.bytes: …`, `Streams.createTransform: expected a function, got null` (they
 began `createZip: …`, `ZipArchive.add: …`, `toBufferSync() only supports …`). `UnsupportedStreamTypeError.operation`
 is the public name (`Streams.discard`, was `drainStream`). These were raw `TypeError`s, wrong results or nothing:
 
@@ -1495,7 +1696,7 @@ is the public name (`Streams.discard`, was `drainStream`). These were raw `TypeE
   with `field` `start` or `end` — it was a `RangeError`. Also a URL that is not a string or `URL` to
   `HttpRangeReader.open`, `RemoteZipReader.open` and
   `editZipUrl`; an AES key strength other than 128/192/256 in `Archive.Crypto`, a version other than 1/2 in
-  `createAesExtraField`, and a negative or fractional length to `Crypto.randomBytes`.
+  `createAesExtraField`, and a negative or fractional length to the deprecated `Archive.randomBytes`.
 - The byte utilities `crc32` / `crc32Update` / `crc32Finalize`, `base64ToUint8Array` (which now refuses anything
   outside the standard alphabet; Node decoded garbage to partial bytes and accepted base64url), `uint8ArrayToBase64`,
   `concatUint8Arrays` (a `totalLength` that is not the combined length was zero-padded) and the string conversions;
@@ -1803,7 +2004,7 @@ Changes of meaning rather than of name — read these even if you migrate nothin
   - `Table.getColumnStyle` returns a copy; `Table.setColumnStyle` applies a style to every cell of the column
     and takes back what the previous style gave them, keeping a cell's own formatting. The deprecated
     `Table.columnStyle` still returns the column's own object, applied on the table's next edit.
-    `Table.getColumn` throws for an index the table has no column at; the deprecated `Table.column` does not.
+    `Table.getColumn` returns `undefined` for an index the table has no column at (and refuses one that is not an integer).
 - **Excel handles' internal fields are deprecated.** The `_`-prefixed fields of `Workbook.Handle`,
   `Worksheet.Handle` and the streaming cell handle, plus `sourceFilePath`, `workbookContentType`,
   `userFunctions` and `pivotTables`, and a worksheet's `tables`, `pivotTables`, `conditionalFormattings`,
@@ -1855,8 +2056,8 @@ password)` (as `Worksheet.verifyPassword`), `Stream.applyCellStyle(cell, name)` 
   corrected one — `"T1"` as `"_T1"`, `"My Table"` as `"My_Table"` — so a formula written with the name the caller chose
   named no table. It now throws a `TableError` naming a form Excel accepts; so do `Table.setName`,
   `Table.setDisplayName` and `Table.setModel`. A file whose table carries such a name is still read with it corrected.
-- `ExcelCsv` takes `CsvReadOptions` where it reads (`read`, `addWorksheet`, `readFile`, `createImportStream`) and
-  `CsvWriteOptions` where it writes (`format`, `toBuffer`, `toBufferSync`, `toStream`, `writeStream`, `writeFile`), so an
+- `ExcelCsv` takes `ExcelCsvReadOptions` where it reads (`read`, `addWorksheet`, `readFile`, `createImportStream`) and
+  `ExcelCsvWriteOptions` where it writes (`format`, `toBuffer`, `toBufferSync`, `toStream`, `writeStream`, `writeFile`), so an
   option the call ignores — a write's `dateFormat` on a read, a parser's `delimitersToGuess` on a write — is a type
   error in an object literal. `CsvOptions` is both halves and is accepted by every one of them. Its `info` and `raw`
   are deprecated: a sheet has nowhere to put them, and `info: true` made a read fail with a `TypeError`; a read now
@@ -1964,7 +2165,7 @@ through):
 | `Chart.categoryAxis`                    | Use `Chart.getCategoryAxis`.                                                                                                                                                                                                                                                                   |
 | `Chart.chartExModel`                    | Use `Chart.getExModel`.                                                                                                                                                                                                                                                                        |
 | `Chart.chartModel`                      | Use `Chart.getModel`.                                                                                                                                                                                                                                                                          |
-| `Chart.chartTypes`                      | Use `Chart.getChartTypes`.                                                                                                                                                                                                                                                                     |
+| `Chart.chartTypes`                      | Use `Chart.getTypes`.                                                                                                                                                                                                                                                                          |
 | `Chart.get`                             | Use `Chart.list`.                                                                                                                                                                                                                                                                              |
 | `Chart.isChartEx`                       | Use `Chart.isEx`.                                                                                                                                                                                                                                                                              |
 | `Chart.legend`                          | Use `Chart.getLegend`.                                                                                                                                                                                                                                                                         |
@@ -2013,9 +2214,9 @@ through):
 | `Form.link`                             | Use `Form.getLink`.                                                                                                                                                                                                                                                                            |
 | `Form.listCheckboxes`                   | Use `Form.list`, which returns a copy. This form returns the sheet's live array, as it always did: before `removeCheckbox` existed, splicing it was how a checkbox was removed.                                                                                                                |
 | `Form.text`                             | Use `Form.getText`.                                                                                                                                                                                                                                                                            |
-| `Form.vmlAnchor`                        | Use `Form.getVmlAnchor`.                                                                                                                                                                                                                                                                       |
-| `Form.vmlCheckedValue`                  | Use `Form.getVmlCheckedValue`.                                                                                                                                                                                                                                                                 |
-| `Form.vmlStyle`                         | Use `Form.getVmlStyle`.                                                                                                                                                                                                                                                                        |
+| `Form.vmlAnchor`                        | Use `Form.Vml.getAnchor`.                                                                                                                                                                                                                                                                      |
+| `Form.vmlCheckedValue`                  | Use `Form.Vml.getCheckedValue`.                                                                                                                                                                                                                                                                |
+| `Form.vmlStyle`                         | Use `Form.Vml.getStyle`.                                                                                                                                                                                                                                                                       |
 | `Format.parseValueByFormat`             | Use `Format.parseValue`.                                                                                                                                                                                                                                                                       |
 | `Image.applyModel`                      | Use `Image.setModel`. Applies the model only, as it always did; `setModel` also records that a picture the image stops showing is no longer used.                                                                                                                                              |
 | `Image.clone`                           | Use `Image.place`. This builds an image handle that is attached to nothing and never written.                                                                                                                                                                                                  |
@@ -2033,7 +2234,7 @@ through):
 | `SheetToJSONOptions`                    | Use `SheetToJsonOptions`.                                                                                                                                                                                                                                                                      |
 | `Stream.rowCell`                        | Use `Stream.getRowCell`.                                                                                                                                                                                                                                                                       |
 | `Stream.rowValues`                      | Use `Stream.getRowValues(r, { base: 1 })`; `getRowValues` is 0-based by default, as `Row.getValues` is.                                                                                                                                                                                        |
-| `Table.column`                          | Use `Table.getColumn`, which refuses an index the table has no column at.                                                                                                                                                                                                                      |
+| `Table.column`                          | Use `Table.getColumn`, which returns `undefined` for an index the table has no column at.                                                                                                                                                                                                      |
 | `Table.columnFilterButton`              | Use `Table.hasColumnFilterButton`.                                                                                                                                                                                                                                                             |
 | `Table.columnName`                      | Use `Table.getColumnName`.                                                                                                                                                                                                                                                                     |
 | `Table.columnSetFilterButton`           | Use `Table.setColumnFilterButton`.                                                                                                                                                                                                                                                             |
@@ -2127,7 +2328,7 @@ through):
 | `Archive.getAesKeyStrength`                  | Use `Crypto.getAesKeyStrength`.                                                                                                                                                 |
 | `Archive.getEncryptionMethodName`            | Use `Crypto.getEncryptionMethodName`.                                                                                                                                           |
 | `Archive.isAesEncryption`                    | Use `Crypto.isAesEncryption`.                                                                                                                                                   |
-| `Archive.randomBytes`                        | Use `Crypto.randomBytes`.                                                                                                                                                       |
+| `Archive.randomBytes`                        | Use `crypto.getRandomValues(new Uint8Array(n))`.                                                                                                                                |
 | `Archive.tar`                                | Use `Archive.packTar`.                                                                                                                                                          |
 | `Archive.tarSync`                            | Use `Archive.packTarSync`.                                                                                                                                                      |
 | `Archive.untar`                              | Use `Archive.unpackTar`.                                                                                                                                                        |
@@ -2149,11 +2350,11 @@ through):
 | `createGunzipStream`                         | Use `Compression.createGunzipStream`.                                                                                                                                           |
 | `createGzipStream`                           | Use `Compression.createGzipStream`.                                                                                                                                             |
 | `createInflateStream`                        | Use `Compression.createInflateStream`.                                                                                                                                          |
-| `createReadStream`                           | Use `Fs.createReadStream`.                                                                                                                                                      |
+| `createReadStream`                           | Use `createReadStream` from `node:fs`.                                                                                                                                          |
 | `createTempDir`                              | Use `Fs.createTempDir`.                                                                                                                                                         |
 | `createTempDirSync`                          | Use `Fs.createTempDirSync`.                                                                                                                                                     |
 | `createUnzlibStream`                         | Use `Compression.createUnzlibStream`.                                                                                                                                           |
-| `createWriteStream`                          | Use `Fs.createWriteStream`.                                                                                                                                                     |
+| `createWriteStream`                          | Use `createWriteStream` from `node:fs`.                                                                                                                                         |
 | `createZlibStream`                           | Use `Compression.createZlibStream`.                                                                                                                                             |
 | `decompress`                                 | Use `Compression.inflate`.                                                                                                                                                      |
 | `decompressAuto`                             | Use `Compression.decompressAuto`.                                                                                                                                               |
@@ -2194,7 +2395,7 @@ through):
 | `readFileBytesSync`                          | Use `Fs.readFileBytesSync`.                                                                                                                                                     |
 | `readFileText`                               | Use `Fs.readFileText`.                                                                                                                                                          |
 | `readFileTextSync`                           | Use `Fs.readFileTextSync`.                                                                                                                                                      |
-| `ReadStreamOptions`                          | Use `FsReadStreamOptions`.                                                                                                                                                      |
+| `ReadStreamOptions`                          | Use `ReadStreamOptions` from `node:fs`.                                                                                                                                         |
 | `remove`                                     | Use `Fs.remove`.                                                                                                                                                                |
 | `removeSync`                                 | Use `Fs.removeSync`.                                                                                                                                                            |
 | `safeStats`                                  | Use `Fs.safeStats`.                                                                                                                                                             |
@@ -2218,7 +2419,7 @@ through):
 | `writeFileBytesSync`                         | Use `Fs.writeFileBytesSync`.                                                                                                                                                    |
 | `writeFileText`                              | Use `Fs.writeFileText`.                                                                                                                                                         |
 | `writeFileTextSync`                          | Use `Fs.writeFileTextSync`.                                                                                                                                                     |
-| `WriteStreamOptions`                         | Use `FsWriteStreamOptions`.                                                                                                                                                     |
+| `WriteStreamOptions`                         | Use `WriteStreamOptions` from `node:fs`.                                                                                                                                        |
 | `zlib`                                       | Use `Compression.zlib`.                                                                                                                                                         |
 | `zlibSync`                                   | Use `Compression.zlibSync`.                                                                                                                                                     |
 
@@ -2378,40 +2579,40 @@ through):
 <details>
 <summary><code>documonster/draw</code> — 32 names</summary>
 
-| Deprecated            | Use instead                                                      |
-| --------------------- | ---------------------------------------------------------------- |
-| `apply`               | Use `MatrixNs.applyMatrix.apply`.                                |
-| `arcToCubics`         | Use `Draw.Geometry.arcToCubics`.                                 |
-| `BasicRasterCanvas`   | Use `Draw.Backend.BasicRasterCanvas`.                            |
-| `createRasterSurface` | Use `Draw.Backend.createRasterSurface`, which takes `{ scale }`. |
-| `cssColour`           | Use `Draw.parseColor`.                                           |
-| `downsample`          | Use `Draw.Backend.downsample`.                                   |
-| `flattenPath`         | Use `Draw.Geometry.flattenPath`.                                 |
-| `fontHasGlyph`        | Use `Draw.Backend.fontHasGlyph`.                                 |
-| `IDENTITY`            | Use `MatrixNs.IDENTITYMatrix.IDENTITY`.                          |
-| `isSimpleText`        | Use `Draw.isSimpleText`.                                         |
-| `measureText`         | Use `Draw.measureText`.                                          |
-| `multiply`            | Use `MatrixNs.multiplyMatrix.multiply`.                          |
-| `normalizeSamples`    | Use `Draw.Backend.normalizeSamples`.                             |
-| `parseRasterFont`     | Use `Draw.parseRasterFont`.                                      |
-| `rasterizeToRgba`     | Use `Draw.toRgba`.                                               |
-| `rectNode`            | Use `Draw.Geometry.createRectNode`.                              |
-| `relativeLuminance`   | Use `Draw.getRelativeLuminance`.                                 |
-| `renderDrawList`      | Use `Draw.render`.                                               |
-| `renderNode`          | Use `Draw.Backend.renderNode`.                                   |
-| `rotate`              | Use `MatrixNs.rotateMatrix.rotate`.                              |
-| `rotationOf`          | Use `MatrixNs.getRotationMatrix.getRotation`.                    |
-| `roundedRectToPath`   | Use `Draw.Geometry.roundedRectToPath`.                           |
-| `scale`               | Use `MatrixNs.scaleMatrix.scale`.                                |
-| `sectorToPath`        | Use `Draw.Geometry.sectorToPath`.                                |
-| `SvgSurface`          | Use `Draw.Backend.SvgSurface`.                                   |
-| `textFeaturesOf`      | Use `Draw.getTextFeatures`.                                      |
-| `toSvg`               | Use `Draw.toSvg`.                                                |
-| `translate`           | Use `MatrixNs.translateMatrix.translate`.                        |
-| `translucent`         | Use `Draw.withAlpha`.                                            |
-| `uniformScale`        | Use `MatrixNs.getUniformScaleMatrix.getUniformScale`.            |
-| `widestText`          | Use `Draw.measureWidest`.                                        |
-| `wrapText`            | Use `Draw.wrapText`.                                             |
+| Deprecated            | Use instead                                                                       |
+| --------------------- | --------------------------------------------------------------------------------- |
+| `apply`               | Use `MatrixNs.applyMatrix.apply`.                                                 |
+| `arcToCubics`         | Use `Draw.Geometry.arcToCubics`.                                                  |
+| `BasicRasterCanvas`   | Use `Draw.Backend.BasicRasterCanvas`.                                             |
+| `createRasterSurface` | Use `Draw.Backend.createRasterSurface`, which takes `{ scale }`.                  |
+| `cssColour`           | Use `Draw.parseColor`.                                                            |
+| `downsample`          | Use `Draw.Backend.downsample`.                                                    |
+| `flattenPath`         | Use `Draw.Geometry.flattenPath`, which takes `{ scale }`.                         |
+| `fontHasGlyph`        | Use `Draw.Backend.fontHasGlyph`.                                                  |
+| `IDENTITY`            | Use `MatrixNs.IDENTITYMatrix.IDENTITY`.                                           |
+| `isSimpleText`        | Use `Draw.isSimpleText`.                                                          |
+| `measureText`         | Use `Draw.measureText`.                                                           |
+| `multiply`            | Use `MatrixNs.multiplyMatrix.multiply`.                                           |
+| `normalizeSamples`    | Use `Draw.Backend.normalizeSamples`.                                              |
+| `parseRasterFont`     | Use `Draw.parseRasterFont`, which takes the bytes or `{ data, collectionIndex }`. |
+| `rasterizeToRgba`     | Use `Draw.toRgba`.                                                                |
+| `rectNode`            | Use `Draw.Geometry.createRectNode`.                                               |
+| `relativeLuminance`   | Use `Draw.getRelativeLuminance`.                                                  |
+| `renderDrawList`      | Use `Draw.render`.                                                                |
+| `renderNode`          | Use `Draw.Backend.renderNode`.                                                    |
+| `rotate`              | Use `MatrixNs.rotateMatrix.rotate`.                                               |
+| `rotationOf`          | Use `MatrixNs.getRotationMatrix.getRotation`.                                     |
+| `roundedRectToPath`   | Use `Draw.Geometry.roundedRectToPath`.                                            |
+| `scale`               | Use `MatrixNs.scaleMatrix.scale`.                                                 |
+| `sectorToPath`        | Use `Draw.Geometry.sectorToPath`.                                                 |
+| `SvgSurface`          | Use `Draw.Backend.SvgSurface`.                                                    |
+| `textFeaturesOf`      | Use `Draw.getTextFeatures`.                                                       |
+| `toSvg`               | Use `Draw.toSvg`.                                                                 |
+| `translate`           | Use `MatrixNs.translateMatrix.translate`.                                         |
+| `translucent`         | Use `Draw.withAlpha`.                                                             |
+| `uniformScale`        | Use `MatrixNs.getUniformScaleMatrix.getUniformScale`.                             |
+| `widestText`          | Use `Draw.measureWidest`.                                                         |
+| `wrapText`            | Use `Draw.wrapText`.                                                              |
 
 </details>
 
@@ -2466,8 +2667,8 @@ through):
 | `renderChartSvg`              | Use `ChartClassic.toSvg`.                                                                              |
 | `resolveTopologyObject`       | Use `ChartClassic.Backend.resolveTopologyObject`.                                                      |
 | `seriesFromColumns`           | Use `ChartClassic.createSeriesFromColumns`.                                                            |
-| `setSpPrFill`                 | Use `DrawingMl.setSpPrFill`.                                                                           |
-| `setSpPrLine`                 | Use `DrawingMl.setSpPrLine`.                                                                           |
+| `setSpPrFill`                 | Use `DrawingMl.withSpPrFill` (returns a copy).                                                         |
+| `setSpPrLine`                 | Use `DrawingMl.withSpPrLine` (returns a copy).                                                         |
 
 </details>
 

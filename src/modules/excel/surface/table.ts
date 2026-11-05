@@ -29,7 +29,6 @@ import {
   tableDisplayName,
   tableCommit,
   tableGetColumn,
-  tableGetColumnChecked,
   tableGetModel,
   tableHeaderRow,
   tableMarkLiveStyle,
@@ -82,7 +81,7 @@ import { addTable, getTable, removeTable } from "@excel/core/worksheet";
  */
 import { checkWorksheet, getTables } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { TableError } from "@excel/errors";
+import { ExcelTableError } from "@excel/errors";
 import type {
   CellValue,
   CellValueInput,
@@ -91,7 +90,7 @@ import type {
   TableProperties
 } from "@excel/types";
 import type { ArgumentChecks } from "@excel/utils/arguments";
-import { argumentChecks, normalizeReference } from "@excel/utils/arguments";
+import { argumentChecks, checkNumber, normalizeReference } from "@excel/utils/arguments";
 import { copyStyle } from "@excel/utils/copy-style";
 import { checkStyle } from "@excel/utils/style-checks";
 import { excelNameKey } from "@utils/name-key";
@@ -212,7 +211,7 @@ function checkColumnNamesUnique(where: string, names: readonly string[]): void {
     while (taken.has(excelNameKey(`${name}${n}`))) {
       n++;
     }
-    throw new TableError(
+    throw new ExcelTableError(
       `${where}: column name ${JSON.stringify(name)} is already used by another column of the table ` +
         `(Excel compares column names without case); Excel would name it ${JSON.stringify(`${name}${n}`)}.`
     );
@@ -227,7 +226,7 @@ function checkColumnNamesUnique(where: string, names: readonly string[]): void {
  * name and display name are free in the workbook. A call that throws leaves the sheet as it was. The model is copied,
  * so changing the object afterwards does not change the table.
  *
- * @throws {TableError} when the name is not one Excel accepts — a space, a character other than a letter, digit,
+ * @throws {ExcelTableError} when the name is not one Excel accepts — a space, a character other than a letter, digit,
  * underscore or period, or a name that reads as a cell reference (`T1`, `R1C1`); the message gives the nearest name
  * Excel does accept, and the table is not added under a name the caller did not choose. Also when two columns share a
  * name, the table would overlap another one, or the name is already taken.
@@ -248,7 +247,7 @@ export function add(ws: WorksheetData, model: TableProperties): TableData {
  * the sheet had it. The cells keep their values, as when Excel converts a table to a range; the handle refuses edits
  * afterwards.
  *
- * @throws {PivotTableError} when a pivot table reads its data from the table.
+ * @throws {ExcelPivotTableError} when a pivot table reads its data from the table.
  */
 export function remove(ws: WorksheetData, table: string | TableData): boolean {
   checkWorksheet(ws);
@@ -308,7 +307,7 @@ export function setModel(t: TableData, value: TableModel): void {
  * Insert a data row at the 0-based `rowNumber` — from `0` to the number of data rows; the end when absent. A row
  * shorter than the table is padded with empty cells.
  *
- * @throws {TableError} when `rowNumber` is not such a position, or the row has more values than the table has columns.
+ * @throws {ExcelTableError} when `rowNumber` is not such a position, or the row has more values than the table has columns.
  */
 export function addRow(t: TableData, values: readonly CellValueInput[], rowNumber?: number): void;
 /** @deprecated `options.commit` does nothing — every edit applies as it is made. Omit it. Removed in 1.0. */
@@ -326,7 +325,7 @@ export function addRow(t: TableData, values: readonly CellValueInput[], rowNumbe
 /**
  * Remove `count` (default 1) data rows from the 0-based `rowIndex`, or as many as there are from it to the end.
  *
- * @throws {TableError} when `rowIndex` is not a data row of the table or `count` is not a whole number of at least 0.
+ * @throws {ExcelTableError} when `rowIndex` is not a data row of the table or `count` is not a whole number of at least 0.
  */
 export function removeRows(t: TableData, rowIndex: number, count?: number): void;
 /** @deprecated `options.commit` does nothing — every edit applies as it is made. Omit it. Removed in 1.0. */
@@ -345,7 +344,7 @@ export function removeRows(t: TableData, rowIndex: number, count?: number): void
  * Insert a column at the 0-based `colIndex` — from `0` to the number of columns; the end when absent — with its
  * data-row `values` (padded with empty cells when shorter).
  *
- * @throws {TableError} when `colIndex` is not such a position, there are more values than data rows, or the name is
+ * @throws {ExcelTableError} when `colIndex` is not such a position, there are more values than data rows, or the name is
  * already a column's.
  */
 export function addColumn(
@@ -367,7 +366,7 @@ export function addColumn(
  * Remove `count` (default 1) columns from the 0-based `colIndex`, or as many as there are from it to the end. A table
  * keeps at least one column.
  *
- * @throws {TableError} when `colIndex` is not a column of the table, `count` is not a whole number of at least 0, or
+ * @throws {ExcelTableError} when `colIndex` is not a column of the table, `count` is not a whole number of at least 0, or
  * no column would be left.
  */
 export function removeColumns(t: TableData, colIndex: number, count?: number): void {
@@ -379,8 +378,8 @@ export function removeColumns(t: TableData, colIndex: number, count?: number): v
  * Move the table so its top-left cell is `value` (`"B2"`, or `"b2"`; a range's top-left cell is taken). The cells move
  * with it.
  *
- * @throws {InvalidAddressError} when `value` is not a cell or range of the table's sheet (a sheet name is refused).
- * @throws {TableError} when the table would overlap another one.
+ * @throws {ExcelInvalidAddressError} when `value` is not a cell or range of the table's sheet (a sheet name is refused).
+ * @throws {ExcelTableError} when the table would overlap another one.
  */
 export function setRef(t: TableData, value: string): void {
   checkTable(t);
@@ -394,7 +393,7 @@ export function setRef(t: TableData, value: string): void {
 /**
  * Rename the table. The totals row's formulas follow.
  *
- * @throws {TableError} when the name is not one Excel accepts, or another table or a defined name already has it.
+ * @throws {ExcelTableError} when the name is not one Excel accepts, or another table or a defined name already has it.
  */
 export function setName(t: TableData, value: string): void {
   checkTable(t);
@@ -404,7 +403,7 @@ export function setName(t: TableData, value: string): void {
 /**
  * Set the name Excel shows and structured references use.
  *
- * @throws {TableError} when the name is not one Excel accepts, or another table or a defined name already has it.
+ * @throws {ExcelTableError} when the name is not one Excel accepts, or another table or a defined name already has it.
  */
 export function setDisplayName(t: TableData, value: string): void {
   checkTable(t);
@@ -436,31 +435,31 @@ export function setTheme(t: TableData, value: string | undefined): void {
   tableSetTheme(t, value);
 }
 
-/** Set whether the first column is styled apart; `undefined` clears the setting. */
-export function setShowFirstColumn(t: TableData, value: boolean | undefined): void {
+/** Set whether the first column is styled apart; `undefined` clears the setting It reads back with {@link hasFirstColumnStyle}. */
+export function setFirstColumnStyle(t: TableData, value: boolean | undefined): void {
   checkTable(t);
-  flag("Table.setShowFirstColumn", value);
+  flag("Table.setFirstColumnStyle", value);
   tableSetShowFirstColumn(t, value);
 }
 
-/** Set whether the last column is styled apart; `undefined` clears the setting. */
-export function setShowLastColumn(t: TableData, value: boolean | undefined): void {
+/** Set whether the last column is styled apart; `undefined` clears the setting It reads back with {@link hasLastColumnStyle}. */
+export function setLastColumnStyle(t: TableData, value: boolean | undefined): void {
   checkTable(t);
-  flag("Table.setShowLastColumn", value);
+  flag("Table.setLastColumnStyle", value);
   tableSetShowLastColumn(t, value);
 }
 
-/** Set whether rows are banded; `undefined` clears the setting. */
-export function setShowRowStripes(t: TableData, value: boolean | undefined): void {
+/** Set whether rows are banded; `undefined` clears the setting It reads back with {@link hasRowStripes}. */
+export function setRowStripes(t: TableData, value: boolean | undefined): void {
   checkTable(t);
-  flag("Table.setShowRowStripes", value);
+  flag("Table.setRowStripes", value);
   tableSetShowRowStripes(t, value);
 }
 
-/** Set whether columns are banded; `undefined` clears the setting. */
-export function setShowColumnStripes(t: TableData, value: boolean | undefined): void {
+/** Set whether columns are banded; `undefined` clears the setting It reads back with {@link hasColumnStripes}. */
+export function setColumnStripes(t: TableData, value: boolean | undefined): void {
   checkTable(t);
-  flag("Table.setShowColumnStripes", value);
+  flag("Table.setColumnStripes", value);
   tableSetShowColumnStripes(t, value);
 }
 
@@ -536,7 +535,7 @@ export function getColumnName(view: TableColumnView): string {
 /**
  * Rename the column; its header cell follows.
  *
- * @throws {TableError} when another column of the table already has the name (compared as Excel compares names).
+ * @throws {ExcelTableError} when another column of the table already has the name (compared as Excel compares names).
  */
 export function setColumnName(view: TableColumnView, value: string): void {
   checkTableColumn(view);
@@ -623,7 +622,19 @@ export function setColumnTotalsRowFormula(view: TableColumnView, value: string |
   tableColumnSetTotalsRowFormula(view, value);
 }
 
-export { tableGetModel as getModel, tableGetColumnChecked as getColumn };
+/**
+ * A view of the column at the 0-based `colIndex`, or `undefined` when the table has no column there. The view is what
+ * the `getColumn*` / `setColumn*` operations take.
+ */
+export function getColumn(t: TableData, colIndex: number): TableColumnView | undefined {
+  checkTable(t);
+  checkNumber("Table.getColumn", "colIndex", colIndex, { integer: true });
+  return colIndex >= 0 && colIndex < t.table.columns.length
+    ? tableGetColumn(t, colIndex)
+    : undefined;
+}
+
+export { tableGetModel as getModel };
 
 /** A table handle. */
 export type { TableData as Handle } from "@excel/core/table";
@@ -714,3 +725,31 @@ export const columnSetTotalsRowFormula = setColumnTotalsRowFormula;
  * the column's own style object. Removed in 1.0.
  */
 export const columnStyle = liveColumnStyle;
+
+/** @deprecated Use {@link setFirstColumnStyle}, the name {@link hasFirstColumnStyle} reads it back with. Removed in 1.0. */
+export function setShowFirstColumn(t: TableData, value: boolean | undefined): void {
+  checkTable(t);
+  flag("Table.setShowFirstColumn", value);
+  tableSetShowFirstColumn(t, value);
+}
+
+/** @deprecated Use {@link setLastColumnStyle}, the name {@link hasLastColumnStyle} reads it back with. Removed in 1.0. */
+export function setShowLastColumn(t: TableData, value: boolean | undefined): void {
+  checkTable(t);
+  flag("Table.setShowLastColumn", value);
+  tableSetShowLastColumn(t, value);
+}
+
+/** @deprecated Use {@link setRowStripes}, the name {@link hasRowStripes} reads it back with. Removed in 1.0. */
+export function setShowRowStripes(t: TableData, value: boolean | undefined): void {
+  checkTable(t);
+  flag("Table.setShowRowStripes", value);
+  tableSetShowRowStripes(t, value);
+}
+
+/** @deprecated Use {@link setColumnStripes}, the name {@link hasColumnStripes} reads it back with. Removed in 1.0. */
+export function setShowColumnStripes(t: TableData, value: boolean | undefined): void {
+  checkTable(t);
+  flag("Table.setShowColumnStripes", value);
+  tableSetShowColumnStripes(t, value);
+}

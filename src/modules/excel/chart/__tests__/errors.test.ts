@@ -1,7 +1,7 @@
 import {
   ChartClassic,
   ChartEx,
-  ChartOptionsError,
+  ExcelChartOptionsError,
   ExcelError,
   isExcelError
 } from "@excel/chart/index";
@@ -21,12 +21,12 @@ function thrownBy(run: () => unknown): unknown {
 
 describe("documonster/chart errors", () => {
   it("publishes the same classes as documonster/excel", () => {
-    expect(ChartOptionsError).toBe(ExcelEntry.ChartOptionsError);
+    expect(ExcelChartOptionsError).toBe(ExcelEntry.ExcelChartOptionsError);
     expect(ExcelError).toBe(ExcelEntry.ExcelError);
     expect(isExcelError).toBe(ExcelEntry.isExcelError);
   });
 
-  it("invalid options throw a ChartOptionsError, which is an ExcelError", () => {
+  it("invalid options throw a ExcelChartOptionsError, which is an ExcelError", () => {
     for (const run of [
       () => ChartClassic.createModel({} as never),
       () => ChartClassic.createModel({ type: "bar", series: [] }),
@@ -34,7 +34,7 @@ describe("documonster/chart errors", () => {
       () => ChartClassic.applyPreset("nope" as never, { series: [] })
     ]) {
       const error = thrownBy(run);
-      expect(error).toBeInstanceOf(ChartOptionsError);
+      expect(error).toBeInstanceOf(ExcelChartOptionsError);
       expect(error).toBeInstanceOf(BaseError);
       expect(isExcelError(error)).toBe(true);
     }
@@ -45,7 +45,12 @@ describe("documonster/chart errors", () => {
   });
 
   it("isExcelError is false for unrelated errors and non-errors", () => {
-    for (const value of [new BaseError("x"), new Error("x"), { name: "ChartOptionsError" }, null]) {
+    for (const value of [
+      new BaseError("x"),
+      new Error("x"),
+      { name: "ExcelChartOptionsError" },
+      null
+    ]) {
       expect(isExcelError(value)).toBe(false);
     }
   });

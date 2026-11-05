@@ -23,6 +23,7 @@ import {
 } from "@xml/dom";
 import { validateXmlName as validateXmlNameImpl } from "@xml/encode";
 import { saxStream as saxStreamImpl } from "@xml/sax";
+import { StdDocAttributes as StdDocAttributesImpl } from "@xml/writer";
 
 // Encoding / decoding
 export {
@@ -35,7 +36,9 @@ export {
 } from "@xml/encode";
 
 // Writers
-export { XmlWriter as Writer, StdDocAttributes } from "@xml/writer";
+export { XmlWriter as Writer } from "@xml/writer";
+/** The declaration `Writer.openXml()` writes when given no attributes: version 1.0, UTF-8, standalone. */
+export { StdDocAttributes as DEFAULT_DECLARATION } from "@xml/writer";
 export { XmlStreamWriter as StreamWriter } from "@xml/stream-writer";
 
 // Parsers
@@ -64,3 +67,6 @@ export const attr = attrImpl;
 export const walk = walkImpl;
 /** @deprecated Use {@link feedSax}. Removed in 1.0. */
 export const saxStream = saxStreamImpl;
+
+/** @deprecated Use {@link DEFAULT_DECLARATION}. Removed in 1.0. */
+export const StdDocAttributes = StdDocAttributesImpl;

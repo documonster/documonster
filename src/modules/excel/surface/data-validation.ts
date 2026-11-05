@@ -80,7 +80,7 @@ function localReference(where: string, argument: string, ref: unknown, range: bo
  *
  * @throws {ExcelArgumentError} when the rule is not one a workbook can hold — an unknown type, operator or error
  * style, or bounds that are not formulas, numbers or dates.
- * @throws {InvalidAddressError} when `ref` is not a cell or range of the sheet (a sheet name is refused).
+ * @throws {ExcelInvalidAddressError} when `ref` is not a cell or range of the sheet (a sheet name is refused).
  */
 export function add(
   target: WorksheetData | DataValidationsData,

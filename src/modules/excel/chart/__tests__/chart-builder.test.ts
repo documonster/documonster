@@ -1005,8 +1005,8 @@ describe("chart round-trip via addChart API", () => {
     expect(chart).toBeDefined();
     expect(chart.chartNumber).toBeGreaterThan(0);
     expect(Chart.getTitle(chart)).toBe("Quarterly Results");
-    expect(Chart.getChartTypes(chart).length).toBe(1);
-    expect(Chart.getChartTypes(chart)[0].type).toBe("bar");
+    expect(Chart.getTypes(chart).length).toBe(1);
+    expect(Chart.getTypes(chart)[0].type).toBe("bar");
     expect(Chart.getSeriesCount(chart, 0)).toBe(2);
     expect(Chart.getAxes(chart).length).toBe(2);
   });
@@ -1019,7 +1019,7 @@ describe("chart round-trip via addChart API", () => {
     });
 
     expect(Chart.getTitle(chart)).toBe("Trend Line");
-    expect(Chart.getChartTypes(chart)[0].type).toBe("line");
+    expect(Chart.getTypes(chart)[0].type).toBe("line");
   });
 
   it("round-trips a pie chart", async () => {
@@ -1030,7 +1030,7 @@ describe("chart round-trip via addChart API", () => {
     });
 
     expect(Chart.getTitle(chart)).toBe("Market Share");
-    expect(Chart.getChartTypes(chart)[0].type).toBe("pie");
+    expect(Chart.getTypes(chart)[0].type).toBe("pie");
     expect(Chart.getAxes(chart).length).toBe(0);
   });
 
@@ -1041,7 +1041,7 @@ describe("chart round-trip via addChart API", () => {
       scatterStyle: "lineMarker"
     });
 
-    expect(Chart.getChartTypes(chart)[0].type).toBe("scatter");
+    expect(Chart.getTypes(chart)[0].type).toBe("scatter");
     expect(Chart.getAxes(chart).length).toBe(2);
   });
 
@@ -1053,7 +1053,7 @@ describe("chart round-trip via addChart API", () => {
     });
 
     expect(Chart.getTitle(chart)).toBe("3D Chart");
-    expect(Chart.getChartTypes(chart)[0].type).toBe("bar3D");
+    expect(Chart.getTypes(chart)[0].type).toBe("bar3D");
     expect(Chart.getAxes(chart).length).toBe(3);
     expect(Chart.getAxes(chart)[2].axisType).toBe("ser");
   });
@@ -1065,7 +1065,7 @@ describe("chart round-trip via addChart API", () => {
       holeSize: 60
     });
 
-    expect(Chart.getChartTypes(chart)[0].type).toBe("doughnut");
+    expect(Chart.getTypes(chart)[0].type).toBe("doughnut");
   });
 
   it("round-trips an area chart", async () => {
@@ -1075,7 +1075,7 @@ describe("chart round-trip via addChart API", () => {
       grouping: "stacked"
     });
 
-    expect(Chart.getChartTypes(chart)[0].type).toBe("area");
+    expect(Chart.getTypes(chart)[0].type).toBe("area");
     expect(Chart.getAxes(chart).length).toBe(2);
   });
 
@@ -1086,7 +1086,7 @@ describe("chart round-trip via addChart API", () => {
       radarStyle: "filled"
     });
 
-    expect(Chart.getChartTypes(chart)[0].type).toBe("radar");
+    expect(Chart.getTypes(chart)[0].type).toBe("radar");
   });
 
   it("round-trips a surface chart", async () => {
@@ -1096,7 +1096,7 @@ describe("chart round-trip via addChart API", () => {
       wireframe: true
     });
 
-    expect(Chart.getChartTypes(chart)[0].type).toBe("surface");
+    expect(Chart.getTypes(chart)[0].type).toBe("surface");
     expect(Chart.getAxes(chart).length).toBe(3);
   });
 
@@ -1107,7 +1107,7 @@ describe("chart round-trip via addChart API", () => {
       bubbleScale: 200
     });
 
-    expect(Chart.getChartTypes(chart)[0].type).toBe("bubble");
+    expect(Chart.getTypes(chart)[0].type).toBe("bubble");
     expect(Chart.getAxes(chart).length).toBe(2);
   });
 
@@ -1197,9 +1197,9 @@ describe("combo chart round-trip via addComboChart API", () => {
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
     expect(Chart.getTitle(chart)).toBe("Combo");
-    expect(Chart.getChartTypes(chart).length).toBe(2);
-    expect(Chart.getChartTypes(chart)[0].type).toBe("bar");
-    expect(Chart.getChartTypes(chart)[1].type).toBe("line");
+    expect(Chart.getTypes(chart).length).toBe(2);
+    expect(Chart.getTypes(chart)[0].type).toBe("bar");
+    expect(Chart.getTypes(chart)[1].type).toBe("line");
     // Should have 4 axes (primary cat+val, secondary cat+val)
     expect(Chart.getAxes(chart).length).toBe(4);
   });
@@ -1226,7 +1226,7 @@ describe("combo chart round-trip via addComboChart API", () => {
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
     expect(Chart.getTitle(chart)).toBe("3D Combo");
-    expect(Chart.getChartTypes(chart).length).toBe(2);
+    expect(Chart.getTypes(chart).length).toBe(2);
     // bar3D produces serAx
     expect(Chart.getAxes(chart).some(a => a.axisType === "ser")).toBe(true);
   });
@@ -1264,15 +1264,15 @@ describe("Chart high-level API", () => {
     expect(Chart.getLegend(chart)).toBeUndefined();
   });
 
-  it("Chart.getChartTypes returns chart type groups", () => {
+  it("Chart.getTypes returns chart type groups", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
     addChart(ws, { type: "line", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(Chart.getChartTypes(chart).length).toBe(1);
-    expect(Chart.getChartTypes(chart)[0].type).toBe("line");
+    expect(Chart.getTypes(chart).length).toBe(1);
+    expect(Chart.getTypes(chart)[0].type).toBe("line");
   });
 
   it("Chart.getAxes returns axis list", () => {
@@ -1339,8 +1339,8 @@ describe("Chart high-level API", () => {
 
     const charts = getCharts(ws);
     expect(charts.length).toBe(2);
-    expect(Chart.getChartTypes(charts[0])[0].type).toBe("bar");
-    expect(Chart.getChartTypes(charts[1])[0].type).toBe("pie");
+    expect(Chart.getTypes(charts[0])[0].type).toBe("bar");
+    expect(Chart.getTypes(charts[1])[0].type).toBe("pie");
   });
 });
 
@@ -1545,8 +1545,8 @@ describe("multiple charts round-trip", () => {
     expect(getCharts(ws2).length).toBe(2);
     expect(Chart.getTitle(getCharts(ws2)[0])).toBe("Chart 1");
     expect(Chart.getTitle(getCharts(ws2)[1])).toBe("Chart 2");
-    expect(Chart.getChartTypes(getCharts(ws2)[0])[0].type).toBe("bar");
-    expect(Chart.getChartTypes(getCharts(ws2)[1])[0].type).toBe("pie");
+    expect(Chart.getTypes(getCharts(ws2)[0])[0].type).toBe("bar");
+    expect(Chart.getTypes(getCharts(ws2)[1])[0].type).toBe("pie");
   });
 });
 

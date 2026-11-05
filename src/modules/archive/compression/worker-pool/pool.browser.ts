@@ -34,13 +34,17 @@ import {
   getWorkerBlobUrl,
   releaseWorkerBlobUrl
 } from "@archive/compression/worker-pool/worker-script";
-import { ArchiveError, ArchiveLimitError, WorkerStreamStartError } from "@archive/core/errors";
+import {
+  ArchiveError,
+  ArchiveLimitError,
+  ArchiveWorkerStreamStartError
+} from "@archive/core/errors";
 
-export { WorkerStreamStartError };
+export { ArchiveWorkerStreamStartError };
 
-/** Whether `error` means a stream never reached its worker (see {@link WorkerStreamStartError}). */
-export function isWorkerStreamStartError(error: unknown): error is WorkerStreamStartError {
-  return error instanceof WorkerStreamStartError;
+/** Whether `error` means a stream never reached its worker (see {@link ArchiveWorkerStreamStartError}). */
+export function isWorkerStreamStartError(error: unknown): error is ArchiveWorkerStreamStartError {
+  return error instanceof ArchiveWorkerStreamStartError;
 }
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };
@@ -620,7 +624,9 @@ export class WorkerPool {
             // Nothing reached the worker yet; let the caller run the stream elsewhere
             this._failStreamStart(
               poolWorker,
-              new WorkerStreamStartError(message.error ?? "Worker failed to start the stream"),
+              new ArchiveWorkerStreamStartError(
+                message.error ?? "Worker failed to start the stream"
+              ),
               false
             );
             return;
@@ -725,7 +731,9 @@ export class WorkerPool {
       // The worker died before the stream reached it; the caller can run it elsewhere
       session.ended = true;
       session.rejectStart?.(
-        new WorkerStreamStartError(event.message || "Worker terminated before the stream started")
+        new ArchiveWorkerStreamStartError(
+          event.message || "Worker terminated before the stream started"
+        )
       );
       session.rejectStart = null;
       session.resolveStart = null;
@@ -996,7 +1004,7 @@ export class WorkerPool {
     const startTimeout = setTimeout(() => {
       this._failStreamStart(
         worker,
-        new WorkerStreamStartError(
+        new ArchiveWorkerStreamStartError(
           `Worker stream did not start within ${this._options.streamStartTimeout} ms`
         ),
         true
@@ -1058,7 +1066,7 @@ export class WorkerPool {
    */
   private _failStreamStart(
     poolWorker: PoolWorker,
-    error: WorkerStreamStartError,
+    error: ArchiveWorkerStreamStartError,
     unresponsive: boolean
   ): void {
     const session = poolWorker.streamSession;

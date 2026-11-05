@@ -21,7 +21,7 @@ import type { ArchiveSink } from "@archive/io/archive-sink";
 import { checkSinkArgument, collect, pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import {
-  toAsyncIterable,
+  iterateArchiveSource,
   toUint8Array,
   toUint8ArraySync,
   isSyncArchiveSource,
@@ -387,7 +387,7 @@ export class ZipArchive {
             await file.push(bytes, true);
             await file.outputCheckpoint();
           } else {
-            for await (const chunk of toAsyncIterable(entry.source, { signal, onChunk })) {
+            for await (const chunk of iterateArchiveSource(entry.source, { signal, onChunk })) {
               throwIfAborted(signal);
               await file.push(chunk, false);
               await file.outputCheckpoint();
@@ -471,7 +471,7 @@ export class ZipArchive {
       let compressedSize = 0;
 
       if (!deflate) {
-        for await (const chunk of toAsyncIterable(input.source)) {
+        for await (const chunk of iterateArchiveSource(input.source)) {
           if (chunk.length === 0) {
             continue;
           }
@@ -497,7 +497,7 @@ export class ZipArchive {
         })();
 
         try {
-          for await (const chunk of toAsyncIterable(input.source)) {
+          for await (const chunk of iterateArchiveSource(input.source)) {
             if (chunk.length === 0) {
               continue;
             }

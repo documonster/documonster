@@ -16,7 +16,7 @@ import {
   rangeIntersects,
   rangeToString
 } from "@excel/core/range";
-import { InvalidAddressError } from "@excel/errors";
+import { ExcelInvalidAddressError } from "@excel/errors";
 import type { DecodedAddress } from "@excel/types";
 import { argumentChecks } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
@@ -111,7 +111,7 @@ function describeInput(args: readonly unknown[]): string {
  * A range — from `"A1:B2"`, two corners (`"A1", "B2"`), four 1-based numbers (`top, left, bottom, right`) or another
  * range. With no arguments it is the empty range that {@link expand} and {@link expandToAddress} grow from.
  *
- * @throws {InvalidAddressError} when the arguments do not name cells inside A1:XFD1048576 — `"garbage"` used to give
+ * @throws {ExcelInvalidAddressError} when the arguments do not name cells inside A1:XFD1048576 — `"garbage"` used to give
  * an empty object, and `"A0"` a range starting at row 0.
  */
 export function create(...args: RangeInput[]): RangeData {
@@ -121,10 +121,14 @@ export function create(...args: RangeInput[]): RangeData {
     args.length === 0 ||
     (args.length === 1 && typeof args[0] === "object" && !Array.isArray(args[0]) && empty);
   if (!(fromEmpty && empty) && !boundsAreValid(r.top, r.left, r.bottom, r.right)) {
-    throw new InvalidAddressError(describeInput(args), "a range names cells inside A1:XFD1048576", {
-      field: "args",
-      where: "Range.create"
-    });
+    throw new ExcelInvalidAddressError(
+      describeInput(args),
+      "a range names cells inside A1:XFD1048576",
+      {
+        field: "args",
+        where: "Range.create"
+      }
+    );
   }
   return r;
 }
@@ -143,7 +147,7 @@ export function expand(
     const field = (Object.keys(bounds) as (keyof typeof bounds)[]).find(
       key => !inGrid(bounds[key], key === "top" || key === "bottom" ? MAX_ROW : MAX_COL)
     );
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       describeInput([top, left, bottom, right]),
       "the bounds are whole numbers inside A1:XFD1048576",
       { field, where: "Range.expand" }
@@ -161,7 +165,7 @@ export function expandToAddress(r: RangeData, addressStr: string): void {
     !("row" in address && "col" in address) ||
     !boundsAreValid(address.row, address.col, address.row, address.col)
   ) {
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       String(addressStr),
       "a cell reference such as B2, inside A1:XFD1048576",
       { field: "addressStr", where: "Range.expandToAddress" }

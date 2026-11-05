@@ -12,7 +12,7 @@ import { zip } from "@archive/create-archive";
 import { describe, expect, it } from "vitest";
 
 import { utf8Encoder } from "../core/internal-utils";
-import { Build, Document, Io, Streaming } from "../index";
+import { Build, Document, Io, Stream } from "../index";
 import type { BodyContent, DocxDocument, HeaderDef, SectionProperties, Watermark } from "../index";
 import {
   differingParts,
@@ -143,7 +143,7 @@ function buffered(c: Case): DocxDocument {
 }
 
 async function streamed(c: Case): Promise<Uint8Array> {
-  const stream = Streaming.createWriter({
+  const stream = new Stream.DocumentWriter({
     watermark: DRAFT,
     headers: c.headers,
     footers: c.footers,
@@ -216,7 +216,7 @@ describe("the document watermark", () => {
     async (_n, c) => {
       const written = await Io.toBuffer(buffered(c));
       const read = await Io.read(written);
-      const reader = Streaming.createReader(written);
+      const reader = new Stream.DocumentReader(written);
       const body: BodyContent[] = [];
       for await (const block of reader) {
         body.push(block);

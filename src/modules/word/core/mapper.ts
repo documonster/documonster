@@ -18,6 +18,7 @@ import {
 } from "@word/core/range-markers";
 import { hyperlinkContent, isRun, withHyperlinkContent } from "@word/core/text-utils";
 import type { WalkPath } from "@word/core/walker";
+import { DocxArgumentError } from "@word/errors";
 import type {
   BodyContent,
   DocxDocument,
@@ -309,8 +310,9 @@ function mapBodyContent(
         if (b.type === "paragraph") {
           filtered.push(b);
         } else {
-          throw new Error(
-            `mapDocument: textBox.content must remain Paragraph[] but a ` +
+          throw new DocxArgumentError(
+            "transformer.transformBodyContent",
+            `Transform.map: textBox.content must remain Paragraph[] but a ` +
               `transform produced "${b.type}". Either rewrite the transform ` +
               `to return only paragraphs here, or restructure the document ` +
               `at the body level instead.`
@@ -338,8 +340,9 @@ function mapBodyContent(
         if (b.type === "paragraph") {
           filtered.push(b);
         } else {
-          throw new Error(
-            `mapDocument: drawingShape.textContent must remain Paragraph[] ` +
+          throw new DocxArgumentError(
+            "transformer.transformBodyContent",
+            `Transform.map: drawingShape.textContent must remain Paragraph[] ` +
               `but a transform produced "${b.type}".`
           );
         }
@@ -365,8 +368,9 @@ function mapBodyContent(
         if (b.type === "paragraph") {
           filtered.push(b);
         } else {
-          throw new Error(
-            `mapDocument: tableOfContents.cachedParagraphs must remain ` +
+          throw new DocxArgumentError(
+            "transformer.transformBodyContent",
+            `Transform.map: tableOfContents.cachedParagraphs must remain ` +
               `Paragraph[] but a transform produced "${b.type}".`
           );
         }

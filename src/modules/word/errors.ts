@@ -72,6 +72,31 @@ export class DocxArgumentError extends DocxError {
 }
 
 /**
+ * Error thrown when the file system will not let `Io.readFile` / `Io.writeFile`
+ * read or write a file — it does not exist, permission is denied, the directory
+ * is missing. The system's own error is the `cause` (its `code`, `ENOENT` or
+ * `EACCES`, is `error.cause.code`), as `ExcelFileError` keeps it. A file that was
+ * read but is not a valid document is a {@link DocxParseError}, not this.
+ */
+export class DocxFileError extends DocxError {
+  override name = "DocxFileError";
+
+  constructor(
+    public readonly path: string,
+    public readonly operation: "read" | "write",
+    details?: string,
+    options?: BaseErrorOptions
+  ) {
+    super(
+      details
+        ? `Failed to ${operation} Word file "${path}": ${details}`
+        : `Failed to ${operation} Word file "${path}"`,
+      options
+    );
+  }
+}
+
+/**
  * Error thrown when an image cannot become a valid package part: its media
  * type is not an `ImageMediaType`, or its file name has no extension that
  * `[Content_Types].xml` can type. Thrown where the image is supplied and,
@@ -169,7 +194,7 @@ export class DocxUnsupportedFeatureError extends DocxError {
 /**
  * Error thrown when a DOCX file is encrypted (CFB format) and no password
  * was provided. Pass `{ password }` in the read options — of `Io.read()`, a
- * `Package` function or `Streaming.createReader()` — to decrypt automatically,
+ * `Package` function or `new Stream.DocumentReader()` — to decrypt automatically,
  * or call `WordCrypto.decrypt()` from `documonster/word/crypto` directly if you
  * need lower-level access to the decrypted ZIP bytes.
  */
@@ -179,7 +204,7 @@ export class DocxEncryptedError extends DocxError {
   constructor() {
     super(
       "The document is encrypted (password-protected). " +
-        "Pass { password } in the read options (Io.read(), Package.*, Streaming.createReader()), " +
+        "Pass { password } in the read options (Io.read(), Package.*, new Stream.DocumentReader()), " +
         'or use WordCrypto.decrypt() from "documonster/word/crypto" for lower-level decryption.'
     );
   }
@@ -243,7 +268,7 @@ export class DocxLimitExceededError extends DocxParseError {
 }
 
 /**
- * Error thrown when the active `WordSecurityPolicy.rawXmlPolicy` is `"reject"`
+ * Error thrown when the active `DocxSecurityPolicy.rawXmlPolicy` is `"reject"`
  * and the writer encounters opaque/preserved rawXml that would otherwise have
  * been emitted verbatim. Callers can either drop the offending model field
  * before serialisation or relax the policy to `"strip"` / `"preserve"`.
@@ -257,15 +282,15 @@ export class DocxRawXmlPolicyError extends DocxWriteError {
     super(
       `Raw XML rejected by security policy at "${site}". ` +
         "Either remove the rawXml/opaque field from the model or set " +
-        "WordSecurityPolicy.rawXmlPolicy to 'preserve' or 'strip'."
+        "DocxSecurityPolicy.rawXmlPolicy to 'preserve' or 'strip'."
     );
     this.site = site;
   }
 }
 
 /** Error thrown when template processing fails. */
-export class TemplateError extends DocxError {
-  override readonly name = "TemplateError";
+export class DocxTemplateError extends DocxError {
+  override readonly name = "DocxTemplateError";
   /** The placeholder that caused the error. */
   readonly placeholder: string;
   /** Location hint (e.g. "body paragraph 3", "header"). */
@@ -295,3 +320,8 @@ export class TemplateError extends DocxError {
     this.sectionPath = options?.sectionPath;
   }
 }
+
+/** @deprecated Use {@link DocxTemplateError}. Removed in 1.0. */
+export const TemplateError = DocxTemplateError;
+/** @deprecated Use {@link DocxTemplateError}. Removed in 1.0. */
+export type TemplateError = DocxTemplateError;

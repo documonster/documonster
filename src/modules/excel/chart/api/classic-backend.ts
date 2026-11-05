@@ -16,7 +16,7 @@ export {
 /**
  * The scene a classic chart model draws as — the geometry every backend paints from.
  *
- * @throws {ChartOptionsError} `model` is not a classic chart model, or an option has no valid
+ * @throws {ExcelChartOptionsError} `model` is not a classic chart model, or an option has no valid
  *   reading.
  */
 export function toScene(model: ChartModel, options?: ChartRenderOptions): ChartScene {
@@ -26,7 +26,7 @@ export function toScene(model: ChartModel, options?: ChartRenderOptions): ChartS
  * The features of the object `objectName` of a TopoJSON topology, as `{ id, properties,
  * geometry, rings }` records in absolute coordinates — what a region map draws.
  *
- * @throws {ChartOptionsError} the topology cannot be read — no such object, an arc table or a
+ * @throws {ExcelChartOptionsError} the topology cannot be read — no such object, an arc table or a
  *   geometry of the wrong shape — with `field` naming the path (`topology.arcs[3]`).
  */
 export function resolveTopologyObject(

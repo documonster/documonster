@@ -104,7 +104,7 @@ const HANDLE_FUNCTIONS: readonly (readonly [name: string, param: string])[] = [
   ["Io.toBuffer", "doc"],
   ["Io.toBase64", "doc"],
   ["Io.toFlatOpc", "doc"],
-  ["Io.writeFile", "doc"],
+  // `Io.writeFile` is Node-only and is checked in `io-node-surface.node.test.ts`.
   ["Transform.split", "doc"],
   ["Transform.updateFields", "doc"],
   ["Transform.updateTableOfContents", "doc"],

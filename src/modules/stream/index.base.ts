@@ -96,7 +96,10 @@ export type { StreamErrorOptions } from "@stream/errors";
 export {
   StreamError,
   StreamStateError,
+  StreamArgumentError,
   StreamTypeError,
+  StreamUnsupportedTypeError,
+  // Deprecated pre-prefix name; removed in 1.0.
   UnsupportedStreamTypeError,
   isStreamError
 } from "@stream/errors";
@@ -116,9 +119,11 @@ export type { EventEmitterLike } from "@stream/types";
 
 /** @deprecated Use {@link Streams.ChunkedBuilder}. Removed in 1.0. */
 export const ChunkedBuilder = ChunkedBuilderImpl;
+/** @deprecated Use {@link Streams.ChunkedBuilder}. Removed in 1.0. */
 export type ChunkedBuilder = ChunkedBuilderImpl;
 /** @deprecated Use {@link Streams.TransactionalChunkedBuilder}. Removed in 1.0. */
 export const TransactionalChunkedBuilder = TransactionalChunkedBuilderImpl;
+/** @deprecated Use {@link Streams.TransactionalChunkedBuilder}. Removed in 1.0. */
 export type TransactionalChunkedBuilder = TransactionalChunkedBuilderImpl;
 /** @deprecated Use {@link Streams.bytes}. Removed in 1.0. */
 export const bytes = bytesImpl;
@@ -153,6 +158,7 @@ export const onceEvent = onceEventImpl;
 export const eventedReadableToAsyncIterableNoDestroy = eventedReadableToAsyncIterableNoDestroyImpl;
 /** @deprecated Use {@link Streams.LowLevel.SinkAdapter}. Removed in 1.0. */
 export const SinkAdapter = SinkAdapterImpl;
+/** @deprecated Use {@link Streams.LowLevel.SinkAdapter}. Removed in 1.0. */
 export type SinkAdapter = SinkAdapterImpl;
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.

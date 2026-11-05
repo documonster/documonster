@@ -84,3 +84,39 @@ describe("a wrong handle", () => {
     expect(Worksheet.getName(ws)).toBe("S");
   });
 });
+
+// The sweep above passes `"A1", 1, 1` after the handle, which some of these refuse as options first — so the handle
+// went unchecked: `Workbook.toBuffer()` failed with a `TypeError`, and `Worksheet.protect({})` wrote onto the `{}`.
+describe("a wrong handle, with every other argument valid", () => {
+  const calls: [string, string, (bad: unknown) => unknown][] = [
+    ["Workbook.toBuffer", "wb", bad => Workbook.toBuffer(bad as never)],
+    ["Workbook.toStream", "wb", bad => Workbook.toStream(bad as never)],
+    ["Workbook.writeStream", "wb", bad => Workbook.writeStream(bad as never, {} as never)],
+    ["Workbook.protect", "wb", bad => Workbook.protect(bad as never, { lockStructure: true })],
+    ["Worksheet.protect", "ws", bad => Worksheet.protect(bad as never)],
+    ["Worksheet.protect (password)", "ws", bad => Worksheet.protect(bad as never, null as never)],
+    ["Worksheet.freeze", "ws", bad => Worksheet.freeze(bad as never, { rows: 1 })],
+    ["Worksheet.freeze (positional)", "ws", bad => Worksheet.freeze(bad as never, 1)],
+    ["Worksheet.split", "ws", bad => Worksheet.split(bad as never, { x: 100 })]
+  ];
+
+  it.each(
+    calls.flatMap(([name, field, call]) =>
+      [undefined, 42, {}].map(bad => [name, field, call, bad] as const)
+    )
+  )("%s refuses %j", async (_name, field, call, bad) => {
+    const handle = bad === undefined ? undefined : typeof bad === "object" ? {} : bad;
+    let error: unknown;
+    try {
+      await call(handle);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ExcelArgumentError);
+    expect((error as ExcelArgumentError).field).toBe(field);
+    expect((error as Error).message).toMatch(new RegExp(`^${field} must be a work`));
+    if (typeof handle === "object") {
+      expect(handle).toEqual({});
+    }
+  });
+});

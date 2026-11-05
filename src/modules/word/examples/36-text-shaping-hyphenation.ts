@@ -83,10 +83,9 @@ for (const w of words) {
   console.log(`    ${w.padEnd(28)} points=${JSON.stringify(hyph(w))}`);
 }
 
-console.log("\n  hyphenateWord (default soft hyphen):");
+console.log('\n  hyphenateWord (a visible "·" instead of the default soft hyphen):');
 for (const w of words) {
-  // Print with visible "·" instead of soft hyphen so the result is readable
-  const result = Font.hyphenateWord(w, hyph).replace(/\u00AD/g, "·");
+  const result = Font.hyphenateWord(w, hyph, { hyphenChar: "·" });
   console.log(`    ${w.padEnd(28)} → ${result}`);
 }
 

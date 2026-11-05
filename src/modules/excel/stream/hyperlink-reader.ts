@@ -11,7 +11,7 @@ import { RelType } from "@excel/xlsx/rel-type";
 import { createPrefixNormalizer } from "@excel/xlsx/xform/namespace-prefixes";
 import { EventEmitter } from "@utils/event-emitter";
 import { SaxParser } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
+import type { XmlSaxTag } from "@xml/types";
 
 export interface HyperlinkReaderOptions<TWorkbook = unknown> {
   workbook: TWorkbook;
@@ -88,10 +88,10 @@ class HyperlinkReader extends EventEmitter {
       const parserPrefixes = createPrefixNormalizer({ lazy: true });
       const decoder = createPartDecoder();
 
-      parser.on("closetag", (rawTag: SaxTag) => {
+      parser.on("closetag", (rawTag: XmlSaxTag) => {
         parserPrefixes.close(rawTag.name);
       });
-      parser.on("opentag", (rawNode: SaxTag) => {
+      parser.on("opentag", (rawNode: XmlSaxTag) => {
         const node = parserPrefixes.open(rawNode);
         if (node.name !== "Relationship") {
           return;

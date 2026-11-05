@@ -67,7 +67,7 @@ import type {
   ResolvedParagraphStyle,
   ResolvedRunStyle,
   ResolvedTableStyle,
-  StyleIndex,
+  StyleIndex as DocxStyleIndex,
   StyleResolveContext
 } from "@word/query/style-resolve";
 import type { BodyContent, DocxDocument, Paragraph, Run, RunProperties } from "@word/types";
@@ -92,7 +92,8 @@ export {
   indexStyles as createStyleIndex,
   resolveNumberingLevel as getNumberingLevel
 } from "@word/query/style-resolve";
-export type { StyleIndex } from "@word/query/style-resolve";
+/** @deprecated Use `DocxStyleIndex` from `documonster/word`. Removed in 1.0. */
+export type StyleIndex = DocxStyleIndex;
 export { getCompatibilityMode } from "@word/query/compat";
 export { extractFormFields as listFormFields } from "@word/query/form-fields";
 export {
@@ -126,7 +127,7 @@ export interface ParagraphStyleOptions {
   /** Table position, for overlaying a table style's conditional formatting. */
   readonly context?: StyleResolveContext;
   /** Prebuilt {@link createStyleIndex} index, reused across calls. */
-  readonly styles?: StyleIndex;
+  readonly styles?: DocxStyleIndex;
 }
 
 /** Options for {@link getRunStyle}. */
@@ -138,13 +139,13 @@ export interface RunStyleOptions {
    */
   readonly paragraphRunProperties?: RunProperties;
   /** Prebuilt {@link createStyleIndex} index, reused across calls. */
-  readonly styles?: StyleIndex;
+  readonly styles?: DocxStyleIndex;
 }
 
 /** Options for {@link getTableStyle}. */
 export interface TableStyleOptions {
   /** Prebuilt {@link createStyleIndex} index, reused across calls. */
-  readonly styles?: StyleIndex;
+  readonly styles?: DocxStyleIndex;
 }
 
 /** Resolve a paragraph's effective style: its style chain merged over the document defaults. */

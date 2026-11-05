@@ -1076,4 +1076,58 @@ describe("embedFont selects a face inside a collection", () => {
     expect(() => PdfEditor.read(blank).embedFont(font)).not.toThrow();
     expect(() => PdfEditor.read(blank).embedFont(font, 3)).toThrow(/collection index/i);
   });
+
+  it("takes the face as one PdfFontSource, as the deprecated positional index did", async () => {
+    const font = singleFace();
+    expect(() => new PdfDocumentBuilder().embedFont({ data: font })).not.toThrow();
+    expect(() =>
+      new PdfDocumentBuilder().embedFont({ data: font, collectionIndex: 0 })
+    ).not.toThrow();
+    expect(() => new PdfDocumentBuilder().embedFont({ data: font, collectionIndex: 3 })).toThrow(
+      /collection index/i
+    );
+    const source = new PdfDocumentBuilder();
+    source.addPage({ width: 200, height: 200 });
+    const blank = await source.toBuffer();
+    expect(() => PdfEditor.read(blank).embedFont({ data: font, collectionIndex: 3 })).toThrow(
+      /collection index/i
+    );
+
+    // The same face embedded either way draws the same text in the same face.
+    const write = async (embed: (builder: PdfDocumentBuilder) => void) => {
+      const builder = new PdfDocumentBuilder();
+      embed(builder);
+      builder.addPage({ width: 200, height: 200 }).drawText("ABC", { x: 10, y: 100, fontSize: 12 });
+      const bytes = await builder.toBuffer();
+      return {
+        text: (await readPdf(bytes)).pages[0].text.trim(),
+        size: bytes.length,
+        probe: new TextDecoder("latin1").decode(bytes).includes("Probe")
+      };
+    };
+    const current = await write(b => b.embedFont({ data: font, collectionIndex: 0 }));
+    expect(current).toEqual(await write(b => b.embedFont(font, 0)));
+    expect(current).toMatchObject({ text: "ABC", probe: true });
+  });
+
+  it("names the argument a bad face came in", () => {
+    const fieldOf = (call: () => unknown): string | undefined => {
+      try {
+        call();
+      } catch (error) {
+        return (error as { field?: string }).field;
+      }
+      return undefined;
+    };
+    const builder = new PdfDocumentBuilder();
+    expect(fieldOf(() => builder.embedFont({ data: new Uint8Array(0) }))).toBe("source.data");
+    expect(fieldOf(() => builder.embedFont({ data: singleFace(), collectionIndex: -1 }))).toBe(
+      "source.collectionIndex"
+    );
+    expect(fieldOf(() => builder.embedFont(new Uint8Array(0), 1))).toBe("fontBytes");
+    expect(fieldOf(() => builder.embedFont(singleFace(), -1))).toBe("collectionIndex");
+    expect(fieldOf(() => builder.embedFont({ data: singleFace() } as never, 1 as never))).toBe(
+      "collectionIndex"
+    );
+  });
 });

@@ -2314,7 +2314,7 @@ describe("TC4: combo chart with categoryAxis/valueAxis options on primary group"
   });
 });
 
-describe("TC5: Chart.clone/copyTo round-trip", () => {
+describe("TC5: Chart.copyTo round-trip", () => {
   it("cloned chart survives write/read as independent copy", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
@@ -2322,7 +2322,7 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
     Cell.setValue(ws, "B1", 100);
     addChart(ws, { type: "bar", series: [baseSeries("Original")], title: "Source" }, "C1:J10");
     const original = getCharts(ws)[0];
-    Chart.clone(original);
+    Chart.copyTo(original, ws);
     expect(getCharts(ws)).toHaveLength(2);
 
     const buf = await Workbook.toBuffer(wb);

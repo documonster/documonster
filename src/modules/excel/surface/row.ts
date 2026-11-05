@@ -678,11 +678,19 @@ export function getProtection(ws: WorksheetData, row: number): Partial<Protectio
 
 /**
  * Commit row `row`. Meaningful to a streaming writer (`Stream.WorksheetWriter`), which writes the row out and releases
- * it; on a document-model sheet it does nothing beyond creating the row, so code that fills either kind of sheet can
- * call it unconditionally.
+ * it; on a document-model sheet it does nothing — it does not create the row.
+ *
+ * @deprecated A document-model sheet has nothing to commit — every edit applies as it is made — and a streamed row is
+ * committed through its handle: `Stream.commitRow(ws.getRow(row))`. Removed in 1.0.
  */
 export function commit(ws: WorksheetData, row: number): void {
-  rowCommit(getRow(ws, row));
+  // Only a streaming writer has a commit step, and only there is the row materialised to be written out. A
+  // document-model sheet is checked, as every reader checks it, and left as it was.
+  if (typeof (ws as { _commitRow?: unknown } | null | undefined)?._commitRow === "function") {
+    rowCommit(getRow(ws, row));
+  } else {
+    findRow(ws, row);
+  }
 }
 
 // --- printing ---

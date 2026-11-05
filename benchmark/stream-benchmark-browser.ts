@@ -16,12 +16,7 @@
 import { Readable, Writable, Transform, pipeline } from "stream";
 import { promisify } from "util";
 
-import {
-  createReadableFromArray as browserCreateReadableFromArray,
-  createTransform as browserCreateTransform,
-  createCollector as browserCreateCollector,
-  pipeline as browserPipeline
-} from "../src/modules/stream/index.browser";
+import { Streams as BrowserStreams, pipeline as browserPipeline } from "../src/modules/stream/index.browser";
 import { EventEmitter as BrowserEmitter } from "../src/utils/event-emitter";
 
 const pipelineAsync = promisify(pipeline);
@@ -79,13 +74,13 @@ async function benchmarkNative(chunks: Uint8Array[]): Promise<number> {
 async function benchmarkBrowser(chunks: Uint8Array[]): Promise<number> {
   const start = performance.now();
 
-  const readable = browserCreateReadableFromArray(chunks, { objectMode: false });
+  const readable = BrowserStreams.createReadableFromArray(chunks, { objectMode: false });
 
-  const transform = browserCreateTransform<Uint8Array, Uint8Array>(chunk => chunk, {
+  const transform = BrowserStreams.createTransform<Uint8Array, Uint8Array>(chunk => chunk, {
     objectMode: false
   });
 
-  const collector = browserCreateCollector<Uint8Array>({ objectMode: false });
+  const collector = new BrowserStreams.Collector<Uint8Array>({ objectMode: false });
 
   await browserPipeline(readable, transform, collector);
 

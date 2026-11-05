@@ -24,7 +24,7 @@ import {
   definedNamesModel
 } from "@excel/core/defined-names";
 import { loadDefinedNamesModel } from "@excel/core/model-load";
-import { DefinedNameError } from "@excel/errors";
+import { ExcelDefinedNameError } from "@excel/errors";
 import type { ArgumentChecks } from "@excel/utils/arguments";
 import { argumentChecks } from "@excel/utils/arguments";
 import { excelNameKey } from "@utils/name-key";
@@ -109,7 +109,7 @@ function checkScope(check: ArgumentChecks, options: unknown): number | undefined
  * scope, or the sheet scope `options.localSheetId` (the sheet's 0-based tab position), where a formula on that sheet
  * finds it before a workbook name of the same spelling. Returns the name as {@link get} reports it then.
  *
- * @throws {DefinedNameError} when `name` is not a name Excel accepts — one that reads as a cell reference (`A1`), or
+ * @throws {ExcelDefinedNameError} when `name` is not a name Excel accepts — one that reads as a cell reference (`A1`), or
  * starts with a digit — or `location` is not a cell or a range of the grid. Both used to be accepted: the first
  * produced a file Excel repairs, the second was dropped when the workbook was written.
  * @throws {ExcelArgumentError} when `options.localSheetId` is not a whole number from 0.
@@ -123,7 +123,7 @@ export function add(
   checkDefinedNames(dn);
   definedNamesCheckName(dn, "DefinedNames.add", name);
   if (!definedNamesIsPlaceable(location)) {
-    throw new DefinedNameError(
+    throw new ExcelDefinedNameError(
       `DefinedNames.add: ${JSON.stringify(location)} is not a cell or range reference such as "Sheet1!$A$1".`
     );
   }
@@ -145,7 +145,7 @@ function attached(
  * Define `name` as a formula (`"0.2"`, `"Sheet1!$A$1*2"`) — in the workbook scope, or the sheet scope
  * `options.localSheetId`, as {@link add} does. Returns the name as {@link get} reports it then.
  *
- * @throws {DefinedNameError} when `name` is not a name Excel accepts, or `expression` is not a string.
+ * @throws {ExcelDefinedNameError} when `name` is not a name Excel accepts, or `expression` is not a string.
  * @throws {ExcelArgumentError} when `options.localSheetId` is not a whole number from 0.
  */
 export function addFormula(
@@ -157,7 +157,7 @@ export function addFormula(
   checkDefinedNames(dn);
   definedNamesCheckName(dn, "DefinedNames.addFormula", name);
   if (typeof expression !== "string" || expression.length === 0) {
-    throw new DefinedNameError(
+    throw new ExcelDefinedNameError(
       `DefinedNames.addFormula: the expression for "${name}" must be a non-empty string.`
     );
   }
@@ -171,7 +171,7 @@ export function addFormula(
  * model taken from another workbook applies as it is.
  *
  * @throws {ExcelArgumentError} when `value` is not an array of entries, each with a string `name`.
- * @throws {DefinedNameError} when two entries are one name in one scope (`N` and `n`).
+ * @throws {ExcelDefinedNameError} when two entries are one name in one scope (`N` and `n`).
  */
 export function setModel(dn: DefinedNamesData, value: readonly DefinedNameModel[]): void {
   checkDefinedNames(dn);
@@ -193,7 +193,7 @@ export function setModel(dn: DefinedNamesData, value: readonly DefinedNameModel[
     const key = `${excelNameKey(entry.name)}\0${entry.localSheetId ?? ""}`;
     const first = seen.get(key);
     if (first !== undefined) {
-      throw new DefinedNameError(
+      throw new ExcelDefinedNameError(
         `DefinedNames.setModel: ${JSON.stringify(first)} and ${JSON.stringify(entry.name)} are one name ` +
           `(names compare without regard to case) in the same scope; give each name one entry.`
       );

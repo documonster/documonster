@@ -47,10 +47,10 @@ describe("Pdf.fromExcel sheets: names, numbers deprecated", () => {
     const lines = [
       'import type { Workbook } from "@excel/index";',
       'import { Pdf } from "@pdf/index";',
-      'import type { ExcelToPdfOptions } from "@pdf/index";',
+      'import type { PdfFromExcelOptions } from "@pdf/index";',
       "declare const wb: Workbook.Handle;",
       'const names: readonly string[] = ["A"];',
-      'const published: ExcelToPdfOptions = { sheets: ["Sales"] };',
+      'const published: PdfFromExcelOptions = { sheets: ["Sales"] };',
       "const inferred = { sheets: [1, 2] };",
       // 8: names, a names variable, `{}`, no options — not deprecated.
       'void Pdf.fromExcel(wb, { sheets: ["Summary"] });',

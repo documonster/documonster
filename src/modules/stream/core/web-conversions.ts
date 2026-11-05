@@ -16,7 +16,8 @@
  */
 
 import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
-import { UnsupportedStreamTypeError } from "@stream/errors";
+import { StreamArgumentError, StreamUnsupportedTypeError } from "@stream/errors";
+import { isEncoding } from "@stream/kernel/state";
 import {
   readableFromWeb as adaptReadableFromWeb,
   readableToWeb as adaptReadableToWeb,
@@ -34,7 +35,7 @@ export function checkWritableLike(stream: unknown): WritableLike {
     typeof s.write !== "function" ||
     typeof s.end !== "function"
   ) {
-    throw new UnsupportedStreamTypeError(
+    throw new StreamUnsupportedTypeError(
       "Streams.toWritable",
       stream === null ? "null" : typeof stream,
       {
@@ -103,13 +104,84 @@ function describeValue(value: unknown): string {
   return value === null ? "null" : typeof value;
 }
 
+type OptionKind = "boolean" | "highWaterMark" | "encoding" | "signal" | "strategy";
+
+function optionProblem(kind: OptionKind, value: unknown): string | undefined {
+  switch (kind) {
+    case "boolean":
+      return typeof value === "boolean" ? undefined : "a boolean";
+    case "highWaterMark":
+      return typeof value === "number" && Number.isInteger(value) && value >= 0
+        ? undefined
+        : "a non-negative integer highWaterMark";
+    case "encoding":
+      return isEncoding(value) ? undefined : "a Buffer encoding name";
+    case "signal": {
+      const signal = value as { aborted?: unknown; addEventListener?: unknown } | null;
+      return typeof signal === "object" &&
+        signal !== null &&
+        typeof signal.aborted === "boolean" &&
+        typeof signal.addEventListener === "function"
+        ? undefined
+        : "an AbortSignal";
+    }
+    case "strategy":
+      return typeof value === "object" && value !== null ? undefined : "a QueuingStrategy";
+  }
+}
+
+/**
+ * Refuse an options argument the adapter would hand to a stream constructor unchecked: there it
+ * failed with the platform's own `TypeError`, naming no public call.
+ */
+function checkOptions(
+  where: string,
+  options: unknown,
+  fields: Readonly<Record<string, OptionKind>>
+): void {
+  if (options === undefined) {
+    return;
+  }
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new StreamArgumentError("an options object", describeValue(options), {
+      field: "options",
+      where
+    });
+  }
+  for (const [name, kind] of Object.entries(fields)) {
+    const value = (options as Record<string, unknown>)[name];
+    const expected = value === undefined ? undefined : optionProblem(kind, value);
+    if (expected !== undefined) {
+      throw new StreamArgumentError(expected, describeValue(value), {
+        field: `options.${name}`,
+        where
+      });
+    }
+  }
+}
+
+const READABLE_FROM_WEB_OPTIONS = {
+  objectMode: "boolean",
+  highWaterMark: "highWaterMark",
+  encoding: "encoding",
+  signal: "signal"
+} as const;
+
+const WRITABLE_FROM_WEB_OPTIONS = {
+  objectMode: "boolean",
+  highWaterMark: "highWaterMark",
+  decodeStrings: "boolean",
+  signal: "signal"
+} as const;
+
 export function makeReadableFromWeb(Readable: StreamCtor): ReadableFromWeb {
   return (stream: ReadableStream, options?: WebReadableOptions) => {
     if (!isReadableStream(stream)) {
-      throw new UnsupportedStreamTypeError("Streams.fromWebReadable", describeValue(stream), {
+      throw new StreamUnsupportedTypeError("Streams.fromWebReadable", describeValue(stream), {
         field: "stream"
       });
     }
+    checkOptions("Streams.fromWebReadable", options, READABLE_FROM_WEB_OPTIONS);
     return adaptReadableFromWeb(Readable, stream, options);
   };
 }
@@ -117,10 +189,11 @@ export function makeReadableFromWeb(Readable: StreamCtor): ReadableFromWeb {
 export function makeWritableFromWeb(Writable: StreamCtor): WritableFromWeb {
   return (stream, options) => {
     if (!isWritableStream(stream)) {
-      throw new UnsupportedStreamTypeError("Streams.fromWebWritable", describeValue(stream), {
+      throw new StreamUnsupportedTypeError("Streams.fromWebWritable", describeValue(stream), {
         field: "stream"
       });
     }
+    checkOptions("Streams.fromWebWritable", options, WRITABLE_FROM_WEB_OPTIONS);
     return adaptWritableFromWeb(Writable, stream, options);
   };
 }
@@ -137,10 +210,11 @@ export function readableToWeb<T = any>(
     typeof s.on !== "function" ||
     typeof s.read !== "function"
   ) {
-    throw new UnsupportedStreamTypeError("Streams.toWebReadable", describeValue(stream), {
+    throw new StreamUnsupportedTypeError("Streams.toWebReadable", describeValue(stream), {
       field: "stream"
     });
   }
+  checkOptions("Streams.toWebReadable", options, { strategy: "strategy" });
   return adaptReadableToWeb<T>(stream, options);
 }
 
@@ -153,7 +227,7 @@ export function writableToWeb<T = any>(stream: IWritable<T>): WritableStream<T> 
     typeof s.on !== "function" ||
     typeof s.write !== "function"
   ) {
-    throw new UnsupportedStreamTypeError("Streams.toWebWritable", describeValue(stream), {
+    throw new StreamUnsupportedTypeError("Streams.toWebWritable", describeValue(stream), {
       field: "stream"
     });
   }

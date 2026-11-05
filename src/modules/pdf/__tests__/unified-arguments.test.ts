@@ -134,13 +134,13 @@ describe("splitPages names pages (R4P-C2)", () => {
 describe("isPageRemoved takes both index ranges (R4P-S4)", () => {
   it("answers for an added page, and every index call takes added pages", async () => {
     const editor = Pdf.Editor.read(await pages("A", "B"));
-    expect(() => editor.isPageRemoved(2)).toThrow(PdfStructureError);
+    expect(() => editor.isPageRemoved(2)).toThrow(PdfArgumentError);
     editor.addPage();
     editor.copyPagesFrom(await pages("C"));
     expect(editor.isPageRemoved(2)).toBe(false);
     expect(editor.isPageRemoved(3)).toBe(false);
-    expect(() => editor.isPageRemoved(4)).toThrow(PdfStructureError);
-    expect(() => editor.isPageRemoved(2.5)).toThrow(PdfStructureError);
+    expect(() => editor.isPageRemoved(4)).toThrow(PdfArgumentError);
+    expect(() => editor.isPageRemoved(2.5)).toThrow(PdfArgumentError);
     expect(editor.getPage(3)).toBeInstanceOf(Pdf.EditorPage);
     editor.removePage(2);
     expect(editor.isPageRemoved(2)).toBe(true);

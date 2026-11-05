@@ -38,7 +38,7 @@ import {
   withRangeMarkersBefore
 } from "@word/core/range-markers";
 import { isRun } from "@word/core/text-utils";
-import { TemplateError } from "@word/errors";
+import { DocxTemplateError } from "@word/errors";
 import type {
   DocxDocument,
   BodyContent,
@@ -68,7 +68,7 @@ export interface TemplateOptions {
   /** Custom delimiters (default: ["{{", "}}"]). */
   readonly delimiters?: readonly [string, string];
   /**
-   * If true (default), throw `TemplateError` when a placeholder cannot be
+   * If true (default), throw `DocxTemplateError` when a placeholder cannot be
    * resolved. If false, unresolved variables render as the empty string and
    * unresolved control directives are skipped silently.
    */
@@ -589,7 +589,7 @@ function processBodyItems(
         const collectionExpr = extractDirectiveArg(text, ctx.open, ctx.close, "#each ");
         const endIdx = findClosingBlock(blocks, i, ctx, "#each ", "/each");
         if (endIdx === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed {{#each ${collectionExpr}}}`,
             `#each ${collectionExpr}`,
             location,
@@ -622,7 +622,7 @@ function processBodyItems(
         }
         result.push(...listRangeAnchors([blocks[endIdx]!]));
         if (!Array.isArray(items) && ctx.strict && items !== undefined && items !== null) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `{{#each ${collectionExpr}}} expects an array, got ${typeof items}`,
             `#each ${collectionExpr}`,
             location,
@@ -643,7 +643,7 @@ function processBodyItems(
         const condExpr = extractDirectiveArg(text, ctx.open, ctx.close, "#if ");
         const { elseIdx, endIdx } = findIfBlock(blocks, i, ctx);
         if (endIdx === -1) {
-          throw new TemplateError(`Unclosed {{#if ${condExpr}}}`, `#if ${condExpr}`, location, {
+          throw new DocxTemplateError(`Unclosed {{#if ${condExpr}}}`, `#if ${condExpr}`, location, {
             tagName: `#if ${condExpr}`,
             paragraphIndex: i,
             sectionPath: location
@@ -684,8 +684,8 @@ function processBodyItems(
           result.push(processParagraph(block, ctx, `${location} para ${i}`));
         }
       } catch (err) {
-        if (err instanceof TemplateError && err.tagName === undefined) {
-          throw new TemplateError(err.message, err.placeholder, err.location, {
+        if (err instanceof DocxTemplateError && err.tagName === undefined) {
+          throw new DocxTemplateError(err.message, err.placeholder, err.location, {
             cause: err.cause,
             tagName: err.placeholder,
             paragraphIndex: i,
@@ -912,7 +912,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
           value = resolvePath(ctx.data, path);
         }
         if (value === undefined && ctx.strict) {
-          throw new TemplateError(`Unresolved variable: {{${path}}}`, path, location, {
+          throw new DocxTemplateError(`Unresolved variable: {{${path}}}`, path, location, {
             tagName: path,
             sectionPath: location
           });
@@ -927,7 +927,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
         const condValue = resolvePath(ctx.data, token.condition);
         const { trueBranch, falseBranch, endIndex } = collectInlineIf(tokens, i);
         if (endIndex === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed inline {{#if ${token.condition}}}`,
             `#if ${token.condition}`,
             location,
@@ -949,7 +949,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
         const items = resolvePath(ctx.data, token.collection);
         const { body, endIndex } = collectInlineEach(tokens, i);
         if (endIndex === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed inline {{#each ${token.collection}}}`,
             `#each ${token.collection}`,
             location,
@@ -1178,7 +1178,7 @@ function processTable(
         // Find the closing row
         const endRowIdx = findClosingTableRow(table.rows, i, ctx);
         if (endRowIdx === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed {{#each ${collectionExpr}}} in table row`,
             `#each ${collectionExpr}`,
             location,
@@ -2065,6 +2065,7 @@ export function fillDocument(
   options: TemplateOptions | undefined,
   where: string
 ): DocxDocument {
+  checkHandle(doc, "document", "doc", where);
   const record = fillData(data, where);
   checkFillArguments(record, options, where);
   return detachCollections(
@@ -2201,7 +2202,7 @@ function resolveRichParagraph(
     const value = resolvePath(data, subMatch);
     if (isTemplateSubDocument(value)) {
       if (rich.depth >= MAX_SUB_DOCUMENT_DEPTH) {
-        throw new TemplateError(
+        throw new DocxTemplateError(
           `Sub-document placeholders nest more than ${MAX_SUB_DOCUMENT_DEPTH} deep: {{>${subMatch}}}`,
           `>${subMatch}`,
           location,

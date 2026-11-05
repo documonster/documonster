@@ -113,6 +113,12 @@ export function normalizeSamples(
   pixelWidth: number,
   pixelHeight: number
 ): number {
+  if (
+    samples !== undefined &&
+    (typeof samples !== "number" || !(samples >= 1) || samples === Infinity)
+  ) {
+    fail("Draw.Backend.normalizeSamples", "samples", "a finite number >= 1", samples);
+  }
   checkPositiveInteger("Draw.Backend.normalizeSamples", "pixelWidth", pixelWidth);
   checkPositiveInteger("Draw.Backend.normalizeSamples", "pixelHeight", pixelHeight);
   return normalizeSamplesImpl(samples, pixelWidth, pixelHeight);

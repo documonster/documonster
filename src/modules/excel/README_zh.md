@@ -244,8 +244,8 @@ DefinedNames.remove(names, "Tax"); // 删除整个名称,不论它如何定义
 DefinedNames.add(names, "Sheet2!$A$1", "Total", { localSheetId: 1 }); // 返回该名称,与 `get` 相同
 ```
 
-无论通过哪个调用给出名称——`DefinedNames.add`、`Cell.addName`、`Cell.setName`、`Cell.setNames`——检查都相同:
-Excel 会修复的名称(`A1`、`1abc`、`has space`)或已被表格使用的名称,会在改动任何内容之前以 `DefinedNameError` 拒绝。
+无论通过哪个调用给出名称——`DefinedNames.add`、`Cell.addName`、`Cell.setNames`——检查都相同:
+Excel 会修复的名称(`A1`、`1abc`、`has space`)或已被表格使用的名称,会在改动任何内容之前以 `ExcelDefinedNameError` 拒绝。
 
 设置公式只是存下公式,并不会求值。要计算结果,从 `documonster/excel/formula`
 subpath 导入计算引擎(单独拆开,好让约 200 KB 的引擎不进入只读写 XLSX 的
@@ -371,7 +371,7 @@ Image.place(worksheet, fileId, "F2:H6");
 （按句柄或按它在列表中的下标），并返回是否确有移除。图片仍注册在工作簿中，在下次保存前其 id 可再次放置；
 写出文件时，被你移除了最后一处使用、且没有其他内容引用的图片不会写入文件；
 从未放置的图片，或读入的文件中本就未被引用的图片，仍照旧写出。
-`Watermark.get(ws)` 返回工作表水印的副本，没有时返回 `null`；要替换水印请用 `Watermark.add`。
+`Watermark.get(ws)` 返回工作表水印的副本，没有时返回 `null`；要替换水印请用 `Watermark.set`。
 
 每个 `remove` 接受 `list` 返回的那一项，或它在列表中的位置（整数）；没有这一项时返回 `false`。其他值——名称、引用字符串、
 `1.5`——什么也不指，会以 `ExcelArgumentError` 拒绝。`ConditionalFormatting.remove` 还接受规则块的 `ref`（`"A1:B9"`，与
@@ -379,13 +379,13 @@ Image.place(worksheet, fileId, "F2:H6");
 
 数据透视表（`Pivot.remove`）和表单复选框（`Form.remove`）也有同样的 `list` / `remove`
 组合。绑定了数据透视图的数据透视表，必须先移除该图表（`Chart.remove`）才能移除 —— 否则抛出
-`PivotTableError`，以免图表指向不存在的对象 —— 包括从原文件中按字节原样保留的图表。
+`ExcelPivotTableError`，以免图表指向不存在的对象 —— 包括从原文件中按字节原样保留的图表。
 
 链接图片也可用作覆盖式水印：
 
 ```typescript
 const wmId = Image.add(workbook, { extension: "png", link: "https://example.com/draft.png" });
-Watermark.add(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
+Watermark.set(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
 ```
 
 **注意事项**（这是 Excel 固有的限制，而非本库的限制）：
@@ -395,8 +395,8 @@ Watermark.add(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
 - 出于安全原因，现代 Excel 可能拒绝自动加载远程 URL。
 - 只有**单元格图片**和**覆盖式水印**可以链接。工作表**背景**图片
   （`Image.setBackground`）和**页眉/页脚（VML）**水印
-  （`Watermark.add(worksheet, { mode: "header" })`）**不能**被链接——若给定链接图片，
-  它们会抛出 `ImageError`（Excel 在打开时会丢弃此类背景）。这些情况请使用嵌入式图片。
+  （`Watermark.set(worksheet, { mode: "header" })`）**不能**被链接——若给定链接图片，
+  它们会抛出 `ExcelImageError`（Excel 在打开时会丢弃此类背景）。这些情况请使用嵌入式图片。
 
 参见可运行的 [`images-external.ts`](examples/images-external.ts) 示例。
 
@@ -464,7 +464,7 @@ Table.add(worksheet, {
 ```
 
 表格按传入的名字原样保存，公式可以直接用这个名字引用它。Excel 不接受的名字——含空格、含字母数字下划线句点以外的字符，
-或形似单元格地址（`T1`、`R1C1`）——在 `Table.add`、`setName`、`setDisplayName`、`setModel` 中都会抛出 `TableError`，
+或形似单元格地址（`T1`、`R1C1`）——在 `Table.add`、`setName`、`setDisplayName`、`setModel` 中都会抛出 `ExcelTableError`，
 错误信息里给出一个 Excel 接受的写法（如 `"_T1"`）。其他程序写出的文件若带有这样的表名，读入时表名会被修正，
 文件中的公式也会读成引用修正后的名字。列名遵循同样的规则：Excel 视为同名的两列（`a` 与 `A`）会被拒绝，错误信息给出 Excel
 会给第二列起的名字（`A2`）；读入文件时重复的表头仍像 Excel 那样编号。
@@ -678,7 +678,7 @@ Chart.place(ws, "E1:M16", {
 `"sunburst"`、`"boxWhisker"`、`"regionMap"`。另有三个辅助函数，从别的来源生成选项：
 
 ```typescript
-import { EXCEL_CHART_PRESETS, EXCEL_CHART_EX_PRESETS } from "documonster/chart";
+import { CHART_EX_PRESETS, CHART_PRESETS } from "documonster/chart";
 
 // 预设：99 个经典预设和 10 个 Office 2016 预设，名字与 Excel 图库一致。
 Chart.place(
@@ -691,7 +691,7 @@ Chart.place(
   "N1:V16",
   Chart.applyPreset("boxAndWhisker", { series: [{ values: "Samples!$A$2:$A$50" }] })
 );
-console.log(EXCEL_CHART_PRESETS.length, EXCEL_CHART_EX_PRESETS.length); // 99, 10
+console.log(Object.keys(CHART_PRESETS).length, Object.keys(CHART_EX_PRESETS).length); // 99, 10
 
 // 普通行数据：写到工作表的 `startCell` 处，系列引用这些单元格。
 const visits = Chart.createOptionsFromRows(
@@ -1172,7 +1172,7 @@ Excel 和 WPS 可以通过提供 CI 作业接入同样的模式，这些作业�
 | ChartEx          | sunburst、treemap、waterfall、funnel、histogram、pareto、boxWhisker、regionMap（参见 regionMap 说明）                                                                                                                                                                                                                                                                                                                                                                                                |
 | 高级图表特性     | 组合图、次坐标轴、标记、数据标签（`DataLabelPosition`、饼图引导线、柱/线碰撞避免）、趋势线、误差线、手动绘图区布局（边缘模式）、图表工作表、数据表（`c:dTable` —— 渲染在绘图区下方）、用户形状覆盖（`c:userShapes` 字节保留 + 程序化替换；不在 SVG/PNG/PDF 预览中渲染）                                                                                                                                                                                                                              |
 | 透视图           | 经典透视图源元数据、字段按钮/筛选元数据、透视图图表工作表（仅元数据 —— 参见下方透视图说明）                                                                                                                                                                                                                                                                                                                                                                                                          |
-| 预设             | 99 个经典预设 + 10 个 ChartEx 预设 —— 圆锥/圆柱/棱锥、散点变体、股价、曲面/等高线、分离饼图/圆环图、histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap（通过 `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`）                                                                                                                                                                                                                                                                 |
+| 预设             | 99 个经典预设 + 10 个 ChartEx 预设 —— 圆锥/圆柱/棱锥、散点变体、股价、曲面/等高线、分离饼图/圆环图、histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap（即 `CHART_PRESETS` / `CHART_EX_PRESETS` 的键）                                                                                                                                                                                                                                                                          |
 | ChartEx 辅助方法 | `ChartEx.createOptionsFromTable` / `ChartEx.createOptionsFromRows`（+ `Chart.createOptionsFromTable/createOptionsFromRows`），用于 sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                     |
 | 模板保真度       | 未修改的 chart / chartEx 部件及其样式与配色 sidecar 的逐字节保留往返（不是整个包的逐字节保留）、用于狭窄编辑的原始 XML 修补、`templateMode: "strict"` 以拒绝静默丢失、`Chart.getUnknownElements` 浮现 `c15:` / `cx14:` 厂商标签                                                                                                                                                                                                                                                                      |
 | 包部件保真度     | 未建模部件（VBA 项目、自定义属性、连接、查询表、打印机设置、厂商扩展）连同其 content type 与两个方向的 relationship 一并保留；陈旧缓存、失效签名与不可达部件被明确丢弃，并通过 `WorkbookModel.opaqueDrops` 报告                                                                                                                                                                                                                                                                                      |
@@ -1329,7 +1329,7 @@ const pdf = await Pdf.fromExcel(workbook, {
 ```typescript
 import { readFileSync } from "fs";
 const pdf = await Pdf.fromExcel(workbook, {
-  font: readFileSync("NotoSansSC-Regular.ttf")
+  fonts: { default: { regular: readFileSync("NotoSansSC-Regular.ttf") } }
 });
 ```
 
@@ -1377,10 +1377,10 @@ await ExcelCsv.writeFile(workbook, "log.csv", { append: true, writeHeaders: fals
 
 读取时的 `encoding` 是输入字节的编码（WHATWG 标签，与 `Csv.parse` 相同）。写入时它只对 `ExcelCsv.writeFile` 生效，取 Node
 `Buffer` 的编码（`"utf8"`、`"utf16le"`、`"latin1"` 等）；返回文本或字节的写出函数只产生 UTF-8，收到其他编码会拒绝而不是忽略。
-不是路径的参数以 `ExcelArgumentError` 拒绝；系统不让读取的文件报 `ExcelFileError`，信息里写明是 CSV 文件，并以系统错误为 `cause`。
+不是路径的参数以 `ExcelArgumentError` 拒绝；系统不让读取或写入的文件报 `ExcelFileError`，信息里写明是 CSV 文件，并以系统错误为 `cause`。
 
 `documonster/excel/csv` 导出它的函数会抛出的错误——`ExcelArgumentError`、`ExcelFileError`、`ExcelDownloadError`、
-`WorksheetNameError`、`InvalidValueTypeError`、`isExcelError`，以及解析器读不了的文本对应的 `CsvError` / `isCsvError`——与
+`ExcelWorksheetNameError`、`ExcelInvalidValueTypeError`、`isExcelError`，以及解析器读不了的文本对应的 `CsvError` / `isCsvError`——与
 `documonster/excel`、`documonster/csv` 导出的是同一批类。`documonster/excel/markdown` 同样导出 `MarkdownError` /
 `MarkdownParseError` / `isMarkdownError`，`documonster/excel/formula` 导出 `ExcelArgumentError` / `isExcelError`。
 
@@ -1578,7 +1578,7 @@ token 映射，文本一侧由 `documonster/formula` 负责：`Formula.tokenize`
 
 ```typescript
 await Workbook.toBuffer(workbook, { format: "xlsb" });
-// ExcelNotSupportedError: 3 item(s) carry content this writer cannot express:
+// ExcelUnsupportedFeatureError: 3 item(s) carry content this writer cannot express:
 //   Sheet1!A1: formula, Sheet1: table, Sheet1: border (12).
 //   Pass { unsupported: "ignore" } to write the workbook without them.
 ```
@@ -1836,7 +1836,7 @@ Excel 里才被发现。
   两者都已实现，见下文。
 
 - **流式写入，两个容器都支持。** `Workbook.toBuffer`、`writeFile`、`toStream` 接受 `format: "xlsb"`，
-  `read`/`readWithDiagnostics` 能自动识别，而 `createStreamWriter` 现在也接受 `format: "xlsb"` ——
+  `read`/`readWithDiagnostics` 能自动识别，而 `Stream.WorkbookWriter` 现在也接受 `format: "xlsb"` ——
   行在提交时就被编码并交给 ZIP，所以 `pnpm benchmark:xlsb-scale` 能把一千万个单元格
   写成 95 MB 的 `.xlsb`。
 
@@ -2426,6 +2426,16 @@ Stream.applyCellStyle(Stream.getRowCell(row, 3), "Totals"); // 名称未定义�
 `workbook.commit()`。如果显式调用了 `sheet.commit()`，仍必须随后等待 `workbook.commit()`；
 工作表调用本身只关闭输入，并不表示其字节已写入目标流。
 
+`commit()` 会结束传给写入器的 `filename` 或 `stream`。两者都未提供时，写入器自己保存整个文件，
+`toBuffer()` 返回它——必要时先提交；若字节已写到 `filename` 或 `stream`，则以 `ExcelStreamStateError` 拒绝：
+
+```typescript
+const writer = new Stream.WorkbookWriter();
+const rows = writer.addWorksheet("Data");
+Stream.commitRow(rows.addRow([1, 2, 3]));
+const bytes = await writer.toBuffer();
+```
+
 ### Web Streams（Node.js 22+ 和浏览器）
 
 ```typescript
@@ -2533,7 +2543,7 @@ Cell.setFont(ws, 3, 2, { bold: true }); // facet 设置器同样支持两种形�
 实际读的是 `"CUA1"`；`Cell.getValue(ws, 5)` 以前能编译，运行时抛异常。两者现在都被拒绝。
 
 超出网格的位置——第 0 行、第 16 385 列、`"ZZ0"`——无论 getter 还是 setter，都会在改动任何内容之前以
-`RowOutOfBoundsError`、`ColumnOutOfBoundsError` 或 `InvalidAddressError` 拒绝。三者都是 `ExcelArgumentError`，其 `field`
+`ExcelRowOutOfBoundsError`、`ExcelColumnOutOfBoundsError` 或 `ExcelInvalidAddressError` 拒绝。三者都是 `ExcelArgumentError`，其 `field`
 给出参数名（`row`、`col`、`addr`），因此为错误输入写的一个 `catch` 就能捕获它们。读取时，*文件*中出现的同样位置则报告为读取器的解析错误——
 `XlsxParseError`（XLSB 为 `XlsbParseError`，CSV 和 Markdown 为指明行号的 `ExcelFileError`），消息中给出部件，位置错误作为 `cause`——
 因为格式错误的文件不是错误的参数。
@@ -2830,7 +2840,7 @@ Documonster 以子路径入口点发布——不存在裸 `"documonster"` 导出
 
 ```typescript
 // Excel 领域错误——来自 documonster/excel
-import { ExcelError, isExcelError, ImageError, TableError } from "documonster/excel";
+import { ExcelError, isExcelError, ExcelImageError, ExcelTableError } from "documonster/excel";
 
 // PDF 导出 + PDF 错误——来自 documonster/pdf
 import { Pdf, PdfError, isPdfError } from "documonster/pdf";

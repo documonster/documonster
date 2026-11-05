@@ -274,9 +274,9 @@ DefinedNames.remove(names, "Tax"); // the whole name, however it is defined
 DefinedNames.add(names, "Sheet2!$A$1", "Total", { localSheetId: 1 }); // returns the name, as `get` would
 ```
 
-A name is checked the same way whichever call gives it — `DefinedNames.add`, `Cell.addName`, `Cell.setName`,
+A name is checked the same way whichever call gives it — `DefinedNames.add`, `Cell.addName`,
 `Cell.setNames`: one Excel would repair (`A1`, `1abc`, `has space`) or a table already uses is refused with a
-`DefinedNameError` before anything changes.
+`ExcelDefinedNameError` before anything changes.
 
 Setting a formula stores it; it does not evaluate it. To compute results,
 import the calculation engine from the `documonster/excel/formula` subpath
@@ -412,7 +412,7 @@ it did. The picture stays registered in the workbook, so its id can be placed
 again before the next save; a picture whose last use you removed, and that nothing
 else references, is left out of the file when it is written. Pictures you never
 placed, or that arrived unreferenced in a file you read, are written as before. `Watermark.get(ws)` returns a copy of
-the sheet's watermark, or `null`; replace it with `Watermark.add`.
+the sheet's watermark, or `null`; replace it with `Watermark.set`.
 
 Every `remove` takes the item its `list` returned or that item's position (a whole number) in the list, and answers
 `false` when there is no such item. Anything else — a name, a reference string, `1.5` — names nothing and is refused
@@ -422,14 +422,14 @@ with `ExcelArgumentError`. `ConditionalFormatting.remove` also takes the block's
 The same `list` / `remove` pair exists for pivot tables (`Pivot.remove`) and form
 checkboxes (`Form.remove`). A pivot table that a pivot chart is bound to
 cannot be removed until that chart is (`Chart.remove`) — it throws a
-`PivotTableError` rather than leave the chart pointing at nothing — including a
+`ExcelPivotTableError` rather than leave the chart pointing at nothing — including a
 chart kept byte-for-byte from the file it was read from.
 
 Linked images also work as overlay watermarks:
 
 ```typescript
 const wmId = Image.add(workbook, { extension: "png", link: "https://example.com/draft.png" });
-Watermark.add(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
+Watermark.set(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
 ```
 
 **Caveats** (inherent to Excel, not this library):
@@ -439,8 +439,8 @@ Watermark.add(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
 - Modern Excel may refuse to auto-load remote URLs for security reasons.
 - Only **cell pictures** and **overlay watermarks** may be linked. Worksheet
   **background** images (`Image.setBackground`) and **header/footer (VML)**
-  watermarks (`Watermark.add(worksheet, { mode: "header" })`) **cannot** be linked — they
-  throw an `ImageError` if given a linked image (Excel drops such backgrounds on
+  watermarks (`Watermark.set(worksheet, { mode: "header" })`) **cannot** be linked — they
+  throw an `ExcelImageError` if given a linked image (Excel drops such backgrounds on
   open). Use an embedded image for those.
 
 See the runnable [`images-external.ts`](examples/images-external.ts) example.
@@ -514,7 +514,7 @@ Table.add(worksheet, {
 
 A table is stored under exactly the name it is given, so a formula can use it. A name Excel would not accept — one
 with a space, a character other than a letter, digit, underscore or period, or one that reads as a cell reference
-(`T1`, `R1C1`) — throws a `TableError` that names a form Excel does accept (`"_T1"`), from `Table.add`, `setName`,
+(`T1`, `R1C1`) — throws a `ExcelTableError` that names a form Excel does accept (`"_T1"`), from `Table.add`, `setName`,
 `setDisplayName` and `setModel` alike. A file another program wrote with such a name is read with the name corrected,
 and its formulas are read naming the corrected table. Column names are held to the same rule: two columns whose names
 Excel treats as one (`a` and `A`) are refused with the name Excel would give the second (`A2`), while a file's
@@ -740,7 +740,7 @@ chooses the chart: `"bar"` (with `barDir: "col"` for columns), `"line"`, `"area"
 options from something else:
 
 ```typescript
-import { EXCEL_CHART_PRESETS, EXCEL_CHART_EX_PRESETS } from "documonster/chart";
+import { CHART_EX_PRESETS, CHART_PRESETS } from "documonster/chart";
 
 // A preset — 99 classic and 10 Office 2016 ones, named as Excel's gallery names them.
 Chart.place(
@@ -753,7 +753,7 @@ Chart.place(
   "N1:V16",
   Chart.applyPreset("boxAndWhisker", { series: [{ values: "Samples!$A$2:$A$50" }] })
 );
-console.log(EXCEL_CHART_PRESETS.length, EXCEL_CHART_EX_PRESETS.length); // 99, 10
+console.log(Object.keys(CHART_PRESETS).length, Object.keys(CHART_EX_PRESETS).length); // 99, 10
 
 // Plain rows: they are written to the sheet at `startCell`, and the series refer to them.
 const visits = Chart.createOptionsFromRows(
@@ -1240,7 +1240,7 @@ Excel and WPS can be wired into the same pattern by providing CI jobs that conve
 | ChartEx                 | sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap (see regionMap note)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Advanced chart features | combo charts, secondary axes, markers, data labels (`DataLabelPosition`, pie leader lines, bar/line collision avoidance), trendlines, error bars, manual plot layout (edge-mode), chartsheets, data table (`c:dTable` — rendered below plot area), user-shape overlays (`c:userShapes` byte-preserving + programmatic replacement; not rendered in SVG/PNG/PDF previews)                                                                                                                                                                                                                    |
 | Pivot charts            | classic pivot chart source metadata, field buttons/filter metadata, pivot chartsheets (metadata-only — see pivot chart note below)                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Presets                 | 99 classic presets + 10 ChartEx presets — cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut, histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (via `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`)                                                                                                                                                                                                                                                                                                                            |
+| Presets                 | 99 classic presets + 10 ChartEx presets — cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut, histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (the keys of `CHART_PRESETS` / `CHART_EX_PRESETS`)                                                                                                                                                                                                                                                                                                                                |
 | ChartEx helpers         | `ChartEx.createOptionsFromTable` / `ChartEx.createOptionsFromRows` (+ `Chart.createOptionsFromTable/createOptionsFromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                                               |
 | Template fidelity       | byte-preserving round-trip of unmodified chart / chartEx parts and their style and colour sidecars (not of the package as a whole), raw-XML patching for narrow edits, `templateMode: "strict"` to refuse silent loss, `Chart.getUnknownElements` surfacing `c15:` / `cx14:` vendor tags                                                                                                                                                                                                                                                                                                    |
 | Package part fidelity   | unmodelled parts (VBA project, custom properties, connections, query tables, printer settings, vendor extensions) preserved with their content type and relationships in both directions; stale caches, invalidated signatures and unreachable parts dropped deliberately and reported via `WorkbookModel.opaqueDrops`                                                                                                                                                                                                                                                                      |
@@ -1397,7 +1397,7 @@ const pdf = await Pdf.fromExcel(workbook, {
 ```typescript
 import { readFileSync } from "fs";
 const pdf = await Pdf.fromExcel(workbook, {
-  font: readFileSync("NotoSansSC-Regular.ttf")
+  fonts: { default: { regular: readFileSync("NotoSansSC-Regular.ttf") } }
 });
 ```
 
@@ -1449,11 +1449,11 @@ read as UTF-16LE). A file that does not exist or is empty is simply written.
 `encoding` on a read is the encoding of the input bytes (a WHATWG label, as `Csv.parse` takes it). On a write it
 applies to `ExcelCsv.writeFile` only — a Node `Buffer` encoding (`"utf8"`, `"utf16le"`, `"latin1"`, …); the writers that
 return text or bytes produce UTF-8 and refuse another encoding rather than ignore it. A path that is not one is refused
-with `ExcelArgumentError`; a file the system will not read is an `ExcelFileError` naming a CSV file, with the system's
+with `ExcelArgumentError`; a file the system will not read or write is an `ExcelFileError` naming a CSV file, with the system's
 error as its `cause`.
 
 `documonster/excel/csv` exports the errors its functions throw — `ExcelArgumentError`, `ExcelFileError`,
-`ExcelDownloadError`, `WorksheetNameError`, `InvalidValueTypeError`, `isExcelError`, and `CsvError` / `isCsvError` for
+`ExcelDownloadError`, `ExcelWorksheetNameError`, `ExcelInvalidValueTypeError`, `isExcelError`, and `CsvError` / `isCsvError` for
 text the parser cannot read — as the same class objects `documonster/excel` and `documonster/csv` export.
 `documonster/excel/markdown` does the same with `MarkdownError` / `MarkdownParseError` / `isMarkdownError`, and
 `documonster/excel/formula` with `ExcelArgumentError` / `isExcelError`.
@@ -1681,7 +1681,7 @@ refuses the write outright:
 
 ```typescript
 await Workbook.toBuffer(workbook, { format: "xlsb" });
-// ExcelNotSupportedError: 3 item(s) carry content this writer cannot express:
+// ExcelUnsupportedFeatureError: 3 item(s) carry content this writer cannot express:
 //   Sheet1!A1: formula, Sheet1: table, Sheet1: border (12).
 //   Pass { unsupported: "ignore" } to write the workbook without them.
 ```
@@ -1969,7 +1969,7 @@ it costs something rather than discovered later in Excel.
   needed `PtgList`, the second only a lowering step. Both are described below.
 
 - **Streaming writes, in both containers.** `Workbook.toBuffer`, `writeFile` and `toStream` accept
-  `format: "xlsb"`, `read`/`readWithDiagnostics` detect it, and `createStreamWriter` now takes
+  `format: "xlsb"`, `read`/`readWithDiagnostics` detect it, and `Stream.WorkbookWriter` now takes
   `format: "xlsb"` as well — rows are encoded and handed to the ZIP as they are committed, so
   `pnpm benchmark:xlsb-scale` writes ten million cells to a 95 MB `.xlsb`.
 
@@ -2671,6 +2671,17 @@ before resolving. Prefer leaving the final worksheet open and calling `await wor
 If you explicitly call `sheet.commit()`, always follow it with and await `workbook.commit()`; the
 sheet call alone only closes input and does not mean that its bytes have reached the destination.
 
+`commit()` ends the `filename` or `stream` the writer was given. Given neither, the writer keeps the package
+itself and `toBuffer()` returns it — committing first if needed, and refusing with `ExcelStreamStateError` when
+the bytes went to a `filename` or `stream`:
+
+```typescript
+const writer = new Stream.WorkbookWriter();
+const rows = writer.addWorksheet("Data");
+Stream.commitRow(rows.addRow([1, 2, 3]));
+const bytes = await writer.toBuffer();
+```
+
 ### Web Streams (Node.js 22+ and Browsers)
 
 ```typescript
@@ -2781,7 +2792,7 @@ Mixing them is a compile error rather than a silent misread: `Cell.getValue(ws,
 to type-check and throw at runtime. Both are now rejected.
 
 A position outside the grid — row 0, column 16 385, `"ZZ0"` — is refused before anything changes, by getters and
-setters alike, with `RowOutOfBoundsError`, `ColumnOutOfBoundsError` or `InvalidAddressError`. All three are
+setters alike, with `ExcelRowOutOfBoundsError`, `ExcelColumnOutOfBoundsError` or `ExcelInvalidAddressError`. All three are
 `ExcelArgumentError`s whose `field` names the parameter (`row`, `col`, `addr`), so the one `catch` written for bad input
 catches them. A read reports the same positions found in a _file_ as the reader's parse error instead — an
 `XlsxParseError` naming the part (`XlsbParseError` for XLSB, `ExcelFileError` naming the row for CSV and Markdown), the
@@ -3099,7 +3110,7 @@ Documonster is published as subpath entry points — there is no bare
 
 ```typescript
 // Excel domain errors — from documonster/excel
-import { ExcelError, isExcelError, ImageError, TableError } from "documonster/excel";
+import { ExcelError, isExcelError, ExcelImageError, ExcelTableError } from "documonster/excel";
 
 // PDF export + PDF errors — from documonster/pdf
 import { Pdf, PdfError, isPdfError } from "documonster/pdf";

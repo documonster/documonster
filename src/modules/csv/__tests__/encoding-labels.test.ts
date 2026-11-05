@@ -20,7 +20,7 @@ describe("CSV encoding labels", () => {
   });
 
   it("the parser stream refuses it when it is created", () => {
-    expect(() => Csv.createParserStream({ encoding: BOGUS })).toThrow(CsvError);
+    expect(() => new Csv.ParserStream({ encoding: BOGUS })).toThrow(CsvError);
   });
 
   it("keeps decoding with a real label", async () => {

@@ -12,32 +12,20 @@
  * This is a flat-named-export module; `excel/index.ts` re-exports it via
  * `export * as Cell`, which tree-shakes per-member on rolldown / rspack.
  */
-import type {
-  CellData,
-  CellModel,
-  CellView,
-  CellValueInputType,
-  CellValueType,
-  FormulaResult,
-  NoteConfig
-} from "@excel/core/cell";
+import type { CellData, CellModel, CellView, FormulaResult, NoteConfig } from "@excel/core/cell";
 import {
   checkCellValue,
   checkFormulaResult,
   checkSharedFormulaAt,
   cellAddName,
-  cellAlignment,
   cellDateKind,
   cellGetDateParts,
   cellGetTemporal,
   cellSetDateParts,
   validateDateParts,
-  cellBorder,
   cellComment,
   cellDisplayText,
   cellEffectiveType,
-  cellFill,
-  cellFont,
   cellFormula,
   cellGetModel,
   cellGetStyle,
@@ -48,7 +36,6 @@ import {
   cellMaster,
   cellNote,
   cellNumFmt,
-  cellProtection,
   cellResult,
   cellSetAlignment,
   cellSetBorder,
@@ -92,12 +79,14 @@ import {
   resolveAddress
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { ExcelArgumentError, InvalidAddressError } from "@excel/errors";
+import { ExcelArgumentError, ExcelInvalidAddressError } from "@excel/errors";
 import { checkDataValidationRule, checkNote } from "@excel/surface/argument-checks";
 import { checkCellModel } from "@excel/surface/model-checks";
 import type {
   Alignment,
   Borders,
+  CellValue,
+  CellValueInput,
   DecodedAddress,
   DataValidationRule,
   Fill,
@@ -108,7 +97,7 @@ import type {
 } from "@excel/types";
 import { argumentChecks } from "@excel/utils/arguments";
 import type { DateFormatKind } from "@excel/utils/cell-format";
-import { copyStyle } from "@excel/utils/copy-style";
+import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
 import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
 import type { ExcelDateTimeParts } from "@utils/excel-serial";
 
@@ -142,7 +131,7 @@ function target(
  */
 function rowNumber(addr: string | number): number {
   if (typeof addr !== "number") {
-    throw new InvalidAddressError(
+    throw new ExcelInvalidAddressError(
       String(addr),
       'the (row, col) form takes a row number; an "A1" address takes no column'
     );
@@ -186,20 +175,12 @@ function addressOf(
 }
 
 /**
- * The cell for a reader that hands a *style facet* back to the caller, without creating it.
+ * The cell for {@link getModel}, which hands the cell's live model back without creating it.
  *
- * A cell's facets may be shared — with the row/column snapshot it inherited, with
- * sibling cells sharing that snapshot, or with whoever passed the facet to a setter —
- * so a reader that lets the caller reach one has to give the cell its own copy first
- * or `Cell.getFont(a).bold = x` would reach every cell in the column.
- *
- * This is the only boundary where that happens. Core internals and both writers read
- * the shared facets directly, which is what keeps a styled sheet's memory flat.
- *
- * An existing cell's facet stays live, as it always was. An absent cell is previewed
- * rather than created ({@link previewCell}): the reader reports what the cell would
- * inherit, and editing that copy changes nothing — {@link getStyle} is the reader that
- * creates the cell for editing.
+ * A cell's facets may be shared — with the row/column snapshot it inherited, with sibling cells sharing that
+ * snapshot, or with whoever passed the facet to a setter — so before the model reaches the caller the cell gets its
+ * own copy, or an edit would reach every cell in the column. An absent cell is previewed rather than created
+ * ({@link previewCell}).
  */
 function own(
   ws: WorksheetData,
@@ -213,6 +194,26 @@ function own(
   const cell = argc >= 3 ? previewCell(ws, rowNumber(addr), col) : previewCell(ws, addr);
   cellOwnStyle(cell);
   return cell;
+}
+
+/**
+ * A copy of one style facet of a cell, for the per-facet readers. The cell is previewed, never created, and the
+ * answer is a copy whether or not the cell exists — so editing it changes nothing, as with `Row`/`Column`. A facet is
+ * changed with its setter, or in place through the live record {@link getStyle} returns.
+ */
+function facet<K extends keyof Style>(
+  ws: WorksheetData,
+  addr: string | number,
+  col: number | undefined,
+  argc: number,
+  key: K
+): Style[K] | undefined {
+  if ((ws as { _rows?: unknown } | null | undefined)?._rows === undefined) {
+    checkWorksheet(ws);
+  }
+  const cell = argc >= 3 ? previewCell(ws, rowNumber(addr), col) : previewCell(ws, addr);
+  const value = cell.style[key];
+  return value === undefined ? undefined : copyStyleFacet(key, value);
 }
 
 /**
@@ -253,10 +254,10 @@ function checkCellName(ws: WorksheetData, where: string, name: unknown): void {
 // --- value / type / text ---
 
 /** Read a cell value by `"A1"` address. */
-export function getValue(ws: WorksheetData, addr: string): CellValueType;
+export function getValue(ws: WorksheetData, addr: string): CellValue;
 /** Read a cell value by 1-based (row, col). */
-export function getValue(ws: WorksheetData, row: number, col: number): CellValueType;
-export function getValue(ws: WorksheetData, addr: string | number, col?: number): CellValueType {
+export function getValue(ws: WorksheetData, row: number, col: number): CellValue;
+export function getValue(ws: WorksheetData, addr: string | number, col?: number): CellValue {
   const cell = peek(ws, addr, col, arguments.length);
   return cell ? cellGetValue(cell) : null;
 }
@@ -269,38 +270,24 @@ export function getValue(ws: WorksheetData, addr: string | number, col?: number)
  * `text` and `tooltip` are text), an error (`{ error: "#N/A" }` — one of Excel's error literals) and a checkbox. An
  * object or array of none of those shapes is stored as its JSON text, as it always has been.
  */
-export function setValue(ws: WorksheetData, addr: string, value: CellValueInputType): void;
+export function setValue(ws: WorksheetData, addr: string, value: CellValueInput): void;
 /** Set a cell value by 1-based (row, col). */
-export function setValue(
-  ws: WorksheetData,
-  row: number,
-  col: number,
-  value: CellValueInputType
-): void;
+export function setValue(ws: WorksheetData, row: number, col: number, value: CellValueInput): void;
 export function setValue(
   ws: WorksheetData,
   addr: string | number,
-  valueOrCol: CellValueInputType,
-  value?: CellValueInputType
+  valueOrCol: CellValueInput,
+  value?: CellValueInput
 ): void {
   const argc = arguments.length;
-  const [cell, resolved] = targetWithValue<CellValueInputType>(
-    ws,
-    addr,
-    valueOrCol,
-    value,
-    argc,
-    v => {
-      const site = { where: "Cell.setValue", field: "value" };
-      checkCellValue(v, site);
-      // A shared formula's master is checked before the cell is created, so a refusal leaves nothing behind.
-      const at =
-        argc >= 4
-          ? addressOf(ws, addr, valueOrCol as number, 3)
-          : addressOf(ws, addr, undefined, 2);
-      checkSharedFormulaAt(ws, at.row, at.col, v, site);
-    }
-  );
+  const [cell, resolved] = targetWithValue<CellValueInput>(ws, addr, valueOrCol, value, argc, v => {
+    const site = { where: "Cell.setValue", field: "value" };
+    checkCellValue(v, site);
+    // A shared formula's master is checked before the cell is created, so a refusal leaves nothing behind.
+    const at =
+      argc >= 4 ? addressOf(ws, addr, valueOrCol as number, 3) : addressOf(ws, addr, undefined, 2);
+    checkSharedFormulaAt(ws, at.row, at.col, v, site);
+  });
   cellSetValue(cell, resolved);
 }
 // --- dates as calendar values ---
@@ -789,9 +776,17 @@ export function removeName(
   argumentChecks("Cell.removeName").string("name", resolved);
   return definedNamesRemoveEx(getSheetWorkbook(ws)._definedNames, address, resolved);
 }
-/** Replace a cell's defined names with one by `"A1"` address. */
+/**
+ * Replace a cell's defined names with one by `"A1"` address.
+ *
+ * @deprecated Use {@link setNames} with a one-name array: `setNames(ws, addr, [name])`. Removed in 1.0.
+ */
 export function setName(ws: WorksheetData, addr: string, name: string): void;
-/** Replace a cell's defined names with one by 1-based (row, col). */
+/**
+ * Replace a cell's defined names with one by 1-based (row, col).
+ *
+ * @deprecated Use {@link setNames} with a one-name array: `setNames(ws, row, col, [name])`. Removed in 1.0.
+ */
 export function setName(ws: WorksheetData, row: number, col: number, name: string): void;
 export function setName(
   ws: WorksheetData,
@@ -840,10 +835,10 @@ export function setNames(
   cellSetNames(cell, [...resolved]);
 }
 /** Remove every defined name from a cell by `"A1"` address. */
-export function removeAllNames(ws: WorksheetData, addr: string): void;
+export function clearNames(ws: WorksheetData, addr: string): void;
 /** Remove every defined name from a cell by 1-based (row, col). */
-export function removeAllNames(ws: WorksheetData, row: number, col: number): void;
-export function removeAllNames(ws: WorksheetData, addr: string | number, col?: number): void {
+export function clearNames(ws: WorksheetData, row: number, col: number): void;
+export function clearNames(ws: WorksheetData, addr: string | number, col?: number): void {
   // See `removeName`: the names are keyed by sheet name, so a removed sheet's handle is refused.
   checkWorksheet(ws);
   checkWorksheetAttached(ws);
@@ -852,6 +847,8 @@ export function removeAllNames(ws: WorksheetData, addr: string | number, col?: n
     addressOf(ws, addr, col, arguments.length)
   );
 }
+/** @deprecated Use {@link clearNames}. Removed in 1.0. */
+export const removeAllNames = clearNames;
 
 // --- data validation ---
 
@@ -946,16 +943,16 @@ export function setModel(
 
 // --- individual style facets (getters + setters) ---
 
-/** Read a cell's font by `"A1"` address. */
+/** A copy of a cell's font by `"A1"` address. Creates nothing; editing the copy changes nothing — change it with {@link setFont}. */
 export function getFont(ws: WorksheetData, addr: string): Partial<Font> | undefined;
-/** Read a cell's font by 1-based (row, col). */
+/** A copy of a cell's font by 1-based (row, col). See the `"A1"` form. */
 export function getFont(ws: WorksheetData, row: number, col: number): Partial<Font> | undefined;
 export function getFont(
   ws: WorksheetData,
   addr: string | number,
   col?: number
 ): Partial<Font> | undefined {
-  return cellFont(own(ws, addr, col, arguments.length));
+  return facet(ws, addr, col, arguments.length, "font");
 }
 /** Set a cell's font by `"A1"` address. */
 export function setFont(ws: WorksheetData, addr: string, value: Partial<Font> | undefined): void;
@@ -993,10 +990,12 @@ export function getNumFmt(
 ): string | NumFmt | undefined {
   const cell = peek(ws, addr, col, arguments.length);
   if (cell) {
-    return cellNumFmt(cell);
+    const numFmt = cellNumFmt(cell);
+    return numFmt === undefined ? undefined : copyStyleFacet("numFmt", numFmt);
   }
   const { row, col: column } = addressOf(ws, addr, col, arguments.length);
-  return inheritedNumFmt(ws, row, column);
+  const inherited = inheritedNumFmt(ws, row, column);
+  return inherited === undefined ? undefined : copyStyleFacet("numFmt", inherited);
 }
 /** Set a cell's number format by `"A1"` address. */
 export function setNumFmt(
@@ -1027,9 +1026,9 @@ export function setNumFmt(
   );
   cellSetNumFmt(cell, resolved);
 }
-/** Read a cell's alignment by `"A1"` address. */
+/** A copy of a cell's alignment by `"A1"` address. Creates nothing; editing the copy changes nothing — change it with {@link setAlignment}. */
 export function getAlignment(ws: WorksheetData, addr: string): Partial<Alignment> | undefined;
-/** Read a cell's alignment by 1-based (row, col). */
+/** A copy of a cell's alignment by 1-based (row, col). See the `"A1"` form. */
 export function getAlignment(
   ws: WorksheetData,
   row: number,
@@ -1040,7 +1039,7 @@ export function getAlignment(
   addr: string | number,
   col?: number
 ): Partial<Alignment> | undefined {
-  return cellAlignment(own(ws, addr, col, arguments.length));
+  return facet(ws, addr, col, arguments.length, "alignment");
 }
 /** Set a cell's alignment by `"A1"` address. */
 export function setAlignment(
@@ -1071,9 +1070,9 @@ export function setAlignment(
   );
   cellSetAlignment(cell, resolved);
 }
-/** Read a cell's borders by `"A1"` address. */
+/** A copy of a cell's borders by `"A1"` address. Creates nothing; editing the copy changes nothing — change it with {@link setBorder}. */
 export function getBorder(ws: WorksheetData, addr: string): Partial<Borders> | undefined;
-/** Read a cell's borders by 1-based (row, col). */
+/** A copy of a cell's borders by 1-based (row, col). See the `"A1"` form. */
 export function getBorder(
   ws: WorksheetData,
   row: number,
@@ -1084,7 +1083,7 @@ export function getBorder(
   addr: string | number,
   col?: number
 ): Partial<Borders> | undefined {
-  return cellBorder(own(ws, addr, col, arguments.length));
+  return facet(ws, addr, col, arguments.length, "border");
 }
 /** Set a cell's borders by `"A1"` address. */
 export function setBorder(
@@ -1115,12 +1114,12 @@ export function setBorder(
   );
   cellSetBorder(cell, resolved);
 }
-/** Read a cell's fill by `"A1"` address. */
+/** A copy of a cell's fill by `"A1"` address. Creates nothing; editing the copy changes nothing — change it with {@link setFill}. */
 export function getFill(ws: WorksheetData, addr: string): Fill | undefined;
-/** Read a cell's fill by 1-based (row, col). */
+/** A copy of a cell's fill by 1-based (row, col). See the `"A1"` form. */
 export function getFill(ws: WorksheetData, row: number, col: number): Fill | undefined;
 export function getFill(ws: WorksheetData, addr: string | number, col?: number): Fill | undefined {
-  return cellFill(own(ws, addr, col, arguments.length));
+  return facet(ws, addr, col, arguments.length, "fill");
 }
 /** Set a cell's fill by `"A1"` address. */
 export function setFill(ws: WorksheetData, addr: string, value: Fill | undefined): void;
@@ -1142,9 +1141,9 @@ export function setFill(
   );
   cellSetFill(cell, resolved);
 }
-/** Read a cell's protection by `"A1"` address. */
+/** A copy of a cell's protection by `"A1"` address. Creates nothing; editing the copy changes nothing — change it with {@link setProtection}. */
 export function getProtection(ws: WorksheetData, addr: string): Partial<Protection> | undefined;
-/** Read a cell's protection by 1-based (row, col). */
+/** A copy of a cell's protection by 1-based (row, col). See the `"A1"` form. */
 export function getProtection(
   ws: WorksheetData,
   row: number,
@@ -1155,7 +1154,7 @@ export function getProtection(
   addr: string | number,
   col?: number
 ): Partial<Protection> | undefined {
-  return cellProtection(own(ws, addr, col, arguments.length));
+  return facet(ws, addr, col, arguments.length, "protection");
 }
 /** Set a cell's protection by `"A1"` address. */
 export function setProtection(
@@ -1393,8 +1392,5 @@ export function view(cell: CellData): CellView {
 
 // --- types ---
 
-/**
- * A value read out of a cell — what {@link getValue} returns, and the element
- * type of the matrix `Range.getValues` returns.
- */
-export type Value = CellValueType;
+/** @deprecated Use the flat `CellValue` type. Removed in 1.0. */
+export type Value = CellValue;

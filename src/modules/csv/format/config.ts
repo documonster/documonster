@@ -89,7 +89,7 @@ export interface FormatFieldContext {
   decimalSeparator: DecimalSeparator;
   /** Type transform map */
   transform?: TypeTransformMap;
-  /** The public call an argument error names (`Csv.format`, `Csv.createFormatterStream`). */
+  /** The public call an argument error names (`Csv.format`, `new Csv.FormatterStream`). */
   where: string;
 }
 
@@ -135,7 +135,7 @@ export interface FormatConfig {
   regex: CsvFormatRegex;
   shouldQuoteColumn: QuoteLookupFn;
   shouldQuoteHeader: QuoteLookupFn;
-  /** The public call an argument error names (`Csv.format`, `Csv.createFormatterStream`). */
+  /** The public call an argument error names (`Csv.format`, `new Csv.FormatterStream`). */
   where: string;
 }
 

@@ -2412,7 +2412,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "S")!)[0];
     const series = Chart.getSeries(chart2, 0) as any;
-    // Directly mutate the fill — no call to `setSpPrFill`. Previously
+    // Directly mutate the fill — no call to `withSpPrFill`. Previously
     // this edit was lost.
     series.spPr.fill = { solid: { srgb: "00FF00" } };
     const buf2 = await Workbook.toBuffer(wb2);

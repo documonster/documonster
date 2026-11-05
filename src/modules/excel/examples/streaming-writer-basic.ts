@@ -292,7 +292,7 @@ await streamBothFormats(filename, { useSharedStrings: false, useStyles: false },
   Stream.setCellValue(ws.getCell("H13"), "Bar");
   Stream.setCellValue(ws.getCell("I13"), "Baz");
   Stream.setCellValue(ws.getCell("H14"), "Baz");
-  // Row.commit(ws.getRow(13));
+  // Stream.commitRow(ws.getRow(13));
 
   ws.commit();
 });

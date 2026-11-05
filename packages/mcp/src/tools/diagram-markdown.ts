@@ -20,9 +20,9 @@
  */
 
 import { Archive } from "documonster/archive";
-import { Draw, Matrix, type DrawList, type RasterFontSource } from "documonster/draw";
+import { Draw, Matrix, type DrawList, type DrawRasterFontSource } from "documonster/draw";
 import type { MermaidRenderOptions } from "documonster/mermaid";
-import type { MarkdownImageData, MarkdownImportOptions } from "documonster/word/markdown";
+import type { DocxMarkdownImageData, DocxMarkdownImportOptions } from "documonster/word/markdown";
 
 import { McpToolError, toolError } from "../errors.js";
 import { planSlices } from "./diagram-slice.js";
@@ -135,7 +135,7 @@ export interface PreparedMarkdown {
    * Pass as `markdownToDocx`'s `resolveImage`. Present only when at least one
    * fence was rendered, so the no-diagram path behaves exactly as before.
    */
-  readonly resolveImage?: MarkdownImportOptions["resolveImage"];
+  readonly resolveImage?: DocxMarkdownImportOptions["resolveImage"];
   /** Lines worth reporting to the caller. */
   readonly notes: readonly string[];
 }
@@ -200,7 +200,7 @@ const DEFAULT_DIAGRAM_FONT_POINTS = 14;
 export async function prepareMarkdownDiagrams(
   markdown: string,
   style: DiagramStyleArgs = {},
-  fonts?: { readonly raster?: readonly RasterFontSource[]; readonly useSystemFonts?: boolean }
+  fonts?: { readonly raster?: readonly DrawRasterFontSource[]; readonly useSystemFonts?: boolean }
 ): Promise<PreparedMarkdown> {
   const fences = findMermaidFences(markdown);
   if (fences.length === 0) {
@@ -218,7 +218,7 @@ export async function prepareMarkdownDiagrams(
   // Only tune a layout the caller has not spoken about.
   const tune =
     style.maxLabelWidth === undefined && style.nodeGap === undefined && style.rankGap === undefined;
-  const images = new Map<string, MarkdownImageData>();
+  const images = new Map<string, DocxMarkdownImageData>();
   const failures: string[] = [];
   /**
    * Code points no available face could draw in any embedded diagram.
@@ -255,7 +255,7 @@ export async function prepareMarkdownDiagrams(
         split.push({ line: fence.line, pieces: cuts.length });
       }
       const parts: string[] = [];
-      const pending: Array<{ url: string; image: MarkdownImageData }> = [];
+      const pending: Array<{ url: string; image: DocxMarkdownImageData }> = [];
       const fenceBudget = { ...budget };
       cuts.forEach((cut, index) => {
         // Paint this viewport, not the whole diagram then crop it. A diagram

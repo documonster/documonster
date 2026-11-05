@@ -16,12 +16,12 @@ import { createInflateStream } from "@archive/compression/streaming-compress";
 import {
   ArchiveError,
   ArchiveLimitError,
-  Crc32MismatchError,
-  DecryptionError,
-  EntrySizeMismatchError,
-  FileTooLargeError,
-  PasswordRequiredError,
-  UnsupportedCompressionError,
+  ZipCrc32MismatchError,
+  ZipDecryptionError,
+  ZipEntrySizeMismatchError,
+  ArchiveFileTooLargeError,
+  ZipPasswordRequiredError,
+  ZipUnsupportedCompressionError,
   throwIfAborted,
   toError,
   toInflateError
@@ -56,7 +56,7 @@ export interface ExtractCoreOptions {
   /** Password for encrypted entries */
   password?: string | Uint8Array;
   /**
-   * Whether to verify each entry's CRC-32 (`Crc32MismatchError`). AES entries carry an
+   * Whether to verify each entry's CRC-32 (`ZipCrc32MismatchError`). AES entries carry an
    * HMAC instead and ZipCrypto entries are always verified.
    * @default true
    */
@@ -107,7 +107,7 @@ function planEntryInflation(
   maxEntrySize: number
 ): EntryInflation {
   if (validateEntrySizes && entry.uncompressedSize > maxEntrySize) {
-    throw new FileTooLargeError(
+    throw new ArchiveFileTooLargeError(
       entry.path,
       `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
         `which exceeds the maximum allowed size of ${maxEntrySize} bytes. ` +
@@ -129,10 +129,16 @@ function translateInflateFailure(err: unknown, plan: EntryInflation): Error {
   }
   const { entry, bound } = plan;
   return plan.validateEntrySizes
-    ? new EntrySizeMismatchError(entry.path, entry.uncompressedSize, undefined, "too-many-bytes", {
-        cause: err
-      })
-    : new FileTooLargeError(entry.path, `inflates beyond ${bound} bytes`, {
+    ? new ZipEntrySizeMismatchError(
+        entry.path,
+        entry.uncompressedSize,
+        undefined,
+        "too-many-bytes",
+        {
+          cause: err
+        }
+      )
+    : new ArchiveFileTooLargeError(entry.path, `inflates beyond ${bound} bytes`, {
         cause: err,
         allowed: bound
       });
@@ -168,14 +174,14 @@ export async function processEntryData(
   // Handle encrypted entries
   if (entry.isEncrypted) {
     if (!password) {
-      throw new PasswordRequiredError(entry.path);
+      throw new ZipPasswordRequiredError(entry.path);
     }
 
     if (entry.encryptionMethod === "aes" && entry.aesKeyStrength) {
       // AES decryption
       const decrypted = await aesDecrypt(compressedData, password, entry.aesKeyStrength);
       if (!decrypted) {
-        throw new DecryptionError(entry.path);
+        throw new ZipDecryptionError(entry.path);
       }
 
       // Decompress if needed (use original compression method)
@@ -188,12 +194,12 @@ export async function processEntryData(
       // ZipCrypto decryption
       const decrypted = zipCryptoDecrypt(compressedData, password, entry.crc32, entry.dosTime);
       if (!decrypted) {
-        throw new DecryptionError(entry.path);
+        throw new ZipDecryptionError(entry.path);
       }
 
       result = await decompressData(decrypted, entry.compressionMethod, plan);
     } else {
-      throw new DecryptionError(entry.path, "Unsupported encryption method");
+      throw new ZipDecryptionError(entry.path, "Unsupported encryption method");
     }
   } else {
     // Non-encrypted entry
@@ -203,7 +209,7 @@ export async function processEntryData(
   // Validate entry size (ZIP bomb protection)
   if (validateEntrySizes && result.length !== entry.uncompressedSize) {
     const reason = result.length > entry.uncompressedSize ? "too-many-bytes" : "too-few-bytes";
-    throw new EntrySizeMismatchError(entry.path, entry.uncompressedSize, result.length, reason);
+    throw new ZipEntrySizeMismatchError(entry.path, entry.uncompressedSize, result.length, reason);
   }
 
   // Validate CRC32
@@ -215,7 +221,7 @@ export async function processEntryData(
   if (shouldCheckCrc) {
     const actualCrc = crc32(result);
     if (actualCrc !== entry.crc32) {
-      throw new Crc32MismatchError(entry.path, entry.crc32, actualCrc);
+      throw new ZipCrc32MismatchError(entry.path, entry.crc32, actualCrc);
     }
   }
 
@@ -253,7 +259,7 @@ export function processEntryDataSync(
   // Handle encrypted entries
   if (entry.isEncrypted) {
     if (!password) {
-      throw new PasswordRequiredError(entry.path);
+      throw new ZipPasswordRequiredError(entry.path);
     }
 
     if (entry.encryptionMethod === "aes") {
@@ -267,7 +273,7 @@ export function processEntryDataSync(
       // ZipCrypto decryption (synchronous)
       const decrypted = zipCryptoDecrypt(compressedData, password, entry.crc32, entry.dosTime);
       if (!decrypted) {
-        throw new DecryptionError(entry.path);
+        throw new ZipDecryptionError(entry.path);
       }
 
       result = decompressDataSync(decrypted, entry.compressionMethod, plan);
@@ -276,10 +282,10 @@ export function processEntryDataSync(
       // (1/256 false positive rate with wrong password per ZIP spec)
       const actualCrc = crc32(result);
       if (actualCrc !== entry.crc32) {
-        throw new Crc32MismatchError(entry.path, entry.crc32, actualCrc);
+        throw new ZipCrc32MismatchError(entry.path, entry.crc32, actualCrc);
       }
     } else {
-      throw new DecryptionError(entry.path, "Unsupported encryption method");
+      throw new ZipDecryptionError(entry.path, "Unsupported encryption method");
     }
   } else {
     // Non-encrypted entry
@@ -289,14 +295,14 @@ export function processEntryDataSync(
   // Validate entry size (ZIP bomb protection)
   if (validateEntrySizes && result.length !== entry.uncompressedSize) {
     const reason = result.length > entry.uncompressedSize ? "too-many-bytes" : "too-few-bytes";
-    throw new EntrySizeMismatchError(entry.path, entry.uncompressedSize, result.length, reason);
+    throw new ZipEntrySizeMismatchError(entry.path, entry.uncompressedSize, result.length, reason);
   }
 
   // ZipCrypto was verified above; AES cannot reach here
   if (checkCrc32 && !entry.isEncrypted) {
     const actualCrc = crc32(result);
     if (actualCrc !== entry.crc32) {
-      throw new Crc32MismatchError(entry.path, entry.crc32, actualCrc);
+      throw new ZipCrc32MismatchError(entry.path, entry.crc32, actualCrc);
     }
   }
 
@@ -322,7 +328,7 @@ async function decompressData(
       throw translateInflateFailure(err, plan);
     }
   }
-  throw new UnsupportedCompressionError(compressionMethod);
+  throw new ZipUnsupportedCompressionError(compressionMethod);
 }
 
 async function* decryptZipCryptoStream(
@@ -362,7 +368,7 @@ async function* decryptZipCryptoStream(
       const crcHighByte = (entry.crc32 >>> 24) & 0xff;
       const timeHighByte = entry.dosTime !== undefined ? (entry.dosTime >>> 8) & 0xff : -1;
       if (lastPlain !== crcHighByte && lastPlain !== timeHighByte) {
-        throw new DecryptionError(entry.path);
+        throw new ZipDecryptionError(entry.path);
       }
 
       verified = true;
@@ -381,7 +387,7 @@ async function* decryptZipCryptoStream(
   }
 
   if (!verified) {
-    throw new DecryptionError(entry.path);
+    throw new ZipDecryptionError(entry.path);
   }
 }
 
@@ -594,7 +600,7 @@ async function* validateSizeStream(
       totalBytes += chunk.length;
       // Early abort if too many bytes (ZIP bomb protection)
       if (totalBytes > expectedSize) {
-        throw new EntrySizeMismatchError(entry.path, expectedSize, totalBytes, "too-many-bytes");
+        throw new ZipEntrySizeMismatchError(entry.path, expectedSize, totalBytes, "too-many-bytes");
       }
       yield chunk;
     }
@@ -602,7 +608,7 @@ async function* validateSizeStream(
 
   // Check if too few bytes at the end
   if (totalBytes < expectedSize) {
-    throw new EntrySizeMismatchError(entry.path, expectedSize, totalBytes, "too-few-bytes");
+    throw new ZipEntrySizeMismatchError(entry.path, expectedSize, totalBytes, "too-few-bytes");
   }
 }
 
@@ -622,7 +628,7 @@ async function* validateCrc32Stream(
   }
   const actual = crc32Finalize(crc);
   if (actual !== entry.crc32) {
-    throw new Crc32MismatchError(entry.path, entry.crc32, actual);
+    throw new ZipCrc32MismatchError(entry.path, entry.crc32, actual);
   }
 }
 
@@ -686,7 +692,7 @@ export function processEntryDataStream(
     // Encrypted cases
     if (entry.isEncrypted) {
       if (!password) {
-        throw new PasswordRequiredError(entry.path);
+        throw new ZipPasswordRequiredError(entry.path);
       }
 
       if (entry.encryptionMethod === "aes" && entry.aesKeyStrength) {
@@ -701,7 +707,12 @@ export function processEntryDataStream(
         // Validate size for AES entries (already fully buffered)
         if (validateEntrySizes && out.length !== entry.uncompressedSize) {
           const reason = out.length > entry.uncompressedSize ? "too-many-bytes" : "too-few-bytes";
-          throw new EntrySizeMismatchError(entry.path, entry.uncompressedSize, out.length, reason);
+          throw new ZipEntrySizeMismatchError(
+            entry.path,
+            entry.uncompressedSize,
+            out.length,
+            reason
+          );
         }
 
         if (out.length) {
@@ -719,7 +730,7 @@ export function processEntryDataStream(
         } else if (entry.compressionMethod === COMPRESSION_DEFLATE) {
           outStream = inflateRawStream(decrypted, { signal });
         } else {
-          throw new UnsupportedCompressionError(entry.compressionMethod);
+          throw new ZipUnsupportedCompressionError(entry.compressionMethod);
         }
 
         // Apply validation streams - always check CRC32 for ZipCrypto
@@ -761,7 +772,7 @@ export function processEntryDataStream(
     } else if (entry.compressionMethod === COMPRESSION_DEFLATE) {
       outStream = inflateRawStream(compressedData, { signal });
     } else {
-      throw new UnsupportedCompressionError(entry.compressionMethod);
+      throw new ZipUnsupportedCompressionError(entry.compressionMethod);
     }
 
     // Apply validation streams using centralized helper
@@ -798,7 +809,7 @@ function decompressDataSync(
       throw translateInflateFailure(err, plan);
     }
   }
-  throw new UnsupportedCompressionError(compressionMethod);
+  throw new ZipUnsupportedCompressionError(compressionMethod);
 }
 
 /**

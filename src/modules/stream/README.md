@@ -52,7 +52,7 @@ import { pipeline, Streams } from "documonster/stream";
 // Create a pipeline that doubles numbers
 const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
 const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(source, double, collector);
 console.log(collector.chunks); // [2, 4, 6, 8, 10]
@@ -309,7 +309,7 @@ Collects all data from a stream into an array.
 import { pipeline, finished, Streams } from "documonster/stream";
 
 // Collect objects
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 collector.write(1);
 collector.write(2);
 collector.write(3);
@@ -320,13 +320,13 @@ console.log(collector.chunks); // [1, 2, 3]
 
 // Use in pipeline
 const source = Streams.createReadableFromArray(["a", "b", "c"], { objectMode: true });
-const collector2 = Streams.createCollector<string>({ objectMode: true });
+const collector2 = new Streams.Collector<string>({ objectMode: true });
 
 await pipeline(source, collector2);
 console.log(collector2.chunks); // ["a", "b", "c"]
 
 // Collect binary data and convert
-const binaryCollector = Streams.createCollector<Uint8Array>();
+const binaryCollector = new Streams.Collector<Uint8Array>();
 binaryCollector.write(new Uint8Array([1, 2, 3]));
 binaryCollector.write(new Uint8Array([4, 5, 6]));
 binaryCollector.end();
@@ -345,7 +345,7 @@ A transform stream with pull-based reading and pattern matching. Useful for pars
 ```typescript
 import { Streams } from "documonster/stream";
 
-const pull = Streams.createPullStream();
+const pull = new Streams.PullStream();
 
 // Write data
 pull.write(Buffer.from("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"));
@@ -375,7 +375,7 @@ console.log(pull.matchPosition);
 **Pattern Matching:**
 
 ```typescript
-const pull = Streams.createPullStream();
+const pull = new Streams.PullStream();
 pull.write(Buffer.from("key1=value1&key2=value2"));
 pull.end();
 
@@ -395,7 +395,7 @@ Duplex stream with efficient internal buffering.
 ```typescript
 import { Streams } from "documonster/stream";
 
-const buffered = Streams.createBufferedStream();
+const buffered = new Streams.BufferedStream();
 
 // Write various data types
 buffered.write("Hello ");
@@ -496,7 +496,7 @@ const filter = Streams.createTransform<number, number>(
   { objectMode: true }
 );
 const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 // Chain multiple streams
 await pipeline(source, filter, double, collector);
@@ -530,7 +530,7 @@ await finished(readable);
 console.log("Stream completed");
 
 // Also works with writables
-const writable = Streams.createCollector();
+const writable = new Streams.Collector();
 writable.write("data");
 writable.end();
 await finished(writable);
@@ -558,7 +558,7 @@ const square = Streams.createTransform<number, number>(n => n * n, { objectMode:
 const combined = compose(addOne, double, square);
 
 const source = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(source, combined, collector);
 console.log(collector.chunks); // [16, 36, 64]
@@ -954,7 +954,7 @@ badTransform.on("error", err => {
 stream.destroy(new Error("Manual destruction"));
 ```
 
-An argument this module refuses is a `StreamTypeError` or `UnsupportedStreamTypeError` (both
+An argument this module refuses is a `StreamArgumentError` or `StreamUnsupportedTypeError` (both
 `StreamError`s, so `isStreamError` answers for them): `field` names the argument
 (`options.highWaterMark`, `stream`) and the message starts with the call (`Streams.bytes: …`).
 An aborted stream fails with `AbortError`, the same class `documonster/archive` exports; it is
@@ -1020,7 +1020,7 @@ const toCsv = Streams.createTransform<Person, string>(row => `${row.name},${row.
   objectMode: true
 });
 
-const collector = Streams.createCollector<string>({ objectMode: true });
+const collector = new Streams.Collector<string>({ objectMode: true });
 
 await pipeline(source, toCsv, collector);
 console.log(collector.chunks.join(""));
@@ -1043,7 +1043,7 @@ const filterEven = Streams.createTransform<number, number>(
 
 const square = Streams.createTransform<number, number>(n => n * n, { objectMode: true });
 
-const collector = Streams.createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(numbers, filterEven, square, collector);
 console.log(collector.chunks); // [4, 16, 36, 64, 100]
@@ -1071,7 +1071,7 @@ const fetchData = Streams.createTransform<string, object>(
   { objectMode: true }
 );
 
-const collector = Streams.createCollector<object>({ objectMode: true });
+const collector = new Streams.Collector<object>({ objectMode: true });
 
 await pipeline(urls, fetchData, collector);
 console.log(collector.chunks); // Array of user objects
@@ -1085,7 +1085,7 @@ console.log(collector.chunks); // Array of user objects
 import { Streams } from "documonster/stream";
 
 // Parse a simple protocol: LENGTH:DATA
-const pull = Streams.createPullStream();
+const pull = new Streams.PullStream();
 pull.write(Buffer.from("5:Hello3:World"));
 pull.end();
 
@@ -1141,7 +1141,7 @@ const response = await fetch("/api/large-data");
 // `pipeline` directly — it accepts Web streams as they are)
 const readable = Streams.fromWebReadable(response.body!);
 
-const collector = Streams.createCollector<Uint8Array>();
+const collector = new Streams.Collector<Uint8Array>();
 
 await pipeline(readable, collector);
 const data = collector.toUint8Array();
@@ -1153,20 +1153,20 @@ const data = collector.toUint8Array();
 
 ### Classes
 
-| Class                                               | Description                             |
-| --------------------------------------------------- | --------------------------------------- |
-| `Readable`                                          | Readable stream class                   |
-| `Writable`                                          | Writable stream class                   |
-| `Transform`                                         | Transform stream class                  |
-| `Duplex`                                            | Duplex stream class                     |
-| `PassThrough`                                       | Pass-through transform (no-op)          |
-| `Streams.Collector` / `createCollector()`           | Collects stream data into array         |
-| `Streams.PullStream` / `createPullStream()`         | Pull-based stream with pattern matching |
-| `Streams.BufferedStream` / `createBufferedStream()` | Stream with internal buffering          |
-| `new Streams.ChunkedBuilder()`                      | Efficient string builder                |
-| `new Streams.TransactionalChunkedBuilder()`         | Builder with snapshot/rollback          |
-| `Streams.createStringChunk()`                       | String data chunk factory               |
-| `Streams.createByteChunk()`                         | Binary data chunk factory               |
+| Class                                       | Description                             |
+| ------------------------------------------- | --------------------------------------- |
+| `Readable`                                  | Readable stream class                   |
+| `Writable`                                  | Writable stream class                   |
+| `Transform`                                 | Transform stream class                  |
+| `Duplex`                                    | Duplex stream class                     |
+| `PassThrough`                               | Pass-through transform (no-op)          |
+| `new Streams.Collector()`                   | Collects stream data into array         |
+| `new Streams.PullStream()`                  | Pull-based stream with pattern matching |
+| `new Streams.BufferedStream()`              | Stream with internal buffering          |
+| `new Streams.ChunkedBuilder()`              | Efficient string builder                |
+| `new Streams.TransactionalChunkedBuilder()` | Builder with snapshot/rollback          |
+| `Streams.createStringChunk()`               | String data chunk factory               |
+| `Streams.createByteChunk()`                 | Binary data chunk factory               |
 
 The classes themselves are public values (`Streams.Collector`, `Streams.PullStream`, …) for
 `instanceof` checks and subclassing; the `create*` factories are the usual way to build one.
@@ -1205,9 +1205,6 @@ await sink.end();
 | `Streams.createTransform()`                 | Create transform with function      |
 | `Streams.createDuplex()`                    | Create duplex stream                |
 | `Streams.createPassThrough()`               | Create pass-through transform       |
-| `Streams.createCollector()`                 | Create data collector               |
-| `Streams.createPullStream()`                | Create pull stream                  |
-| `Streams.createBufferedStream()`            | Create buffered stream              |
 | `duplexPair()`                              | Create connected duplex pair        |
 
 ### Utility Functions
@@ -1227,13 +1224,7 @@ await sink.end();
 
 ### Binary Utilities
 
-These helpers are re-exported from `documonster/archive` (not `documonster/stream`).
-
-| Function               | Description             |
-| ---------------------- | ----------------------- |
-| `stringToUint8Array()` | Convert string to bytes |
-| `uint8ArrayToString()` | Convert bytes to string |
-| `concatUint8Arrays()`  | Concatenate arrays      |
+Use the platform built-ins — see [Binary Utilities](#binary-utilities) above.
 
 ### Type Guards
 

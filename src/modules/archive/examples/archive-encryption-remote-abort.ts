@@ -9,8 +9,8 @@
  * - Random-access / "remote" ZIP reading via Archive.RemoteZipReader.fromReader, fed by an
  *   in-memory RandomAccessReader from Archive.createBufferReader (no network):
  *   fromReader() / getEntries() / extract() / getStats() / close().
- * - Abort signals: Archive.throwIfAborted / Archive.isAbortError /
- *   Archive.createAbortError, with an AbortController cancelling a streaming
+ * - Abort signals: Archive.throwIfAborted and the flat AbortError / isAbortError,
+ *   with an AbortController cancelling a streaming
  *   ZipArchive.operation({ signal }) mid-flight.
  *
  * Usage: pnpm example --filter archive-encryption-remote-abort
@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Archive } from "../index";
+import { AbortError, Archive, isAbortError } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -154,7 +154,7 @@ console.log("  close(): reader released");
 // 4. Abort signals
 // =============================================================================
 //
-// throwIfAborted / isAbortError / createAbortError, plus a real abort flowing
+// throwIfAborted / isAbortError / new AbortError, plus a real abort flowing
 // through a streaming ZipArchive.operation({ signal }).
 
 console.log("\n4. Abort signals:");
@@ -168,12 +168,12 @@ standaloneController.abort();
 try {
   Archive.throwIfAborted(standaloneController.signal);
 } catch (err) {
-  console.log(`  throwIfAborted (aborted) threw, isAbortError=${Archive.isAbortError(err)}`);
+  console.log(`  throwIfAborted (aborted) threw, isAbortError=${isAbortError(err)}`);
 }
 
-const manualAbort = Archive.createAbortError("manual cancel");
+const manualAbort = new AbortError("manual cancel");
 console.log(
-  `  createAbortError("manual cancel"): name=${manualAbort.name}, isAbortError=${Archive.isAbortError(manualAbort)}`
+  `  new AbortError("manual cancel"): name=${manualAbort.name}, isAbortError=${isAbortError(manualAbort)}`
 );
 
 // 4b. Abort a streaming ZIP operation mid-flight.
@@ -199,7 +199,7 @@ try {
   }
   console.log("  streaming op completed without abort (unexpected)");
 } catch (err) {
-  aborted = Archive.isAbortError(err);
+  aborted = isAbortError(err);
   console.log(
     `  streaming ZipArchive.operation aborted after ${received} bytes, isAbortError=${aborted}`
   );

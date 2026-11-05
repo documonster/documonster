@@ -23,8 +23,10 @@ import {
   Query,
   RenderContext,
   Security,
+  Stream,
   Streaming,
   Template,
+  DocxTemplateError,
   TemplateError,
   Transform,
   Validation
@@ -125,7 +127,11 @@ describe("Template", () => {
     expect(Template.fillTemplate).toBeTypeOf("function");
     expect(Template.listTemplateTags).toBeTypeOf("function");
     expect(Template.isTemplateChart).toBe(Template.isChart);
-    expect(Template.TemplateError).toBe(TemplateError);
+    expect(Template.TemplateError).toBe(DocxTemplateError);
+    expect(TemplateError).toBe(DocxTemplateError);
+    const err = new DocxTemplateError("m", "p", "body");
+    expect(err).toBeInstanceOf(TemplateError);
+    expect(err.name).toBe("DocxTemplateError");
     expect(Io.patchDocument).toBe(Package.patch);
     expect(Io.compileTemplate).toBe(Package.compileTemplate);
     expect(Io.patchTemplate).toBe(Package.patchTemplate);
@@ -247,6 +253,31 @@ describe("Layout", () => {
   });
 });
 
+describe("Stream factories", () => {
+  it("builds the same classes the constructors do", async () => {
+    const writer = Stream.createWriter();
+    expect(writer).toBeInstanceOf(Stream.DocumentWriter);
+    writer.addText("hello");
+    const bytes = await writer.finalize();
+    const direct = new Stream.DocumentWriter();
+    direct.addText("hello");
+    expect((await direct.finalize()).length).toBeGreaterThan(0);
+
+    const reader = Stream.createReader(bytes);
+    expect(reader).toBeInstanceOf(Stream.DocumentReader);
+    const viaFactory: string[] = [];
+    for await (const item of reader) {
+      viaFactory.push(item.type);
+    }
+    const viaClass: string[] = [];
+    for await (const item of new Stream.DocumentReader(bytes)) {
+      viaClass.push(item.type);
+    }
+    expect(viaFactory).toEqual(viaClass);
+    expect(viaFactory).toContain("paragraph");
+  });
+});
+
 describe("Build / Streaming / Glossary / Diff / Validation / Security", () => {
   it("keeps deprecated aliases", () => {
     expect(Build.createShape).toBe(Build.shape);
@@ -267,6 +298,11 @@ describe("Build / Streaming / Glossary / Diff / Validation / Security", () => {
     expect(Convert.toFlatOpc).toBe(Convert.partsToFlatOpc);
     expect(Streaming.createDocxStream).toBe(Streaming.createWriter);
     expect(Streaming.createDocxStreamReader).toBe(Streaming.createReader);
+    // `Streaming` is the deprecated name of the `Stream` namespace; its class
+    // members are the same classes under their old names.
+    expect(Streaming).toBe(Stream);
+    expect(Stream.StreamingDocxWriter).toBe(Stream.DocumentWriter);
+    expect(Stream.StreamingDocxReader).toBe(Stream.DocumentReader);
     expect(Glossary.autoTextEntries).toBe(Glossary.listAutoTextEntries);
     expect(Glossary.quickParts).toBe(Glossary.listQuickParts);
     expect(Diff.documents).toBe(Diff.compare);
@@ -427,14 +463,29 @@ describe("subpath entries", () => {
   it("Crypto keeps deprecated flat names", () => {
     expect(CryptoEntry.isEncryptedDocx).toBe(WordCrypto.isEncrypted);
     expect(CryptoEntry.encryptDocx).toBe(WordCrypto.encrypt);
-    expect(CryptoEntry.isWellFormedSignature).toBe(WordCrypto.isWellFormedSignature);
-    expect(CryptoEntry.parseSignatureXml).toBe(WordCrypto.parseSignature);
-    expect(CryptoEntry.parseEncryptionInfoXml).toBe(WordCrypto.Agile.parseEncryptionInfo);
+    // The namespace members check their arguments; the deprecated flat names keep the
+    // unchecked forms and give the same answer for a valid one.
+    const sigXml = "<Signature><SignedInfo/><SignatureValue/><KeyInfo/></Signature>";
+    const sig = CryptoEntry.parseSignatureXml(sigXml, "sig1.xml");
+    expect(sig).toEqual(WordCrypto.parseSignature(sigXml, "sig1.xml"));
+    expect(CryptoEntry.isWellFormedSignature(sig)).toBe(WordCrypto.isWellFormedSignature(sig));
+    expect(CryptoEntry.isWellFormedSignature(sig)).toBe(true);
     expect(CryptoEntry.AGILE_BLOCK_KEYS).toBe(WordCrypto.Agile.BLOCK_KEYS);
     expect(CryptoEntry.writeCfb).toBe(WordCrypto.Cfb.write);
     expect(CryptoEntry.obfuscateFont).toBe(Font.obfuscate);
     expect(CryptoEntry.deobfuscateFont).toBe(Font.deobfuscate);
     expect(CryptoEntry.generateFontKey).toBe(Font.generateObfuscationKey);
+  });
+
+  it("Crypto keeps parseEncryptionInfoXml, unchecked, with the same answer", async () => {
+    const encrypted = await WordCrypto.encrypt(await Io.toBuffer(sample()), "pw", {
+      spinCount: 10
+    });
+    const infoBytes = WordCrypto.Cfb.read(encrypted).find(e => e.name === "EncryptionInfo")!.data;
+    const xml = new TextDecoder().decode(infoBytes.subarray(8));
+    expect(CryptoEntry.parseEncryptionInfoXml(xml)).toEqual(
+      WordCrypto.Agile.parseEncryptionInfo(xml)
+    );
   });
 
   it("WordCrypto.verifyPassword checks an encrypted file without decrypting it", async () => {
@@ -465,8 +516,9 @@ describe("subpath entries", () => {
     await expect(CryptoEntry.decryptPackage(pkg, info, "pw", 10)).rejects.toThrow(/maximum/);
     expect(CryptoEntry.readCfb(encrypted).map(e => e.name)).toEqual(entries.map(e => e.name));
     const block = WordCrypto.Agile.BLOCK_KEYS.encryptedKey;
+    // The deprecated flat name keeps its (password, info, blockKey) order.
     expect(await CryptoEntry.deriveEncryptionKey("pw", info, block)).toEqual(
-      await WordCrypto.Agile.deriveKey("pw", info, block)
+      await WordCrypto.Agile.deriveKey(info, "pw", block)
     );
     const key = Font.generateObfuscationKey();
     const font = new Uint8Array(64).map((_, i) => i);

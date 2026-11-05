@@ -70,11 +70,10 @@ import {
 import type { PdfResourceDict } from "@pdf/builder/resource-merger";
 import {
   checkMetadataUpdate,
-  checkFontBytes,
+  readFontSourceArgument,
   checkFontOptions,
   checkOptionalEnum,
   pdfBytes,
-  checkOptionalInteger,
   checkOptionalObject,
   checkOptionalString,
   checkPageOptions,
@@ -104,7 +103,7 @@ import {
   PdfXfaFormError
 } from "@pdf/errors";
 import { compilePdfFontConfig } from "@pdf/font/font-config";
-import type { PdfFontConfig } from "@pdf/font/font-config";
+import type { PdfFontConfig, PdfFontSource } from "@pdf/font/font-config";
 import { FontManager } from "@pdf/font/font-manager";
 import { parseTtf } from "@pdf/font/ttf-parser";
 import { extractFormFields } from "@pdf/reader/form-extractor";
@@ -116,6 +115,7 @@ import type { PdfDictValue, PdfObject, PdfRef } from "@pdf/reader/pdf-parser";
 import { getDictStringValue } from "@pdf/reader/reader-utils";
 import { alphaGsName } from "@pdf/render/page-renderer";
 import type { CjkLanguage } from "@utils/cjk";
+import { describeValue } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
 
 // =============================================================================
@@ -139,13 +139,21 @@ export interface EditorReadOptions {
    * {@link PdfEditor.embedFont} is refused: the configuration already names the faces.
    */
   readonly fonts?: PdfFontConfig;
-  /** System font families auto-discovery should prefer, in order — see `Pdf.Builder#preferSystemFonts`. */
+  /**
+   * System font families auto-discovery should prefer, in order — see
+   * `Pdf.Builder#preferSystemFonts`. No effect in a browser, which has no system fonts to
+   * search.
+   */
   readonly preferSystemFonts?: readonly string[];
-  /** The East Asian written language of the drawn text — see `Pdf.Builder#setTextLanguage`. */
+  /**
+   * The East Asian written language of the drawn text — see `Pdf.Builder#setTextLanguage`.
+   * No effect in a browser, which has no system fonts to search.
+   */
   readonly textLanguage?: CjkLanguage;
   /**
    * Turn off the host font scan, for output that does not depend on the fonts installed —
-   * see `Pdf.Builder#disableFontAutoDiscovery`.
+   * see `Pdf.Builder#disableFontAutoDiscovery`. No effect in a browser, which has no such
+   * scan.
    */
   readonly disableFontAutoDiscovery?: boolean;
   /**
@@ -155,9 +163,6 @@ export interface EditorReadOptions {
    */
   readonly onWarning?: (message: string) => void;
 }
-
-/** @deprecated Use {@link EditorReadOptions}. Removed in 1.0. */
-export type LoadOptions = EditorReadOptions;
 
 /** Options every write shares — {@link PdfEditor.toBuffer} and {@link PdfEditor.sign}. */
 export interface EditorWriteOptions {
@@ -190,12 +195,6 @@ export interface EditorWriteOptions {
    */
   encryption?: "keep" | "remove";
 }
-
-/**
- * @deprecated Use {@link EditorToBufferOptions} with `toBuffer()`, or
- * {@link EditorWriteOptions} for what every write shares. Removed in 1.0.
- */
-export type EditorSaveOptions = EditorWriteOptions;
 
 /** Options for {@link PdfEditor.toBuffer}. */
 export interface EditorToBufferOptions extends EditorWriteOptions {
@@ -833,11 +832,11 @@ export class PdfEditor {
    * {@link isPageRemoved} first when it may have been removed.
    *
    * @param index - 0-based index of the page (see the class description)
-   * @throws {PdfStructureError} The index is not an integer, or names no page.
-   * @throws {PdfArgumentError} The page has been removed (field `index`).
+   * @throws {PdfArgumentError} The index is not an integer, names no page, or names a removed
+   *   one (field `index`).
    */
   getPage(index: number): PdfEditorPage {
-    this._checkPageIndex(index);
+    this._checkPageIndex("Pdf.Editor#getPage", index);
     this._checkNotRemoved("Pdf.Editor#getPage", index);
     return index < this._pages.length ? this._pages[index] : this._appendedHandle(index);
   }
@@ -879,10 +878,10 @@ export class PdfEditor {
    * added or copied in before the document is written; writing a document with no pages throws.
    *
    * @param index - 0-based index of the page (see the class description)
-   * @throws {PdfStructureError} The index is not an integer, or names no page.
+   * @throws {PdfArgumentError} The index is not an integer, or names no page (field `index`).
    */
   removePage(index: number): this {
-    this._checkPageIndex(index);
+    this._checkPageIndex("Pdf.Editor#removePage", index);
     this._removedPageIndices.add(index);
     return this;
   }
@@ -892,10 +891,10 @@ export class PdfEditor {
    * added since.
    *
    * @param index - 0-based index of the page (see the class description)
-   * @throws {PdfStructureError} The index is not an integer, or names no page.
+   * @throws {PdfArgumentError} The index is not an integer, or names no page (field `index`).
    */
   isPageRemoved(index: number): boolean {
-    this._checkPageIndex(index);
+    this._checkPageIndex("Pdf.Editor#isPageRemoved", index);
     return this._removedPageIndices.has(index);
   }
 
@@ -903,29 +902,41 @@ export class PdfEditor {
    * @internal - Throw unless `index` names a page: one of the document as it was read, or one
    * added since (numbered after them).
    *
-   * Every bad index is a `PdfStructureError`, the class an index out of range has always
-   * thrown, so one `catch` covers them all. The range is checked first so an index that was
-   * always out of range (`-1`, `Infinity`) keeps the message it had. What is left — a
-   * fraction or `NaN` inside the range — once passed: `getPage` returned `undefined` and
-   * `removePage`/`rotatePage` recorded an edit no page matched. A value that is not a number
-   * at all is checked before the range: `"1"` passed it by coercion.
+   * Every bad index is a `PdfArgumentError` with field `index` — the same class and field as
+   * an index naming a removed page ({@link _checkNotRemoved}), so one `catch` covers every
+   * index the caller got wrong. These were `PdfStructureError`, which describes a malformed
+   * file, not a wrong argument. A fraction or `NaN` inside the range once passed: `getPage`
+   * returned `undefined` and `removePage`/`rotatePage` recorded an edit no page matched. A
+   * value that is not a number at all is checked before the range: `"1"` passed it by
+   * coercion.
    */
-  private _checkPageIndex(index: number): void {
-    if (typeof index !== "number") {
-      throw new PdfStructureError(`Page index must be an integer, got ${describeIndex(index)}`);
+  private _checkPageIndex(where: string, index: number): void {
+    if (typeof index !== "number" || Number.isNaN(index)) {
+      throw new PdfArgumentError(
+        "index",
+        `${where}: index must be an integer, got ${describeIndex(index)}`
+      );
     }
-    if (index < 0 || index >= this._pages.length + this._appendedPages.length) {
-      throw new PdfStructureError(this._outOfRangeMessage(index));
+    const count = this._pages.length + this._appendedPages.length;
+    if (index < 0 || index >= count) {
+      throw new PdfArgumentError(
+        "index",
+        count === 0
+          ? `${where}: index ${index} names no page: the document has no pages`
+          : `${where}: index ${index} names no page (0-${count - 1})`
+      );
     }
     if (!Number.isInteger(index)) {
-      throw new PdfStructureError(`Page index must be an integer, got ${describeIndex(index)}`);
+      throw new PdfArgumentError(
+        "index",
+        `${where}: index must be an integer, got ${describeIndex(index)}`
+      );
     }
   }
 
   /**
    * @internal - Throw when page `index` has been removed: an edit of it was accepted and then
-   * written nowhere. `PdfArgumentError` rather than the index errors' `PdfStructureError`: the
-   * index is a valid one, the request is what cannot be honoured.
+   * written nowhere. The index is a valid one; the request is what cannot be honoured.
    */
   private _checkNotRemoved(where: string, index: number, field = "index"): void {
     if (this._removedPageIndices.has(index)) {
@@ -934,14 +945,6 @@ export class PdfEditor {
         `${where}: page ${index} has been removed (removePage); isPageRemoved() tells`
       );
     }
-  }
-
-  /** @internal - Why `index` names no page. */
-  private _outOfRangeMessage(index: number): string {
-    const count = this._pages.length + this._appendedPages.length;
-    return count === 0
-      ? `Page index ${index} out of range: the document has no pages`
-      : `Page index ${index} out of range (0-${count - 1})`;
   }
 
   /**
@@ -1011,15 +1014,17 @@ export class PdfEditor {
    *
    * @param index - 0-based index of the page (see the class description)
    * @param degrees - Rotation in degrees (must be 0, 90, 180, or 270)
-   * @throws {PdfStructureError} The index is not an integer or names no page, or `degrees`
-   *   is not a quarter turn.
-   * @throws {PdfArgumentError} The page has been removed (field `index`).
+   * @throws {PdfArgumentError} The index is not an integer, names no page or names a removed
+   *   one (field `index`), or `degrees` is not a quarter turn (field `degrees`).
    */
   rotatePage(index: number, degrees: number): this {
-    this._checkPageIndex(index);
+    this._checkPageIndex("Pdf.Editor#rotatePage", index);
     this._checkNotRemoved("Pdf.Editor#rotatePage", index);
     if (degrees !== 0 && degrees !== 90 && degrees !== 180 && degrees !== 270) {
-      throw new PdfStructureError(`Invalid rotation ${degrees}: must be 0, 90, 180, or 270`);
+      throw new PdfArgumentError(
+        "degrees",
+        `Pdf.Editor#rotatePage: degrees must be 0, 90, 180 or 270, got ${describeIndex(degrees)}`
+      );
     }
     this._rotationOverrides.set(index, degrees);
     return this;
@@ -1060,6 +1065,18 @@ export class PdfEditor {
     // included, which meant "every page".
     const where = "Pdf.Editor#splitPages";
     const isOptions = isRecordArgument(optionsOrIndices);
+    // Neither form: the positional list was iterated as given, so a value it cannot iterate
+    // failed there with a `TypeError`.
+    if (
+      !isOptions &&
+      optionsOrIndices != null &&
+      typeof (optionsOrIndices as { [Symbol.iterator]?: unknown })[Symbol.iterator] !== "function"
+    ) {
+      throw new PdfArgumentError(
+        "options",
+        `${where}: options must be an options object { pageIndices }, got ${describeValue(optionsOrIndices)}`
+      );
+    }
     const options: EditorSplitOptions | undefined = isOptions
       ? (optionsOrIndices as EditorSplitOptions)
       : undefined;
@@ -1180,23 +1197,30 @@ export class PdfEditor {
   /**
    * Embed a TrueType font for Unicode/CJK support.
    *
-   * @param fontBytes - Raw .ttf or .ttc file bytes
-   * @param collectionIndex - Which face, for a `.ttc`. Defaults to 0. Overlay text — a
-   *   watermark, a stamp, a page number — is drawn by this library rather than copied from
-   *   the file, so it needs a face like any other text; without a way to name one inside a
-   *   collection, a caller holding a `.ttc` had to embed whichever face happened to be first.
+   * @param source - Raw .ttf or .ttc file bytes, or `{ data, collectionIndex }` to pick a
+   *   face of a `.ttc` (the index defaults to 0). Overlay text — a watermark, a stamp, a page
+   *   number — is drawn by this library rather than copied from the file, so it needs a face
+   *   like any other text; without a way to name one inside a collection, a caller holding a
+   *   `.ttc` had to embed whichever face happened to be first.
+   * @throws {PdfArgumentError} `source` is not font bytes or `{ data, collectionIndex }`, or
+   *   the document was read with `options.fonts`.
    */
-  embedFont(fontBytes: Uint8Array, collectionIndex?: number): this {
-    checkFontBytes("Pdf.Editor#embedFont", fontBytes);
-    checkOptionalInteger("Pdf.Editor#embedFont", "collectionIndex", collectionIndex, 0);
+  embedFont(source: PdfFontSource): this;
+  /**
+   * @deprecated Pass `{ data: fontBytes, collectionIndex }` as one {@link PdfFontSource}. The
+   * positional `collectionIndex` is removed in 1.0.
+   */
+  embedFont(fontBytes: Uint8Array, collectionIndex: number | undefined): this;
+  embedFont(source: PdfFontSource, collectionIndex?: number): this {
+    const where = "Pdf.Editor#embedFont";
+    const face = readFontSourceArgument(where, source, collectionIndex);
     if (this._hasFontConfig) {
       throw new PdfArgumentError(
-        "fontBytes",
-        "Pdf.Editor#embedFont: the document was read with options.fonts, which already names the faces drawn text uses — add this face to that configuration instead"
+        face.field,
+        `${where}: the document was read with options.fonts, which already names the faces drawn text uses — add this face to that configuration instead`
       );
     }
-    const ttfFont = parseTtf(fontBytes, collectionIndex);
-    this._fontManager.registerEmbeddedFont(ttfFont);
+    this._fontManager.registerEmbeddedFont(parseTtf(face.data, face.collectionIndex));
     return this;
   }
 
@@ -3325,6 +3349,11 @@ export class PdfEditor {
    * then fills in the real CMS SignedData. Because the save is a full
    * rewrite, signing an already-signed document throws
    * `PdfSignatureInvalidationError` unless `invalidateSignatures` is set.
+   *
+   * This is a write, like {@link toBuffer}: it resolves to the signed bytes and leaves the
+   * editor unsigned, so a later `toBuffer()` writes without a signature. `Pdf.Builder#sign`
+   * is different in kind: it records the signature, returns the builder for chaining, and
+   * signs during that builder's `toBuffer()`.
    *
    * @param options - Certificate, private key, and optional signer metadata
    * @returns The signed PDF as Uint8Array

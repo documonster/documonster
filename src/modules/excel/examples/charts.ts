@@ -56,7 +56,7 @@
  *      `CustomGeometry` + `ShapeTransform` on series `spPr`.
  * 24.  Shape / text helpers — `DrawingMl.parseSpPr` / `DrawingMl.createSpPr` /
  *      `DrawingMl.getSpPrFillColor` / `DrawingMl.getSpPrLine` / `DrawingMl.getSpPrGradient` /
- *      `DrawingMl.getSpPrPattern` / `DrawingMl.setSpPrFill` / `DrawingMl.setSpPrLine` / `DrawingMl.parseTxPr` /
+ *      `DrawingMl.getSpPrPattern` / `DrawingMl.withSpPrFill` / `DrawingMl.withSpPrLine` / `DrawingMl.parseTxPr` /
  *      `DrawingMl.createTxPr` / `DrawingMl.getTxPrFontSize` / `DrawingMl.getTxPrColor`.
  * 25.  Sidecar parsers / writers — `ChartClassic.fromStyleXml` / `ChartClassic.toStyleXml`
  *      and `ChartClassic.fromColorsXml` / `ChartClassic.toColorsXml`, plus attaching the
@@ -67,7 +67,7 @@
  * 27.  Low-level rendering & TopoJSON — direct `ChartClassic.toSvg` /
  *      `ChartClassic.toPng` / `ChartEx.toSvg` / `ChartEx.toPng`;
  *      `ChartClassic.Backend.toScene` IR; `ChartClassic.Backend.applyAxisTransform`; `ChartClassic.Backend.toSvgFilter`;
- *      `VECTOR_PDF_CHART_EX_LAYOUT_IDS`; `ChartClassic.Backend.resolveTopologyObject` against
+ *      `ChartClassic.Backend.resolveTopologyObject` against
  *      a synthetic two-country TopoJSON; `ChartClassic.applyPreset` /
  *      `ChartEx.applyPreset` direct invocation.
  * 28.  Axis edge cases — `invertIfNegative`, reversed axis
@@ -124,16 +124,15 @@ import type {
   RegionMapDataOptions,
   TopologyLike,
   NumberReference,
-  StringReference
+  StringReference,
+  ExcelChartPreset
 } from "@excel/chart/index";
 import {
   DrawingMl,
   ChartEx,
   ChartClassic,
-  EXCEL_CHART_PRESETS,
-  EXCEL_CHART_EX_PRESETS,
-  CHART_PRESETS,
-  VECTOR_PDF_CHART_EX_LAYOUT_IDS
+  CHART_EX_PRESETS,
+  CHART_PRESETS
 } from "@excel/chart/index";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
 import type { AddSparklineGroupOptions, ChartHandle, SparklineGroup } from "@excel/index";
@@ -761,7 +760,7 @@ async function main(): Promise<void> {
     Chart.place(
       presets,
       `B${row}:J${row + 14}`,
-      Chart.applyPreset(entry.preset as (typeof EXCEL_CHART_PRESETS)[number], {
+      Chart.applyPreset(entry.preset as ExcelChartPreset, {
         title: entry.title,
         series
       })
@@ -895,7 +894,7 @@ async function main(): Promise<void> {
   });
 
   // ChartEx presets — same shape as classic presets but using
-  // `addPresetChartEx` / `EXCEL_CHART_EX_PRESETS`.
+  // `Chart.applyPreset` / the keys of `CHART_EX_PRESETS`.
   addExChart("preset: boxAndWhisker alias", 15, range => {
     Chart.place(
       ex,
@@ -907,7 +906,7 @@ async function main(): Promise<void> {
       })
     );
   });
-  console.log(`ChartEx presets known: ${EXCEL_CHART_EX_PRESETS.join(", ")}`);
+  console.log(`ChartEx presets known: ${Object.keys(CHART_EX_PRESETS).join(", ")}`);
 
   // ---------------------------------------------------------------------------
   // 4. Combo charts — multiple chart-type groups with secondary axes,
@@ -2066,8 +2065,8 @@ async function main(): Promise<void> {
   // entry per chart-type group; combo charts return one per group.
   console.log(
     "Editing chart groups:",
-    Chart.getChartTypes(editing).length,
-    Chart.getChartTypes(editing)[0]?.type
+    Chart.getTypes(editing).length,
+    Chart.getTypes(editing)[0]?.type
   );
   console.log("Initial series count:", Chart.getSeriesCount(editing));
 
@@ -2312,7 +2311,7 @@ async function main(): Promise<void> {
         tl: { col: startCol, row: startRow },
         br: { col: endCol, row: endRow }
       },
-      Chart.applyPreset(name as (typeof EXCEL_CHART_PRESETS)[number], {
+      Chart.applyPreset(name as ExcelChartPreset, {
         title: name,
         series,
         showLegend: false
@@ -3000,7 +2999,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // 24. Shape / text property helpers — `DrawingMl.parseSpPr` / `DrawingMl.createSpPr` /
   //     `DrawingMl.getSpPrFillColor` / `DrawingMl.getSpPrLine` / `DrawingMl.getSpPrGradient` /
-  //     `DrawingMl.getSpPrPattern` / `DrawingMl.setSpPrFill` / `DrawingMl.setSpPrLine` / `DrawingMl.parseTxPr` /
+  //     `DrawingMl.getSpPrPattern` / `DrawingMl.withSpPrFill` / `DrawingMl.withSpPrLine` / `DrawingMl.parseTxPr` /
   //     `DrawingMl.createTxPr` / `DrawingMl.getTxPrFontSize` / `DrawingMl.getTxPrColor`.
   //
   // These are programmatic helpers for reading / writing the structured
@@ -3025,9 +3024,9 @@ async function main(): Promise<void> {
     `DrawingMl.parseSpPr → fill=${fillColor?.srgb}, line.dash=${line?.dash}, line.width=${line?.width}, gradient=${gradient ? "yes" : "none"}, pattern=${pattern ? "yes" : "none"}`
   );
 
-  // `DrawingMl.setSpPrFill` / `DrawingMl.setSpPrLine` — functional setters that return a new spPr.
-  let mutatedSpPr = DrawingMl.setSpPrFill(parsedSpPr, { solid: { srgb: "70AD47" } });
-  mutatedSpPr = DrawingMl.setSpPrLine(mutatedSpPr, {
+  // `DrawingMl.withSpPrFill` / `DrawingMl.withSpPrLine` — functional setters that return a new spPr.
+  let mutatedSpPr = DrawingMl.withSpPrFill(parsedSpPr, { solid: { srgb: "70AD47" } });
+  mutatedSpPr = DrawingMl.withSpPrLine(mutatedSpPr, {
     color: { srgb: "375623" },
     width: 25400,
     dash: "solid"
@@ -3190,12 +3189,10 @@ async function main(): Promise<void> {
   //   27.4  `ChartClassic.Backend.toSvgFilter` — build an SVG `<filter>` definition
   //         from an `EffectList`; callers doing custom SVG composition
   //         can reuse it.
-  //   27.5  `VECTOR_PDF_CHART_EX_LAYOUT_IDS` — readonly set exposing
-  //         which ChartEx layouts take the vector PDF path.
-  //   27.6  `ChartClassic.Backend.resolveTopologyObject` + regionMap rendered from a
+  //   27.5  `ChartClassic.Backend.resolveTopologyObject` + regionMap rendered from a
   //         synthetic two-country TopoJSON (no external data-set
   //         required).
-  //   27.7  `ChartClassic.applyPreset` / `ChartEx.applyPreset` invoked directly
+  //   27.6  `ChartClassic.applyPreset` / `ChartEx.applyPreset` invoked directly
   //         (vs via `worksheet.addPresetChart`).
   // ---------------------------------------------------------------------------
 
@@ -3246,13 +3243,7 @@ async function main(): Promise<void> {
   });
   console.log(`ChartClassic.Backend.toSvgFilter → ${effectFilterXml.length} bytes of <filter> XML`);
 
-  // --- 27.5 VECTOR_PDF_CHART_EX_LAYOUT_IDS — which ChartEx layouts
-  //         render as PDF vector content (vs. rasterised). The set
-  //         grows over time; consumers that decide their own render
-  //         path can inspect it.
-  console.log(`VECTOR_PDF_CHART_EX_LAYOUT_IDS: ${VECTOR_PDF_CHART_EX_LAYOUT_IDS.join(", ")}`);
-
-  // --- 27.6 ChartClassic.Backend.resolveTopologyObject + regionMap with real polygons
+  // --- 27.5 ChartClassic.Backend.resolveTopologyObject + regionMap with real polygons
   //
   // A tiny in-memory TopoJSON with two "countries" encoded as
   // quantised integer arcs. World-atlas bundles look exactly like
@@ -3345,7 +3336,7 @@ async function main(): Promise<void> {
   });
   writeFileSync(resolve(OUT_DIR, "charts-example-regionmap-topojson.svg"), regionMapSvg, "utf-8");
 
-  // --- 27.7 ChartClassic.applyPreset / ChartEx.applyPreset direct invocation
+  // --- 27.6 ChartClassic.applyPreset / ChartEx.applyPreset direct invocation
   //
   // `Chart.place(ws, range, Chart.applyPreset("lineMarkers", opts))` builds
   // the preset's options first and then the chart; `ChartClassic.applyPreset`
@@ -4855,8 +4846,8 @@ async function main(): Promise<void> {
   console.log(`Worksheets with charts: ${Workbook.listWorksheets(wb).length}`);
   console.log(`Charts embedded:       ${chartCount}`);
   console.log(`Chartsheets:           ${chartsheetCount}`);
-  console.log(`Preset classic count:  ${EXCEL_CHART_PRESETS.length}`);
-  console.log(`Preset chartEx count:  ${EXCEL_CHART_EX_PRESETS.length}`);
+  console.log(`Preset classic count:  ${Object.keys(CHART_PRESETS).length}`);
+  console.log(`Preset chartEx count:  ${Object.keys(CHART_EX_PRESETS).length}`);
 }
 
 // ---------------------------------------------------------------------------

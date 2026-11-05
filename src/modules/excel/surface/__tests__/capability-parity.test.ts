@@ -23,7 +23,7 @@ import {
 import { insertRow, insertRows } from "@excel/core/worksheet";
 import { addRow, eachRow, findRow, getRow } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { PivotTableError } from "@excel/errors";
+import { ExcelPivotTableError } from "@excel/errors";
 import {
   Cell,
   Chart,
@@ -219,7 +219,7 @@ describe("Watermark.get", () => {
     const { wb, ws } = sheet();
     expect(Watermark.get(ws)).toBeNull();
     const imageId = Image.add(wb, { base64: PNG, extension: "png" });
-    Watermark.add(ws, { imageId });
+    Watermark.set(ws, { imageId });
     expect(Watermark.get(ws)?.imageId).toBe(String(imageId));
   });
 });
@@ -283,7 +283,7 @@ describe("Image.remove", () => {
   it("does not touch a watermark", () => {
     const { wb, ws } = sheet();
     const imageId = Image.add(wb, { base64: PNG, extension: "png" });
-    Watermark.add(ws, { imageId });
+    Watermark.set(ws, { imageId });
     expect(Image.list(ws)).toHaveLength(0);
     expect(Image.remove(ws, 0)).toBe(false);
     expect(Watermark.get(ws)).not.toBeNull();
@@ -360,7 +360,9 @@ describe("Pivot.remove", () => {
       const back = await readWithParts(pivotBook().wb, {
         "xl/charts/chart9.xml": `<c:chartSpace xmlns:c="x"><c:pivotSource>${name}</c:pivotSource></c:chartSpace>`
       });
-      expect(() => Pivot.remove(Workbook.getWorksheet(back, "P1")!, 0)).toThrow(PivotTableError);
+      expect(() => Pivot.remove(Workbook.getWorksheet(back, "P1")!, 0)).toThrow(
+        ExcelPivotTableError
+      );
     }
   });
 
@@ -380,7 +382,7 @@ describe("Pivot.remove", () => {
     for (const parts of filters) {
       const back = await readWithParts(wb, parts);
       const p1 = Workbook.getWorksheet(back, "P1")!;
-      expect(() => Pivot.remove(p1, 0)).toThrow(PivotTableError);
+      expect(() => Pivot.remove(p1, 0)).toThrow(ExcelPivotTableError);
       // Same name on another sheet is not this table.
       expect(Pivot.remove(Workbook.getWorksheet(back, "P2")!, 0)).toBe(true);
     }
@@ -392,7 +394,7 @@ describe("Pivot.remove", () => {
     const { wb, p1, a } = pivotBook();
     Chart.addPivot(p1, a, PIVOT_CHART, "E1:L12");
     const [chart] = Chart.list(p1);
-    expect(() => Pivot.remove(p1, a)).toThrow(PivotTableError);
+    expect(() => Pivot.remove(p1, a)).toThrow(ExcelPivotTableError);
     expect(Pivot.list(p1)).toHaveLength(1);
     expect(Chart.remove(p1, chart)).toBe(true);
     expect(Pivot.remove(p1, a)).toBe(true);
@@ -408,7 +410,7 @@ describe("Pivot.remove", () => {
     // Bound to the other pivot table: this one may go.
     expect(Pivot.remove(Workbook.getWorksheet(back, "P1")!, 0)).toBe(true);
     const other = Workbook.getWorksheet(back, "P2")!;
-    expect(() => Pivot.remove(other, 0)).toThrow(PivotTableError);
+    expect(() => Pivot.remove(other, 0)).toThrow(ExcelPivotTableError);
     expect(Pivot.list(other)).toHaveLength(1);
   });
 
@@ -417,7 +419,7 @@ describe("Pivot.remove", () => {
     Chart.addPivot(p1, a, PIVOT_CHART, "E1:L12");
     const back = await roundTrip(wb, "pivot chart");
     const loaded = Workbook.getWorksheet(back, "P1")!;
-    expect(() => Pivot.remove(loaded, 0)).toThrow(PivotTableError);
+    expect(() => Pivot.remove(loaded, 0)).toThrow(ExcelPivotTableError);
   });
 });
 

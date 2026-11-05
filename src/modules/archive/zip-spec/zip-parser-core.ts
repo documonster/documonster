@@ -5,7 +5,7 @@
  * Used by both `ZipParser` (in-memory) and `RemoteZipReader` (random-access).
  */
 
-import { ArchiveError, ArchiveLimitError, EocdNotFoundError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitError, ZipEocdNotFoundError } from "@archive/core/errors";
 import type { ZipStringEncoding, ZipStringCodec } from "@archive/core/text";
 import { decodeZipPath, decodeZipComment, resolveZipStringCodec } from "@archive/core/text";
 import type { AesKeyStrength } from "@archive/crypto/aes";
@@ -511,7 +511,7 @@ export function parseZipArchiveFromBuffer(
   // Find EOCD
   const eocdOffset = findEOCDSignature(data);
   if (eocdOffset === -1) {
-    throw new EocdNotFoundError();
+    throw new ZipEocdNotFoundError();
   }
 
   // Parse EOCD

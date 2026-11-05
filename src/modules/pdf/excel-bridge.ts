@@ -91,7 +91,7 @@ import {
   getSparklineGroups
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import type {
   Style,
   Font,
@@ -288,12 +288,12 @@ export async function chartToPdf(
 
   // The region map's topology is the caller's data: one that cannot be read is refused here,
   // with the path, rather than drawn as the built-in preview. The chart engine reports it as a
-  // `ChartOptionsError`; this call is a PDF one, so it says so in the PDF module's class.
+  // `ExcelChartOptionsError`; this call is a PDF one, so it says so in the PDF module's class.
   if (options.regionMap !== undefined) {
     try {
       checkChartRenderOptions("Pdf.fromChart", { regionMap: options.regionMap });
     } catch (err) {
-      if (err instanceof ChartOptionsError) {
+      if (err instanceof ExcelChartOptionsError) {
         throw new PdfArgumentError(err.field, err.message, { cause: err });
       }
       throw err;

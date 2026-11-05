@@ -689,7 +689,7 @@ export interface PdfDocumentOptions {
    * extraction. Each embedded face is limited to 65,535 distinct Unicode
    * sequences in one PDF.
    *
-   * Cannot be combined with `Pdf.fromExcel`'s legacy `font` option.
+   * Cannot be combined with `Pdf.fromExcel`'s deprecated `font` option.
    */
   fonts?: PdfFontConfig;
 
@@ -722,8 +722,9 @@ export interface PdfDocumentOptions {
    * });
    * ```
    *
-   * Ignored when {@link fonts} (or the legacy `font`) is supplied, since no discovery
-   * runs in that case. Node-only, like the scan it disables.
+   * Ignored when {@link fonts} (or the deprecated `font`) is supplied, since no discovery
+   * runs in that case. No effect in a browser, which has no system font scan to disable:
+   * there, the output never depends on the host's fonts.
    *
    * @default false
    */
@@ -766,7 +767,8 @@ export interface PdfDocumentOptions {
    * narrow ones. For a document whose language varies, naming nothing is usually right:
    * the search reads the language off the text and picks the regional face itself.
    *
-   * Node-only, and ignored when a font is supplied explicitly.
+   * No effect in a browser, which has no system fonts to search; ignored as well when a
+   * font is supplied explicitly.
    */
   preferSystemFonts?: readonly string[];
 
@@ -790,7 +792,8 @@ export interface PdfDocumentOptions {
    * CJK carries no evidence and Chinese is preferred — a default rather than a
    * detection, which is the reason to state the language when you know it.
    *
-   * Node-only, and ignored when a font is supplied explicitly.
+   * No effect in a browser, which has no system fonts to search; ignored as well when a
+   * font is supplied explicitly.
    */
   textLanguage?: CjkLanguage;
 
@@ -827,23 +830,43 @@ export interface PdfDocumentOptions {
    * });
    * ```
    */
-  encryption?: {
-    /** User password (required to open). Empty string = no open password. */
-    userPassword?: string;
-    /** Owner password (grants full access). Required. */
-    ownerPassword: string;
-    /** Permissions when opened with user password. */
-    permissions?: Partial<{
-      print: boolean;
-      modify: boolean;
-      copy: boolean;
-      annotate: boolean;
-      fillForms: boolean;
-      accessibility: boolean;
-      assemble: boolean;
-      printHighQuality: boolean;
-    }>;
-  };
+  encryption?: PdfEncryptionOptions;
+}
+
+/**
+ * Password protection (AES-256) for a written PDF: `PdfDocumentOptions.encryption` and
+ * `Pdf.Builder#setEncryption`.
+ */
+export interface PdfEncryptionOptions {
+  /** User password (required to open the document). Empty string = no open password. */
+  userPassword?: string;
+  /** Owner password (grants full permissions). Required. */
+  ownerPassword: string;
+  /** Permissions to grant when opened with the user password. */
+  permissions?: Partial<PdfPermissions>;
+}
+
+/**
+ * What a user-password holder may do with an encrypted PDF ({@link PdfEncryptionOptions}).
+ * Each omitted permission is denied.
+ */
+export interface PdfPermissions {
+  /** Allow printing */
+  print: boolean;
+  /** Allow modifying content */
+  modify: boolean;
+  /** Allow copying text/images */
+  copy: boolean;
+  /** Allow adding/modifying annotations */
+  annotate: boolean;
+  /** Allow filling form fields */
+  fillForms: boolean;
+  /** Allow extracting content for accessibility */
+  accessibility: boolean;
+  /** Allow assembling (insert/rotate/delete pages) */
+  assemble: boolean;
+  /** Allow high-quality printing */
+  printHighQuality: boolean;
 }
 
 /**
@@ -1090,18 +1113,14 @@ export interface PdfExportOptions extends PdfDocumentOptions {
   headerFooter?: PdfHeaderFooterOptions;
 
   /**
-   * Legacy single-font shortcut for TrueType font file (.ttf) data.
-   * When provided, all text rendering uses this font. Prefer {@link fonts} for
-   * named families, style faces, TrueType Collections, and fallback.
-   *
-   * Pass the raw bytes of a .ttf font file:
-   * ```typescript
-   * import { readFileSync } from "fs";
-   * const font = readFileSync("NotoSansSC-Regular.ttf");
-   * Pdf.fromExcel(workbook, { font });
-   * ```
+   * Single-font shortcut for TrueType font file (.ttf) data: all text rendering uses this
+   * font. `{ fonts: { default: { regular: font } } }` says the same thing, and also names
+   * families, style faces, TrueType Collection faces and fallback.
    *
    * Cannot be combined with {@link fonts}.
+   *
+   * @deprecated Use {@link PdfDocumentOptions.fonts} (`{ fonts: { default: { regular: bytes } } }`).
+   * Removed in 1.0.
    */
   font?: Uint8Array;
 

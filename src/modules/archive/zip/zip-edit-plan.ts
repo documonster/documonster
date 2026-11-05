@@ -3,6 +3,7 @@ import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { resolveArchiveSourceToBuffer } from "@archive/io/archive-source";
 import type { ZipEntryOptions } from "@archive/zip";
+import { describeValue } from "@utils/describe-value";
 
 /**
  * Serializable operation types for ZipEditPlan
@@ -72,6 +73,50 @@ export interface SerializedZipEditPlan {
   ops: SerializedZipEditOp[];
 }
 
+const EDIT_OP_FIELDS: Record<ZipEditOp["type"], readonly string[]> = {
+  set: ["name"],
+  delete: ["name"],
+  deleteDirectory: ["prefix"],
+  rename: ["from", "to"],
+  comment: []
+};
+
+/** Refuse a list of operations a plan could not apply; `field` names the list in the caller's signature. */
+function checkEditOps(where: string, field: string, ops: unknown): void {
+  if (!Array.isArray(ops)) {
+    throw new ArchiveArgumentError(
+      field,
+      `${where}: ${field} must be an array of operations, got ${describeValue(ops)}`
+    );
+  }
+  ops.forEach((op: unknown, index) => {
+    const at = `${field}[${index}]`;
+    const type = (op as { type?: unknown } | null)?.type;
+    if (
+      typeof op !== "object" ||
+      op === null ||
+      typeof type !== "string" ||
+      !Object.hasOwn(EDIT_OP_FIELDS, type)
+    ) {
+      throw new ArchiveArgumentError(
+        at,
+        `${where}: ${at} must be an operation with type ${Object.keys(EDIT_OP_FIELDS)
+          .map(name => JSON.stringify(name))
+          .join(", ")}, got ${describeValue(op)}`
+      );
+    }
+    const record = op as Record<string, unknown>;
+    for (const name of EDIT_OP_FIELDS[type as ZipEditOp["type"]]) {
+      checkString(where, `${at}.${name}`, record[name]);
+    }
+    if (type === "set") {
+      checkArchiveSource(where, `${at}.source`, record.source);
+    } else if (type === "comment") {
+      checkString(where, `${at}.comment`, record.comment, true);
+    }
+  });
+}
+
 /**
  * A reusable, serializable description of ZIP edits.
  *
@@ -82,6 +127,7 @@ export class ZipEditPlan {
   private readonly _ops: ZipEditOp[];
 
   constructor(ops: readonly ZipEditOp[] = []) {
+    checkEditOps("Archive.ZipEditPlan", "ops", ops);
     this._ops = [...ops];
   }
 
@@ -103,6 +149,7 @@ export class ZipEditPlan {
   }
 
   delete(name: string): this {
+    checkString("Archive.ZipEditPlan#delete", "name", name);
     this._ops.push({ type: "delete", name });
     return this;
   }
@@ -113,11 +160,14 @@ export class ZipEditPlan {
    * @param prefix - The directory path prefix to delete (with or without trailing slash)
    */
   deleteDirectory(prefix: string): this {
+    checkString("Archive.ZipEditPlan#deleteDirectory", "prefix", prefix);
     this._ops.push({ type: "deleteDirectory", prefix });
     return this;
   }
 
   rename(from: string, to: string): this {
+    checkString("Archive.ZipEditPlan#rename", "from", from);
+    checkString("Archive.ZipEditPlan#rename", "to", to);
     this._ops.push({ type: "rename", from, to });
     return this;
   }
@@ -266,8 +316,15 @@ export class ZipEditPlan {
         "Archive.ZipEditPlan.deserialize: data.ops must be an array"
       );
     }
-    const ops: ZipEditOp[] = data.ops.map(op => {
+    const ops: ZipEditOp[] = data.ops.map((op, index) => {
+      if (typeof op !== "object" || op === null) {
+        throw new ArchiveArgumentError(
+          `data.ops[${index}]`,
+          `Archive.ZipEditPlan.deserialize: data.ops[${index}] must be an operation object, got ${describeValue(op)}`
+        );
+      }
       if (op.type === "set") {
+        checkString("Archive.ZipEditPlan.deserialize", `data.ops[${index}].data`, op.data);
         // Decode base64 back to Uint8Array
         const buffer = base64ToUint8Array(op.data);
         return {
@@ -280,6 +337,7 @@ export class ZipEditPlan {
       return op as ZipEditOp;
     });
 
+    checkEditOps("Archive.ZipEditPlan.deserialize", "data.ops", ops);
     return new ZipEditPlan(ops);
   }
 

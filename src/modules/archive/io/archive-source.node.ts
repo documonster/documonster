@@ -1,7 +1,11 @@
 import { Readable } from "node:stream";
 
 import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
-import { checkSourceArgument, toAsyncIterable } from "@archive/io/archive-source";
+import {
+  checkSourceArgument,
+  checkSourceOptions,
+  iterateArchiveSource
+} from "@archive/io/archive-source";
 
 /**
  * Convert an ArchiveSource into a Node.js Readable stream.
@@ -16,5 +20,6 @@ export function toNodeReadable(
   options: { signal?: AbortSignal } = {}
 ): Readable {
   checkSourceArgument("Archive.toNodeReadable", source);
-  return Readable.from(toAsyncIterable(source, options) as AsyncIterable<Uint8Array>);
+  checkSourceOptions("Archive.toNodeReadable", options);
+  return Readable.from(iterateArchiveSource(source, options) as AsyncIterable<Uint8Array>);
 }

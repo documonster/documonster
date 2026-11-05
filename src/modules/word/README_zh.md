@@ -31,7 +31,7 @@
 - **转换** — DOCX ↔ HTML、DOCX ↔ Markdown、Excel → Word、Word → PDF
 - **Flat OPC** — 单一 XML `.xml` 表示形式往返
 - **比对和合并** — 比较两个文档、合并多个文档
-- **流式写入器** — `Streaming.createWriter()` 处理大文档
+- **流式写入器** — `new Stream.DocumentWriter()` 处理大文档
 - **校验** — 结构检查，带严重级别标记
 - **OOXML Strict** — 读取时透明归一化为 Transitional
 - **浏览器支持** — 同一个 `documonster/word` 导入在 Node.js 和浏览器中均可用
@@ -119,6 +119,10 @@ const text = Query.getText(doc);
 // 搜索
 const results = Query.searchText(doc, /pattern/g);
 ```
+
+在 Node 中，`Io.readFile(path)` 与 `Io.writeFile(doc, path)` 直接读写文件；浏览器构建不提供这两个成员——请自行读取字节后交给
+`Io.read`。系统不允许读取或写入的文件报 `DocxFileError`（含 `path`、`operation`），以系统错误为 `cause`（`error.cause.code`
+为 `ENOENT`、`EACCES` 等），与 Excel 的 `ExcelFileError` 一致；读到了但不是有效文档的文件报 `DocxParseError`。
 
 ### 唯一的文档对象
 
@@ -379,15 +383,17 @@ const merged = Transform.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" })
 ### 流式写入器
 
 ```typescript
-import { Streaming } from "documonster/word";
+import { Stream } from "documonster/word";
 
-const stream = Streaming.createWriter();
+const stream = new Stream.DocumentWriter();
 stream.addText("Title", { style: "Heading1" });
 for (const item of largeDataset) {
   stream.addText(item.text);
 }
-const buffer = await stream.finalize();
+const buffer = await stream.toBuffer();
 ```
+
+传入 `new Stream.DocumentWriter({ sink })` 时，字节会边生成边写入 sink：用 `await stream.commit()` 收尾，它会结束该 sink（此时 `toBuffer()` 会被拒绝，因为写入器不持有字节）。
 
 ### 文档保护
 
@@ -473,7 +479,7 @@ const fromBase64 = await Io.read(await Io.toBase64(doc), { base64: true });
 ### 加密与签名
 
 受密码保护的 DOCX——OLE 复合文件中的 Agile 加密，即 Word「用密码进行加密」写出的文件——用 `{ password }` 读取
-（`Io.read`、`Io.readFile`、`Package` 系列函数、`Streaming.createReader`），也用它写出（`Io.toBuffer`、`Io.toBase64`、
+（`Io.read`、`Io.readFile`、`Package` 系列函数、`new Stream.DocumentReader`），也用它写出（`Io.toBuffer`、`Io.toBase64`、
 `Io.writeFile`）；`encryption` 用于调整参数（Office 默认值：AES-256、SHA-512、100,000 次迭代）。Excel 的
 `Workbook.read` / `toBuffer` 接受相同的选项，两个模块共用一份实现。只有提供密码时才加载加密代码。未提供密码时，
 加密文件报告为 `DocxEncryptedError`；密码错误时为 `DocxDecryptionError`，其 `reason` 为 `"password"`。只实现了

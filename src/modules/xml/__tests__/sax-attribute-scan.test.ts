@@ -1,5 +1,5 @@
 import { SaxParser } from "@xml/sax";
-import type { SaxOptions } from "@xml/types";
+import type { XmlSaxOptions } from "@xml/types";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
  * event, every error and every reported position.
  */
 
-function record(xml: string, chunkSize: number, options: SaxOptions): unknown[] {
+function record(xml: string, chunkSize: number, options: XmlSaxOptions): unknown[] {
   const events: unknown[] = [];
   const parser = new SaxParser(options);
   parser.on("opentag", tag =>
@@ -97,7 +97,7 @@ describe("SaxParser attribute scanning", () => {
     { position: false },
     { xmlns: true },
     { invalidCharHandling: "skip" as const }
-  ] satisfies SaxOptions[]) {
+  ] satisfies XmlSaxOptions[]) {
     it(`agrees with the state machine on 500 generated documents (${JSON.stringify(options)})`, () => {
       for (let seed = 1; seed <= 500; seed++) {
         const xml = document(seed);

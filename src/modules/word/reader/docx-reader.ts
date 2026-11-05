@@ -132,7 +132,7 @@ import {
 import { findWatermark, withoutWatermark } from "@word/reader/watermark-parser";
 import type { FoundWatermark } from "@word/reader/watermark-parser";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import { resolveSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
@@ -2795,7 +2795,7 @@ function readBodyElements(
  * entries.
  *
  * Extracted from {@link parseDocumentXml}'s body loop so that both the batch
- * reader and the streaming reader ({@link createDocxStreamReader}) run the
+ * reader and the streaming reader (`Stream.DocumentReader`) run the
  * exact same per-element logic — paragraph/table/sdt/altChunk/math/textbox
  * handling plus per-paragraph floating-content extraction. The caller is
  * responsible for handling the body-level `<w:sectPr>` (which sets section
@@ -2971,11 +2971,11 @@ export interface ReadDocxOptions {
    * back to {@link DEFAULT_SECURITY_POLICY} when omitted. Helpful as a
    * defense-in-depth control against ZIP bombs / pathological inputs.
    */
-  readonly securityPolicy?: WordSecurityPolicy;
+  readonly securityPolicy?: DocxSecurityPolicy;
   /**
    * Whether each part is checked against the CRC-32 the package records for it. A
    * mismatch fails the read with a `DocxParseError` whose `cause` is the archive's
-   * `Crc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
    * @default true
    */
   readonly checkCrc32?: boolean;
@@ -3066,7 +3066,7 @@ async function readDocxBytes(
 
 async function _readDocxInner(
   buffer: Uint8Array,
-  policy: Required<WordSecurityPolicy>,
+  policy: Required<DocxSecurityPolicy>,
   checkCrc32?: boolean
 ): Promise<DocxDocument> {
   const reader = unzip(buffer, { checkCrc32 });
@@ -3093,7 +3093,7 @@ async function _readDocxInner(
 /** Build the document model from unzipped entries. */
 function readDocxEntries(
   entries: Map<string, Uint8Array>,
-  policy: Required<WordSecurityPolicy>
+  policy: Required<DocxSecurityPolicy>
 ): DocxDocument {
   const decoder = utf8Decoder;
   const depth = policy.maxXmlDepth;
@@ -3960,7 +3960,7 @@ function parseGlossaryDocument(
   rawXml: string,
   rawParts: ReadonlyMap<string, Uint8Array>,
   rels: readonly ParsedRelationship[],
-  securityPolicy: Required<WordSecurityPolicy>
+  securityPolicy: Required<DocxSecurityPolicy>
 ): GlossaryDocument {
   const blocks: BuildingBlock[] = [];
   const unlisted: string[] = [];

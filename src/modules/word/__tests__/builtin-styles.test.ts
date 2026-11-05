@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Build, Document, Io, Streaming } from "../index";
+import { Build, Document, Io, Stream } from "../index";
 import type { DocxDocument } from "../types";
 import { buildDocx, packageParts, partText } from "./roundtrip-integrity.helpers";
 
@@ -83,7 +83,7 @@ describe("referenced built-in styles", () => {
   });
 
   it("defines them in a streamed document too", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.heading("One", 2));
     const xml = partText(await packageParts(await stream.finalize()), "word/styles.xml");
     expect(style(xml, "Heading2")).toContain('<w:outlineLvl w:val="1"/>');

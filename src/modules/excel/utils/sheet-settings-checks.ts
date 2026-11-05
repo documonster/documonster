@@ -17,7 +17,7 @@
  * Only what the format itself rules out is refused: enumerations, booleans, and the integers and references the
  * schema types require. Ranges Excel's dialogs enforce but its reader may tolerate are left alone.
  */
-import { ExcelArgumentError, InvalidAddressError } from "@excel/errors";
+import { ExcelArgumentError, ExcelInvalidAddressError } from "@excel/errors";
 import { describeValue as describe } from "@utils/describe-value";
 import {
   UNRECOGNIZED_KEY,
@@ -291,7 +291,7 @@ function visitSheetSettings(sheet: Fields, sink: Sink): void {
 
 /**
  * Check a sheet's plain settings, refusing a value the file format cannot hold with an `ExcelArgumentError` (or an
- * `InvalidAddressError` for a pane's cell) whose message begins with `where`.
+ * `ExcelInvalidAddressError` for a pane's cell) whose message begins with `where`.
  */
 export function checkSheetSettings(
   where: string,
@@ -305,7 +305,7 @@ export function checkSheetSettings(
       const path = field(settingPath);
       const message = `${where}: ${path} must be ${expected}, got ${describe(container[key])}.`;
       if (address) {
-        throw new InvalidAddressError(String(container[key]), message);
+        throw new ExcelInvalidAddressError(String(container[key]), message);
       }
       throw new ExcelArgumentError(path, message);
     }

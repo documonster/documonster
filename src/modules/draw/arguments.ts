@@ -6,14 +6,16 @@
  * `null` child crashed with a `TypeError` half-way through a render. Each check here
  * throws {@link DrawArgumentError} naming the call and the field, before anything is drawn.
  *
- * Only the public entries run these (`Draw.*`, `Matrix.*`). The producers inside the
- * library build their lists from checked inputs, and re-walking every chart's list on
- * every render would cost them for nothing.
+ * Only the public entries run these (`Draw.*`, `Matrix.*`, and the methods of the
+ * published backend classes). The producers inside the library build their lists from
+ * checked inputs, and re-walking every chart's list on every render would cost them for
+ * nothing.
  */
 
 import { DrawArgumentError } from "@draw/errors";
 import { checkBackgroundWith } from "@utils/background-check";
 import { describeValue as describe } from "@utils/describe-value";
+import { isRecordArgument } from "@utils/object";
 
 export function fail(where: string, field: string, expected: string, value: unknown): never {
   throw new DrawArgumentError(
@@ -29,6 +31,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function checkFinite(where: string, field: string, value: unknown): void {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     fail(where, field, "a finite number", value);
+  }
+}
+
+/**
+ * A number of any value, `NaN` included. For the backend primitives, which have always drawn
+ * nothing for a coordinate with no position rather than refusing it; what they cannot take is a
+ * value that is not a number at all.
+ */
+export function checkNumber(where: string, field: string, value: unknown): void {
+  if (typeof value !== "number") {
+    fail(where, field, "a number", value);
+  }
+}
+
+export function checkNumbers(where: string, fields: Record<string, unknown>): void {
+  for (const [field, value] of Object.entries(fields)) {
+    checkNumber(where, field, value);
+  }
+}
+
+/** A list of objects, each read for `x` and `y`. */
+export function checkPointList(where: string, field: string, value: unknown): void {
+  checkArray(where, field, value);
+  value.forEach((point, i) => checkObject(where, `${field}[${i}]`, point));
+}
+
+/** A CSS colour token, or `undefined` / `null` for none. */
+export function checkOptionalColorToken(where: string, field: string, value: unknown): void {
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    fail(where, field, "a CSS color string", value);
   }
 }
 
@@ -103,7 +135,11 @@ function checkOptionalEnum(
   }
 }
 
-function checkArray(where: string, field: string, value: unknown): asserts value is unknown[] {
+export function checkArray(
+  where: string,
+  field: string,
+  value: unknown
+): asserts value is unknown[] {
   if (!Array.isArray(value)) {
     fail(where, field, "an array", value);
   }
@@ -343,5 +379,142 @@ export function checkRasterCanvas(where: string, canvas: unknown): void {
     typeof (canvas as { pushClip?: unknown }).pushClip !== "function"
   ) {
     fail(where, "canvas", "a BasicRasterCanvas", canvas);
+  }
+}
+
+type SurfaceParameter = readonly [
+  name: string,
+  kind: "number" | "string" | "paint" | "style" | "clip" | "points" | "commands" | "lines" | "any"
+];
+
+const SURFACE_PARAMETERS: Readonly<Record<string, readonly SurfaceParameter[]>> = {
+  pushClip: [["clip", "clip"]],
+  pushFilter: [["id", "string"]],
+  rect: [
+    ["x", "number"],
+    ["y", "number"],
+    ["width", "number"],
+    ["height", "number"],
+    ["rx", "number"],
+    ["paint", "paint"]
+  ],
+  ellipse: [
+    ["cx", "number"],
+    ["cy", "number"],
+    ["rx", "number"],
+    ["ry", "number"],
+    ["paint", "paint"]
+  ],
+  sector: [
+    ["cx", "number"],
+    ["cy", "number"],
+    ["radius", "number"],
+    ["innerRadius", "number"],
+    ["startAngle", "number"],
+    ["endAngle", "number"],
+    ["paint", "paint"]
+  ],
+  polyline: [
+    ["points", "points"],
+    ["closed", "any"],
+    ["paint", "paint"]
+  ],
+  path: [
+    ["commands", "commands"],
+    ["paint", "paint"]
+  ],
+  text: [
+    ["x", "number"],
+    ["y", "number"],
+    ["lines", "lines"],
+    ["style", "style"],
+    ["rotate", "number"]
+  ]
+};
+
+function checkRecordArgument(where: string, field: string, value: unknown): void {
+  if (!isRecordArgument(value)) {
+    fail(where, field, "an object", value);
+  }
+}
+
+/**
+ * The arguments of one `DrawSurface` primitive, for a surface a caller can reach directly
+ * (`Draw.Backend.SvgSurface`, the surfaces `Draw.Backend.createRasterSurface` and
+ * `Pdf.createDrawSurface` return).
+ *
+ * By default this asks only what a value must be to be read at all — a number of any value,
+ * an object, a string — because the SVG and raster surfaces have always drawn nothing for a
+ * `NaN` rather than refusing it. `strict` holds every value to what the display list itself
+ * must be (`Draw.toSvg` and its siblings check exactly this), for a surface whose target
+ * refuses anything less: a PDF page takes no `NaN`.
+ */
+export function checkSurfaceCall(
+  where: string,
+  method: string,
+  args: readonly unknown[],
+  options: { readonly strict?: boolean } = {}
+): void {
+  const parameters = SURFACE_PARAMETERS[method];
+  if (parameters === undefined) {
+    return;
+  }
+  const strict = options.strict === true;
+  parameters.forEach(([field, kind], i) => {
+    const value = args[i];
+    switch (kind) {
+      case "number":
+        (strict ? checkFinite : checkNumber)(where, field, value);
+        return;
+      case "string":
+        checkString(where, field, value);
+        return;
+      case "paint":
+        (strict ? checkPaint : checkRecordArgument)(where, field, value);
+        return;
+      case "style":
+        (strict ? checkTextStyle : checkRecordArgument)(where, field, value);
+        return;
+      case "clip":
+        checkRecordArgument(where, field, value);
+        (strict ? checkBox : checkBoxNumbers)(where, field, value);
+        return;
+      case "points":
+        checkArray(where, field, value);
+        value.forEach((point, j) =>
+          (strict ? checkPoint : checkRecordArgument)(where, `${field}[${j}]`, point)
+        );
+        return;
+      case "commands":
+        if (strict) {
+          checkPathCommands(where, field, value);
+          return;
+        }
+        checkArray(where, field, value);
+        value.forEach((command, j) => checkRecordArgument(where, `${field}[${j}]`, command));
+        return;
+      case "lines":
+        checkArray(where, field, value);
+        value.forEach((line, j) => {
+          const at = `${field}[${j}]`;
+          checkRecordArgument(where, at, line);
+          const l = line as Record<string, unknown>;
+          checkString(where, `${at}.text`, l.text);
+          if (strict) {
+            checkFinite(where, `${at}.dy`, l.dy);
+            checkOptionalFinite(where, `${at}.x`, l.x);
+          }
+        });
+        return;
+      case "any":
+        return;
+    }
+  });
+}
+
+function checkBoxNumbers(where: string, field: string, value: unknown): void {
+  const box = value as Record<string, unknown>;
+  for (const key of ["x", "y", "width", "height"]) {
+    checkNumber(where, `${field}.${key}`, box[key]);
   }
 }

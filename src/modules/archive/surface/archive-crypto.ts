@@ -9,12 +9,11 @@
  * Both decryptors throw an `ArchiveError` when the password does not verify.
  *
  * Names are verb first (`encryptAes`, `decryptZipCrypto`, `createAesExtraField`), like the
- * rest of the library. `randomBytes` keeps the name of the `node:crypto` function it stands
- * in for.
+ * rest of the library. Random bytes are the platform's: `crypto.getRandomValues(new Uint8Array(n))`
+ * (for instance as the generator `encryptZipCrypto` takes).
  */
 export {
   ZIP_CRYPTO_HEADER_SIZE,
-  zipCryptoInitKeys as createZipCryptoKeys,
   zipCryptoEncrypt as encryptZipCrypto,
   AES_VENDOR_ID,
   AES_VERSION_AE1,
@@ -29,10 +28,12 @@ export {
   aesEncrypt as encryptAes,
   aesEncryptedSize as getAesEncryptedSize,
   buildAesExtraField as createAesExtraField,
-  randomBytes,
   getEncryptionMethodName,
   isAesEncryption,
   getAesKeyStrength,
   encryptionMethodFromAesKeyStrength as getEncryptionMethodForAesKeyStrength
 } from "@archive/crypto";
-export { zipCryptoDecryptOrThrow as decryptZipCrypto } from "@archive/crypto/zip-crypto";
+export {
+  createZipCryptoKeys,
+  zipCryptoDecryptOrThrow as decryptZipCrypto
+} from "@archive/crypto/zip-crypto";

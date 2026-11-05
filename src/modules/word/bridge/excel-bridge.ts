@@ -83,7 +83,7 @@ import {
   rowGetCell
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { Workbook } from "@excel/index";
 import type {
   Font as ExcelFont,
@@ -246,7 +246,15 @@ export function excelToDocx(
  */
 export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions): DocxDocument;
 export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions): DocxDocument {
-  checkRecord(workbook, "workbook", "WordExcel.toDocx");
+  // Excel's own test for a workbook handle (`checkWorkbook`): it carries its sheet list.
+  if ((workbook as { _worksheets?: unknown } | null | undefined)?._worksheets === undefined) {
+    invalidArgument(
+      "WordExcel.toDocx",
+      "workbook",
+      "a workbook (from Workbook.create or Workbook.read)",
+      workbook
+    );
+  }
   checkExcelToDocxOptions(options, "WordExcel.toDocx");
   const opts: Required<ExcelToDocxOptions> = {
     sheets: options?.sheets ?? [],
@@ -733,7 +741,7 @@ function fmtDate(date: Date | string): string {
 export type { AddChartExOptions, ChartExModel, ChartExType, ChartModel };
 
 /** Options for creating a ChartEx in a Word document. */
-export interface WordChartExOptions {
+export interface DocxChartExOptions {
   /** ChartEx type (sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap). */
   readonly type: ChartExType;
   /** Series data (with literal categories/values for Word context). */
@@ -762,7 +770,7 @@ const CHART_EX_TYPES: ReadonlySet<string> = new Set<ChartExType>([
 ]);
 
 const CHART_EX_LEGEND_POSITIONS: ReadonlySet<string> = new Set<
-  NonNullable<WordChartExOptions["legendPosition"]>
+  NonNullable<DocxChartExOptions["legendPosition"]>
 >(["b", "l", "r", "t", "tr"]);
 
 /** Chart series as the Word chart helpers take them: a name, categories and finite values. */
@@ -793,7 +801,7 @@ function checkChartSeries(series: unknown, field: string, where: string): void {
  * @param options - Chart configuration.
  * @returns The complete ChartEx XML string for the chart part.
  */
-export function buildWordChartExXml(options: WordChartExOptions): string {
+export function buildWordChartExXml(options: DocxChartExOptions): string {
   const where = "WordExcel.toChartExXml";
   checkRecord(options, "options", where);
   checkOneOf(options.type, CHART_EX_TYPES, "options.type", where);
@@ -830,12 +838,12 @@ export function buildWordChartExXml(options: WordChartExOptions): string {
 // Classic Chart Bridge — Render Word Chart definitions to SVG
 // =============================================================================
 
-// The chart engine's theme-colour type, named in `WordChartSvgOptions`; re-exported here
+// The chart engine's theme-colour type, named in `DocxChartSvgOptions`; re-exported here
 // because only this bridge may reach into `@excel`.
 export type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 
 /** Options for {@link renderWordChartSvg} (`WordExcel.toChartSvg`). */
-export interface WordChartSvgOptions {
+export interface DocxChartSvgOptions {
   /**
    * The colour scheme the chart's automatic series colours and scheme colours resolve against:
    * six hex digits per theme slot — the document's `doc.theme.colorScheme.colors` (which
@@ -857,7 +865,7 @@ export interface WordChartSvgOptions {
  * @throws {DocxArgumentError} `chart` is not a Word chart, or `options` is malformed (field
  *   `options.themeColors.<slot>`, …).
  */
-export function renderWordChartSvg(chart: Chart, options?: WordChartSvgOptions): string {
+export function renderWordChartSvg(chart: Chart, options?: DocxChartSvgOptions): string {
   const where = "WordExcel.toChartSvg";
   checkWordChart(chart, where);
   checkRecord(options, "options", where, { optional: true });
@@ -866,7 +874,7 @@ export function renderWordChartSvg(chart: Chart, options?: WordChartSvgOptions):
     checkChartRenderOptions(where, { themeColors });
   } catch (error) {
     // The chart engine's check, in this module's class.
-    if (error instanceof ChartOptionsError) {
+    if (error instanceof ExcelChartOptionsError) {
       throw new DocxArgumentError(error.field, error.message, { cause: error });
     }
     throw error;

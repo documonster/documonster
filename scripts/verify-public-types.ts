@@ -62,6 +62,17 @@ function argValue(flag: string): string | undefined {
 
 const ROOT = path.resolve(argValue("--root") ?? path.resolve(import.meta.dirname, ".."));
 const SRC = path.join(ROOT, "src");
+/**
+ * The trees whose declarations are the repository's own. A satellite (`packages/*`) is one: it
+ * publishes types of its own, and a hole in them is a hole for its consumers just as one in the
+ * core is. Anything else a signature names — the MCP SDK, `zod`, `documonster` itself as a
+ * satellite imports it — belongs to another package and is that package's to publish.
+ */
+const OWN_TREES = [SRC, path.join(ROOT, "packages")];
+
+function isOwnFile(file: string): boolean {
+  return OWN_TREES.some(tree => file.startsWith(tree + path.sep));
+}
 
 /**
  * Public entry points, keyed by the specifier a consumer writes.
@@ -112,7 +123,8 @@ const REPO_ENTRIES: Record<string, { file: string; platform: "node" | "browser" 
   "documonster/stream (browser)": {
     file: "src/modules/stream/index.browser.ts",
     platform: "browser"
-  }
+  },
+  "@documonster/mcp": { file: "packages/mcp/src/index.ts", platform: "node" }
 };
 
 /** The excel module's domain vocabulary — R1 applies to every declaration here. */
@@ -160,7 +172,7 @@ const REPO_PRIVATE_MEMBER_TYPES = new Set([
   // pdf — `PdfEditorPage._owner`, its private constructor and the `@internal` `_create` the editor
   // makes pages with; none of the three reaches the published declarations
   "EditorPageOwner @ modules/pdf/builder/pdf-editor.ts",
-  // word — `StreamingDocxWriter._documentRels` and its private image registrars
+  // word — `Stream.DocumentWriter._documentRels` and its private image registrars
   "RelationshipsState @ modules/word/writer/relationships.ts",
   // csv — private parser/formatter state on CsvParserStream / CsvFormatterStream
   "ParseConfig @ modules/csv/parse/config.ts",
@@ -352,7 +364,12 @@ function resolveSpec(spec: string, fromFile: string): string | undefined {
     }
   }
   if (!p) return undefined;
-  for (const candidate of [p, p + ".ts", path.join(p, "index.ts")]) {
+  // A satellite is compiled by `tsc` as ESM, so it writes `./config.js` for `./config.ts`.
+  const candidates = [p, p + ".ts", path.join(p, "index.ts")];
+  if (p.endsWith(".js")) {
+    candidates.push(p.slice(0, -".js".length) + ".ts");
+  }
+  for (const candidate of candidates) {
     if (isFile(candidate)) return preferPlatformVariant(candidate);
   }
   return undefined;
@@ -689,7 +706,7 @@ function unnameableIn(
 
   const out: Array<{ name: string; decl: string }> = [];
   for (const [localName, ref] of candidates) {
-    if (!ref.file.startsWith(SRC)) continue;
+    if (!isOwnFile(ref.file)) continue;
     if (!new RegExp(`[^.\\w]${localName}\\b`).test(text)) continue;
     const id = origin(ref.file, ref.declared) ?? { file: ref.file, name: ref.declared };
     if (nameable.has(identityKey(id))) continue;
@@ -722,7 +739,7 @@ function signatureHoles(entry: string, nameable: Map<string, string>): Hole[] {
     const mod = parse(file);
     for (const exported of mod.named.keys()) {
       const id = origin(file, exported);
-      if (!id || !id.file.startsWith(SRC)) continue;
+      if (!id || !isOwnFile(id.file)) continue;
       for (const hole of unnameableIn(valueDeclText(id.file, id.name), id.file, nameable)) {
         const k = `${hole.decl}|${hole.name}`;
         if (!holes.has(k)) holes.set(k, { ...hole, where: `${label}.${exported}` });

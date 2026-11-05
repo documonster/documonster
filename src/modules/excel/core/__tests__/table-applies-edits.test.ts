@@ -3,7 +3,7 @@
  * through `Cell.setValue` survives the table's next edit instead of being overwritten by the copy the table took when
  * it was built.
  */
-import { Cell, Table, Workbook } from "@excel/index";
+import { Cell, ExcelArgumentError, Table, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 function setup() {
@@ -61,7 +61,7 @@ describe("a cell edited through Cell.setValue survives the table's next edit", (
   it("setColumnStyle keeps the values", () => {
     const { ws, t } = setup();
     Cell.setValue(ws, "A3", "kept");
-    Table.setColumnStyle(Table.getColumn(t, 0), { font: { bold: true } });
+    Table.setColumnStyle(Table.getColumn(t, 0)!, { font: { bold: true } });
     expect(Cell.getValue(ws, "A3")).toBe("kept");
     expect(Cell.getFont(ws, "A3")?.bold).toBe(true);
   });
@@ -82,8 +82,8 @@ describe("edits apply as they are made", () => {
   it("column renames and totals settings reach the header and totals rows", () => {
     const { ws, t } = setup();
     Table.setTotalsRow(t, true);
-    Table.setColumnName(Table.getColumn(t, 1), "Amount");
-    Table.setColumnTotalsRowFunction(Table.getColumn(t, 1), "sum");
+    Table.setColumnName(Table.getColumn(t, 1)!, "Amount");
+    Table.setColumnTotalsRowFunction(Table.getColumn(t, 1)!, "sum");
     expect(Cell.getValue(ws, "B1")).toBe("Amount");
     expect(Cell.getFormula(ws, "B4")).toBe("SUBTOTAL(109,T[Amount])");
     Table.setName(t, "Sales");
@@ -165,7 +165,7 @@ describe("a cell's own formatting stays with its value", () => {
 
   it("setting the column's style is what restyles its cells", () => {
     const { ws, t } = styled();
-    Table.setColumnStyle(Table.getColumn(t, 0), { font: { underline: true } });
+    Table.setColumnStyle(Table.getColumn(t, 0)!, { font: { underline: true } });
     expect(Cell.getFont(ws, "A2")).toEqual({ underline: true });
     expect((Cell.getFill(ws, "B3") as { fgColor?: unknown } | undefined)?.fgColor).toEqual({
       argb: "FFFFFF00"
@@ -281,16 +281,18 @@ describe("an edit that throws leaves the table as it was", () => {
 
   it("an empty column name, and a column without one", () => {
     const { ws, t } = setup();
-    expect(() => Table.setColumnName(Table.getColumn(t, 0), "")).toThrow(/must have a name/);
-    expect(Table.getColumnName(Table.getColumn(t, 0))).toBe("A");
+    expect(() => Table.setColumnName(Table.getColumn(t, 0)!, "")).toThrow(/must have a name/);
+    expect(Table.getColumnName(Table.getColumn(t, 0)!)).toBe("A");
     expect(() => Table.addColumn(t, { name: "" }, [1, 2])).toThrow(/must have a name/);
     expect(Table.getModel(t).columns.map(c => c.name)).toEqual(["A", "B"]);
     expect(Cell.getValue(ws, "C1")).toBeNull();
   });
 
-  it("getColumn refuses an index the table has no column at; the deprecated column does not", () => {
+  it("getColumn answers undefined for an index the table has no column at; the deprecated column hands out an empty view", () => {
     const { t } = setup();
-    expect(() => Table.getColumn(t, 2)).toThrow(/no column 2/);
+    expect(Table.getColumn(t, 2)).toBeUndefined();
+    expect(Table.getColumn(t, -1)).toBeUndefined();
+    expect(() => Table.getColumn(t, 0.5)).toThrow(ExcelArgumentError);
     expect(Table.column(t, 2).column).toBeUndefined();
   });
 });
@@ -306,10 +308,10 @@ describe("clearing and replacing a column's style", () => {
       rows: [[1], [2]]
     });
     Cell.setFont(ws, "A3", { bold: true });
-    Table.setColumnStyle(Table.getColumn(t, 0), undefined);
+    Table.setColumnStyle(Table.getColumn(t, 0)!, undefined);
     expect(Cell.getFont(ws, "A2")).toBeUndefined();
     expect(Cell.getFont(ws, "A3")).toEqual({ bold: true });
-    Table.setColumnStyle(Table.getColumn(t, 0), { font: { underline: true } });
+    Table.setColumnStyle(Table.getColumn(t, 0)!, { font: { underline: true } });
     expect(Cell.getFont(ws, "A2")).toEqual({ underline: true });
   });
 

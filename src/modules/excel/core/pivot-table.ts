@@ -28,7 +28,7 @@ import type { TableData } from "@excel/core/table";
 import { tableModel } from "@excel/core/table";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { columnValues, findCell, getSheetName } from "@excel/core/worksheet-core";
-import { PivotTableError } from "@excel/errors";
+import { ExcelPivotTableError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { isDateFmt, range } from "@utils/utils";
 
@@ -322,12 +322,12 @@ function createTableSourceAdapter(table: TableData): PivotTableSource {
   // Checked once, when the pivot table is added: a pivot needs a header row to name its fields and a row to read.
   const initial = tableModel(table);
   if (initial.headerRow === false) {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       "Cannot create pivot table from a table without headers. Set headerRow: true on the table."
     );
   }
   if (!initial.rows || initial.rows.length === 0) {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       "Cannot create pivot table from an empty table. Add data rows to the table."
     );
   }
@@ -335,7 +335,7 @@ function createTableSourceAdapter(table: TableData): PivotTableSource {
   const nameSet = new Set<string>();
   for (const name of names) {
     if (nameSet.has(name)) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `Duplicate column name "${name}" found in table. Pivot tables require unique column names.`
       );
     }
@@ -349,7 +349,7 @@ function createTableSourceAdapter(table: TableData): PivotTableSource {
     const model = tableModel(table);
     const tl = model.tl;
     if (!tl) {
-      throw new PivotTableError(`Table "${model.name}" is missing top-left cell address (tl)`);
+      throw new ExcelPivotTableError(`Table "${model.name}" is missing top-left cell address (tl)`);
     }
     return {
       model,
@@ -514,13 +514,13 @@ const BASE_CACHE_ID = 10;
  */
 function resolveSource(model: PivotTableModel): PivotTableSource {
   if (model.sourceSheet && model.sourceTable) {
-    throw new PivotTableError("Cannot specify both sourceSheet and sourceTable. Choose one.");
+    throw new ExcelPivotTableError("Cannot specify both sourceSheet and sourceTable. Choose one.");
   }
   if (model.sourceTable) {
     return createTableSourceAdapter(model.sourceTable);
   }
   if (!model.sourceSheet) {
-    throw new PivotTableError("Either sourceSheet or sourceTable must be provided.");
+    throw new ExcelPivotTableError("Either sourceSheet or sourceTable must be provided.");
   }
   // A de-classed worksheet (WorksheetData record) is identified structurally
   // by its `_rows` field; a pre-built PivotTableSource adapter has none.
@@ -586,7 +586,7 @@ function makePivotTable(
   const resolveIndex = (fieldName: string, role: string): number => {
     const idx = nameToIndex[fieldName];
     if (idx === undefined) {
-      throw new PivotTableError(`${role} field "${fieldName}" not found in cache fields`);
+      throw new ExcelPivotTableError(`${role} field "${fieldName}" not found in cache fields`);
     }
     return idx;
   };
@@ -667,7 +667,7 @@ function normalisePivotRef(ref: string | undefined): string | undefined {
     return undefined;
   }
   if (typeof ref !== "string" || ref.trim() === "") {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       `Invalid pivot table ref "${String(ref)}". Provide a cell address like "A3".`
     );
   }
@@ -679,12 +679,12 @@ function normalisePivotRef(ref: string | undefined): string | undefined {
   try {
     decoded = colCache.decodeAddress(topLeft);
   } catch {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       `Invalid pivot table ref "${ref}". Provide a cell address like "A3".`
     );
   }
   if (!decoded.col || !decoded.row) {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       `Invalid pivot table ref "${ref}". Both column and row are required (e.g. "A3").`
     );
   }
@@ -704,7 +704,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   for (let i = 0; i < headerNames.length; i++) {
     const h = headerNames[i];
     if (h === null || h === undefined || h === "" || (typeof h === "string" && h.trim() === "")) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `Empty or missing header name at column ${i + 1} in ${source.name}. Pivot tables require all columns to have non-empty headers.`
       );
     }
@@ -715,7 +715,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   for (const h of headerNames) {
     const name = String(h);
     if (headerDupCheck.has(name)) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `Duplicate header name "${name}" found in ${source.name}. Pivot tables require unique column names.`
       );
     }
@@ -726,7 +726,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   const headerNameSet = new Set(headerNames.map(String));
   const validateFieldExists = (name: string): void => {
     if (!headerNameSet.has(name)) {
-      throw new PivotTableError(`The header name "${name}" was not found in ${source.name}.`);
+      throw new ExcelPivotTableError(`The header name "${name}" was not found in ${source.name}.`);
     }
   };
   for (const name of model.rows) {
@@ -754,11 +754,11 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
     for (const field of area.fields) {
       const existing = fieldToAxis.get(field);
       if (existing === area.name) {
-        throw new PivotTableError(
+        throw new ExcelPivotTableError(
           `Duplicate field "${field}" in ${area.name}. Each field can only appear once per axis area.`
         );
       } else if (existing) {
-        throw new PivotTableError(
+        throw new ExcelPivotTableError(
           `Field "${field}" cannot appear in both ${existing} and ${area.name}. Each field can only be assigned to one axis area.`
         );
       }
@@ -767,24 +767,24 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   }
 
   if (!model.rows.length) {
-    throw new PivotTableError("No pivot table rows specified.");
+    throw new ExcelPivotTableError("No pivot table rows specified.");
   }
 
   // Allow empty columns - Excel will use "Values" as column field
   if (model.values.length < 1) {
-    throw new PivotTableError("Must have at least one value.");
+    throw new ExcelPivotTableError("Must have at least one value.");
   }
 
   // Validate metric values at runtime (guards against `as any` bypasses)
   if (model.metric !== undefined && !VALID_SUBTOTALS.has(model.metric)) {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       `Invalid metric "${model.metric}". Must be one of: ${[...VALID_SUBTOTALS].join(", ")}.`
     );
   }
   for (const v of model.values) {
     const perMetric = resolveValueMetric(v);
     if (perMetric !== undefined && !VALID_SUBTOTALS.has(perMetric)) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `Invalid metric "${perMetric}" on value field "${resolveValueName(v)}". Must be one of: ${[...VALID_SUBTOTALS].join(", ")}.`
       );
     }
@@ -794,7 +794,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   const valueDupCheck = new Set<string>();
   for (const name of valueNames) {
     if (valueDupCheck.has(name)) {
-      throw new PivotTableError(
+      throw new ExcelPivotTableError(
         `Duplicate value field "${name}". Each value field name must be unique.`
       );
     }

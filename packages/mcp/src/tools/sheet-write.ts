@@ -14,7 +14,14 @@
 
 import { createReadStream } from "node:fs";
 
-import { Cell, Column, ExcelNotSupportedError, Row, Workbook, Worksheet } from "documonster/excel";
+import {
+  Cell,
+  Column,
+  ExcelUnsupportedFeatureError,
+  Row,
+  Workbook,
+  Worksheet
+} from "documonster/excel";
 import { ExcelCsv } from "documonster/excel/csv";
 import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
@@ -219,7 +226,7 @@ export const sheetWriteTool = defineTool({
         ? await Workbook.toBuffer(wb, { format }).then(
             () => [],
             (cause: unknown): string[] =>
-              cause instanceof ExcelNotSupportedError ? [...cause.items] : []
+              cause instanceof ExcelUnsupportedFeatureError ? [...cause.items] : []
           )
         : [];
     await writeWithPolicy(target, args.overwrite === true, temporary =>

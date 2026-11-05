@@ -12,10 +12,11 @@ import {
   checkFinite,
   checkNonNegative,
   checkOptionalNonNegative,
+  checkOptionalObject,
+  checkOptionalPositive,
   checkPaint,
   checkPathCommands,
   checkPoint,
-  checkPositive,
   fail
 } from "@draw/arguments";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@draw/types";
 import type {
   DrawBox,
+  DrawFlattenPathOptions,
   DrawNode,
   DrawPaint,
   DrawPathCommand,
@@ -43,6 +45,12 @@ function checkBoolean(where: string, field: string, value: unknown): void {
 /**
  * Convert an SVG-style elliptical arc (endpoint parameterisation) to cubic Béziers. A zero
  * radius, or coincident end points, degrade to a line, as SVG specifies.
+ *
+ * The two flags are positional, which the API conventions otherwise rule out, on purpose:
+ * the parameters are the SVG `A` command's, in its order (`rx ry x-axis-rotation
+ * large-arc-flag sweep-flag x y`), with the current point in front. A path parser hands
+ * them straight across, and a reader checks them against the SVG specification one for
+ * one — an options object would only add a translation step to get wrong.
  */
 export function arcToCubics(
   from: DrawPoint,
@@ -64,16 +72,18 @@ export function arcToCubics(
 }
 
 /**
- * Flatten a path to polylines, one per subpath, keeping whether each closed. `scale`
- * multiplies the output points (default 1), so a supersampling backend gets finer
- * subdivision.
+ * Flatten a path to polylines, one per subpath, keeping whether each closed.
+ * `options.scale` multiplies the output points (default 1), so a supersampling backend
+ * gets finer subdivision.
  */
-export function flattenPath(commands: readonly DrawPathCommand[], scale?: number): DrawSubpath[] {
+export function flattenPath(
+  commands: readonly DrawPathCommand[],
+  options?: DrawFlattenPathOptions
+): DrawSubpath[] {
   checkPathCommands("Draw.Geometry.flattenPath", "commands", commands);
-  if (scale !== undefined) {
-    checkPositive("Draw.Geometry.flattenPath", "scale", scale);
-  }
-  return flattenPathImpl(commands, scale);
+  checkOptionalObject("Draw.Geometry.flattenPath", "options", options);
+  checkOptionalPositive("Draw.Geometry.flattenPath", "options.scale", options?.scale);
+  return flattenPathImpl(commands, options?.scale);
 }
 
 /** A rect node from a box, with an optional corner radius. */
@@ -95,7 +105,10 @@ export function roundedRectToPath(
   height: number,
   radius: number
 ): DrawPathCommand[] {
-  checkBox("Draw.Geometry.roundedRectToPath", "box", { x, y, width, height });
+  checkFinite("Draw.Geometry.roundedRectToPath", "x", x);
+  checkFinite("Draw.Geometry.roundedRectToPath", "y", y);
+  checkFinite("Draw.Geometry.roundedRectToPath", "width", width);
+  checkFinite("Draw.Geometry.roundedRectToPath", "height", height);
   checkFinite("Draw.Geometry.roundedRectToPath", "radius", radius);
   return roundedRectToPathImpl(x, y, width, height, radius);
 }

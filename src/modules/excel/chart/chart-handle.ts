@@ -54,7 +54,7 @@ import {
 } from "@excel/core/workbook-core";
 import type { ChartAnchorRange, ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
 import { checkWorksheetAttached, getSheetWorkbook } from "@excel/core/worksheet-core";
-import { ChartOptionsError, ExcelArgumentError } from "@excel/errors";
+import { ExcelChartOptionsError, ExcelArgumentError } from "@excel/errors";
 import { argumentChecks } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
 import { RelType } from "@excel/xlsx/rel-type";
@@ -288,7 +288,7 @@ function chartParseRange(
   // rather than an opaque serialization failure.
   if ("pos" in range && range.pos !== undefined) {
     if (!range.ext) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         "range.ext",
         "Chart range with `pos` requires `ext` (absolute anchor needs an explicit EMU extent)."
       );
@@ -465,11 +465,14 @@ export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string |
     argumentChecks("Chart.setUserShapesXml").fail("xml", "XML text, its bytes, or undefined", xml);
   }
   if (c.chartNumber <= 0) {
-    throw new ChartOptionsError("c", "Chart.setUserShapesXml is only supported on classic charts.");
+    throw new ExcelChartOptionsError(
+      "c",
+      "Chart.setUserShapesXml is only supported on classic charts."
+    );
   }
   const entry = getChartEntry(getSheetWorkbook(c.worksheet), c.chartNumber);
   if (!entry) {
-    throw new ChartOptionsError("c", `Chart ${c.chartNumber} has no registered chart entry.`);
+    throw new ExcelChartOptionsError("c", `Chart ${c.chartNumber} has no registered chart entry.`);
   }
   if (xml === undefined) {
     chartRemoveUserShapes(c);
@@ -485,7 +488,7 @@ export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string |
   // Minimal sanity check — full validation is left to downstream consumers.
   const peek = new TextDecoder().decode(bytes.slice(0, 512));
   if (!peek.includes("userShapes")) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "xml",
       "Chart.setUserShapesXml expects a DrawingML document whose root is c:userShapes."
     );
@@ -704,7 +707,7 @@ export function chartSetTitle(
     // the branches above (e.g. `{ formula: 123 }`, `{ foo: 1 }`). Previously
     // we silently returned, which quietly swallowed malformed input; throw
     // instead so callers see the bug at the assignment site.
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "value",
       "Chart.setTitle: value must be a string, rich text, { formula } or undefined, " +
         `got ${JSON.stringify(value)}.`
@@ -860,10 +863,10 @@ export function chartPlotArea(c: ChartHandle): PlotArea | undefined {
  * Options, for a chart read from a file:
  * - `preferRawPatch` — write the change by patching the part's original XML where it can, keeping what the model
  *   does not describe; otherwise the part is rendered from the model.
- * - `requireRawPatch` — the same, but `Workbook.toBuffer` throws a `ChartOptionsError` when the change cannot be
+ * - `requireRawPatch` — the same, but `Workbook.toBuffer` throws a `ExcelChartOptionsError` when the change cannot be
  *   written as a patch, rather than rendering the part from the model.
  *
- * @throws {ChartOptionsError} when the chart is an Office 2016 chart (use {@link chartMutateChartEx}).
+ * @throws {ExcelChartOptionsError} when the chart is an Office 2016 chart (use {@link chartMutateChartEx}).
  * @throws {ExcelArgumentError} when the chart was removed from its sheet.
  */
 export function chartMutate(
@@ -875,7 +878,7 @@ export function chartMutate(
   checkChartPresent(c, "Chart.mutate");
   const model = chartChartModel(c);
   if (!model) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "c",
       "Cannot mutate a classic chart model because this chart is ChartEx or missing."
     );
@@ -893,7 +896,7 @@ export function chartMutate(
  * copy, the chart takes it only if the mutator returns and the result still has `chartSpace.chart` and
  * `chartSpace.chartData`. `preferRawPatch` / `requireRawPatch` as for {@link chartMutate}.
  *
- * @throws {ChartOptionsError} when the chart is a classic chart, or the result is not a chart.
+ * @throws {ExcelChartOptionsError} when the chart is a classic chart, or the result is not a chart.
  * @throws {ExcelArgumentError} when the chart was removed from its sheet.
  */
 export function chartMutateChartEx(
@@ -905,7 +908,7 @@ export function chartMutateChartEx(
   checkChartPresent(c, "Chart.mutateEx");
   const model = chartChartExModel(c);
   if (!model) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "c",
       "Cannot mutate a ChartEx model because this chart is classic or missing."
     );
@@ -913,7 +916,7 @@ export function chartMutateChartEx(
   const draft = structuredClone(model);
   mutator(draft);
   if (!draft.chartSpace?.chart || !draft.chartSpace.chartData) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "mutator",
       "Chart.mutateEx produced an invalid model: chartSpace.chart and chartSpace.chartData are required."
     );
@@ -993,21 +996,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `c:` namespace.
  *
  * @param style - Integer in the range 1–48.
- * @throws {ChartOptionsError} when `style` is outside 1–48 or the
+ * @throws {ExcelChartOptionsError} when `style` is outside 1–48 or the
  *         chart is a ChartEx.
  */
 export function chartSetStyle(c: ChartHandle, style: number): ChartHandle {
   checkChart(c);
   checkChartPresent(c, "Chart.setStyle");
   if (!Number.isInteger(style) || style < 1 || style > 48) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "style",
       `Chart.setStyle: built-in style must be an integer in 1..48, received ${style}`
     );
   }
   const model = chartChartModel(c);
   if (!model) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "c",
       "Chart.setStyle is only valid on classic charts; ChartEx does not honour `c:style`"
     );
@@ -1276,7 +1279,7 @@ export function chartCopyTo(
   if (typeof targetWs !== "object" || targetWs === null) {
     throw new ExcelArgumentError(
       "targetWs",
-      "Chart.copyTo: targetWs must be the worksheet to copy the chart to; Chart.clone copies it onto its own sheet."
+      "Chart.copyTo: targetWs must be the worksheet to copy the chart to; pass c.worksheet to copy it onto its own sheet."
     );
   }
   // A removed chart has no model to copy; say so as every other edit through its handle does.
@@ -1284,7 +1287,7 @@ export function chartCopyTo(
   const sourceModel = chartChartModel(c);
   const sourceChartExModel = chartChartExModel(c);
   if (!sourceModel && !sourceChartExModel) {
-    throw new ChartOptionsError("c", "Cannot copy chart because no chart model is available.");
+    throw new ExcelChartOptionsError("c", "Cannot copy chart because no chart model is available.");
   }
   const targetRange = range ?? _chartCloneRange(c);
   if (sourceChartExModel) {

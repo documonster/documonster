@@ -5,7 +5,7 @@
  */
 
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { ArchiveLimitError, FileTooLargeError } from "@archive/core/errors";
+import { ArchiveLimitError, ArchiveFileTooLargeError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import {
   processEntryData,
@@ -25,12 +25,12 @@ function assertEntryExtractableInMemory(entry: ZipEntryRecord): void {
     entry.uncompressedSize64 !== undefined &&
     entry.uncompressedSize64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
+    throw new ArchiveFileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
       allowed: Number.MAX_SAFE_INTEGER
     });
   }
   if (entry.compressedSize64 !== undefined && entry.compressedSize64 > MAX_SAFE_INTEGER_BIGINT) {
-    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
+    throw new ArchiveFileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
       allowed: Number.MAX_SAFE_INTEGER
     });
   }
@@ -38,7 +38,7 @@ function assertEntryExtractableInMemory(entry: ZipEntryRecord): void {
     entry.localHeaderOffset64 !== undefined &&
     entry.localHeaderOffset64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new FileTooLargeError(entry.path, "ZIP64 offset > 2^53-1", {
+    throw new ArchiveFileTooLargeError(entry.path, "ZIP64 offset > 2^53-1", {
       allowed: Number.MAX_SAFE_INTEGER
     });
   }
@@ -62,7 +62,7 @@ export interface ZipParseOptions {
   /**
    * Largest uncompressed size, in bytes, of a single entry extracted into memory.
    * An entry declaring more is rejected before inflation; an entry that inflates
-   * past its declared size is stopped at that size (`EntrySizeMismatchError`).
+   * past its declared size is stopped at that size (`ZipEntrySizeMismatchError`).
    * @default 536870912 (512 MiB)
    */
   maxEntrySize?: number;
@@ -87,7 +87,7 @@ export interface ZipParseOptions {
 
   /**
    * Whether to verify each extracted entry against its recorded CRC-32, throwing
-   * `Crc32MismatchError` on a mismatch. Set `false` to read damaged archives as far as
+   * `ZipCrc32MismatchError` on a mismatch. Set `false` to read damaged archives as far as
    * they go. AES entries carry an HMAC instead and are always authenticated; ZipCrypto
    * entries are always verified.
    * @default true

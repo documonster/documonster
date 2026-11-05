@@ -4,7 +4,7 @@
  * Extends base with file path support and file system image loading.
  */
 
-import { ImageError } from "@excel/errors";
+import { ExcelImageError } from "@excel/errors";
 import type {
   WorkbookWriterOptions,
   WorkbookZipOptions,
@@ -34,13 +34,15 @@ interface OutputStreamLike {
  * memory: `addWorksheet` hands out a {@link WorksheetWriter}, each committed row is written and released, and
  * `commit` finishes the package. A sheet's rows go out in order, so a committed row or sheet takes no more edits.
  */
-class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter> {
+class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter<WorkbookWriter>> {
   constructor(options: WorkbookWriterOptions = {}) {
     super(options, WorksheetWriter);
   }
 
   /**
    * Create output stream - supports filename option in Node.js
+   *
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
    */
   protected _createOutputStream(options: WorkbookWriterOptions): OutputStreamLike {
     if (options.filename) {
@@ -51,6 +53,9 @@ class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter> {
 
   /**
    * Add media files - supports loading from file system
+   *
+   * @deprecated One of the steps {@link commit} runs to write the package, and only correct there: called on its own it
+   * writes the media a second time. Use {@link commit}. Removed in 1.0.
    */
   addMedia(): Promise<void[]> {
     return Promise.all(
@@ -78,7 +83,7 @@ class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter> {
             return;
           }
         }
-        throw new ImageError("Unsupported media");
+        throw new ExcelImageError("Unsupported media");
       })
     );
   }

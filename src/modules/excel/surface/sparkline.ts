@@ -1,4 +1,7 @@
-import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/core/sparkline";
+import type {
+  AddSparklineGroupOptions as SparklineAddOptions,
+  SparklineGroup as SparklineGroupModel
+} from "@excel/core/sparkline";
 import { addSparklineGroup, getSparklineGroups, removeSparklineGroup } from "@excel/core/worksheet";
 /**
  * `Sparkline` namespace surface.
@@ -10,13 +13,13 @@ import { checkListTarget } from "@excel/surface/argument-checks";
 import { argumentChecks } from "@excel/utils/arguments";
 
 /** The sheet's sparkline groups, in the order they were added. */
-export function list(ws: WorksheetData): SparklineGroup[] {
+export function list(ws: WorksheetData): SparklineGroupModel[] {
   checkWorksheet(ws);
   return getSparklineGroups(ws);
 }
 
 /** Remove a sparkline group — one {@link list} listed, or its index in that list. Returns `true` if one was removed. */
-export function remove(ws: WorksheetData, groupOrIndex: SparklineGroup | number): boolean {
+export function remove(ws: WorksheetData, groupOrIndex: SparklineGroupModel | number): boolean {
   checkWorksheet(ws);
   checkListTarget("Sparkline.remove", "groupOrIndex", groupOrIndex, "a sparkline group");
   return removeSparklineGroup(ws, groupOrIndex);
@@ -46,7 +49,7 @@ const HEX_COLOR = /^#?(?:[0-9A-Fa-f]{2})?[0-9A-Fa-f]{6}$/;
  * The group keeps copies of the `sparklines` given. The returned group is the one the sheet writes: editing it changes
  * the sheet without these checks.
  */
-export function add(ws: WorksheetData, options: AddSparklineGroupOptions): SparklineGroup {
+export function add(ws: WorksheetData, options: SparklineAddOptions): SparklineGroupModel {
   checkWorksheet(ws);
   const check = argumentChecks("Sparkline.add");
   check.required("options", options);
@@ -104,4 +107,8 @@ export function add(ws: WorksheetData, options: AddSparklineGroupOptions): Spark
   return addSparklineGroup(ws, options);
 }
 
-export type { AddSparklineGroupOptions, SparklineGroup } from "@excel/core/sparkline";
+// The flat names are the public ones; these namespace aliases repeated them (and `SparklineGroup` its namespace noun).
+/** @deprecated Use the flat `AddSparklineGroupOptions` type. Removed in 1.0. */
+export type AddSparklineGroupOptions = SparklineAddOptions;
+/** @deprecated Use the flat `SparklineGroup` type. Removed in 1.0. */
+export type SparklineGroup = SparklineGroupModel;

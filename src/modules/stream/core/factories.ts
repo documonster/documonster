@@ -7,7 +7,7 @@
 
 import { BufferedStream } from "@stream/buffered-stream";
 import { isAsyncIterable } from "@stream/core/type-guards";
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 import { PullStream } from "@stream/pull-stream";
 import type {
   BufferedStreamOptions,
@@ -252,7 +252,7 @@ export function makeCreateReadableFromAsyncIterable(
         "function" &&
       typeof iterable !== "string"
     ) {
-      throw new StreamTypeError("an async iterable", describeValue(iterable), {
+      throw new StreamArgumentError("an async iterable", describeValue(iterable), {
         field: "iterable",
         where: "Streams.createReadableFromAsyncIterable"
       });
@@ -271,7 +271,7 @@ export function makeCreateReadableFromArray(
 ): StreamFactories["createReadableFromArray"] {
   return <T>(data: T[], options?: ReadableStreamOptions): IReadable<T> => {
     if (!Array.isArray(data)) {
-      throw new StreamTypeError("an array", typeof data, {
+      throw new StreamArgumentError("an array", typeof data, {
         field: "data",
         where: "Streams.createReadableFromArray"
       });
@@ -280,7 +280,7 @@ export function makeCreateReadableFromArray(
     // than ending the stream there and dropping everything after it.
     const nullAt = data.indexOf(null as T);
     if (nullAt >= 0) {
-      throw new StreamTypeError(
+      throw new StreamArgumentError(
         "entries other than null (null ends a stream)",
         `null at index ${nullAt}`,
         { field: `data[${nullAt}]`, where: "Streams.createReadableFromArray" }
@@ -320,7 +320,7 @@ export function makeCreateReadableFromPromise(
 ): StreamFactories["createReadableFromPromise"] {
   return <T>(promise: Promise<T>, options?: ReadableStreamOptions): IReadable<T> => {
     if (typeof (promise as { then?: unknown } | null)?.then !== "function") {
-      throw new StreamTypeError("a promise or thenable", describeValue(promise), {
+      throw new StreamArgumentError("a promise or thenable", describeValue(promise), {
         field: "promise",
         where: "Streams.createReadableFromPromise"
       });
@@ -412,7 +412,7 @@ function describeValue(value: unknown): string {
 
 function checkFunction(where: string, field: string, value: unknown): void {
   if (typeof value !== "function") {
-    throw new StreamTypeError("a function", describeValue(value), {
+    throw new StreamArgumentError("a function", describeValue(value), {
       field,
       where: `Streams.${where}`
     });
@@ -429,7 +429,7 @@ function isByteArray(value: unknown): value is Uint8Array {
 export function makeFromBytes(Readable: StreamClasses["Readable"]): StreamFactories["fromBytes"] {
   return data => {
     if (!isByteArray(data)) {
-      throw new StreamTypeError("a Uint8Array", data === null ? "null" : typeof data, {
+      throw new StreamArgumentError("a Uint8Array", data === null ? "null" : typeof data, {
         field: "data",
         where: "Streams.fromBytes"
       });
@@ -447,7 +447,7 @@ export function makeFromString(Readable: StreamClasses["Readable"]): StreamFacto
   const fromBytes = makeFromBytes(Readable);
   return str => {
     if (typeof str !== "string") {
-      throw new StreamTypeError("a string", str === null ? "null" : typeof str, {
+      throw new StreamArgumentError("a string", str === null ? "null" : typeof str, {
         field: "str",
         where: "Streams.fromString"
       });
@@ -463,7 +463,7 @@ export function makeFromJSON(Readable: StreamClasses["Readable"]): StreamFactori
     try {
       json = JSON.stringify(data);
     } catch (cause) {
-      throw new StreamTypeError(
+      throw new StreamArgumentError(
         "JSON-serialisable data",
         `${describeValue(data)} (${(cause as Error).message})`,
         { cause, field: "data", where: "Streams.fromJson" }
@@ -471,7 +471,7 @@ export function makeFromJSON(Readable: StreamClasses["Readable"]): StreamFactori
     }
     if (json === undefined) {
       // JSON.stringify answers `undefined` for a function, a symbol and `undefined` itself.
-      throw new StreamTypeError("JSON-serialisable data", describeValue(data), {
+      throw new StreamArgumentError("JSON-serialisable data", describeValue(data), {
         field: "data",
         where: "Streams.fromJson"
       });

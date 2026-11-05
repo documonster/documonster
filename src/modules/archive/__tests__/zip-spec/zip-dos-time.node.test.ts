@@ -80,7 +80,7 @@ describe("ZIP DOS timestamps", () => {
 
   it("refuses an out-of-range modTime in the editor and ArchiveFile too", async () => {
     const zip = Archive.packZipSync([["a.txt", "x"]]);
-    const editor = await Archive.editZip(zip);
+    const editor = await Archive.ZipEditor.open(zip);
     const tooEarly = new Date(Date.UTC(1969, 0, 1));
     expect(() => editor.set("b.txt", "y", { modTime: tooEarly })).toThrow(ArchiveError);
     expect(() => new Archive.ArchiveFile().addText("y", "b.txt", { modTime: tooEarly })).toThrow(

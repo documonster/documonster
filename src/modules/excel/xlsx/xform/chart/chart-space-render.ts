@@ -2538,7 +2538,7 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
   // Emit raw XML only when the model is a pure raw-capture — i.e.
   // `_rawXml` is present AND no structured field has been set. If
   // the caller assigned `spPr.fill = {...}` directly (without going
-  // through `setSpPrFill`, which clears `_rawXml`), the stale raw
+  // through `withSpPrFill`, which clears `_rawXml`), the stale raw
   // bytes are stale and the structured writer must win. Previously
   // this check was `if (spPr._rawXml)` — so any direct mutation of
   // a loaded chart's spPr was silently dropped on save.

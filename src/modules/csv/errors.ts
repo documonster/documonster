@@ -38,7 +38,8 @@ export function isCsvError(err: unknown): err is CsvError {
 }
 
 /**
- * Error thrown when CSV worker operations fail.
+ * Error thrown when CSV worker operations fail. Not published: the worker pool that throws it
+ * is not reachable from any public entry.
  */
 export class CsvWorkerError extends CsvError {
   override name = "CsvWorkerError";

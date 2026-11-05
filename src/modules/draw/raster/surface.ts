@@ -12,8 +12,10 @@
  * would lose accuracy for nothing if the flattening happened upstream.
  */
 
+import { checkSurfaceCall } from "@draw/arguments";
 import { DrawArgumentError, DrawError } from "@draw/errors";
 import { BasicRasterCanvas } from "@draw/raster/canvas";
+import type { DrawRasterStrokeOptions } from "@draw/raster/canvas";
 import type { RasterFontSource } from "@draw/raster/glyph-outline";
 import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
@@ -167,7 +169,7 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
     height: pixelHeight,
     data: samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples),
     uncoveredCodePoints: [...canvas.uncoveredCodePoints].sort((a, b) => a - b),
-    textWarnings: canvas.textWarnings()
+    textWarnings: canvas.getTextWarnings()
   };
 }
 
@@ -307,9 +309,14 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
   const at = (value: number): number => value * scale;
   const points = (input: readonly DrawPoint[]): DrawPoint[] =>
     input.map(point => ({ x: at(point.x), y: at(point.y) }));
+  // The surface is a public object as well as the one `Draw.toRgba` walks, so a caller
+  // driving it by hand gets a typed error rather than a `TypeError` from inside a primitive.
+  const check = (method: string, args: readonly unknown[]): void =>
+    checkSurfaceCall(`Draw.Backend.createRasterSurface(…).${method}`, method, args);
 
   return {
     pushClip(clip: DrawClip) {
+      check("pushClip", [clip]);
       canvas.pushClip(at(clip.x), at(clip.y), at(clip.width), at(clip.height));
     },
 
@@ -318,6 +325,7 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
     },
 
     rect(x, y, width, height, rx, paint) {
+      check("rect", [x, y, width, height, rx, paint]);
       const fill = token(paint.fill);
       if (fill !== undefined) {
         if (rx > 0) {
@@ -337,10 +345,7 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
         for (const subpath of flattenPath(roundedRectToPath(x, y, width, height, rx), scale)) {
           canvas.drawPolyline(
             subpath.closed ? [...subpath.points, subpath.points[0]] : [...subpath.points],
-            stroke,
-            strokeWidth(paint, scale),
-            paint.dash?.map(part => part * scale),
-            strokeShape(paint, subpath.closed)
+            strokeOptions(paint, stroke, scale, subpath.closed)
           );
         }
         return;
@@ -357,14 +362,12 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
           { x: at(x), y: at(y + height) },
           { x: at(x), y: at(y) }
         ],
-        stroke,
-        strokeWidth(paint, scale),
-        paint.dash?.map(part => part * scale),
-        strokeShape(paint, true)
+        strokeOptions(paint, stroke, scale, true)
       );
     },
 
     ellipse(cx, cy, rx, ry, paint) {
+      check("ellipse", [cx, cy, rx, ry, paint]);
       const fill = token(paint.fill);
       if (fill !== undefined) {
         canvas.fillEllipse(at(cx), at(cy), at(rx), at(ry), fill);
@@ -376,16 +379,14 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
           at(cy),
           at(rx),
           at(ry),
-          stroke,
-          strokeWidth(paint, scale),
-          paint.dash?.map(part => part * scale),
           // A closed outline: its first and last vertex is a corner like any other.
-          strokeShape(paint, true)
+          strokeOptions(paint, stroke, scale, true)
         );
       }
     },
 
     sector(cx, cy, radius, innerRadius, startAngle, endAngle, paint) {
+      check("sector", [cx, cy, radius, innerRadius, startAngle, endAngle, paint]);
       const fill = token(paint.fill);
       if (fill !== undefined) {
         // Per-pixel radius and angle test: an exact edge, no polygon facets. This
@@ -406,19 +407,18 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
       )) {
         canvas.drawPolyline(
           subpath.closed ? [...subpath.points, subpath.points[0]] : [...subpath.points],
-          stroke,
-          strokeWidth(paint, scale),
-          paint.dash?.map(part => part * scale),
-          strokeShape(paint, subpath.closed)
+          strokeOptions(paint, stroke, scale, subpath.closed)
         );
       }
     },
 
     polyline(input, closed, paint) {
+      check("polyline", [input, closed, paint]);
       paintPolygon(canvas, points(input), closed, paint, scale);
     },
 
     path(commands, paint) {
+      check("path", [commands, paint]);
       const subpaths = flattenPath(commands, scale);
       const fill = token(paint.fill);
       if (fill !== undefined) {
@@ -440,15 +440,13 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
       for (const subpath of subpaths) {
         canvas.drawPolyline(
           subpath.closed ? [...subpath.points, subpath.points[0]] : [...subpath.points],
-          stroke,
-          strokeWidth(paint, scale),
-          paint.dash?.map(part => part * scale),
-          strokeShape(paint, subpath.closed)
+          strokeOptions(paint, stroke, scale, subpath.closed)
         );
       }
     },
 
     text(x, y, lines, style, rotate) {
+      check("text", [x, y, lines, style, rotate]);
       const fill = token(style.fill);
       if (fill === undefined) {
         return;
@@ -457,20 +455,15 @@ export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1):
         if (line.text === "") {
           continue;
         }
-        canvas.drawText(
-          at(line.x ?? x),
-          at(y + line.dy),
-          line.text,
-          at(style.size),
-          fill,
-          style.anchor ?? "start",
-          rotate === 0 ? undefined : { angle: rotate, originX: at(x), originY: at(y) },
-          {
-            family: style.family ?? DEFAULT_TEXT_FAMILY,
-            ...(style.bold === undefined ? {} : { bold: style.bold }),
-            ...(style.italic === undefined ? {} : { italic: style.italic })
-          }
-        );
+        canvas.drawText(at(line.x ?? x), at(y + line.dy), line.text, {
+          fontSize: at(style.size),
+          color: fill,
+          anchor: style.anchor ?? "start",
+          ...(rotate === 0 ? {} : { rotation: { angle: rotate, originX: at(x), originY: at(y) } }),
+          family: style.family ?? DEFAULT_TEXT_FAMILY,
+          ...(style.bold === undefined ? {} : { bold: style.bold }),
+          ...(style.italic === undefined ? {} : { italic: style.italic })
+        });
       }
     }
   };
@@ -495,26 +488,28 @@ function paintPolygon(
   if (stroke !== undefined) {
     canvas.drawPolyline(
       closed ? [...points, points[0]] : [...points],
-      stroke,
-      strokeWidth(paint, scale),
-      paint.dash?.map(part => part * scale),
-      strokeShape(paint, closed)
+      strokeOptions(paint, stroke, scale, closed)
     );
   }
 }
 
 /**
- * The join and cap the canvas should apply.
+ * How the canvas should stroke `paint` in colour `color`, in canvas pixels.
  *
  * A closed run has no ends, so its first and last vertex is a corner like any other
  * and a round *join* has to round it — asking for a cap there would leave the seam
  * notched.
  */
-function strokeShape(
+function strokeOptions(
   paint: DrawPaint,
+  color: string,
+  scale: number,
   closed: boolean
-): { join?: "miter" | "round" | "bevel"; cap?: "butt" | "round" | "square" } {
+): DrawRasterStrokeOptions {
   return {
+    color,
+    width: strokeWidth(paint, scale),
+    ...(paint.dash === undefined ? {} : { dash: paint.dash.map(part => part * scale) }),
     ...(paint.lineJoin === undefined ? {} : { join: paint.lineJoin }),
     ...(closed
       ? paint.lineJoin === "round"

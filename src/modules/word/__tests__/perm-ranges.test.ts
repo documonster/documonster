@@ -10,7 +10,7 @@ import { unzip } from "@archive/read-archive";
 import { describe, expect, it } from "vitest";
 
 import { utf8Decoder, utf8Encoder } from "../core/internal-utils";
-import { Build, Document, Io, Query, Security, Streaming } from "../index";
+import { Build, Document, Io, Query, Security, Stream } from "../index";
 import type { BodyContent, DocxDocument, Paragraph, RangeMarker } from "../types";
 
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -197,7 +197,7 @@ describe("range permissions (w:permStart / w:permEnd)", () => {
 
   it("the streaming reader and writer carry them too", async () => {
     const bytes = await protectedDocxWithBody(PROTECTED_BODY);
-    const reader = Streaming.createReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
     const body: BodyContent[] = [];
     for await (const item of reader) {
       body.push(item);
@@ -205,7 +205,7 @@ describe("range permissions (w:permStart / w:permEnd)", () => {
     const streamed: DocxDocument = { body, bodyRangeMarkersAfter: reader.bodyRangeMarkersAfter };
     expect(markers(streamed)).toEqual(EXPECTED);
 
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       bodyRangeMarkersAfter: streamed.bodyRangeMarkersAfter
     });
     stream.addMany(body);

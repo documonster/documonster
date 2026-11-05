@@ -13,6 +13,7 @@ import { PdfArgumentError } from "@pdf/errors";
 import { PageSizes } from "@pdf/types";
 import type { PdfColor, PdfDocumentOptions, PdfExportOptions } from "@pdf/types";
 import { describeValue as describe } from "@utils/describe-value";
+import { isRecordArgument } from "@utils/object";
 import { isLegalXmlChar } from "@utils/xml-encode";
 
 function fail(where: string, field: string, expected: string, value: unknown): never {
@@ -384,7 +385,7 @@ export function checkFontBytes(where: string, value: unknown, field = "fontBytes
 }
 
 /** One `PdfFontSource`: font bytes, or `{ data, collectionIndex? }`. */
-function checkFontSource(where: string, field: string, value: unknown): void {
+export function checkFontSource(where: string, field: string, value: unknown): void {
   if (isByteArray(value)) {
     checkFontBytes(where, value, field);
     return;
@@ -395,6 +396,38 @@ function checkFontSource(where: string, field: string, value: unknown): void {
   const source = value as Record<string, unknown>;
   checkFontBytes(where, source.data, `${field}.data`);
   checkOptionalInteger(where, `${field}.collectionIndex`, source.collectionIndex, 0);
+}
+
+/**
+ * The face an `embedFont` call names, checked. `source` is font bytes or a
+ * `{ data, collectionIndex }` record; the deprecated form passes the index as a second
+ * argument, and its fields keep the names its signature gives them (`fontBytes`,
+ * `collectionIndex`). `field` is the argument a later refusal of the face names.
+ */
+export function readFontSourceArgument(
+  where: string,
+  source: unknown,
+  collectionIndex: unknown
+): { data: Uint8Array; collectionIndex: number | undefined; field: string } {
+  if (isRecordArgument(source)) {
+    if (collectionIndex !== undefined) {
+      throw new PdfArgumentError(
+        "collectionIndex",
+        `${where}: collectionIndex cannot be passed beside { data, collectionIndex } — give it as source.collectionIndex`
+      );
+    }
+    checkFontSource(where, "source", source);
+    const face = source as { data: Uint8Array; collectionIndex?: number };
+    return { data: face.data, collectionIndex: face.collectionIndex, field: "source" };
+  }
+  const field = collectionIndex === undefined ? "source" : "fontBytes";
+  checkFontBytes(where, source, field);
+  checkOptionalInteger(where, "collectionIndex", collectionIndex, 0);
+  return {
+    data: source as Uint8Array,
+    collectionIndex: collectionIndex as number | undefined,
+    field
+  };
 }
 
 /** A `PdfFontFaces`: `regular` and the optional styled faces. */

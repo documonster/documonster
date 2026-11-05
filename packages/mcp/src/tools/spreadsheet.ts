@@ -138,7 +138,7 @@ export function parseRange(range: string): GridWindow {
  * An empty sheet reports `{ top: 0, left: 0, bottom: 0, right: 0 }` — verified
  * empirically, both freshly created and after a file round-trip. That satisfies
  * `bottom >= top`, so checking only for an inverted rectangle lets zeroes through
- * and the first `columnLetter(0)` then throws `ColumnOutOfBoundsError`. Hence the
+ * and the first `columnLetter(0)` then throws `ExcelColumnOutOfBoundsError`. Hence the
  * explicit `>= 1` checks.
  */
 export function usedWindow(ws: SheetHandle): GridWindow | undefined {

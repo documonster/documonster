@@ -1,4 +1,4 @@
-import { Archive, Crc32MismatchError } from "@archive";
+import { Archive, ZipCrc32MismatchError } from "@archive";
 import { describe, expect, it } from "vitest";
 
 import { createDataDescriptorZip } from "./test-helpers";
@@ -129,7 +129,7 @@ describe("ZIP reads verify CRC-32 by default", () => {
         const zip = await build();
         expect(await read(zip)).toBe(content);
         const corrupt = corruptCrc(zip);
-        await expect(read(corrupt)).rejects.toBeInstanceOf(Crc32MismatchError);
+        await expect(read(corrupt)).rejects.toBeInstanceOf(ZipCrc32MismatchError);
         // The explicit opt-out still returns the data
         expect(await read(corrupt, false)).toBe(content);
       });
@@ -139,7 +139,7 @@ describe("ZIP reads verify CRC-32 by default", () => {
   it("a damaged stored payload is reported, not returned", async () => {
     const zip = corruptPayload(await Archive.packZip([["a.txt", content]], { level: 0 }));
     for (const read of Object.values(readers)) {
-      await expect(read(zip)).rejects.toBeInstanceOf(Crc32MismatchError);
+      await expect(read(zip)).rejects.toBeInstanceOf(ZipCrc32MismatchError);
     }
   });
 });

@@ -21,7 +21,7 @@
  * the geometry output.
  */
 
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { describeValue } from "@utils/describe-value";
 
 /** Raw TopoJSON topology as produced by d3 / world-atlas. */
@@ -129,7 +129,7 @@ function isFinitePair(value: unknown): value is [number, number] {
  * its shape. A geometry of another type (`type: null` is allowed by the specification) is
  * skipped when drawn, not refused here.
  *
- * Every refusal is a {@link ChartOptionsError} whose `field` is the path from the caller's own
+ * Every refusal is a {@link ExcelChartOptionsError} whose `field` is the path from the caller's own
  * parameter, so a malformed file names the entry that is wrong — it used to be a `TypeError`
  * from inside the decoder, or, from a renderer, a silent fall-back to the centroid preview.
  */
@@ -140,7 +140,7 @@ export function checkTopology(
 ): asserts topology is TopologyLike {
   const prefix = at.where === undefined ? "" : `${at.where}: `;
   const fail = (field: string, expected: string, value: unknown): never => {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       field,
       `${prefix}${field} must be ${expected}, got ${describeValue(value)}`
     );
@@ -155,7 +155,7 @@ export function checkTopology(
   const objects = topology.objects;
   if (typeof objectName !== "string" || !Object.hasOwn(objects, objectName)) {
     const names = Object.keys(objects);
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       at.objectName,
       `${prefix}${at.objectName} must name a geometry collection of the topology (it has ${
         names.length === 0 ? "none" : names.map(name => JSON.stringify(name)).join(", ")
@@ -255,7 +255,7 @@ function checkGeometry(
  * treat them as un-closed paths.
  *
  * The topology is checked first ({@link checkTopology}): a missing object, a malformed arc
- * table or a geometry of the wrong shape throws `ChartOptionsError` naming the path — preferring
+ * table or a geometry of the wrong shape throws `ExcelChartOptionsError` naming the path — preferring
  * a loud failure over silent "empty map" output, which is almost always a wiring bug on the
  * caller's side. `at` names the paths from the public caller's parameters.
  */

@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 
 import { WordCrypto } from "../crypto";
 import { DocxArgumentError } from "../errors";
-import { Convert, Document, Io, Package, Streaming, Vba } from "../index";
+import { Convert, Document, Io, Package, Stream, Vba } from "../index";
 import type { DocxDocument } from "../index";
 
 const PNG = Uint8Array.from([
@@ -57,7 +57,7 @@ describe("bytes given as any ArrayBufferView", () => {
       expect((await Io.read(view as never)).body.length, label).toBe(1);
       expect(await Package.listParts(view as never), label).toEqual(parts);
       const blocks: string[] = [];
-      for await (const block of Streaming.createReader(view as never)) {
+      for await (const block of new Stream.DocumentReader(view as never)) {
         blocks.push(block.type);
       }
       expect(blocks, label).toEqual(["paragraph"]);
@@ -103,7 +103,7 @@ describe("bytes given as any ArrayBufferView", () => {
     await expect(Package.compileTemplate(buf)).resolves.toBeDefined();
     await expect(Package.fillTemplate(buf, {})).resolves.toBeInstanceOf(Uint8Array);
     const blocks: string[] = [];
-    for await (const block of Streaming.createReader(buf)) {
+    for await (const block of new Stream.DocumentReader(buf)) {
       blocks.push(block.type);
     }
     expect(blocks).toEqual(["paragraph"]);
@@ -123,7 +123,7 @@ describe("bytes given as any ArrayBufferView", () => {
   it("anything else is refused with DocxArgumentError", async () => {
     for (const value of [42, "x", [1, 2], { length: 4 }]) {
       await expect(Io.read(value as never)).rejects.toBeInstanceOf(DocxArgumentError);
-      expect(() => Streaming.createReader(value as never)).toThrow(DocxArgumentError);
+      expect(() => new Stream.DocumentReader(value as never)).toThrow(DocxArgumentError);
     }
   });
 });

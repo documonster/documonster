@@ -87,8 +87,8 @@ export function calculateFormulas(wb: WorkbookData): void {
   // A workbook, or a typed error naming the argument — `null` reached a `WeakMap` and `{}` a missing field.
   if (!isReadTarget(wb)) {
     throw new ExcelArgumentError(
-      "workbook",
-      `ExcelFormula.calculate: workbook must be a workbook, got ${wb === null ? "null" : typeof wb}.`
+      "wb",
+      `ExcelFormula.calculate: wb must be a workbook, got ${wb === null ? "null" : typeof wb}.`
     );
   }
   const state = stateFor(wb);

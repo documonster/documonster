@@ -12,7 +12,7 @@
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
-import { TemplateError } from "../errors";
+import { DocxTemplateError } from "../errors";
 import {
   Document,
   DocxError,
@@ -2952,9 +2952,9 @@ describe("Template Engine", () => {
     expect(resultTable.rows.length).toBe(2);
   });
 
-  it("should throw TemplateError for unresolved variable in strict mode", () => {
+  it("should throw DocxTemplateError for unresolved variable in strict mode", () => {
     const doc = makeDoc([makePara("{{missing}}")]);
-    expect(() => fillTemplate(doc, {})).toThrow(TemplateError);
+    expect(() => fillTemplate(doc, {})).toThrow(DocxTemplateError);
     expect(() => fillTemplate(doc, {})).toThrow("Unresolved variable");
   });
 

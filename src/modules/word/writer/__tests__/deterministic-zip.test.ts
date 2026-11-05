@@ -3,7 +3,7 @@
  * with dated core properties produces identical bytes on every save.
  */
 
-import { Build, Document, Io, Streaming } from "@word/index";
+import { Build, Document, Io, Stream } from "@word/index";
 import { afterEach, describe, it, expect, vi } from "vitest";
 
 const MODIFIED = new Date("2024-03-05T06:07:08Z");
@@ -82,7 +82,7 @@ describe("DOCX deterministic ZIP timestamps", () => {
   });
 
   it("streaming writer uses the same default", async () => {
-    const stream = Streaming.createWriter({ coreProperties: { modified: MODIFIED } });
+    const stream = new Stream.DocumentWriter({ coreProperties: { modified: MODIFIED } });
     stream.add(Build.textParagraph("x"));
     const times = await entryTimes(await stream.finalize());
     expect(new Set(times)).toEqual(new Set([dosApprox(MODIFIED)]));

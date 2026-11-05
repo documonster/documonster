@@ -10,7 +10,7 @@
  * encryption Word uses too (`@archive/office-crypto/agile`) — loaded only then, through `import()`.
  */
 import { hasEncryptedPackageStreams, isCfb } from "@archive/cfb/signature";
-import { Crc32MismatchError, ZipParseError } from "@archive/core/errors";
+import { ZipCrc32MismatchError, ZipParseError } from "@archive/core/errors";
 import type { EncryptOptions } from "@archive/office-crypto/agile";
 import { ExcelDecryptionError, ExcelEncryptedError, ExcelFileError } from "@excel/errors";
 
@@ -243,7 +243,7 @@ export function containerReadError(
   if (error instanceof ZipParseError && bytes !== undefined && isCompoundFile(bytes)) {
     return compoundFileError(bytes, source, format);
   }
-  if (error instanceof Crc32MismatchError) {
+  if (error instanceof ZipCrc32MismatchError) {
     return new ExcelFileError(
       source,
       "read",

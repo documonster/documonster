@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { TemplateError } from "../errors";
+import { DocxTemplateError } from "../errors";
 import { fillTemplate } from "../template/template-engine";
 import type { DocxDocument, Paragraph, Run } from "../types";
 
@@ -68,12 +68,12 @@ describe("template engine — inline directives", () => {
 
   it("throws on unclosed inline {{#if}} in strict mode", () => {
     const doc = makeDoc("Hello {{#if x}}A");
-    expect(() => fillTemplate(doc, { x: true })).toThrow(TemplateError);
+    expect(() => fillTemplate(doc, { x: true })).toThrow(DocxTemplateError);
   });
 
   it("throws on unclosed inline {{#each}} in strict mode", () => {
     const doc = makeDoc("List {{#each items}}A");
-    expect(() => fillTemplate(doc, { items: [1, 2] })).toThrow(TemplateError);
+    expect(() => fillTemplate(doc, { items: [1, 2] })).toThrow(DocxTemplateError);
   });
 });
 

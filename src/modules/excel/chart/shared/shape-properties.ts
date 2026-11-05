@@ -53,12 +53,12 @@ function getRawXml(obj: { _rawXml?: string } | undefined): string | undefined {
  * Writers must ALSO consult this predicate before short-circuiting to
  * the raw bytes: if the model has been mutated through a direct
  * property assignment (`spPr.fill = {...}` without routing through
- * `setSpPrFill`), the raw bytes are stale and the structured path
+ * `withSpPrFill`), the raw bytes are stale and the structured path
  * must win. Exported for use by `_renderSpPr` in both the classic
  * chart-space xform and the ChartEx renderer.
  *
  * Previously `isRawXml` returned `true` whenever `_rawXml` was a
- * string, which caused `setSpPrFill` → `parseSpPr` to re-read from
+ * string, which caused `withSpPrFill` → `parseSpPr` to re-read from
  * raw and discard pending `line.width` / `fill.solid` assignments.
  */
 export function isRawXmlShape(obj: { _rawXml?: string } | undefined): boolean {
@@ -1534,7 +1534,7 @@ export function getTxPrColor(txPr: ChartTextProperties): ChartColor | undefined 
  * presetGeometry, customGeometry, bwMode).
  *
  * Previous versions only copied a five-field subset, which caused
- * `setSpPrFill` / `setSpPrLine` to silently strip `xfrm` / `prstGeom` /
+ * `withSpPrFill` / `withSpPrLine` to silently strip `xfrm` / `prstGeom` /
  * `custGeom` off the returned spPr whenever the input had been parsed from
  * raw XML. The earlier `_rawXml` round-trip path was dropped because it lost
  * effectList/scene3d/sp3d; we now keep all structured fields and intentionally
@@ -1632,18 +1632,17 @@ export function buildTxPr(props: ChartTextProperties): ChartTextProperties {
 }
 
 /**
- * Modify a property on an existing spPr (raw or structured).
- * Returns a new ShapeProperties object with the modification applied.
+ * A copy of `spPr` (raw or structured) with its fill replaced; `spPr` itself is left as it was.
  */
-export function setSpPrFill(spPr: ShapeProperties | undefined, fill: ChartFill): ShapeProperties {
+export function withSpPrFill(spPr: ShapeProperties | undefined, fill: ChartFill): ShapeProperties {
   const parsed = spPr && isRawXml(spPr) ? parseSpPr(spPr) : (spPr ?? {});
   return buildSpPr({ ...parsed, fill });
 }
 
 /**
- * Modify line properties on an existing spPr.
+ * A copy of `spPr` (raw or structured) with its line replaced; `spPr` itself is left as it was.
  */
-export function setSpPrLine(spPr: ShapeProperties | undefined, line: ChartLine): ShapeProperties {
+export function withSpPrLine(spPr: ShapeProperties | undefined, line: ChartLine): ShapeProperties {
   const parsed = spPr && isRawXml(spPr) ? parseSpPr(spPr) : (spPr ?? {});
   return buildSpPr({ ...parsed, line });
 }

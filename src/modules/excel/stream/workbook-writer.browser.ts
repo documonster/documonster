@@ -23,7 +23,11 @@ import {
 import type { WorkbookFormat } from "@excel/core/workbook-format";
 import { getWorkbookModel } from "@excel/core/workbook-model";
 import type { ProtectWorkbookOptions } from "@excel/core/workbook.browser";
-import { ExcelNotSupportedError, ExcelStreamStateError, ImageError } from "@excel/errors";
+import {
+  ExcelUnsupportedFeatureError,
+  ExcelStreamStateError,
+  ExcelImageError
+} from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import type { WorkbookWriterLike } from "@excel/stream/worksheet-writer";
 import {
@@ -186,6 +190,9 @@ export interface WorkbookWriterOptions {
    * response, or an upload body). Handing over an unconsumed intermediate
    * stream — e.g. a bare `PassThrough` whose reader is attached only after
    * `commit()` resolves — deadlocks once its buffers fill.
+   *
+   * `commit()` ends it. With neither `stream` nor `filename` the writer keeps the package itself and `toBuffer()`
+   * returns it.
    */
   stream?: Writable | WritableStream<Uint8Array>;
   filename?: string; // Node.js only
@@ -273,11 +280,14 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   lastModifiedBy: string;
   lastPrinted?: Date;
   useSharedStrings: boolean;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   sharedStrings: SharedStrings;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   styles: StylesXform;
   private _definedNames: DefinedNamesData;
   private _worksheets: TWorksheetWriter[];
   views: WorkbookView[];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   zipOptions?: Partial<WorkbookZipOptions>;
   /** Which container this writer produces. Read by `WorksheetWriter` to decide what a row becomes. */
   readonly format: WorkbookFormat;
@@ -287,6 +297,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * Created eagerly rather than on first use so that `WorksheetWriter` can rely on it existing: a `BrtCellIsst`
    * index is workbook-wide, and a table created per sheet would make every sheet after the first name the wrong
    * strings. Undefined for XLSX, where nothing needs it.
+   *
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
    */
   readonly xlsbTables?: StreamedXlsbTables;
   /**
@@ -412,10 +424,16 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
   /** Deflate completions for entries opened through `packageSink()`, awaited before the ZIP is finalised. */
   private readonly _sinkCompletions: Promise<void>[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   compressionLevel: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   media: Medium[];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   commentRefs: CommentRef[];
-  /** Number of cells with dynamic array formulas, accumulated during worksheet commit */
+  /**
+   * Number of cells with dynamic array formulas, accumulated during worksheet commit.
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
+   */
   dynamicArrayCount: number;
   /** Workbook-level structure protection */
   protection?: {
@@ -427,10 +445,15 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     saltValue?: string;
     spinCount?: number;
   };
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   zip: Zip;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   stream: OutputStreamLike;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   promise: Promise<void[] | void>;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   protected _trueStreaming: boolean;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   protected WorksheetWriterClass: WorksheetWriterConstructor<TWorksheetWriter>;
 
   // ---------------------------------------------------------------------------
@@ -473,6 +496,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     options: WorkbookWriterOptions,
     WorksheetWriterClass: WorksheetWriterConstructor<TWorksheetWriter>
   ) {
+    // `null` reached `options.created` and threw a `TypeError`; a number was read as no options at all.
+    argumentChecks("WorkbookWriter").record("options", options);
     this.WorksheetWriterClass = WorksheetWriterClass;
     this.created = options.created || new Date();
     this.modified = options.modified || this.created;
@@ -554,12 +579,16 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
   /**
    * Create output stream - can be overridden by Node.js to support filename
+   *
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
    */
   protected _createOutputStream(options: WorkbookWriterOptions): OutputStreamLike {
     if (options.stream) {
       return Streams.toWritable(options.stream);
     }
-    return new StreamBuf();
+    const output = new StreamBuf();
+    this._ownedOutput = output;
+    return output;
   }
 
   /**
@@ -830,6 +859,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return stream;
   }
 
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   protected _addFile(data: string | Uint8Array, name: string, base64?: boolean): void {
     const zipFile = new ZipDeflate(name, { level: this.compressionLevel });
     this.zip.add(zipFile);
@@ -933,9 +963,49 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     };
   }
 
+  /**
+   * Finish the package: commit every sheet still open, write the workbook-level parts and the ZIP central directory,
+   * and end the output — the `stream` or `filename` the writer was given, or its own buffer, which {@link toBuffer}
+   * then returns.
+   *
+   * @throws {ExcelStreamStateError} If the workbook was already committed.
+   */
   async commit(): Promise<void> {
     this._checkNotCommitted("commit the workbook");
     this._workbookCommitted = true;
+    this._commitDone = this._commit();
+    await this._commitDone;
+  }
+
+  /**
+   * The complete file, when the writer was given no `stream` and no `filename`. Commits first if {@link commit} has
+   * not been called (and waits for one already running); afterwards it may be called again and returns the same bytes.
+   *
+   * @throws {ExcelStreamStateError} If the writer was given a `stream` or `filename` — the package went there and the
+   * writer holds none — or committing failed.
+   */
+  async toBuffer(): Promise<Uint8Array> {
+    const output = this._ownedOutput;
+    if (!output) {
+      throw new ExcelStreamStateError(
+        "get the workbook bytes",
+        "the package was written to the stream or file given in the options"
+      );
+    }
+    await (this._commitDone ?? this.commit());
+    const bytes = output.toBuffer();
+    if (!bytes) {
+      throw new ExcelStreamStateError("get the workbook bytes", "the writer produced no output");
+    }
+    return bytes;
+  }
+
+  /** The output the writer created because it was given none; `toBuffer` reads it. */
+  private _ownedOutput: InstanceType<typeof StreamBuf> | undefined;
+  /** The running or settled `commit`. */
+  private _commitDone: Promise<void> | undefined;
+
+  private async _commit(): Promise<void> {
     await this.promise;
     await this._commitWorksheets();
     if (this.format === "xlsb") {
@@ -1027,7 +1097,14 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     await this._finalize();
   }
 
+  /**
+   * @deprecated The id `addWorksheet` gives the next sheet; nothing outside the writer needs it. Removed in 1.0.
+   */
   get nextId(): number {
+    return this._nextSheetId();
+  }
+
+  private _nextSheetId(): number {
     for (let i = 1; i < this._worksheets.length; i++) {
       if (!this._worksheets[i]) {
         return i;
@@ -1064,7 +1141,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       raster.base64 == null &&
       raster.filename == null
     ) {
-      throw new ImageError(
+      throw new ExcelImageError(
         "An SVG image requires an embedded raster fallback (buffer/base64/filename); it cannot be combined with an external link."
       );
     }
@@ -1158,7 +1235,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       opts.properties = { tabColor: legacyTabColor, ...opts.properties };
     }
 
-    const id = this.nextId;
+    const id = this._nextSheetId();
     name = name ?? `sheet${id}`;
     // The document model's rules, so a streamed workbook can be read back: a repeated or illegal name was written as
     // given, and the file could not be opened — not even by `Workbook.read`.
@@ -1309,13 +1386,13 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
             return;
           }
           if (medium.filename) {
-            throw new ExcelNotSupportedError(
+            throw new ExcelUnsupportedFeatureError(
               "Loading images from filename",
               "not supported in browser. Use buffer or base64."
             );
           }
         }
-        throw new ImageError("Unsupported media");
+        throw new ExcelImageError("Unsupported media");
       })
     );
   }
@@ -1334,6 +1411,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * The emptiness check comes first so a workbook with no images does not load the
    * module at all — the previous version constructed a `DrawingXform` even when
    * there was nothing to write.
+   *
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
    */
   protected async addDrawings(): Promise<void> {
     const drawings = this._worksheets
@@ -1577,7 +1656,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
  * Write a workbook a row at a time to a stream, without holding the sheets in memory: `addWorksheet` hands out a
  * worksheet writer, each committed row is written and released, and `commit` finishes the package.
  */
-class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter> {
+class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter<WorkbookWriter>> {
   constructor(options: WorkbookWriterOptions = {}) {
     super(options, WorksheetWriter);
   }

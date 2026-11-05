@@ -44,7 +44,7 @@ export function remove(ws: WorksheetData, position: HeaderFooterImagePosition): 
 /**
  * Put an image in one of the six header/footer sections, replacing what was there.
  *
- * @throws {ImageError} when the workbook has no image `imageId`.
+ * @throws {ExcelImageError} when the workbook has no image `imageId`.
  * @throws {ExcelArgumentError} when `position` or `applyTo` is outside its vocabulary, or a size is not a
  * non-negative number of points.
  */
@@ -65,8 +65,10 @@ export function set(ws: WorksheetData, options: HeaderFooterImageOptions): void 
   setHeaderFooterImage(ws, options);
 }
 
-export type {
-  HeaderFooterImageEntry as Entry,
-  HeaderFooterImageOptions as Options
-} from "@excel/core/worksheet";
-export type { HeaderFooterImagePosition as Position } from "@excel/types";
+// The flat names are the public ones; these namespace aliases repeated them.
+/** @deprecated Use the flat `HeaderFooterImageEntry` type. Removed in 1.0. */
+export type Entry = HeaderFooterImageEntry;
+/** @deprecated Use the flat `HeaderFooterImageOptions` type. Removed in 1.0. */
+export type Options = HeaderFooterImageOptions;
+/** @deprecated Use the flat `HeaderFooterImagePosition` type. Removed in 1.0. */
+export type Position = HeaderFooterImagePosition;

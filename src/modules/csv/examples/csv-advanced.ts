@@ -7,7 +7,7 @@
  * - Csv.generateRows: sync row-string iterator (memory efficient)
  * - Csv.generateRowsAsync: async row-string iterator (supports delay)
  * - Csv.generateData: raw data rows (array or objectMode)
- * - Csv.createGenerator: reusable preconfigured generator (generate/rows/data/asyncRows)
+ * - Csv.createGenerator: reusable preconfigured generator (generate/rows/data/rowsAsync)
  * - Error handling: CsvError / isCsvError
  *
  * Usage:   pnpm example --filter csv-advanced
@@ -202,12 +202,12 @@ console.log("rows(2) produced", overrideLines.length, "lines (incl. header)");
 const dataRows = gen.data(3);
 console.log("data(3) rows:", dataRows.length);
 
-// asyncRows(): async iterator
+// rowsAsync(): async iterator
 let asyncCount = 0;
-for await (const _line of gen.asyncRows({ rows: 2 })) {
+for await (const _line of gen.rowsAsync({ rows: 2 })) {
   asyncCount++;
 }
-console.log("asyncRows produced", asyncCount, "lines (incl. header)");
+console.log("rowsAsync produced", asyncCount, "lines (incl. header)");
 
 // =============================================================================
 // 7. Error handling — CsvError / isCsvError

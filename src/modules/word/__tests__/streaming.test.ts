@@ -5,7 +5,7 @@
 import { extractAll } from "@archive/unzip/extract";
 import { describe, it, expect } from "vitest";
 
-import { Build, Streaming } from "../index";
+import { Build, Stream } from "../index";
 import type { BodyContent, HeaderDef, ImageDef, CommentDef } from "../types";
 
 const REL_IMAGE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
@@ -26,9 +26,9 @@ async function extract(bytes: Uint8Array): Promise<Map<string, string>> {
   return out;
 }
 
-describe("StreamingDocxWriter", () => {
+describe("Stream.DocumentWriter", () => {
   it("basic usage: add 3 paragraphs, finalize, verify output", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.textParagraph("First"));
     stream.add(Build.textParagraph("Second"));
     stream.add(Build.textParagraph("Third"));
@@ -42,7 +42,7 @@ describe("StreamingDocxWriter", () => {
   });
 
   it("addMany with 100 elements", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     const elements: BodyContent[] = [];
     for (let i = 0; i < 100; i++) {
       elements.push(Build.textParagraph(`Paragraph ${i}`));
@@ -56,7 +56,7 @@ describe("StreamingDocxWriter", () => {
   });
 
   it("progress callback reports progress", async () => {
-    const stream = Streaming.createWriter({ chunkSize: 5 });
+    const stream = new Stream.DocumentWriter({ chunkSize: 5 });
     const reports: Array<{ elementsWritten: number; phase: string }> = [];
     stream.onProgress(info => {
       reports.push({ ...info });
@@ -76,7 +76,7 @@ describe("StreamingDocxWriter", () => {
   });
 
   it("throws on add after finalize", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.textParagraph("test"));
     await stream.finalize();
 
@@ -84,7 +84,7 @@ describe("StreamingDocxWriter", () => {
   });
 
   it("reset for reuse", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.textParagraph("first run"));
     await stream.finalize();
 
@@ -97,7 +97,7 @@ describe("StreamingDocxWriter", () => {
   });
 
   it("throws when an image-bearing element references an rId not provided in options.images", () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     const para: BodyContent = {
       type: "paragraph",
       children: [
@@ -125,7 +125,7 @@ describe("StreamingDocxWriter", () => {
       warnings.push(String(args[0]));
     };
     try {
-      const stream = Streaming.createWriter({ missingImagePolicy: "warn" });
+      const stream = new Stream.DocumentWriter({ missingImagePolicy: "warn" });
       const para: BodyContent = {
         type: "paragraph",
         children: [
@@ -184,7 +184,7 @@ describe("StreamingDocxWriter", () => {
     const images: ImageDef[] = [
       { rId: "rIdHdrImg", fileName: "hdr.png", data: MINI_PNG, mediaType: "png" }
     ];
-    const stream = Streaming.createWriter({ headers, images });
+    const stream = new Stream.DocumentWriter({ headers, images });
     stream.add(Build.textParagraph("body"));
     const bytes = await stream.finalize();
     const files = await extract(bytes);
@@ -205,7 +205,7 @@ describe("StreamingDocxWriter", () => {
   });
 
   it("writes footnote/endnote/comment .rels for hyperlinks living inside those parts", async () => {
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       footnotes: [
         {
           id: 2,
@@ -282,7 +282,7 @@ describe("StreamingDocxWriter", () => {
     const headers = new Map<string, HeaderDef>([
       ["default", { content: { children: [{ type: "paragraph", children: [] } as never] } }]
     ]);
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       headers,
       sectionProperties: { headers: [{ type: "default", rId: "" }] }
     });
@@ -304,7 +304,7 @@ describe("StreamingDocxWriter", () => {
     const headers = new Map<string, HeaderDef>([
       ["default", { content: { children: [{ type: "paragraph", children: [] } as never] } }]
     ]);
-    const stream = Streaming.createWriter({ headers });
+    const stream = new Stream.DocumentWriter({ headers });
     stream.add(Build.textParagraph("body"));
     const bytes = await stream.finalize();
     const files = await extract(bytes);
@@ -320,7 +320,7 @@ describe("StreamingDocxWriter", () => {
     const headers = new Map<string, HeaderDef>([
       ["default", { content: { children: [{ type: "paragraph", children: [] } as never] } }]
     ]);
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       headers,
       watermark: { type: "text", text: "DRAFT" }
     });
@@ -345,7 +345,7 @@ describe("StreamingDocxWriter", () => {
   it("finalising an empty stream produces a body with at least one <w:p>", async () => {
     // Word rejects <w:body/> with no <w:p>. Make sure the writer fills
     // the gap when the caller streamed zero elements.
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     const bytes = await stream.finalize();
     const files = await extract(bytes);
     const docXml = files.get("word/document.xml")!;
@@ -356,7 +356,7 @@ describe("StreamingDocxWriter", () => {
   it("always emits a final <w:sectPr> even when sectionProperties is omitted", async () => {
     // ECMA-376 CT_Body requires a final sectPr; without it Word does
     // not know the page geometry and falls back to error-prone defaults.
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.textParagraph("body"));
     const bytes = await stream.finalize();
     const docXml = (await extract(bytes)).get("word/document.xml")!;
@@ -368,7 +368,7 @@ describe("StreamingDocxWriter", () => {
     // _rels/.rels references docProps/core.xml + docProps/app.xml on
     // every package. If the corresponding Override entries are missing,
     // Word/LibreOffice refuse to open the file at the OPC layer.
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(Build.textParagraph("body"));
     const bytes = await stream.finalize();
     const ct = (await extract(bytes)).get("[Content_Types].xml")!;

@@ -27,12 +27,13 @@ export * as WordExcel from "@word/surface/excel";
 export { DocxArgumentError, DocxError, isDocxError } from "@word/errors";
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";
-export type {
-  ExcelToDocxOptions,
-  WordChartExOptions,
-  WordChartSvgOptions,
-  ChartThemeColors
+import type {
+  ExcelToDocxOptions as DocxFromExcelOptions,
+  DocxChartExOptions,
+  DocxChartSvgOptions,
+  ChartThemeColors as DocxChartThemeColors
 } from "@word/bridge/excel-bridge";
+export type { DocxFromExcelOptions, DocxChartExOptions, DocxChartSvgOptions, DocxChartThemeColors };
 
 /** @deprecated Use {@link WordExcel.toDocx}. Removed in 1.0. */
 export const excelToDocx = excelToDocxImpl;
@@ -46,3 +47,14 @@ export const buildWordChartExXml = buildWordChartExXmlImpl;
 export const wordChartToChartModel = wordChartToChartModelImpl;
 /** @deprecated Use {@link WordExcel.toChartXlsx}. Removed in 1.0. */
 export const generateChartEmbeddedXlsx = generateChartEmbeddedXlsxImpl;
+
+// =============================================================================
+// Deprecated unprefixed type names — every flat operation type of this entry carries `Docx`
+// =============================================================================
+
+/** @deprecated Use {@link DocxFromExcelOptions}. Removed in 1.0. */
+export type ExcelToDocxOptions = DocxFromExcelOptions;
+/** @deprecated Use {@link DocxChartExOptions}. Removed in 1.0. */
+export type WordChartExOptions = DocxChartExOptions;
+/** @deprecated Use {@link DocxChartThemeColors}. Removed in 1.0. */
+export type ChartThemeColors = DocxChartThemeColors;

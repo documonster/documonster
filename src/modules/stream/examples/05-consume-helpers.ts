@@ -69,7 +69,7 @@ export async function exampleDrain(): Promise<void> {
 /** pipeline(): pipe a readable into a writable. */
 export async function exampleCopy(): Promise<void> {
   const source = Streams.createReadableFromArray(["x", "y", "z"], { objectMode: true });
-  const sink = Streams.createCollector<string>();
+  const sink = new Streams.Collector<string>();
   await pipeline(source, sink);
   console.log("pipeline collected:", sink.chunks);
 }
@@ -86,7 +86,7 @@ export async function exampleEventsAndSinks(): Promise<void> {
   }
   console.log("source destroyed after break:", source.destroyed);
 
-  const collector = Streams.createCollector();
+  const collector = new Streams.Collector();
   const sink = new Streams.LowLevel.SinkAdapter(collector);
   await sink.write(new TextEncoder().encode("via SinkAdapter"));
   await sink.end();

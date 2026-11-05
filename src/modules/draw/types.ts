@@ -556,6 +556,12 @@ export interface DrawSubpath {
   readonly closed: boolean;
 }
 
+/** Options for `Draw.Geometry.flattenPath`. */
+export interface DrawFlattenPathOptions {
+  /** Multiplies the output points, so a supersampling backend gets finer subdivision. Defaults to 1. */
+  readonly scale?: number;
+}
+
 /**
  * Flatten a path into straight-line subpaths.
  *

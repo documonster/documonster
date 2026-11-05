@@ -16,7 +16,7 @@ import type {
   ChartExSeriesType
 } from "@excel/chart/model/chart-ex-types";
 import type { ChartRichText } from "@excel/chart/model/types";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { EMU_PER_PX } from "@utils/units";
 
 /**
@@ -191,7 +191,7 @@ export function buildChartExModel(opts: AddChartExOptions): ChartExModel {
           continue;
         }
         if (!arraysEqual(so.literalCategories, firstLiteral)) {
-          throw new ChartOptionsError(
+          throw new ExcelChartOptionsError(
             "options.series",
             "AddChartExOptions.series[*].literalCategories must be the same across all series; " +
               "ChartEx stores categories on a shared category axis (see `opts.categories` for the " +
@@ -374,7 +374,7 @@ function buildChartExTitle(
       overlay: false
     };
   }
-  throw new ChartOptionsError(
+  throw new ExcelChartOptionsError(
     "options.title",
     "options.title must be a string, a { formula: string } reference, or a ChartRichText object."
   );
@@ -833,19 +833,19 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
 
 function validateChartExOptions(opts: AddChartExOptions): void {
   if (!opts || typeof opts !== "object") {
-    throw new ChartOptionsError("options", "options must be an options object.");
+    throw new ExcelChartOptionsError("options", "options must be an options object.");
   }
   if (!opts.type) {
-    throw new ChartOptionsError("options.type", "options.type is required.");
+    throw new ExcelChartOptionsError("options.type", "options.type is required.");
   }
   if (!Array.isArray(opts.series) || opts.series.length === 0) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.series",
       "options.series must contain at least one series."
     );
   }
   if (opts.binning && opts.type !== "histogram" && opts.type !== "pareto") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.binning",
       `options.binning is only valid for histogram and pareto charts, not ${opts.type}.`
     );
@@ -862,13 +862,13 @@ function validateChartExOptions(opts: AddChartExOptions): void {
     // only `literalValues` because there is no underlying worksheet to
     // reference.
     if (!series.values && !series.literalValues?.length) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].values`,
         `options.series[${i}].values or literalValues is required.`
       );
     }
     if (series.literalValues?.some(value => !Number.isFinite(value))) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].literalValues`,
         `options.series[${i}].literalValues must contain only finite numbers.`
       );
@@ -878,19 +878,19 @@ function validateChartExOptions(opts: AddChartExOptions): void {
       series.literalValues &&
       series.literalCategories.length !== series.literalValues.length
     ) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].literalCategories`,
         `options.series[${i}].literalCategories length must match literalValues length.`
       );
     }
     if (series.hierarchy && opts.type !== "sunburst" && opts.type !== "treemap") {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].hierarchy`,
         `options.series[${i}].hierarchy is only valid for sunburst and treemap charts.`
       );
     }
     if (series.literalHierarchy && opts.type !== "sunburst" && opts.type !== "treemap") {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].literalHierarchy`,
         `options.series[${i}].literalHierarchy is only valid for sunburst and treemap charts.`
       );
@@ -898,7 +898,7 @@ function validateChartExOptions(opts: AddChartExOptions): void {
     if (series.literalHierarchy && series.literalValues) {
       for (let level = 0; level < series.literalHierarchy.length; level++) {
         if (series.literalHierarchy[level].length !== series.literalValues.length) {
-          throw new ChartOptionsError(
+          throw new ExcelChartOptionsError(
             `options.series[${i}].literalHierarchy[${level}]`,
             `options.series[${i}].literalHierarchy[${level}] length must match literalValues length.`
           );
@@ -906,19 +906,19 @@ function validateChartExOptions(opts: AddChartExOptions): void {
       }
     }
     if ((series.subtotals || series.subtotalPoints) && opts.type !== "waterfall") {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].subtotals`,
         `options.series[${i}].subtotals is only valid for waterfall charts.`
       );
     }
     if (series.subtotals?.some(idx => !Number.isInteger(idx) || idx < 0)) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].subtotals`,
         `options.series[${i}].subtotals must contain non-negative integer indices.`
       );
     }
     if (series.subtotalPoints?.some(point => !Number.isInteger(point.idx) || point.idx < 0)) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         `options.series[${i}].subtotalPoints`,
         `options.series[${i}].subtotalPoints must contain non-negative integer indices.`
       );
@@ -932,13 +932,13 @@ function validateLayoutOptions(opts: AddChartExOptions): void {
     return;
   }
   if (layout.binning && opts.type !== "histogram" && opts.type !== "pareto") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout.binning",
       `options.layout.binning is only valid for histogram and pareto charts.`
     );
   }
   if (layout.subtotals && opts.type !== "waterfall") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout.subtotals",
       `options.layout.subtotals is only valid for waterfall charts.`
     );
@@ -950,14 +950,14 @@ function validateLayoutOptions(opts: AddChartExOptions): void {
     layout.totalSpPr
   ];
   if (waterfallFields.some(value => value !== undefined) && opts.type !== "waterfall") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout",
       `options.layout waterfall fields are only valid for waterfall charts.`
     );
   }
   const hierarchyLayout = layout.parentLabelLayout !== undefined;
   if (hierarchyLayout && opts.type !== "sunburst" && opts.type !== "treemap") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout.parentLabelLayout",
       `options.layout.parentLabelLayout is only valid for sunburst and treemap charts.`
     );
@@ -970,20 +970,20 @@ function validateLayoutOptions(opts: AddChartExOptions): void {
     layout.showOutlierPoints
   ];
   if (boxWhiskerFields.some(value => value !== undefined) && opts.type !== "boxWhisker") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout",
       `options.layout box-whisker fields are only valid for boxWhisker charts.`
     );
   }
   const regionMapFields = [layout.projection, layout.regionLabels, layout.geoMappingLevel];
   if (regionMapFields.some(value => value !== undefined) && opts.type !== "regionMap") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout",
       `options.layout region-map fields are only valid for regionMap charts.`
     );
   }
   if (layout.paretoLine !== undefined && opts.type !== "pareto") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.layout.paretoLine",
       `options.layout.paretoLine is only valid for pareto charts.`
     );
@@ -992,7 +992,7 @@ function validateLayoutOptions(opts: AddChartExOptions): void {
 
 function validateBinning(binning: NonNullable<AddChartExOptions["binning"]>): void {
   if (binning.binSize !== undefined && binning.binSize <= 0) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.binning.binSize",
       "options.binning.binSize must be greater than 0."
     );
@@ -1001,7 +1001,7 @@ function validateBinning(binning: NonNullable<AddChartExOptions["binning"]>): vo
     binning.binCount !== undefined &&
     (!Number.isInteger(binning.binCount) || binning.binCount <= 0)
   ) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.binning.binCount",
       "options.binning.binCount must be a positive integer."
     );
@@ -1011,7 +1011,7 @@ function validateBinning(binning: NonNullable<AddChartExOptions["binning"]>): vo
     binning.overflow !== undefined &&
     binning.underflow >= binning.overflow
   ) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.binning.underflow",
       "options.binning.underflow must be less than overflow."
     );
@@ -1040,7 +1040,10 @@ function mapChartTypeToLayoutId(type: AddChartExOptions["type"]): ChartExSeriesT
       return "regionMap";
     default: {
       const _never: never = type;
-      throw new ChartOptionsError("options.type", `Unsupported chartEx type: ${String(_never)}.`);
+      throw new ExcelChartOptionsError(
+        "options.type",
+        `Unsupported chartEx type: ${String(_never)}.`
+      );
     }
   }
 }

@@ -38,7 +38,7 @@ describe("Documonster.Csv IIFE bundle", () => {
   });
 
   it("streams rows across one-character chunk boundaries", async () => {
-    const parser = Csv.createParserStream();
+    const parser = new Csv.ParserStream();
     const rows: string[][] = [];
     parser.on("data", (row: string[]) => rows.push(row));
     const ended = new Promise<void>((resolve, reject) => {

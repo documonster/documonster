@@ -15,7 +15,7 @@ import {
   DocxWriteError,
   Io,
   Layout,
-  Streaming
+  Stream
 } from "../../index";
 import type { DocxDocument } from "../../index";
 import { finalizeDocument } from "../document-finalize";
@@ -481,13 +481,14 @@ describe("DocxDocument", () => {
       });
 
       it("the streaming writer refuses the same models", () => {
-        expect(() =>
-          Streaming.createWriter({
-            comments: [
-              { id: 3, author: "a", content: [] },
-              { id: 3, author: "b", content: [] }
-            ]
-          })
+        expect(
+          () =>
+            new Stream.DocumentWriter({
+              comments: [
+                { id: 3, author: "a", content: [] },
+                { id: 3, author: "b", content: [] }
+              ]
+            })
         ).toThrow(DocxDuplicateIdError);
       });
 

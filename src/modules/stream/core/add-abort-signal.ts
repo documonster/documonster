@@ -7,7 +7,7 @@
  */
 
 import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 import type { EventEmitterLike, ReadableLike, WritableLike } from "@stream/types";
 import { createAbortError } from "@utils/errors";
 
@@ -37,7 +37,7 @@ export function createAddAbortSignal(ops: ListenerOps) {
       typeof signal.addEventListener !== "function" ||
       typeof signal.aborted !== "boolean"
     ) {
-      throw new StreamTypeError("an AbortSignal", signal === null ? "null" : typeof signal, {
+      throw new StreamArgumentError("an AbortSignal", signal === null ? "null" : typeof signal, {
         field: "signal",
         where: "addAbortSignal"
       });
@@ -68,7 +68,7 @@ export function createAddAbortSignal(ops: ListenerOps) {
       typeof (stream as { destroy?: unknown }).destroy !== "function" ||
       typeof (stream as { once?: unknown; on?: unknown }).on !== "function"
     ) {
-      throw new StreamTypeError("a stream", stream === null ? "null" : typeof stream, {
+      throw new StreamArgumentError("a stream", stream === null ? "null" : typeof stream, {
         field: "stream",
         where: "addAbortSignal"
       });

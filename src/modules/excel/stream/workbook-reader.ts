@@ -10,6 +10,7 @@ import type { ZipEntry } from "@archive/unzip/stream";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import type {
   WorkbookReaderInput as CrossPlatformInput,
+  ParseEvent,
   WorkbookReaderOptions,
   WorksheetReadyEvent
 } from "@excel/stream/workbook-reader.browser";
@@ -20,6 +21,7 @@ import {
 } from "@excel/stream/workbook-reader.browser";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
 import { containerReadError } from "@excel/utils/container-errors";
+import { fileSystemError } from "@excel/utils/file-path";
 import { iterateStream } from "@excel/utils/iterate-stream";
 import type { Readable } from "@stream";
 import { createReadStream, createWriteStream, createTempDirSync, remove } from "@utils/fs";
@@ -82,6 +84,30 @@ class WorkbookReader extends WorkbookReaderBase<
       return createReadStream(input);
     }
     return super._getStream(input as CrossPlatformInput);
+  }
+
+  /**
+   * A file path the system will not open is an `ExcelFileError`, as it is for `Workbook.readFile`: the stream
+   * opened in {@link _getStream} reports its refusal only once it is read, so it surfaces here.
+   */
+  override async *parse(
+    input?: WorkbookReaderInput,
+    options?: WorkbookReaderOptions
+  ): AsyncIterableIterator<ParseEvent<WorksheetReader, HyperlinkReader>> {
+    const source = input ?? this.input;
+    try {
+      yield* super.parse(input, options);
+    } catch (error) {
+      const refused = (error as { path?: unknown; syscall?: unknown } | null) ?? {};
+      if (
+        typeof source === "string" &&
+        refused.path === source &&
+        typeof refused.syscall === "string"
+      ) {
+        throw fileSystemError(source, "read", error);
+      }
+      throw error;
+    }
   }
 
   async _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<WaitingWorksheet> {

@@ -29,7 +29,7 @@ import { isRun } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import { planWatermark } from "@word/core/watermark-sections";
 import { DocxInvalidImageError, DocxWriteError } from "@word/errors";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import { resolveSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
@@ -264,7 +264,7 @@ export interface DocxWriteOptions {
    * Security policy controlling rawXmlPolicy, OLE/signature handling, etc.
    * Defaults to {@link DEFAULT_SECURITY_POLICY}.
    */
-  readonly securityPolicy?: WordSecurityPolicy;
+  readonly securityPolicy?: DocxSecurityPolicy;
   /**
    * Encrypt the package with this password (1 to 255 characters) — Agile Encryption in a compound file, what
    * Word writes for "Encrypt with Password", and what `Io.read(bytes, { password })` opens. Absent: the package is
@@ -855,7 +855,7 @@ async function _packageDocxInner(
 
   // Process altChunk body items: register relationship and prepare data part.
   // We never mutate the chunk objects — the rId is published via a WeakMap
-  // that the renderer reads through the WordRenderContext. This matters for
+  // that the renderer reads through the DocxRenderContext. This matters for
   // altChunks nested inside tables / SDTs which the shallow body copy did
   // not (and intentionally cannot cheaply) clone.
   const altChunkRIds = new WeakMap<object, string>();

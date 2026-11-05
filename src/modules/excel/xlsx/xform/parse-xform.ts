@@ -15,7 +15,7 @@ import {
 import { createPrefixNormalizer } from "@excel/xlsx/xform/namespace-prefixes";
 import { toError } from "@utils/errors";
 import { SaxParser } from "@xml/sax";
-import type { ParseOpenTag, SaxEvent, SaxTag } from "@xml/types";
+import type { ParseOpenTag, XmlSaxEvent, XmlSaxTag } from "@xml/types";
 
 // HAN CELL namespace prefix normalization
 // HAN CELL uses non-standard namespace prefixes (ep:, cp:, dc:, etc.)
@@ -68,7 +68,7 @@ function stripPrefix(name: string, nsPrefix: string | null): string {
  */
 export async function parseXformEvents<TModel>(
   xform: BaseXform<TModel>,
-  saxParser: AsyncIterable<SaxEvent[]>
+  saxParser: AsyncIterable<XmlSaxEvent[]>
 ): Promise<TModel | undefined> {
   // IMPORTANT:
   // Do not return early once parsing is "done".
@@ -87,7 +87,7 @@ export async function parseXformEvents<TModel>(
   // A capture an xform starts asks the normaliser for text — see `fragment-namespaces.ts`.
   const namespaces = createNamespaceContext(prefixes, xform);
 
-  const dispatch = (events: SaxEvent[]): void => {
+  const dispatch = (events: XmlSaxEvent[]): void => {
     for (const event of events) {
       if (event.eventType === "opentag") {
         const value = prefixes.open(event.value);
@@ -198,7 +198,7 @@ export async function parseXformStream<TModel>(
   // Once the parser has reported an error, no xform hears anything more. The parser keeps going after an error and
   // delivers close tags for elements it never opened, and an xform handed one reads state it never set up — a
   // `TypeError` from inside the xform instead of the parser's `XmlParseError`.
-  const onOpenTag = (raw: SaxTag): void => {
+  const onOpenTag = (raw: XmlSaxTag): void => {
     if (done || parseError !== undefined) {
       return;
     }
@@ -251,7 +251,7 @@ export async function parseXformStream<TModel>(
     }
   });
 
-  const onCloseTag = (tag: SaxTag): void => {
+  const onCloseTag = (tag: XmlSaxTag): void => {
     if (done || parseError !== undefined) {
       return;
     }

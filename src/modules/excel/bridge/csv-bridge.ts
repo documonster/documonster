@@ -37,7 +37,7 @@ import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
 import { ExcelArgumentError, ExcelDownloadError } from "@excel/errors";
 import type { CellValue, CellValueInput } from "@excel/types";
-import { pipeline } from "@stream";
+import { finished, pipeline } from "@stream";
 import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/core/stream-helpers";
 import type { IReadable, IWritable } from "@stream/types";
 import type { DateFormat } from "@utils/datetime";
@@ -48,7 +48,7 @@ import { describeValue as describeInput } from "@utils/describe-value";
 // Public CSV option / input types
 // =============================================================================
 
-export type CsvInput =
+export type ExcelCsvInput =
   | string // CSV string or URL (http:// or https://)
   | ArrayBuffer
   | Uint8Array
@@ -100,7 +100,7 @@ type CsvWriteFormatFields = Pick<
  * Options for reading CSV into a workbook — `ExcelCsv.read`, `addWorksheet`, `readFile` and `createImportStream` —
  * the parser's options plus where the rows go and how text becomes cell values.
  */
-export interface CsvReadOptions extends CsvReadParseFields {
+export interface ExcelCsvReadOptions extends CsvReadParseFields {
   /** The name of the worksheet the rows are written to. */
   sheetName?: string;
   /**
@@ -146,7 +146,7 @@ export interface CsvReadOptions extends CsvReadParseFields {
  * Options for writing a worksheet as CSV — `ExcelCsv.format`, `toBuffer`, `toBufferSync`, `toStream`, `writeStream`
  * and `writeFile` — the formatter's options plus which sheet is written and how cell values become text.
  */
-export interface CsvWriteOptions extends CsvWriteFormatFields {
+export interface ExcelCsvWriteOptions extends CsvWriteFormatFields {
   /**
    * Whether to write the sheet's first row — its header row, where `ExcelCsv.read` with `headers` puts a file's
    * header. `false` leaves it out, in every writer: the CSV holds the data rows only, and `ExcelCsv.writeFile` with
@@ -177,7 +177,7 @@ export interface CsvWriteOptions extends CsvWriteFormatFields {
    * The form dates are written in, as `YYYY-MM-DD HH:mm:ss` tokens. Default: ISO 8601 with milliseconds, in UTC
    * (`…Z`). A cell's number format is not applied — `Cell.getDisplayText` is the reading that applies it.
    *
-   * See {@link CsvWriteOptions.dateUTC} for which clock the fields are taken from.
+   * See {@link ExcelCsvWriteOptions.dateUTC} for which clock the fields are taken from.
    */
   dateFormat?: string;
   /**
@@ -214,14 +214,14 @@ export interface CsvWriteOptions extends CsvWriteFormatFields {
 }
 
 /**
- * Both {@link CsvReadOptions} and {@link CsvWriteOptions}, for one bag shared by a read and a write. Each function
+ * Both {@link ExcelCsvReadOptions} and {@link ExcelCsvWriteOptions}, for one bag shared by a read and a write. Each function
  * takes the half it uses.
  */
-export interface CsvOptions extends CsvReadOptions, CsvWriteOptions {
+export interface ExcelCsvOptions extends ExcelCsvReadOptions, ExcelCsvWriteOptions {
   /**
    * Turn each value into another — a read's text into the cell value written, a write's cell value into the value
-   * written. One function for both halves, so it takes a cell value; see {@link CsvReadOptions.map} and
-   * {@link CsvWriteOptions.map} for what each calls it with.
+   * written. One function for both halves, so it takes a cell value; see {@link ExcelCsvReadOptions.map} and
+   * {@link ExcelCsvWriteOptions.map} for what each calls it with.
    */
   map?(value: CellValue, index: number): CellValue;
   /** @deprecated Has no effect on a workbook: a record's position has nowhere to go in a sheet. Removed in 1.0. */
@@ -241,7 +241,7 @@ export interface CsvOptions extends CsvReadOptions, CsvWriteOptions {
  * computed from the `Date`'s UTC fields (`dateToExcel`), so those fields are what Excel shows, and what its own
  * "Save as CSV" writes. The default used to be the host's local time — paired with a reader that built local time,
  * so a file round-tripped, but in New York a cell Excel shows as `2024-03-10` was written `2024-03-09`. The reader
- * now reads a text with no timezone as UTC, so the writer does too. See {@link CsvWriteOptions.dateUTC}.
+ * now reads a text with no timezone as UTC, so the writer does too. See {@link ExcelCsvWriteOptions.dateUTC}.
  *
  * `2020-01-15T00:00:00.000Z` was once read a day early, because the fixed-width parsers did not check their input's
  * width and the millisecond form was missing from {@link DEFAULT_DATE_FORMATS}. Both are fixed at the root, in
@@ -349,7 +349,7 @@ function* iterateWorksheetRows(
  */
 function* csvRows(
   worksheet: Worksheet,
-  options: CsvWriteOptions | undefined,
+  options: ExcelCsvWriteOptions | undefined,
   map: (value: CellValue, index: number) => CellValue
 ): Generator<CellValue[]> {
   const includeEmptyRows = options?.includeEmptyRows !== false;
@@ -402,7 +402,7 @@ function createDrainRacer(emitter: {
     });
 }
 
-function buildParserOptions(options?: CsvReadOptions): Partial<CsvParseOptions> {
+function buildParserOptions(options?: ExcelCsvReadOptions): Partial<CsvParseOptions> {
   return {
     delimiter: options?.delimiter ?? ",",
     quote: options?.quote,
@@ -434,14 +434,14 @@ function buildParserOptions(options?: CsvReadOptions): Partial<CsvParseOptions> 
 }
 
 /** Whether a quoting option names columns — its object form, which matches the header row's texts. */
-function hasQuoteNames(options: CsvWriteOptions | undefined): boolean {
+function hasQuoteNames(options: ExcelCsvWriteOptions | undefined): boolean {
   const named = (value: unknown): boolean =>
     typeof value === "object" && value !== null && !Array.isArray(value);
   return named(options?.quoteColumns) || named(options?.quoteHeaders);
 }
 
 /** The header row's texts, as the formatter writes them unquoted — the names its columns go by. */
-function headerTexts(values: CellValue[], options: CsvWriteOptions | undefined): string[] {
+function headerTexts(values: CellValue[], options: ExcelCsvWriteOptions | undefined): string[] {
   return headerNames(
     values,
     createFormatConfig({ decimalSeparator: options?.decimalSeparator ?? "." }, "ExcelCsv.format")
@@ -449,7 +449,7 @@ function headerTexts(values: CellValue[], options: CsvWriteOptions | undefined):
 }
 
 function buildFormatterOptions(
-  options?: CsvWriteOptions,
+  options?: ExcelCsvWriteOptions,
   worksheet?: Worksheet,
   map?: (value: CellValue, index: number) => CellValue
 ) {
@@ -525,7 +525,7 @@ function checkCsvOptions(where: string, options: unknown): void {
 function selectWorksheet(
   where: string,
   workbook: Workbook,
-  options: CsvWriteOptions | undefined
+  options: ExcelCsvWriteOptions | undefined
 ): Worksheet | undefined {
   if (!isReadTarget(workbook)) {
     fail(where, "workbook", "a workbook", workbook);
@@ -556,7 +556,7 @@ function selectWorksheet(
  */
 function readValueMapper(
   where: string,
-  options: CsvReadOptions | undefined
+  options: ExcelCsvReadOptions | undefined
 ): (text: string, column: number) => CellValueInput {
   checkCsvOptions(where, options);
   if (options?.map !== undefined && typeof options.map !== "function") {
@@ -638,7 +638,7 @@ const UTF8_LABELS = new Set(["utf8", "utf-8"]);
  */
 function writeValueMapper(
   where: string,
-  options: CsvWriteOptions | undefined,
+  options: ExcelCsvWriteOptions | undefined,
   fileEncoding = false
 ): (value: CellValue, index: number) => CellValue {
   for (const key of ["append", "includeEmptyRows", "writeHeaders"] as const) {
@@ -679,7 +679,10 @@ function writeValueMapper(
 }
 
 /** @internal Check what a read is given before it touches a file — for the Node file variant. */
-export function checkCsvReadArguments(where: string, options: CsvReadOptions | undefined): void {
+export function checkCsvReadArguments(
+  where: string,
+  options: ExcelCsvReadOptions | undefined
+): void {
   readValueMapper(where, options);
 }
 
@@ -690,7 +693,7 @@ export function checkCsvReadArguments(where: string, options: CsvReadOptions | u
 export function checkCsvWriteArguments(
   where: string,
   workbook: Workbook,
-  options: CsvWriteOptions | undefined
+  options: ExcelCsvWriteOptions | undefined
 ): void {
   selectWorksheet(where, workbook, options);
   writeValueMapper(where, options, true);
@@ -700,7 +703,7 @@ export function checkCsvWriteArguments(
 export function readCsvContent(
   workbook: Workbook,
   content: string | ArrayBuffer | Uint8Array,
-  options?: CsvReadOptions,
+  options?: ExcelCsvReadOptions,
   where = "ExcelCsv.addWorksheet"
 ): Worksheet {
   let str: string;
@@ -742,7 +745,7 @@ export function readCsvContent(
 export function readCsvStream(
   workbook: Workbook,
   stream: IReadable<Uint8Array | string> | AsyncIterable<Uint8Array | string>,
-  options?: CsvReadOptions,
+  options?: ExcelCsvReadOptions,
   where = "ExcelCsv.addWorksheet"
 ): Promise<Worksheet> {
   const map = readValueMapper(where, options);
@@ -783,7 +786,7 @@ async function readCsvUrl(
   where: string,
   workbook: Workbook,
   url: string,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet> {
   // Checked before the download, so a wrong option does not cost a request.
   readValueMapper(where, options);
@@ -818,7 +821,7 @@ async function readCsvBlob(
   where: string,
   workbook: Workbook,
   blob: Blob,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet> {
   readValueMapper(where, options);
   const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024;
@@ -871,8 +874,8 @@ async function collectBytes(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Arr
 async function addCsvWorksheet(
   where: string,
   workbook: Workbook,
-  input: CsvInput,
-  options?: CsvReadOptions
+  input: ExcelCsvInput,
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet> {
   if (isUrl(input)) {
     return readCsvUrl(where, workbook, input, options);
@@ -899,7 +902,7 @@ async function addCsvWorksheet(
 /**
  * Read CSV into a new worksheet on `workbook`. Accepts a CSV string, URL,
  * `ArrayBuffer`/`Uint8Array`, browser `File`/`Blob`, a Node or Web readable stream, or an
- * async iterable of text or byte chunks ({@link CsvInput}).
+ * async iterable of text or byte chunks ({@link ExcelCsvInput}).
  *
  * @example
  * ```ts
@@ -911,8 +914,8 @@ async function addCsvWorksheet(
  */
 export async function readCsv(
   workbook: Workbook,
-  input: CsvInput,
-  options?: CsvReadOptions
+  input: ExcelCsvInput,
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet> {
   if (!isReadTarget(workbook)) {
     fail("ExcelCsv.addWorksheet", "workbook", "a workbook", workbook);
@@ -924,7 +927,7 @@ export async function readCsv(
  * Read CSV and return it as a new workbook holding one worksheet. Accepts what
  * {@link readCsv} accepts.
  *
- * Text is read as numbers, dates (see {@link CsvReadOptions.dateFormats} — a date with no timezone is the calendar
+ * Text is read as numbers, dates (see {@link ExcelCsvReadOptions.dateFormats} — a date with no timezone is the calendar
  * value in UTC, as a cell holds it), `true` / `false` and error literals, unless `options.map` says otherwise.
  *
  * @throws {ExcelArgumentError} for an argument or option this bridge cannot use — the message names the function
@@ -936,7 +939,10 @@ export async function readCsv(
  * const workbook = await ExcelCsv.read("a,b,c\n1,2,3", { sheetName: "Data" });
  * ```
  */
-export async function readCsvWorkbook(input: CsvInput, options?: CsvReadOptions): Promise<Workbook>;
+export async function readCsvWorkbook(
+  input: ExcelCsvInput,
+  options?: ExcelCsvReadOptions
+): Promise<Workbook>;
 /**
  * @deprecated Use `ExcelCsv.addWorksheet(workbook, input, options)`, which this form does — it adds a
  * worksheet to `workbook` and returns the worksheet. `ExcelCsv.read(input)` returns a new workbook.
@@ -944,19 +950,24 @@ export async function readCsvWorkbook(input: CsvInput, options?: CsvReadOptions)
  */
 export async function readCsvWorkbook(
   workbook: Workbook,
-  input: CsvInput,
-  options?: CsvReadOptions
+  input: ExcelCsvInput,
+  options?: ExcelCsvReadOptions
 ): Promise<Worksheet>;
 export async function readCsvWorkbook(
-  first: Workbook | CsvInput,
-  second?: CsvInput | CsvReadOptions,
-  third?: CsvReadOptions
+  first: Workbook | ExcelCsvInput,
+  second?: ExcelCsvInput | ExcelCsvReadOptions,
+  third?: ExcelCsvReadOptions
 ): Promise<Workbook | Worksheet> {
   if (isReadTarget(first)) {
-    return addCsvWorksheet("ExcelCsv.read", first, second as CsvInput, third);
+    return addCsvWorksheet("ExcelCsv.read", first, second as ExcelCsvInput, third);
   }
   const workbook = createWorkbook();
-  await addCsvWorksheet("ExcelCsv.read", workbook, first, second as CsvReadOptions | undefined);
+  await addCsvWorksheet(
+    "ExcelCsv.read",
+    workbook,
+    first,
+    second as ExcelCsvReadOptions | undefined
+  );
   return workbook;
 }
 
@@ -968,7 +979,7 @@ export async function readCsvWorkbook(
  * Format a worksheet as CSV text.
  *
  * A date cell is written as the calendar value it holds — ISO 8601 in UTC (`2024-03-10T00:00:00.000Z`), or
- * `dateFormat` filled from the UTC fields — unless `dateUTC: false`; see {@link CsvWriteOptions.dateUTC} for the four
+ * `dateFormat` filled from the UTC fields — unless `dateUTC: false`; see {@link ExcelCsvWriteOptions.dateUTC} for the four
  * renderings. A cell's number format is not applied.
  *
  * @throws {ExcelArgumentError} for an argument or option this bridge cannot use — the message names the function
@@ -980,12 +991,16 @@ export async function readCsvWorkbook(
  * const csv = ExcelCsv.format(workbook, { sheetName: "Data" });
  * ```
  */
-export function writeCsvString(workbook: Workbook, options?: CsvWriteOptions): string {
+export function writeCsvString(workbook: Workbook, options?: ExcelCsvWriteOptions): string {
   return formatWorksheet("ExcelCsv.format", workbook, options);
 }
 
 /** {@link writeCsvString}, with the public name the errors give. */
-function formatWorksheet(where: string, workbook: Workbook, options?: CsvWriteOptions): string {
+function formatWorksheet(
+  where: string,
+  workbook: Workbook,
+  options?: ExcelCsvWriteOptions
+): string {
   const worksheet = selectWorksheet(where, workbook, options);
   const map = writeValueMapper(where, options);
   if (!worksheet) {
@@ -1011,7 +1026,7 @@ function formatWorksheet(where: string, workbook: Workbook, options?: CsvWriteOp
 export async function writeCsvStream(
   workbook: Workbook,
   stream: IWritable<Uint8Array | string>,
-  options?: CsvWriteOptions
+  options?: ExcelCsvWriteOptions
 ): Promise<void> {
   return streamWorksheet("ExcelCsv.writeStream", workbook, stream, options);
 }
@@ -1024,13 +1039,15 @@ export async function streamWorksheet(
   where: string,
   workbook: Workbook,
   stream: IWritable<Uint8Array | string>,
-  options?: CsvWriteOptions,
+  options?: ExcelCsvWriteOptions,
   fileEncoding = false
 ): Promise<void> {
   const worksheet = selectWorksheet(where, workbook, options);
   const map = writeValueMapper(where, options, fileEncoding);
   if (!worksheet) {
+    // Settled when the stream is, as the pipeline below is: a file that cannot be opened must not resolve as written.
     stream.end();
+    await finished(stream as never);
     return;
   }
 
@@ -1066,28 +1083,28 @@ export async function streamWorksheet(
  * Kept for the deprecated `writeCsv` export; one name with two return shapes is
  * what `ExcelCsv.format` and `ExcelCsv.writeStream` replace.
  */
-export function writeCsv(workbook: Workbook, options?: CsvWriteOptions): string;
+export function writeCsv(workbook: Workbook, options?: ExcelCsvWriteOptions): string;
 export function writeCsv(
   workbook: Workbook,
   stream: IWritable<Uint8Array | string>,
-  options?: CsvWriteOptions
+  options?: ExcelCsvWriteOptions
 ): Promise<void>;
 export function writeCsv(
   workbook: Workbook,
-  streamOrOptions?: IWritable<Uint8Array | string> | CsvWriteOptions,
-  options?: CsvWriteOptions
+  streamOrOptions?: IWritable<Uint8Array | string> | ExcelCsvWriteOptions,
+  options?: ExcelCsvWriteOptions
 ): string | Promise<void> {
   if (streamOrOptions && typeof (streamOrOptions as { write?: unknown }).write === "function") {
     return writeCsvStream(workbook, streamOrOptions as IWritable<Uint8Array | string>, options);
   }
-  return writeCsvString(workbook, streamOrOptions as CsvWriteOptions | undefined);
+  return writeCsvString(workbook, streamOrOptions as ExcelCsvWriteOptions | undefined);
 }
 
 /**
  * Write a worksheet to a CSV buffer (`Uint8Array`) synchronously. Published as
  * `ExcelCsv.toBufferSync`; `ExcelCsv.toBuffer` is the asynchronous form.
  */
-export function writeCsvBufferSync(workbook: Workbook, options?: CsvWriteOptions): Uint8Array {
+export function writeCsvBufferSync(workbook: Workbook, options?: ExcelCsvWriteOptions): Uint8Array {
   return new TextEncoder().encode(formatWorksheet("ExcelCsv.toBufferSync", workbook, options));
 }
 
@@ -1098,7 +1115,7 @@ export function writeCsvBufferSync(workbook: Workbook, options?: CsvWriteOptions
  */
 export async function writeCsvBuffer(
   workbook: Workbook,
-  options?: CsvWriteOptions
+  options?: ExcelCsvWriteOptions
 ): Promise<Uint8Array> {
   return new TextEncoder().encode(formatWorksheet("ExcelCsv.toBuffer", workbook, options));
 }
@@ -1132,7 +1149,7 @@ export async function writeCsvBuffer(
  */
 export function createCsvReadStream(
   workbook: Workbook,
-  options?: CsvWriteOptions
+  options?: ExcelCsvWriteOptions
 ): IReadable<Uint8Array> {
   return createCsvByteStream(workbook, options, "ExcelCsv.toStream");
 }
@@ -1150,7 +1167,7 @@ export function createCsvReadStream(
  */
 export function createCsvByteStream(
   workbook: Workbook,
-  options?: CsvWriteOptions,
+  options?: ExcelCsvWriteOptions,
   where = "ExcelCsv.toStream"
 ): CsvFormatterStream {
   const worksheet = selectWorksheet(where, workbook, options);
@@ -1199,7 +1216,7 @@ export function createCsvByteStream(
 /**
  * Create a writable stream that imports the CSV written into it into a new worksheet on
  * `workbook`. Data flows CSV → worksheet. Published as `ExcelCsv.createImportStream`; the
- * standalone parser that yields rows instead is `Csv.createParserStream`.
+ * standalone parser that yields rows instead is `Csv.ParserStream`.
  *
  * @example
  * ```ts
@@ -1211,7 +1228,7 @@ export function createCsvByteStream(
  */
 export function createCsvWriteStream(
   workbook: Workbook,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): IWritable<Uint8Array | string> {
   return createCsvImportParser(workbook, options);
 }
@@ -1224,7 +1241,7 @@ export function createCsvWriteStream(
  */
 export function createCsvImportParser(
   workbook: Workbook,
-  options?: CsvReadOptions
+  options?: ExcelCsvReadOptions
 ): CsvParserStream {
   if (!isReadTarget(workbook)) {
     fail("ExcelCsv.createImportStream", "workbook", "a workbook", workbook);

@@ -14,9 +14,10 @@
  * ```
  */
 
-import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { checkHandle } from "@word/core/argument-checks";
 import { extractParagraphText } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
+import { DocxError } from "@word/errors";
 import type { DocxDocument, BodyContent } from "@word/types";
 
 /** Type of change detected between two documents. */
@@ -69,8 +70,7 @@ export interface DiffResult {
  */
 export function diffDocuments(oldDoc: DocxDocument, newDoc: DocxDocument): DiffResult {
   checkHandle(oldDoc, "document", "oldDoc", "Diff.compare");
-  checkRecord(oldDoc, "oldDoc", "Diff.compare");
-  checkRecord(newDoc, "newDoc", "Diff.compare");
+  checkHandle(newDoc, "document", "newDoc", "Diff.compare");
   const oldTexts = extractParagraphTexts(oldDoc.body);
   const newTexts = extractParagraphTexts(newDoc.body);
 
@@ -138,9 +138,11 @@ function computeDiff(oldTexts: string[], newTexts: string[]): DiffEntry[] {
   const m = oldTexts.length;
   const n = newTexts.length;
 
+  // Not `DocxLimitExceededError`: that is a `DocxParseError` whose `limit` names a package
+  // limit of the read's security policy, and this cap is neither a parse nor configurable.
   if ((m + 1) * (n + 1) > MAX_LCS_CELLS) {
-    throw new Error(
-      `diffDocuments: LCS table for ${m}x${n} paragraphs exceeds ` +
+    throw new DocxError(
+      `Diff.compare: LCS table for ${m}x${n} paragraphs exceeds ` +
         `MAX_LCS_CELLS (${MAX_LCS_CELLS}). Diff was aborted to avoid ` +
         `excessive memory use; consider diffing sections individually.`
     );

@@ -17,7 +17,7 @@
  */
 
 import type { DrawList } from "@draw/types";
-import { namedCall } from "@excel/chart/api/call";
+import { checkFillArguments, namedCall } from "@excel/chart/api/call";
 import type { ChartFillRefOptions } from "@excel/chart/api/types";
 import { fillChartExCaches } from "@excel/chart/bridge/excel-chart-host";
 import { chartExOptionsFromRows, chartExOptionsFromTable } from "@excel/chart/build/chart-api";
@@ -30,13 +30,16 @@ import type { AddChartExOptions, ChartExModel } from "@excel/chart/model/chart-e
 import { applyChartExPreset } from "@excel/chart/model/chart-presets";
 import type { ExcelChartExPreset } from "@excel/chart/model/chart-presets";
 import {
+  checkChartExModel,
   renderChartExDrawList,
   renderChartExPng,
   renderChartExSvg
 } from "@excel/chart/render/chart-ex-renderer";
 import type { ChartRenderOptions } from "@excel/chart/render/chart-renderer";
+import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
 import type { WorkbookData } from "@excel/core/workbook-core";
-import type { WorksheetData } from "@excel/core/worksheet-core";
+import { checkWorksheet, type WorksheetData } from "@excel/core/worksheet-core";
+import { argumentChecks } from "@excel/utils/arguments";
 
 // Every builder here runs through `namedCall`, so an argument error says which call received
 // it (`ChartEx.createModel: options.series must …`) — the builders are shared with `Chart.*`
@@ -46,7 +49,7 @@ import type { WorksheetData } from "@excel/core/worksheet-core";
  * An Office 2016 chart model from options — histogram, Pareto, waterfall, funnel, treemap,
  * sunburst, box & whisker or region map.
  *
- * @throws {ChartOptionsError} an option has no valid reading (its `field` names it).
+ * @throws {ExcelChartOptionsError} an option has no valid reading (its `field` names it).
  */
 export function createModel(options: AddChartExOptions): ChartExModel {
   return namedCall("ChartEx.createModel", () => buildChartExModel(options));
@@ -63,9 +66,10 @@ export function createOptionsFromRows<T extends object>(
     type: Exclude<AddChartExOptions["type"], "regionMap">;
   }
 ): AddChartExOptions {
-  return namedCall("ChartEx.createOptionsFromRows", () =>
-    chartExOptionsFromRows(worksheet, rows, options)
-  );
+  return namedCall("ChartEx.createOptionsFromRows", () => {
+    checkWorksheet(worksheet, "worksheet");
+    return chartExOptionsFromRows(worksheet, rows, options);
+  });
 }
 
 /** An Office 2016 chart's options from a table of `worksheet`; a region map is not drawn from a table. */
@@ -74,9 +78,10 @@ export function createOptionsFromTable(
   table: Parameters<typeof chartExOptionsFromTable>[1],
   options: AddChartExFromTableOptions & { type: Exclude<AddChartExOptions["type"], "regionMap"> }
 ): AddChartExOptions {
-  return namedCall("ChartEx.createOptionsFromTable", () =>
-    chartExOptionsFromTable(worksheet, table, options)
-  );
+  return namedCall("ChartEx.createOptionsFromTable", () => {
+    checkWorksheet(worksheet, "worksheet");
+    return chartExOptionsFromTable(worksheet, table, options);
+  });
 }
 
 /** Merge an Office 2016 preset (`"histogram"`, `"treemap"`, …) into `options`. */
@@ -96,7 +101,7 @@ export function applyPreset(
  * fonts, and those two options do not apply. For the characters no font covered, draw the list
  * yourself: `Draw.toRgba(ChartEx.toDrawList(model), { fonts }).uncoveredCodePoints`.
  *
- * @throws {ChartOptionsError} `model` is not an Office 2016 chart model, or an option has no
+ * @throws {ExcelChartOptionsError} `model` is not an Office 2016 chart model, or an option has no
  *   valid reading — a `width`, `height`, `scale` or `dpi` that is not a finite number > 0, a
  *   title that is not text, a `background` that is not a colour, or `fonts` /
  *   `useSystemFonts` of the wrong shape.
@@ -111,7 +116,7 @@ export async function toPng(
 /**
  * Render an Office 2016 chart model to SVG markup.
  *
- * @throws {ChartOptionsError} as {@link toPng}.
+ * @throws {ExcelChartOptionsError} as {@link toPng}.
  */
 export function toSvg(model: ChartExModel, options?: ChartRenderOptions): string {
   return renderChartExSvg(model, options, "ChartEx.toSvg");
@@ -123,7 +128,7 @@ export function toSvg(model: ChartExModel, options?: ChartRenderOptions): string
  * that do not depend on the host's fonts, or a PDF page through `Pdf.createDrawSurface`. (The
  * SVG `toSvg` writes is the same picture; it also marks how a region map was drawn.)
  *
- * @throws {ChartOptionsError} as {@link toPng}.
+ * @throws {ExcelChartOptionsError} as {@link toPng}.
  */
 export function toDrawList(model: ChartExModel, options?: ChartRenderOptions): DrawList {
   return renderChartExDrawList(model, options, "ChartEx.toDrawList");
@@ -138,9 +143,23 @@ export function fillCaches(
   workbook: WorkbookData,
   options: ChartFillRefOptions = {}
 ): void {
+  checkFillArguments("ChartEx.fillCaches", workbook, options);
   fillChartExCaches(model, workbook, options.worksheet);
 }
 
 /** Read a `cx:chartSpace` part into a model; malformed XML throws `XmlParseError`. */
 export { parseChartEx as fromXml } from "@excel/chart/serialize/chart-ex-parser";
-export { renderChartEx as toXml } from "@excel/chart/serialize/chart-ex-serialize";
+
+/**
+ * A model as a `cx:chartSpace` part. A model read from a file is written back as it was read unless
+ * `options.forceStructural` asks for it to be rebuilt from its fields.
+ *
+ * @throws {ExcelChartOptionsError} `model` is not an Office 2016 chart model.
+ */
+export function toXml(model: ChartExModel, options: { forceStructural?: boolean } = {}): string {
+  checkChartExModel("ChartEx.toXml", model);
+  if (argumentChecks("ChartEx.toXml").record("options", options)) {
+    argumentChecks("ChartEx.toXml").boolean("options.forceStructural", options.forceStructural);
+  }
+  return renderChartEx(model, options);
+}

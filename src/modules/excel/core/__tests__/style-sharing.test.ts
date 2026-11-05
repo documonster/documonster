@@ -88,7 +88,7 @@ describe("style sharing", () => {
       expect(Cell.getStyle(ws, "A2").font!.bold).toBe(true);
     });
 
-    it("isolates through each facet reader", () => {
+    it("facet readers hand out copies, so editing one reaches no cell", () => {
       const ws = sheet();
       Cell.setValue(ws, "A1", 1);
       Cell.setValue(ws, "A2", 2);
@@ -105,6 +105,10 @@ describe("style sharing", () => {
       Cell.getBorder(ws, "A1")!.top = { style: "thick" };
       Cell.getProtection(ws, "A1")!.locked = false;
 
+      expect(Cell.getFont(ws, "A1")!.bold).toBe(true);
+      expect(Cell.getAlignment(ws, "A1")!.horizontal).toBe("left");
+      expect(Cell.getBorder(ws, "A1")!.top).toEqual({ style: "thin" });
+      expect(Cell.getProtection(ws, "A1")!.locked).toBe(true);
       expect(Cell.getFont(ws, "A2")!.bold).toBe(true);
       expect(Cell.getAlignment(ws, "A2")!.horizontal).toBe("left");
       expect(Cell.getBorder(ws, "A2")!.top).toEqual({ style: "thin" });
@@ -352,7 +356,7 @@ describe("style sharing", () => {
 
       // The deprecated name hands out the column's own object; the table's next edit
       // applies what the column says then, to every cell of the column.
-      Table.columnStyle(Table.getColumn(table, 0))!.font!.bold = false;
+      Table.columnStyle(Table.getColumn(table, 0)!)!.font!.bold = false;
       Table.addRow(table, [2]);
 
       expect(Cell.getStyle(ws, "A2").font!.bold).toBe(false);
@@ -367,10 +371,10 @@ describe("style sharing", () => {
         columns: [{ name: "A", style: { font: { bold: true } } }],
         rows: [[1]]
       });
-      Table.getColumnStyle(Table.getColumn(table, 0))!.font!.bold = false;
+      Table.getColumnStyle(Table.getColumn(table, 0)!)!.font!.bold = false;
       Table.addRow(table, [2]);
       expect(Cell.getStyle(ws, "A3").font!.bold).toBe(true);
-      expect(Table.getColumnStyle(Table.getColumn(table, 0))!.font!.bold).toBe(true);
+      expect(Table.getColumnStyle(Table.getColumn(table, 0)!)!.font!.bold).toBe(true);
     });
   });
 

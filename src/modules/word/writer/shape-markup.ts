@@ -20,7 +20,7 @@ import { DocxRawXmlPolicyError } from "@word/errors";
 import type { DrawingShape, DrawingShapePreserved } from "@word/types";
 import { rebindPreservedLinks } from "@word/writer/drawing-frame";
 import { renderParagraph } from "@word/writer/paragraph-writer";
-import type { WordRenderContext } from "@word/writer/render-context";
+import type { DocxRenderContext } from "@word/writer/render-context";
 import { prepareRawMarkup, renderHelpersFor } from "@word/writer/render-context";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
@@ -29,7 +29,7 @@ export function renderShapeBody(
   xml: XmlSink,
   shape: DrawingShape,
   drawingId: number,
-  ctx: WordRenderContext
+  ctx: DocxRenderContext
 ): void {
   const preserved = shape._preserved;
   if (preserved && ctx.rawXmlPolicy === "reject" && hasMarkup(preserved)) {

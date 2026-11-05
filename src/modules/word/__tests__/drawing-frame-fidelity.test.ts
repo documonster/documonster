@@ -12,7 +12,7 @@ import { parsePartXml } from "@word/reader/part-xml";
 import type { XmlElement } from "@xml/types";
 import { describe, expect, it } from "vitest";
 
-import { Build, Document, Io, Streaming } from "../index";
+import { Build, Document, Io, Stream } from "../index";
 import type { BodyContent, DocxDocument, FloatingImage } from "../types";
 
 const decoder = new TextDecoder();
@@ -235,7 +235,7 @@ describe("drawing frames survive a round trip", () => {
     const twice = await canonicalFrames(await Io.toBuffer(doubled));
     expect(twice).toEqual([before, before]);
 
-    const stream = Streaming.createWriter({ images: read.images ? [...read.images] : [] });
+    const stream = new Stream.DocumentWriter({ images: read.images ? [...read.images] : [] });
     for (const block of read.body) {
       stream.add(block);
     }

@@ -13,7 +13,7 @@ import {
   Io,
   Layout,
   Package,
-  Streaming,
+  Stream,
   Template,
   type DocxDocument,
   type ImageDef,
@@ -153,10 +153,11 @@ describe("image media type at the other entry points", () => {
   });
 
   it("the streaming writer", () => {
-    expect(() =>
-      Streaming.createWriter({
-        images: [{ data: PNG, fileName: "image1.image/png", mediaType: "png", rId: "rId5" }]
-      })
+    expect(
+      () =>
+        new Stream.DocumentWriter({
+          images: [{ data: PNG, fileName: "image1.image/png", mediaType: "png", rId: "rId5" }]
+        })
     ).toThrow(DocxInvalidImageError);
   });
 
@@ -328,7 +329,7 @@ describe("the writers type every caller-named part", () => {
   });
 
   it("the streaming writer does the same", async () => {
-    const stream = Streaming.createWriter(untyped());
+    const stream = new Stream.DocumentWriter(untyped());
     const parts = await readParts(await stream.finalize());
     expect(contentTypeOf(parts, "word/custom/data.foo")).toBe("application/octet-stream");
     expect(contentTypeOf(parts, "word/custom/noext")).toBe("application/octet-stream");

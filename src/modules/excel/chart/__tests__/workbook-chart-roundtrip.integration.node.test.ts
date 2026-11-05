@@ -303,8 +303,8 @@ describe("Chart Round-Trip Preservation", () => {
 
       // Verify chart model is accessible
       expect(Chart.getModel(chart)).toBeDefined();
-      expect(Chart.getChartTypes(chart).length).toBeGreaterThan(0);
-      expect(Chart.getChartTypes(chart)[0].type).toBe("bar");
+      expect(Chart.getTypes(chart).length).toBeGreaterThan(0);
+      expect(Chart.getTypes(chart)[0].type).toBe("bar");
       expect(Chart.getAxes(chart).length).toBeGreaterThan(0);
     });
 

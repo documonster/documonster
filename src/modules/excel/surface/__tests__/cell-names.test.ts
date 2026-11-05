@@ -1,6 +1,6 @@
 import {
   Cell,
-  DefinedNameError,
+  ExcelDefinedNameError,
   DefinedNames,
   ExcelArgumentError,
   Row,
@@ -9,7 +9,7 @@ import {
 } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
-describe("Cell.removeName / removeAllNames", () => {
+describe("Cell.removeName / clearNames", () => {
   it("reports whether the cell carried the name", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
@@ -26,7 +26,7 @@ describe("Cell.removeName / removeAllNames", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", 1);
     Cell.removeName(ws, "Q50", "Here");
-    Cell.removeAllNames(ws, "Q60");
+    Cell.clearNames(ws, "Q60");
     expect(Row.getCount(ws)).toBe(1);
     expect(Cell.has(ws, "Q50")).toBe(false);
   });
@@ -63,7 +63,7 @@ describe("a name given through Cell is checked as DefinedNames.add checks it", (
       rows: [[1]]
     });
     Cell.setNames(ws, "Z9", ["Keep1", "Keep2"]);
-    expect(() => edit(ws)).toThrow(DefinedNameError);
+    expect(() => edit(ws)).toThrow(ExcelDefinedNameError);
     expect(Cell.has(ws, "B1")).toBe(false);
     expect(Cell.getNames(ws, "Z9")).toEqual(["Keep1", "Keep2"]);
     expect(DefinedNames.list(Workbook.getDefinedNames(wb)).map(n => n.name)).toEqual([
@@ -83,7 +83,7 @@ describe("a name given through Cell is checked as DefinedNames.add checks it", (
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setNames(ws, "A7", ["Keep1", "Keep2"]);
-    expect(() => Cell.setNames(ws, "A7", ["New", "1bad"])).toThrow(DefinedNameError);
+    expect(() => Cell.setNames(ws, "A7", ["New", "1bad"])).toThrow(ExcelDefinedNameError);
     expect(Cell.getNames(ws, "A7")).toEqual(["Keep1", "Keep2"]);
   });
 
@@ -100,5 +100,24 @@ describe("a name given through Cell is checked as DefinedNames.add checks it", (
     expect(DefinedNames.getModel(Workbook.getDefinedNames(back))).toEqual([
       { name: "Tax", ranges: ["0.3"], formulaExpression: "0.3" }
     ]);
+  });
+});
+
+describe("the deprecated Cell name forms", () => {
+  it("setName replaces the names as setNames with one name does", () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setNames(ws, "A1", ["OldOne", "OldTwo"]);
+    Cell.setNames(ws, "B1", ["OldOne", "OldTwo"]);
+    Cell.setName(ws, "A1", "Only");
+    Cell.setNames(ws, "B1", ["Only"]);
+    expect(Cell.getNames(ws, "A1")).toEqual(["Only"]);
+    expect(Cell.getNames(ws, "B1")).toEqual(["Only"]);
+    Cell.setName(ws, 1, 3, "ByPosition");
+    expect(Cell.getNames(ws, "C1")).toEqual(["ByPosition"]);
+  });
+
+  it("removeAllNames is clearNames", () => {
+    expect(Cell.removeAllNames).toBe(Cell.clearNames);
   });
 });

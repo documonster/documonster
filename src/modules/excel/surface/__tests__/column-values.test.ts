@@ -1,4 +1,4 @@
-import { Cell, Column, ColumnOutOfBoundsError, Row, Workbook } from "@excel/index";
+import { Cell, Column, ExcelColumnOutOfBoundsError, Row, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -211,9 +211,9 @@ describe("column references are validated", () => {
     const { ws } = sheet();
 
     for (const ref of [0, -1, 16385]) {
-      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ColumnOutOfBoundsError);
-      expect(() => Column.getValues(ws, ref)).toThrow(ColumnOutOfBoundsError);
-      expect(() => Column.setValues(ws, ref, [1])).toThrow(ColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref)).toThrow(ExcelColumnOutOfBoundsError);
+      expect(() => Column.setValues(ws, ref, [1])).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 
@@ -224,14 +224,14 @@ describe("column references are validated", () => {
     // so the read reported an empty column instead of a bad argument. `Infinity`
     // is the reason this matters: `getColumn` pads `_columns` in a `while` loop.
     for (const ref of [1.5, NaN, Infinity, -Infinity]) {
-      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ColumnOutOfBoundsError);
-      expect(() => Column.setValues(ws, ref, [])).toThrow(ColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
+      expect(() => Column.setValues(ws, ref, [])).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 
   it("rejects a letter beyond XFD, the way it always did", () => {
     const { ws } = sheet();
-    expect(() => Column.getValues(ws, "XFE", { base: 1 })).toThrow(ColumnOutOfBoundsError);
+    expect(() => Column.getValues(ws, "XFE", { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
   });
 
   it("does not mistake an Object.prototype member for a column key", () => {
@@ -240,7 +240,7 @@ describe("column references are validated", () => {
     // `ws._keys` is a plain object, so a bare lookup finds these on the
     // prototype and reports a column number of `undefined`.
     for (const ref of ["toString", "constructor", "hasOwnProperty"]) {
-      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 

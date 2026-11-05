@@ -1385,7 +1385,7 @@ describe("WorkbookWriter", () => {
       cellSetValue(rowGetCell(row2, 1), "data2");
       rowCommit(row2);
 
-      // Should NOT throw RowOutOfBoundsError even though rows 1-2 are committed
+      // Should NOT throw ExcelRowOutOfBoundsError even though rows 1-2 are committed
       ws.addImage(imageId, "A1:C3");
 
       await wb.commit();

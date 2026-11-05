@@ -39,7 +39,7 @@ import {
   checkSourceArgument,
   isInMemoryArchiveSource,
   isSyncArchiveSource,
-  toAsyncIterable,
+  iterateArchiveSource,
   toUint8Array,
   toUint8ArraySync
 } from "@archive/io/archive-source";
@@ -216,7 +216,7 @@ export type TarArchiveOperation = ArchiveOperationBase<TarArchiveProgress> & {
 
 export interface TarReaderOptions {
   /**
-   * Largest entry, in bytes, that may be read into memory (`FileTooLargeError`). The same
+   * Largest entry, in bytes, that may be read into memory (`ArchiveFileTooLargeError`). The same
    * option as ZIP's `maxEntrySize`.
    * @default 104857600 (100 MiB)
    */
@@ -410,7 +410,7 @@ export class TarArchive {
           if (isInMemoryArchiveSource(source)) {
             data = await toUint8Array(source);
           } else {
-            data = await collect(toAsyncIterable(source, { signal }));
+            data = await collect(iterateArchiveSource(source, { signal }));
           }
 
           progress.bytesIn += data.length;
@@ -797,7 +797,7 @@ export class TarReader {
               throw createAbortError();
             }
 
-            const entryData = await entry.data();
+            const entryData = await entry.bytes();
             progress.bytesOut += entryData.length;
             progress.currentEntry = {
               path: entry.info.path,
@@ -827,7 +827,7 @@ export class TarReader {
               throw createAbortError();
             }
 
-            const entryData = await entry.data();
+            const entryData = await entry.bytes();
             progress.bytesOut += entryData.length;
             progress.entriesTotal++;
             progress.currentEntry = {

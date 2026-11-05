@@ -79,7 +79,7 @@ function inkedPixels(canvas: BasicRasterCanvas): number {
 function render(text: string, fonts: readonly RasterFontSource[]): BasicRasterCanvas {
   const canvas = new BasicRasterCanvas(400, 60);
   canvas.setFonts(fonts, { useSystemFonts: false });
-  canvas.drawText(10, 40, text, 24, "#000000", "start");
+  canvas.drawText(10, 40, text, { fontSize: 24, color: "#000000", anchor: "start" });
   return canvas;
 }
 
@@ -212,8 +212,8 @@ describe("raster font fallback", () => {
     const withNothing = new BasicRasterCanvas(200, 60);
     withNothing.setFonts([], { useSystemFonts: false });
 
-    withCjk.drawText(10, 40, "中", 24, "#000000", "start");
-    withNothing.drawText(10, 40, "中", 24, "#000000", "start");
+    withCjk.drawText(10, 40, "中", { fontSize: 24, color: "#000000", anchor: "start" });
+    withNothing.drawText(10, 40, "中", { fontSize: 24, color: "#000000", anchor: "start" });
 
     expect([...withCjk.uncoveredCodePoints]).toEqual([]);
     expect([...withNothing.uncoveredCodePoints]).toEqual([HAN_ZHONG]);

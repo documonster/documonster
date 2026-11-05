@@ -8,7 +8,7 @@ import { docxToSemantic } from "@word/convert/docx-to-semantic";
 import { renderToHtml } from "@word/convert/html/html-renderer";
 import { renderToMarkdown } from "@word/convert/markdown/markdown-renderer";
 import { Query } from "@word/index";
-import type { StyleIndex } from "@word/index";
+import type { DocxStyleIndex } from "@word/index";
 import { getHeadings } from "@word/query/search";
 import { splitDocument } from "@word/query/split";
 import type {
@@ -103,9 +103,9 @@ describe("getHeadings and splitDocument use the shared heading rule", () => {
 });
 
 describe("Query publishes the style index its resolvers accept", () => {
-  it("indexStyles builds a reusable StyleIndex", () => {
+  it("indexStyles builds a reusable DocxStyleIndex", () => {
     const d = doc([], [style("Base", { runProperties: { bold: true } })]);
-    const index: StyleIndex = Query.createStyleIndex(d);
+    const index: DocxStyleIndex = Query.createStyleIndex(d);
     const p = para("x", { style: "Base" });
     expect(Query.getParagraphStyle(d, p, { styles: index })).toEqual(Query.getParagraphStyle(d, p));
   });

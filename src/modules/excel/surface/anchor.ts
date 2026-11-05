@@ -52,22 +52,22 @@ function position(check: ArgumentChecks, field: string, value: unknown, max: num
 /**
  * Set the anchor's column — a fractional position, the fraction becoming an offset into the column.
  *
- * @throws {ExcelArgumentError} when `v` is not a number from 0 to the sheet's last column. It used to be stored as
+ * @throws {ExcelArgumentError} when `value` is not a number from 0 to the sheet's last column. It used to be stored as
  * given and refused only by the drawing that used the anchor.
  */
-export function setCol(a: AnchorData, v: number): void {
+export function setCol(a: AnchorData, value: number): void {
   checkAnchor(a);
   checkAnchorEditable(a);
-  position(argumentChecks("Anchor.setCol"), "value", v, MAX_COL);
-  anchorSetCol(a, v);
+  position(argumentChecks("Anchor.setCol"), "value", value, MAX_COL);
+  anchorSetCol(a, value);
 }
 
 /** Set the anchor's row, as {@link setCol} sets the column. @throws {ExcelArgumentError} for a value off the grid. */
-export function setRow(a: AnchorData, v: number): void {
+export function setRow(a: AnchorData, value: number): void {
   checkAnchor(a);
   checkAnchorEditable(a);
-  position(argumentChecks("Anchor.setRow"), "value", v, MAX_ROW);
-  anchorSetRow(a, v);
+  position(argumentChecks("Anchor.setRow"), "value", value, MAX_ROW);
+  anchorSetRow(a, value);
 }
 
 function checkModel(check: ArgumentChecks, field: string, value: unknown): value is AnchorModel {
@@ -115,7 +115,7 @@ export interface CreateAnchorOptions {
  * Create an anchor on `worksheet` at `address` — a string (`"A1"`, or `"a1"`), an anchor model, or a
  * `{ col, row }` simple address. With no address the anchor sits at the top-left corner.
  *
- * @throws {InvalidAddressError} when a string is not a cell of the sheet (a sheet name is refused).
+ * @throws {ExcelInvalidAddressError} when a string is not a cell of the sheet (a sheet name is refused).
  * @throws {ExcelArgumentError} when a model or `{ col, row }` is off the grid, or `offset` is not a whole number.
  */
 export function create(

@@ -7,10 +7,11 @@
 
 import { CsvArgumentError } from "@csv/errors";
 import type { DynamicTypingConfig, CastDateConfig } from "@csv/types";
-import { checkDynamicTyping } from "@csv/utils/check-options";
+import { checkDynamicTyping, describeValue } from "@csv/utils/check-options";
 import type { DecimalSeparator } from "@csv/utils/number";
 import type { DateParser } from "@utils/datetime";
 import { createIsoDateParser } from "@utils/datetime";
+import { isRecordArgument } from "@utils/object";
 
 // =============================================================================
 // Pre-compiled Regex Constants
@@ -279,6 +280,27 @@ export function applyDynamicTyping(
   value: string,
   columnConfig: boolean | ((value: string) => unknown) = true
 ): unknown {
+  const where = "Csv.applyDynamicTyping";
+  if (typeof value !== "string") {
+    throw new CsvArgumentError(
+      "value",
+      `${where}: value must be a string, got ${describeValue(value)}`
+    );
+  }
+  if (typeof columnConfig !== "boolean" && typeof columnConfig !== "function") {
+    throw new CsvArgumentError(
+      "columnConfig",
+      `${where}: columnConfig must be true, false or a function, got ${describeValue(columnConfig)}`
+    );
+  }
+  return applyColumnConfig(value, columnConfig);
+}
+
+/** {@link applyDynamicTyping} for a value and config already known to be valid. */
+function applyColumnConfig(
+  value: string,
+  columnConfig: boolean | ((value: string) => unknown)
+): unknown {
   if (columnConfig === false) {
     return value;
   }
@@ -349,12 +371,20 @@ function convertSingleValue(
   if (config === true) {
     return convertValue(value, decimalSeparator);
   }
-  return applyDynamicTyping(value, config);
+  return applyColumnConfig(value, config);
 }
 
 // =============================================================================
 // Row Conversion Functions
 // =============================================================================
+
+/** The settings of {@link applyDynamicTypingToRow}, as `CsvParseOptions` names them. */
+export interface CsvDynamicTypingOptions {
+  /** Columns whose ISO date strings become `Date`s, as `CsvParseOptions.castDate` takes it. */
+  castDate?: CastDateConfig;
+  /** Decimal separator numbers are read with (default `"."`), as `CsvParseOptions` takes it. */
+  decimalSeparator?: DecimalSeparator;
+}
 
 /**
  * Apply dynamic typing to an entire row (object form).
@@ -362,24 +392,73 @@ function convertSingleValue(
  * Performance: Converts values IN PLACE to avoid allocating a new object.
  * The input object is mutated and returned with converted values.
  *
+ * `dynamicTyping` stays positional: it is the conversion being applied — the same value
+ * `CsvParseOptions.dynamicTyping` takes, whose per-column form is itself a record and so could
+ * not share an options object without colliding with a column named like an option.
+ *
  * @param row - Row object with string values (will be mutated)
  * @param dynamicTyping - DynamicTyping configuration
- * @param castDate - CastDate configuration for date parsing
+ * @param options - Date casting and the decimal separator
  * @returns The same row object with converted values
  */
 export function applyDynamicTypingToRow(
   row: Record<string, string>,
   dynamicTyping: DynamicTypingConfig,
-  castDate?: CastDateConfig
+  options?: CsvDynamicTypingOptions
+): Record<string, unknown>;
+/** @deprecated Pass `castDate` as `{ castDate }`. Removed in 1.0. */
+export function applyDynamicTypingToRow(
+  row: Record<string, string>,
+  dynamicTyping: DynamicTypingConfig,
+  castDate: CastDateConfig | undefined
+): Record<string, unknown>;
+export function applyDynamicTypingToRow(
+  row: Record<string, string>,
+  dynamicTyping: DynamicTypingConfig,
+  options?: CsvDynamicTypingOptions | CastDateConfig
 ): Record<string, unknown> {
+  const where = "Csv.applyDynamicTypingToRow";
   if (typeof row !== "object" || row === null) {
+    throw new CsvArgumentError("row", `${where}: row must be an object of column values`);
+  }
+  for (const key of Object.keys(row)) {
+    const value: unknown = row[key];
+    if (typeof value !== "string") {
+      const entry = `[${JSON.stringify(key)}]`;
+      throw new CsvArgumentError(
+        `row${entry}`,
+        `${where}: row${entry} must be a string, got ${describeValue(value)}`
+      );
+    }
+  }
+  if (dynamicTyping === undefined) {
     throw new CsvArgumentError(
-      "row",
-      "Csv.applyDynamicTypingToRow: row must be an object of column values"
+      "dynamicTyping",
+      `${where}: dynamicTyping must be true, false or a map of column name to boolean or function, got undefined`
     );
   }
-  checkDynamicTyping("Csv.applyDynamicTypingToRow", dynamicTyping);
-  return typeRecord(row, dynamicTyping, castDate, ".");
+  checkDynamicTyping(where, dynamicTyping, "dynamicTyping");
+  if (!isRecordArgument(options)) {
+    return typeRecord(row, dynamicTyping, options, ".");
+  }
+  const { castDate, decimalSeparator = "." } = options;
+  if (
+    castDate !== undefined &&
+    typeof castDate !== "boolean" &&
+    (!Array.isArray(castDate) || castDate.some(c => typeof c !== "string"))
+  ) {
+    throw new CsvArgumentError(
+      "options.castDate",
+      `${where}: options.castDate must be true, false or an array of column names, got ${describeValue(castDate)}`
+    );
+  }
+  if (decimalSeparator !== "." && decimalSeparator !== ",") {
+    throw new CsvArgumentError(
+      "options.decimalSeparator",
+      `${where}: options.decimalSeparator must be "." or ",", got ${describeValue(decimalSeparator)}`
+    );
+  }
+  return typeRecord(row, dynamicTyping, castDate, decimalSeparator);
 }
 
 /**

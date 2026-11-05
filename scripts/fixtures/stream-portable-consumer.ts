@@ -343,11 +343,11 @@ export function declaredTypes(
     }
   });
 
-  const collected: Uint8Array = Streams.createCollector<number>().toUint8Array();
-  const collector = Streams.createCollector<number>();
+  const collected: Uint8Array = new Streams.Collector<number>().toUint8Array();
+  const collector = new Streams.Collector<number>();
   // @ts-expect-error a number collector takes numbers
   collector.write("x");
-  const pull: IPullStream = Streams.createPullStream();
+  const pull: IPullStream = new Streams.PullStream();
 
   void pipeline(
     // @ts-expect-error a sync generator as a middle stage fails with ERR_INVALID_RETURN_VALUE

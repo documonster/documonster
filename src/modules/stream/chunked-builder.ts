@@ -5,7 +5,7 @@
  * This file provides the same API but works in browser environments.
  */
 
-import { StreamStateError, StreamTypeError } from "@stream/errors";
+import { StreamStateError, StreamArgumentError } from "@stream/errors";
 import { textEncoder } from "@utils/binary";
 
 /**
@@ -18,9 +18,13 @@ export interface ChunkedBuilderOptions {
   initialCapacity?: number;
 }
 
+function describe(value: unknown): string {
+  return value === null ? "null" : typeof value === "number" ? String(value) : typeof value;
+}
+
 function checkPiece(piece: unknown): void {
   if (typeof piece !== "string") {
-    throw new StreamTypeError("a string piece", piece === null ? "null" : typeof piece, {
+    throw new StreamArgumentError("a string piece", piece === null ? "null" : typeof piece, {
       field: "piece",
       where: "Streams.ChunkedBuilder#push"
     });
@@ -37,8 +41,35 @@ export class ChunkedBuilder {
   protected readonly _chunkSize: number;
   protected _totalLength: number = 0;
 
+  /** The public name the constructor's argument errors start with. */
+  protected static readonly publicName: string = "Streams.ChunkedBuilder";
+
   constructor(options: ChunkedBuilderOptions = {}) {
-    this._chunkSize = options.chunkSize ?? 10000;
+    const where = (new.target as typeof ChunkedBuilder).publicName;
+    if (typeof options !== "object" || options === null) {
+      throw new StreamArgumentError("an options object", describe(options), {
+        field: "options",
+        where
+      });
+    }
+    const { chunkSize, initialCapacity } = options;
+    if (chunkSize !== undefined && (!Number.isInteger(chunkSize) || chunkSize <= 0)) {
+      throw new StreamArgumentError("a positive integer chunkSize", describe(chunkSize), {
+        field: "options.chunkSize",
+        where
+      });
+    }
+    if (
+      initialCapacity !== undefined &&
+      (!Number.isInteger(initialCapacity) || initialCapacity < 0)
+    ) {
+      throw new StreamArgumentError(
+        "a non-negative integer initialCapacity",
+        describe(initialCapacity),
+        { field: "options.initialCapacity", where }
+      );
+    }
+    this._chunkSize = chunkSize ?? 10000;
   }
 
   /**
@@ -154,6 +185,8 @@ export interface BuilderSnapshot {
  * Browser-compatible version
  */
 export class TransactionalChunkedBuilder extends ChunkedBuilder {
+  protected static override readonly publicName: string = "Streams.TransactionalChunkedBuilder";
+
   private _snapshots: BuilderSnapshot[] = [];
 
   /**

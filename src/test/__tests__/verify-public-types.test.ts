@@ -92,6 +92,39 @@ function soundTree(): void {
 }
 
 describe("the public type surface gate", () => {
+  it("holds a satellite package to the same rule, through its ESM `.js` specifiers", () => {
+    soundTree();
+    file("packages/sat/src/options.ts", "export interface SatOptions {\n  flag?: boolean;\n}\n");
+    file(
+      "packages/sat/src/index.ts",
+      [
+        'import type { SatOptions } from "./options.js";',
+        "export function start(options?: SatOptions): void {",
+        "  void options;",
+        "}"
+      ].join("\n")
+    );
+    const entries = {
+      demo: { file: "src/modules/demo/index.ts", platform: "both" },
+      sat: { file: "packages/sat/src/index.ts", platform: "node" }
+    };
+    const hole = run(config({ entries }));
+    expect(hole.code).not.toBe(0);
+    expect(hole.output).toContain("sat exposes `SatOptions`");
+
+    file(
+      "packages/sat/src/index.ts",
+      [
+        'import type { SatOptions } from "./options.js";',
+        'export type { SatOptions } from "./options.js";',
+        "export function start(options?: SatOptions): void {",
+        "  void options;",
+        "}"
+      ].join("\n")
+    );
+    expect(run(config({ entries })).code).toBe(0);
+  });
+
   it("passes a surface with no holes", () => {
     soundTree();
     const { code, output } = run(config());

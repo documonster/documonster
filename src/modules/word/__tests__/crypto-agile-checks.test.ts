@@ -38,33 +38,33 @@ const goodInfo = {
 
 describe("WordCrypto.Agile.deriveKey", () => {
   it("derives a key from valid arguments", async () => {
-    const key = await WordCrypto.Agile.deriveKey("pw", goodInfo, new Uint8Array(8));
+    const key = await WordCrypto.Agile.deriveKey(goodInfo, "pw", new Uint8Array(8));
     expect(key.length).toBe(32);
   });
 
   it("refuses what would derive a wrong key", async () => {
     const block = new Uint8Array(8);
     const bad: [string, () => Promise<unknown>][] = [
-      ["password", () => WordCrypto.Agile.deriveKey(42 as never, goodInfo, block)],
-      ["info", () => WordCrypto.Agile.deriveKey("pw", 42 as never, block)],
+      ["password", () => WordCrypto.Agile.deriveKey(goodInfo, 42 as never, block)],
+      ["info", () => WordCrypto.Agile.deriveKey(42 as never, "pw", block)],
       [
         "info.keySalt",
-        () => WordCrypto.Agile.deriveKey("pw", { ...goodInfo, keySalt: "x" as never }, block)
+        () => WordCrypto.Agile.deriveKey({ ...goodInfo, keySalt: "x" as never }, "pw", block)
       ],
       [
         "info.spinCount",
-        () => WordCrypto.Agile.deriveKey("pw", { ...goodInfo, spinCount: Number.NaN }, block)
+        () => WordCrypto.Agile.deriveKey({ ...goodInfo, spinCount: Number.NaN }, "pw", block)
       ],
       [
         "info.spinCount",
-        () => WordCrypto.Agile.deriveKey("pw", { ...goodInfo, spinCount: -1 }, block)
+        () => WordCrypto.Agile.deriveKey({ ...goodInfo, spinCount: -1 }, "pw", block)
       ],
       [
         "info.hashAlgorithm",
-        () => WordCrypto.Agile.deriveKey("pw", { ...goodInfo, hashAlgorithm: "bogus" }, block)
+        () => WordCrypto.Agile.deriveKey({ ...goodInfo, hashAlgorithm: "bogus" }, "pw", block)
       ],
-      ["info.keyBits", () => WordCrypto.Agile.deriveKey("pw", { ...goodInfo, keyBits: 7 }, block)],
-      ["blockKey", () => WordCrypto.Agile.deriveKey("pw", goodInfo, "x" as never)]
+      ["info.keyBits", () => WordCrypto.Agile.deriveKey({ ...goodInfo, keyBits: 7 }, "pw", block)],
+      ["blockKey", () => WordCrypto.Agile.deriveKey(goodInfo, "pw", "x" as never)]
     ];
     for (const [field, call] of bad) {
       const error = await call().catch((e: unknown) => e);

@@ -14,8 +14,8 @@ import {
   Form,
   HeaderFooterImage,
   Image,
-  InvalidAddressError,
-  InvalidValueTypeError,
+  ExcelInvalidAddressError,
+  ExcelInvalidValueTypeError,
   Note,
   Pivot,
   Range,
@@ -61,8 +61,8 @@ describe("R4-E1 a refused Column.splice changes nothing", () => {
         return e;
       }
     })();
-    expect(error).toBeInstanceOf(InvalidValueTypeError);
-    expect((error as InvalidValueTypeError).field).toBe("inserts[0][1]");
+    expect(error).toBeInstanceOf(ExcelInvalidValueTypeError);
+    expect((error as ExcelInvalidValueTypeError).field).toBe("inserts[0][1]");
     expect((error as Error).message).toMatch(/^Column\.splice: inserts\[0\]\[1\]: /);
     expect(Worksheet.toAoa(ws)).toEqual(before);
     expect(Cell.getFormula(ws, "D1")).toBe("B1");
@@ -102,7 +102,7 @@ describe("R4-E4 a refused Column.setValues writes nothing", () => {
   it("checks every value first, as Row.setValues does", () => {
     const { ws } = book();
     expect(() => Column.setValues(ws, "D", [1, Number.NaN], { base: 0 })).toThrow(
-      InvalidValueTypeError
+      ExcelInvalidValueTypeError
     );
     expect(Cell.has(ws, "D1")).toBe(false);
     expect(Column.getValues(ws, "D")).toEqual([]);
@@ -110,20 +110,20 @@ describe("R4-E4 a refused Column.setValues writes nothing", () => {
 });
 
 describe("R4-S4 a refused cell value is one error class, naming the call and the argument", () => {
-  it("is an InvalidValueTypeError, which is an ExcelArgumentError, for scalars and shapes alike", () => {
+  it("is an ExcelInvalidValueTypeError, which is an ExcelArgumentError, for scalars and shapes alike", () => {
     const { ws } = book();
     const caught = (run: () => void) => {
       try {
         run();
       } catch (e) {
-        return e as InvalidValueTypeError;
+        return e as ExcelInvalidValueTypeError;
       }
       throw new Error("did not throw");
     };
     const nan = caught(() => Cell.setValue(ws, "A1", Number.NaN));
     const shape = caught(() => Cell.setValue(ws, "A1", { richText: [{ text: 42 }] } as never));
     for (const error of [nan, shape]) {
-      expect(error).toBeInstanceOf(InvalidValueTypeError);
+      expect(error).toBeInstanceOf(ExcelInvalidValueTypeError);
       expect(error).toBeInstanceOf(ExcelArgumentError);
       expect(error.message).toMatch(/^Cell\.setValue: /);
     }
@@ -139,7 +139,7 @@ describe("R4-S4 a refused cell value is one error class, naming the call and the
   });
 
   it("keeps a bare value check's message when no call is named", () => {
-    expect(new InvalidValueTypeError("number").field).toBe("value");
+    expect(new ExcelInvalidValueTypeError("number").field).toBe("value");
   });
 });
 
@@ -223,7 +223,7 @@ describe("R4-C1 ConditionalFormatting.remove by ref, and a predicate removes one
     expect(ConditionalFormatting.remove(ws, "a1:b3")).toBe(true);
     expect(ConditionalFormatting.list(ws).map(cf => cf.ref)).toEqual(["C1:C3"]);
     expect(ConditionalFormatting.remove(ws, "A1:B3")).toBe(false);
-    expect(() => ConditionalFormatting.remove(ws, "not a ref")).toThrow(InvalidAddressError);
+    expect(() => ConditionalFormatting.remove(ws, "not a ref")).toThrow(ExcelInvalidAddressError);
   });
 
   it("removes the first entry a predicate accepts, as the TSDoc says", () => {
@@ -250,7 +250,7 @@ describe("R4-C2 ConditionalFormatting.add stores its ref canonical", () => {
   it("names its fields from the parameter (`cf.ref`)", () => {
     const { ws } = book();
     expect(() => ConditionalFormatting.add(ws, { ref: "zz", rules: [] } as never)).toThrow(
-      InvalidAddressError
+      ExcelInvalidAddressError
     );
     expect(() => ConditionalFormatting.add(ws, { ref: "A1", rules: [] })).toThrow(
       expect.objectContaining({ field: "cf.rules" })
@@ -268,10 +268,19 @@ describe("R4-C5 Watermark.get checks its handle and returns a copy", () => {
     const { wb, ws } = book();
     expect(Watermark.get(ws)).toBeNull();
     const imageId = Image.add(wb, { buffer: PNG, extension: "png" });
-    Watermark.add(ws, { imageId, mode: "overlay", opacity: 0.3 });
+    Watermark.set(ws, { imageId, mode: "overlay", opacity: 0.3 });
     const got = Watermark.get(ws)!;
     got.opacity = 9;
     expect(Watermark.get(ws)!.opacity).toBe(0.3);
+  });
+
+  it("keeps the deprecated Watermark.add as a forward that replaces, as set does", () => {
+    const { wb, ws } = book();
+    const imageId = Image.add(wb, { buffer: PNG, extension: "png" });
+    Watermark.add(ws, { imageId, mode: "overlay", opacity: 0.3 });
+    Watermark.add(ws, { imageId, mode: "overlay", opacity: 0.5 });
+    expect(Watermark.get(ws)!.opacity).toBe(0.5);
+    expect(() => Watermark.add(ws, { imageId, opacity: 5 })).toThrow(/^Watermark\.add: /);
   });
 });
 

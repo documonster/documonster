@@ -14,7 +14,7 @@
  * `xlsx/opaque-parts.ts`.
  */
 
-import { ImageError } from "@excel/errors";
+import { ExcelImageError } from "@excel/errors";
 
 /**
  * A relationship carried through verbatim.
@@ -195,7 +195,7 @@ export interface OpaqueDrop {
  */
 export function imageContentTypeFor(extension: string): string {
   if (!/^[a-z0-9]+$/i.test(extension)) {
-    throw new ImageError(
+    throw new ExcelImageError(
       `Cannot write an image with extension ${JSON.stringify(extension)}: a media part's extension must be letters and digits (png, jpeg, gif, …)`
     );
   }

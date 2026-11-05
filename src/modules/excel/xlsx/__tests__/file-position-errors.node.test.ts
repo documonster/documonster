@@ -15,13 +15,13 @@ import { Readable } from "node:stream";
 import { Archive } from "@archive";
 import {
   Cell,
-  ColumnOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   ExcelArgumentError,
   ExcelError,
   ExcelFileError,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   isExcelError,
-  RowOutOfBoundsError,
+  ExcelRowOutOfBoundsError,
   Stream,
   Workbook,
   Worksheet,
@@ -101,33 +101,38 @@ const XLSX_CASES: [string, (xml: string) => string, ErrorClass, boolean][] = [
   [
     "a cell written in another row",
     xml => xml.replace('r="B5"', 'r="B7"'),
-    InvalidAddressError,
+    ExcelInvalidAddressError,
     true
   ],
-  ["a column past XFD", xml => xml.replace('r="B5"', 'r="XFE5"'), ColumnOutOfBoundsError, true],
+  [
+    "a column past XFD",
+    xml => xml.replace('r="B5"', 'r="XFE5"'),
+    ExcelColumnOutOfBoundsError,
+    true
+  ],
   [
     "row 0",
     xml => xml.replace('<row r="5"', '<row r="0"').replace('r="B5"', 'r="B0"'),
-    RowOutOfBoundsError,
+    ExcelRowOutOfBoundsError,
     true
   ],
   [
     "a row past 1048576",
     xml => xml.replace('<row r="5"', '<row r="1048577"').replace('r="B5"', 'r="B1048577"'),
-    RowOutOfBoundsError,
+    ExcelRowOutOfBoundsError,
     true
   ],
   // The streaming reader reads no merges.
   [
     "a merge from row 0",
     xml => xml.replace('ref="C1:D2"', 'ref="C0:D2"'),
-    RowOutOfBoundsError,
+    ExcelRowOutOfBoundsError,
     false
   ],
   [
     "a merge to column XFE",
     xml => xml.replace('ref="C1:D2"', 'ref="C1:XFE2"'),
-    ColumnOutOfBoundsError,
+    ExcelColumnOutOfBoundsError,
     false
   ]
 ];
@@ -201,7 +206,7 @@ describe("CSV and Markdown: a row wider than a sheet is an ExcelFileError naming
       () => ExcelCsv.addWorksheet(Workbook.create(), csv)
     ]) {
       const error = await failure(run);
-      expectFileError(error, ExcelFileError, "row 2", ColumnOutOfBoundsError);
+      expectFileError(error, ExcelFileError, "row 2", ExcelColumnOutOfBoundsError);
       expect(error.message).toContain("CSV");
     }
   });
@@ -209,7 +214,7 @@ describe("CSV and Markdown: a row wider than a sheet is an ExcelFileError naming
   it("ExcelMarkdown.read", async () => {
     const md = `| ${wide(16385).join(" | ")} |\n|${" --- |".repeat(16385)}\n`;
     const error = await failure(async () => ExcelMarkdown.read(md));
-    expectFileError(error, ExcelFileError, "row 1", ColumnOutOfBoundsError);
+    expectFileError(error, ExcelFileError, "row 1", ExcelColumnOutOfBoundsError);
     expect(error.message).toContain("Markdown");
   });
 });

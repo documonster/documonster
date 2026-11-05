@@ -5,7 +5,7 @@
  */
 import { extractAll } from "@archive/unzip/extract";
 import { Cell, ConditionalFormatting, DataValidation, DefinedNames, Workbook } from "@excel";
-import { ExcelNotSupportedError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
 import { unwritableFormulaReason } from "@excel/utils/array-evaluation";
 import {
   FUNCTION_ID_BY_NAME,
@@ -113,8 +113,8 @@ describe("a non-reference in a reference-only parameter", () => {
     const error = await Workbook.toBuffer(workbookWith("RANK(2,{2,2,1},0)"), { format }).catch(
       (cause: unknown) => cause
     );
-    expect(error).toBeInstanceOf(ExcelNotSupportedError);
-    expect((error as ExcelNotSupportedError).items).toEqual([
+    expect(error).toBeInstanceOf(ExcelUnsupportedFeatureError);
+    expect((error as ExcelUnsupportedFeatureError).items).toEqual([
       "S!B1: formula (RANK argument 2 must be a reference)"
     ]);
   });
@@ -154,7 +154,7 @@ describe("a non-reference in a reference-only parameter", () => {
       } as never);
       Cell.setValue(sheet, "A2", { sharedFormula: "A1", result: 1 } as never);
       const error = await Workbook.toBuffer(workbook, { format }).catch((cause: unknown) => cause);
-      expect((error as ExcelNotSupportedError).items).toContain(
+      expect((error as ExcelUnsupportedFeatureError).items).toContain(
         "S!A1: formula (RANK argument 2 must be a reference)"
       );
       const bytes = await Workbook.toBuffer(workbook, { format, unsupported: "ignore" });
@@ -177,7 +177,7 @@ describe("a non-reference in a reference-only parameter", () => {
         ref: "A1"
       } as never);
       const error = await Workbook.toBuffer(workbook, { format }).catch((cause: unknown) => cause);
-      expect((error as ExcelNotSupportedError).items).toEqual([
+      expect((error as ExcelUnsupportedFeatureError).items).toEqual([
         "S!A1: formula (ROW argument 1 must be a reference)"
       ]);
       const back = await reopen(
@@ -209,9 +209,9 @@ describe("a non-reference in a reference-only parameter", () => {
       DefinedNames.addFormula(Workbook.getDefinedNames(workbook), "Bad", "OFFSET(1,0,0)");
       DefinedNames.addFormula(Workbook.getDefinedNames(workbook), "Good", "OFFSET(S!$A$1,0,0)");
       const error = await Workbook.toBuffer(workbook, { format }).catch((cause: unknown) => cause);
-      expect(error).toBeInstanceOf(ExcelNotSupportedError);
+      expect(error).toBeInstanceOf(ExcelUnsupportedFeatureError);
       // Each container words these losses as it words any formula of theirs it cannot write.
-      expect((error as ExcelNotSupportedError).items).toEqual(
+      expect((error as ExcelUnsupportedFeatureError).items).toEqual(
         format === "xlsx"
           ? [
               "S!A1:A3: conditional formatting formula (RANK argument 2 must be a reference)",

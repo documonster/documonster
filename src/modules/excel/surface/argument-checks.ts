@@ -6,7 +6,7 @@ import { isNoteData } from "@excel/core/note";
 import { getImage } from "@excel/core/workbook-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { getSheetWorkbook } from "@excel/core/worksheet-core";
-import { ImageError } from "@excel/errors";
+import { ExcelImageError } from "@excel/errors";
 import type { ArgumentChecks } from "@excel/utils/arguments";
 import { argumentChecks } from "@excel/utils/arguments";
 import { checkStyleFacet } from "@excel/utils/style-checks";
@@ -20,7 +20,7 @@ export function checkImageId(where: string, ws: WorksheetData, imageId: unknown)
     (typeof imageId !== "string" && typeof imageId !== "number") ||
     getImage(getSheetWorkbook(ws), imageId) === undefined
   ) {
-    throw new ImageError(
+    throw new ExcelImageError(
       `${where}: the workbook has no image ${JSON.stringify(imageId)}; add it with Image.add first.`
     );
   }
@@ -165,7 +165,7 @@ export function checkAutoFilter(where: string, field: string, range: unknown): v
 const POSITIONS = ["LH", "CH", "RH", "LF", "CF", "RF"];
 const APPLY_TO = ["all", "odd", "even", "first"];
 
-/** A header/footer picture's section, size and page variants, as `HeaderFooterImage.set` and `Watermark.add` take them. */
+/** A header/footer picture's section, size and page variants, as `HeaderFooterImage.set` and `Watermark.set` take them. */
 export function checkHeaderImage(
   check: ArgumentChecks,
   argument: string,

@@ -39,12 +39,18 @@ import {
   checkBytes,
   checkEntryName,
   checkEntryPath,
+  checkOptionsObject,
   checkReadOptions,
   checkString,
   checkZipEntryOptions,
   checkZipOptions
 } from "@archive/core/entry-checks";
-import { ArchiveArgumentError, ArchiveError, createAbortError } from "@archive/core/errors";
+import {
+  ArchiveArgumentError,
+  ArchiveError,
+  ArchiveFileError,
+  createAbortError
+} from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import { decodeEntryText } from "@archive/core/text";
 import type { ArchiveFormat } from "@archive/core/types";
@@ -87,7 +93,7 @@ import {
   archiveBytesToUint8Array,
   collectUint8ArrayStream,
   isArchiveBytes,
-  toAsyncIterable
+  iterateArchiveSource
 } from "@archive/io/archive-source";
 import { gzipTarStream, gzipTarSync } from "@archive/tar/gzip-tar-stream";
 import type { TarArchiveEntryOptions } from "@archive/tar/tar-archive";
@@ -310,11 +316,16 @@ function resolveViewSync<V>(steps: ViewResolution<V>): V {
   let step = steps.next();
   while (!step.done) {
     const query = step.value;
-    step = steps.next(
-      query.kind === "directory"
-        ? traverseDirectorySync(query.path, query.options)
-        : globFilesSync(query.pattern, query.options)
-    );
+    let found: FileEntry[];
+    try {
+      found =
+        query.kind === "directory"
+          ? traverseDirectorySync(query.path, query.options)
+          : globFilesSync(query.pattern, query.options);
+    } catch (error) {
+      throw queryError(query, error);
+    }
+    step = steps.next(found);
   }
   return step.value;
 }
@@ -324,10 +335,14 @@ async function resolveViewAsync<V>(steps: ViewResolution<V>): Promise<V> {
   while (!step.done) {
     const query = step.value;
     const found: FileEntry[] = [];
-    for await (const entry of query.kind === "directory"
-      ? traverseDirectory(query.path, query.options)
-      : globFiles(query.pattern, query.options)) {
-      found.push(entry);
+    try {
+      for await (const entry of query.kind === "directory"
+        ? traverseDirectory(query.path, query.options)
+        : globFiles(query.pattern, query.options)) {
+        found.push(entry);
+      }
+    } catch (error) {
+      throw queryError(query, error);
     }
     step = steps.next(found);
   }
@@ -379,7 +394,7 @@ async function* readPendingStreamOnce(op: {
     return;
   }
   const chunks: Uint8Array[] = [];
-  for await (const chunk of toAsyncIterable(op.stream)) {
+  for await (const chunk of iterateArchiveSource(op.stream)) {
     chunks.push(chunk);
     yield chunk;
   }
@@ -566,7 +581,7 @@ async function tryFsOpWithWarning(
       emitExtractWarning(onWarning, entryPath, targetPath, err);
       return false;
     }
-    throw err;
+    throw toFileError(targetPath, "write", err, "extracted");
   }
 }
 
@@ -587,7 +602,7 @@ function tryFsOpWithWarningSync(
       emitExtractWarning(onWarning, entryPath, targetPath, err);
       return false;
     }
-    throw err;
+    throw toFileError(targetPath, "write", err, "extracted");
   }
 }
 
@@ -833,6 +848,76 @@ function buildSymlinkEntry(
     mode: mode ?? 0o120777,
     encoding
   };
+}
+
+type FileKind = "archive" | "source" | "extracted";
+
+/** The `ArchiveFileError` for a file the system would not let us read or write, with its error as the cause. */
+function fileSystemError(
+  filePath: string,
+  operation: "read" | "write",
+  error: unknown,
+  fileKind: FileKind = "archive"
+): ArchiveFileError {
+  const code = (error as { code?: unknown } | null)?.code;
+  const detail =
+    code === "ENOENT" ? "File not found" : error instanceof Error ? error.message : String(error);
+  return new ArchiveFileError(filePath, operation, detail, { cause: error, fileKind });
+}
+
+/**
+ * {@link fileSystemError} for a platform refusal, and `error` itself for anything else — a
+ * step that both touches the disk and applies this module's own policy (an `overwrite: "error"`
+ * refusal is an `ArchiveError` already) must not have its own errors relabelled.
+ */
+function toFileError(
+  filePath: string,
+  operation: "read" | "write",
+  error: unknown,
+  fileKind: FileKind = "archive"
+): unknown {
+  const code = (error as { code?: unknown } | null)?.code;
+  return error instanceof Error && !(error instanceof ArchiveError) && typeof code === "string"
+    ? fileSystemError(filePath, operation, error, fileKind)
+    : error;
+}
+
+/** {@link toFileError} for a directory walk or glob, naming the path the system refused. */
+function queryError(query: FsQuery, error: unknown): unknown {
+  const refused = (error as { path?: unknown } | null)?.path;
+  const queried = query.kind === "directory" ? query.path : query.pattern;
+  return toFileError(typeof refused === "string" ? refused : queried, "read", error, "source");
+}
+
+/**
+ * An archive stream whose local sources are opened as it runs: a source the system will not
+ * read surfaces from the stream as an `ArchiveFileError` naming that source.
+ */
+async function* readingSources(chunks: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
+  try {
+    yield* chunks;
+  } catch (error) {
+    const refused = (error as { path?: unknown } | null)?.path;
+    throw typeof refused === "string" ? toFileError(refused, "read", error, "source") : error;
+  }
+}
+
+/** A local source's bytes; a file the system will not read is an `ArchiveFileError`. */
+async function readSourceBytes(filePath: string): Promise<Uint8Array> {
+  try {
+    return await readFileBytes(filePath);
+  } catch (error) {
+    throw toFileError(filePath, "read", error, "source");
+  }
+}
+
+/** {@link readSourceBytes}, synchronously. */
+function readSourceBytesSync(filePath: string): Uint8Array {
+  try {
+    return readFileBytesSync(filePath);
+  } catch (error) {
+    throw toFileError(filePath, "read", error, "source");
+  }
 }
 
 /**
@@ -1324,6 +1409,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    */
   constructor(options?: ArchiveFileOptions);
   constructor(options: ArchiveFileOptions = {}) {
+    checkOptionsObject("Archive.ArchiveFile", options);
     const format = (options.format ?? "zip") as F;
     if (format !== "zip" && format !== "tar") {
       throw new ArchiveArgumentError(
@@ -1553,12 +1639,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     }
     if (v.found) {
       return v.found.build(
-        v.found.path === null ? EMPTY_UINT8ARRAY : await readFileBytes(v.found.path)
+        v.found.path === null ? EMPTY_UINT8ARRAY : await readSourceBytes(v.found.path)
       );
     }
     const op = v.op!;
     if (op.type === "file") {
-      const data = await readFileBytes(op.localPath);
+      const data = await readSourceBytes(op.localPath);
       const stats = await safeStats(op.localPath);
       return buildZipEntry(
         op.zipPath,
@@ -1586,12 +1672,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     }
     if (v.found) {
       return v.found.build(
-        v.found.path === null ? EMPTY_UINT8ARRAY : readFileBytesSync(v.found.path)
+        v.found.path === null ? EMPTY_UINT8ARRAY : readSourceBytesSync(v.found.path)
       );
     }
     const op = v.op!;
     if (op.type === "file") {
-      const data = readFileBytesSync(op.localPath);
+      const data = readSourceBytesSync(op.localPath);
       const stats = safeStatsSync(op.localPath);
       return buildZipEntry(
         op.zipPath,
@@ -1721,11 +1807,11 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     v: TarViewEntry
   ): Promise<{ data: Uint8Array; options: TarArchiveEntryOptions }> {
     if (v.op?.type === "file") {
-      const data = await readFileBytes(v.op.localPath);
+      const data = await readSourceBytes(v.op.localPath);
       return { data, options: this._tarFileOptions(v.op, await safeStats(v.op.localPath)) };
     }
     if (v.found?.path) {
-      return { data: await readFileBytes(v.found.path), options: v.found.options };
+      return { data: await readSourceBytes(v.found.path), options: v.found.options };
     }
     if (v.op?.type === "stream") {
       v.op.buffered ??= await collectStream(v.op.stream);
@@ -1739,7 +1825,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     }
     if (v.found) {
       return {
-        data: v.found.path === null ? EMPTY_UINT8ARRAY : readFileBytesSync(v.found.path),
+        data: v.found.path === null ? EMPTY_UINT8ARRAY : readSourceBytesSync(v.found.path),
         options: v.found.options
       };
     }
@@ -1747,7 +1833,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     switch (op.type) {
       case "file":
         return {
-          data: readFileBytesSync(op.localPath),
+          data: readSourceBytesSync(op.localPath),
           options: this._tarFileOptions(op, safeStatsSync(op.localPath))
         };
       case "buffer":
@@ -1956,7 +2042,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     options: ArchiveFileOpenOptions = {}
   ): Promise<ArchiveFile<ArchiveFormat>> {
     checkOpenOptions("Archive.ArchiveFile.fromFile", options);
-    const data = await readFileBytes(filePath);
+    let data: Uint8Array;
+    try {
+      data = await readFileBytes(filePath);
+    } catch (error) {
+      throw fileSystemError(filePath, "read", error);
+    }
     const autoDetectGzip = filePath.endsWith(".gz") || filePath.endsWith(".tgz");
     return ArchiveFile._fromData(data, options, path.resolve(filePath), autoDetectGzip);
   }
@@ -1971,7 +2062,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     options: ArchiveFileOpenOptions = {}
   ): ArchiveFile<ArchiveFormat> {
     checkOpenOptions("Archive.ArchiveFile.fromFileSync", options);
-    const data = readFileBytesSync(filePath);
+    let data: Uint8Array;
+    try {
+      data = readFileBytesSync(filePath);
+    } catch (error) {
+      throw fileSystemError(filePath, "read", error);
+    }
     const autoDetectGzip = filePath.endsWith(".gz") || filePath.endsWith(".tgz");
     return ArchiveFile._fromData(data, options, path.resolve(filePath), autoDetectGzip);
   }
@@ -2409,8 +2505,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     }
 
     const data = await this.toBuffer();
-    await ensureDir(path.dirname(targetPath));
-    await writeFileBytes(targetPath, data);
+    try {
+      await ensureDir(path.dirname(targetPath));
+      await writeFileBytes(targetPath, data);
+    } catch (error) {
+      throw fileSystemError(targetPath, "write", error);
+    }
   }
 
   /** @deprecated Use {@link writeFile}. Removed in 1.0. */
@@ -2431,8 +2531,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     }
 
     const data = this.toBufferSync();
-    ensureDirSync(path.dirname(targetPath));
-    writeFileBytesSync(targetPath, data);
+    try {
+      ensureDirSync(path.dirname(targetPath));
+      writeFileBytesSync(targetPath, data);
+    } catch (error) {
+      throw fileSystemError(targetPath, "write", error);
+    }
   }
   /** @deprecated Use {@link writeFileSync}. Removed in 1.0. */
   writeToFileSync(filePath: string, options?: WriteArchiveOptions): void {
@@ -2492,11 +2596,15 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    * ```
    */
   operation(options: ArchiveStreamOptions = {}): ArchiveStreamOperation {
-    if (this._format === "zip") {
-      return this._buildZipStream(options);
-    } else {
-      return this._buildTarStream(options);
-    }
+    const op =
+      this._format === "zip" ? this._buildZipStream(options) : this._buildTarStream(options);
+    return {
+      iterable: readingSources(op.iterable),
+      signal: op.signal,
+      abort: reason => op.abort(reason),
+      pointer: () => op.pointer(),
+      progress: () => op.progress()
+    };
   }
 
   /**
@@ -2543,15 +2651,19 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       return;
     }
 
-    await ensureDir(path.dirname(targetPath));
-
-    const writeStream = createWriteStream(targetPath);
+    let writeStream: ReturnType<typeof createWriteStream>;
+    try {
+      await ensureDir(path.dirname(targetPath));
+      writeStream = createWriteStream(targetPath);
+    } catch (error) {
+      throw toFileError(targetPath, "write", error);
+    }
     try {
       await this.pipeTo(writeStream, options);
     } catch (err) {
       // Clean up partial file on error
       writeStream.destroy();
-      throw err;
+      throw toFileError(targetPath, "write", err);
     }
   }
 
@@ -2805,24 +2917,28 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     const { overwrite = "error", preserveTimestamps = true, password } = options;
     const resolvedTarget = path.resolve(targetPath);
 
-    if (entry.type === "directory") {
-      await ensureDir(resolvedTarget);
+    try {
+      if (entry.type === "directory") {
+        await ensureDir(resolvedTarget);
+        return true;
+      }
+
+      if (!(await shouldExtract(resolvedTarget, entry.lastModified, overwrite))) {
+        return false;
+      }
+
+      await ensureDir(path.dirname(resolvedTarget));
+
+      const data = await this._zipDataOf(v, password);
+      await writeFileBytes(resolvedTarget, data);
+      if (preserveTimestamps) {
+        await setFileTime(resolvedTarget, entry.lastModified);
+      }
+
       return true;
+    } catch (error) {
+      throw toFileError(resolvedTarget, "write", error, "extracted");
     }
-
-    if (!(await shouldExtract(resolvedTarget, entry.lastModified, overwrite))) {
-      return false;
-    }
-
-    await ensureDir(path.dirname(resolvedTarget));
-
-    const data = await this._zipDataOf(v, password);
-    await writeFileBytes(resolvedTarget, data);
-    if (preserveTimestamps) {
-      await setFileTime(resolvedTarget, entry.lastModified);
-    }
-
-    return true;
   }
 
   /**
@@ -2848,24 +2964,28 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     const { overwrite = "error", preserveTimestamps = true, password } = options;
     const resolvedTarget = path.resolve(targetPath);
 
-    if (entry.type === "directory") {
-      ensureDirSync(resolvedTarget);
+    try {
+      if (entry.type === "directory") {
+        ensureDirSync(resolvedTarget);
+        return true;
+      }
+
+      if (!shouldExtractSync(resolvedTarget, entry.lastModified, overwrite)) {
+        return false;
+      }
+
+      ensureDirSync(path.dirname(resolvedTarget));
+
+      const data = this._zipDataOfSync(v, password);
+      writeFileBytesSync(resolvedTarget, data);
+      if (preserveTimestamps) {
+        setFileTimeSync(resolvedTarget, entry.lastModified);
+      }
+
       return true;
+    } catch (error) {
+      throw toFileError(resolvedTarget, "write", error, "extracted");
     }
-
-    if (!shouldExtractSync(resolvedTarget, entry.lastModified, overwrite)) {
-      return false;
-    }
-
-    ensureDirSync(path.dirname(resolvedTarget));
-
-    const data = this._zipDataOfSync(v, password);
-    writeFileBytesSync(resolvedTarget, data);
-    if (preserveTimestamps) {
-      setFileTimeSync(resolvedTarget, entry.lastModified);
-    }
-
-    return true;
   }
 
   // =============================================================================
@@ -3184,7 +3304,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
             emitExtractWarning(onWarning, entry.path, targetPath, err);
             continue;
           }
-          throw err;
+          throw toFileError(targetPath, "write", err, "extracted");
         }
 
         if (!shouldWrite) {
@@ -3216,7 +3336,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               emitExtractWarning(onWarning, entry.path, targetPath, err);
               continue;
             }
-            throw err;
+            throw toFileError(targetPath, "write", err, "extracted");
           }
 
           if (writeSuccess) {
@@ -3274,7 +3394,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
           emitExtractWarning(onWarning, entry.path, targetPath, err);
           continue;
         }
-        throw err;
+        throw toFileError(targetPath, "write", err, "extracted");
       }
 
       if (!shouldWrite) {
@@ -3423,7 +3543,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
             emitExtractWarning(onWarning, entry.path, targetPath, err);
             continue;
           }
-          throw err;
+          throw toFileError(targetPath, "write", err, "extracted");
         }
 
         if (!shouldWrite) {
@@ -3453,7 +3573,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               emitExtractWarning(onWarning, entry.path, targetPath, err);
               continue;
             }
-            throw err;
+            throw toFileError(targetPath, "write", err, "extracted");
           }
 
           if (writeSuccess) {
@@ -3507,7 +3627,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
           emitExtractWarning(onWarning, entry.path, targetPath, err);
           continue;
         }
-        throw err;
+        throw toFileError(targetPath, "write", err, "extracted");
       }
 
       if (!shouldWrite) {
@@ -3718,7 +3838,11 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
     let extractedEntries = 0;
     let bytesWritten = 0;
-    await ensureDir(resolvedTargetDir);
+    try {
+      await ensureDir(resolvedTargetDir);
+    } catch (error) {
+      throw toFileError(resolvedTargetDir, "write", error, "extracted");
+    }
 
     for (const v of view.values()) {
       if (signal?.aborted) {
@@ -3748,7 +3872,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
             emitExtractWarning(onWarning, entryPath, targetPath, err);
             continue;
           }
-          throw err;
+          throw toFileError(targetPath, "write", err, "extracted");
         }
 
         if (shouldWrite) {
@@ -3761,7 +3885,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               emitExtractWarning(onWarning, entryPath, targetPath, err);
               continue;
             }
-            throw err;
+            throw toFileError(targetPath, "write", err, "extracted");
           }
           if (preserveTimestamps) {
             await tryFsOpWithWarning(
@@ -3793,7 +3917,11 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
     let extractedEntries = 0;
     let bytesWritten = 0;
-    ensureDirSync(resolvedTargetDir);
+    try {
+      ensureDirSync(resolvedTargetDir);
+    } catch (error) {
+      throw toFileError(resolvedTargetDir, "write", error, "extracted");
+    }
 
     for (const v of view.values()) {
       if (signal?.aborted) {
@@ -3823,7 +3951,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
             emitExtractWarning(onWarning, entryPath, targetPath, err);
             continue;
           }
-          throw err;
+          throw toFileError(targetPath, "write", err, "extracted");
         }
 
         if (shouldWrite) {
@@ -3836,7 +3964,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               emitExtractWarning(onWarning, entryPath, targetPath, err);
               continue;
             }
-            throw err;
+            throw toFileError(targetPath, "write", err, "extracted");
           }
           if (preserveTimestamps) {
             tryFsOpWithWarningSync(

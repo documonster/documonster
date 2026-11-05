@@ -1,5 +1,5 @@
 import { SaxParser, parseSax } from "@xml/sax";
-import type { SaxTag, SaxEventAny } from "@xml/types";
+import type { XmlSaxTag, XmlSaxEventAny } from "@xml/types";
 import { describe, it, expect } from "vitest";
 
 describe("SaxParser", () => {
@@ -213,14 +213,14 @@ describe("parseSax", () => {
       yield "</root>";
     }
 
-    const allEvents: SaxEventAny[] = [];
+    const allEvents: XmlSaxEventAny[] = [];
     for await (const batch of parseSax(chunks())) {
       allEvents.push(...batch);
     }
 
     const openTags = allEvents
       .filter(e => e.eventType === "opentag")
-      .map(e => (e.value as SaxTag).name);
+      .map(e => (e.value as XmlSaxTag).name);
     expect(openTags).toEqual(["root", "child"]);
 
     const texts = allEvents.filter(e => e.eventType === "text").map(e => e.value);
@@ -235,14 +235,14 @@ describe("parseSax", () => {
       yield encoder.encode("</root>");
     }
 
-    const allEvents: SaxEventAny[] = [];
+    const allEvents: XmlSaxEventAny[] = [];
     for await (const batch of parseSax(chunks())) {
       allEvents.push(...batch);
     }
 
     const openTags = allEvents
       .filter(e => e.eventType === "opentag")
-      .map(e => (e.value as SaxTag).name);
+      .map(e => (e.value as XmlSaxTag).name);
     expect(openTags).toEqual(["root", "item"]);
   });
 });

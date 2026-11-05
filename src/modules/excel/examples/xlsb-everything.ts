@@ -187,7 +187,7 @@ await Workbook.protect(workbook, { password: "b00kpass", lockStructure: true });
 // An *overlay* watermark is a picture in the sheet's own drawing. It used to be collected with the header
 // pictures, so it came back as a page-header decoration with its opacity dropped — a different document
 // rather than a lossy one.
-Watermark.add(secured, {
+Watermark.set(secured, {
   imageId: Image.add(workbook, { buffer: PNG, extension: "png" }),
   mode: "overlay",
   opacity: 0.25

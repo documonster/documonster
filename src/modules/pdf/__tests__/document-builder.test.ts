@@ -12,7 +12,7 @@ import {
 } from "../builder/resource-merger";
 import type { PdfResourceDict } from "../builder/resource-merger";
 import { generateSelfSignedCertificate } from "../examples/utils/self-signed-certificate";
-import { Pdf } from "../index";
+import { Pdf, PdfArgumentError } from "../index";
 import { buildTtfWithCmap } from "./ttf-test-utils";
 
 // =============================================================================
@@ -870,8 +870,8 @@ describe("PdfDocumentBuilder — Bookmarks", () => {
     const doc = new Pdf.Builder();
     doc.addPage();
 
-    expect(() => doc.addBookmark("Child", 0, 5)).toThrow(RangeError);
-    expect(() => doc.addBookmark("Child", 0, -1)).toThrow(RangeError);
+    expect(() => doc.addBookmark("Child", 0, 5)).toThrow(PdfArgumentError);
+    expect(() => doc.addBookmark("Child", 0, -1)).toThrow(PdfArgumentError);
   });
 
   it("should roundtrip bookmarks through builder and reader", async () => {

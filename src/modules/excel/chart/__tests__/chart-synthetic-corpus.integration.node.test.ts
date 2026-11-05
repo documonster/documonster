@@ -25,7 +25,7 @@ import {
   CHART_EX_TYPES
 } from "@excel/__tests__/helpers/synthetic-fixtures";
 import { entryText } from "@excel/__tests__/helpers/zip-text";
-import { ChartClassic, EXCEL_CHART_PRESETS } from "@excel/chart";
+import { CHART_PRESETS, ChartClassic } from "@excel/chart";
 import { addChart, addChartEx, getCharts } from "@excel/core/worksheet";
 import { Chart, Row, Workbook } from "@excel/index";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -71,7 +71,7 @@ describe("Synthetic chart corpus", () => {
   describe("audit baseline", () => {
     it("keeps the package audit clean for every classic preset", async () => {
       const fixtures = classicFixtures;
-      expect(fixtures.length).toBe(EXCEL_CHART_PRESETS.length);
+      expect(fixtures.length).toBe(Object.keys(CHART_PRESETS).length);
       for (const fixture of fixtures) {
         await expectAuditClean(fixture);
       }

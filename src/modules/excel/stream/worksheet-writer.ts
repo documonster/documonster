@@ -22,10 +22,10 @@ import { checkColumnNumber } from "@excel/core/worksheet-core";
 import {
   ExcelArgumentError,
   ExcelStreamStateError,
-  ImageError,
-  InvalidAddressError,
-  MergeConflictError,
-  RowOutOfBoundsError
+  ExcelImageError,
+  ExcelInvalidAddressError,
+  ExcelMergeConflictError,
+  ExcelRowOutOfBoundsError
 } from "@excel/errors";
 import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
 import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
@@ -254,8 +254,12 @@ const STREAMED_SHEET_TABLES = tableNameAt(undefined);
  * One sheet of a streaming workbook writer, from `WorkbookWriter.addWorksheet`. Rows are added in order and written
  * when committed (`Stream.commitRow`, or `commit` for the rest); a committed row, and a committed sheet, take no more
  * edits.
+ *
+ * `TWorkbook` is the writer that made the sheet, which {@link workbook} hands back. The public
+ * `Stream.WorksheetWriter` fixes it to `Stream.WorkbookWriter`; it is a parameter here only because
+ * this file cannot import the workbook writer that imports it.
  */
-class WorksheetWriter {
+class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
   id: number;
   name: string;
   /**
@@ -263,6 +267,8 @@ class WorksheetWriter {
    * (`cellFullAddress`, defined-name registration, …) read from a worksheet.
    * Record worksheets store the name in `_name`; the streaming writer keeps it
    * in the public `name`, so we mirror it here for cross-cutting helpers.
+   *
+   * @deprecated Use {@link name}; this mirror exists for the shared helpers, not for callers. Removed in 1.0.
    */
   get _name(): string {
     return this.name;
@@ -287,11 +293,15 @@ class WorksheetWriter {
    *
    * Named `_retainedComments` because `getSheetModel` reads it under that name — see the field it emits. Small by
    * construction: one entry per annotated cell, not per row.
+   *
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
    */
   readonly _retainedComments: SheetComment[] = [];
   /**
    * Hyperlinks collected as rows were committed, for the sheet part's `BrtHLink` records and the sheet's `.rels` —
    * named so `getSheetModel` reads it, as `_retainedComments`. One entry per linked cell.
+   *
+   * @internal
    */
   readonly _retainedHyperlinks: HyperlinkLike[] = [];
   /** Shared formulas being written cell by cell in XLSB, kept across rows — see `sheetRowsFromModel`. */
@@ -327,23 +337,42 @@ class WorksheetWriter {
    * `conditionalFormattings` is the exception and is a genuine naming split rather than a gap: this class has
    * always called the same thing `conditionalFormatting`, and `getSheetModel` reads the plural. The getter below
    * bridges the two rather than renaming a public field.
+   *
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
    */
   readonly tables: Record<string, unknown> = {};
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly pivotTables: readonly unknown[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly threadedComments: readonly unknown[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly formControls: readonly unknown[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly _charts: readonly unknown[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly _shapes: readonly unknown[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly _sparklineGroups: readonly unknown[] = [];
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly _worksheetMcIgnorable: string | undefined = undefined;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   readonly _sortStateAutoFilterRef: string | undefined = undefined;
-  /** Tab position, allocated across worksheets and chartsheets — see `core/sheet-order`. */
+  /**
+   * Tab position, allocated across worksheets and chartsheets — see `core/sheet-order`.
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
+   */
   orderNo?: number;
-  /** The file-path number, which is this sheet's `id` for a streaming writer. */
+  /**
+   * The file-path number, which is this sheet's `id` for a streaming writer.
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
+   */
   get sheetNo(): number {
     return this.id;
   }
-  /** What `getSheetModel` reads; this class spells the same field singular. */
+  /**
+   * What `getSheetModel` reads; this class spells the same field singular — use {@link conditionalFormatting}.
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
+   */
   get conditionalFormattings(): ConditionalFormattingOptions[] {
     return this.conditionalFormatting;
   }
@@ -362,6 +391,7 @@ class WorksheetWriter {
   // WorkbookWriter parent — structural reference to avoid the circular
   // dependency between workbook-writer.ts and worksheet-writer.ts.
   private _workbook: WorkbookWriterLike;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   hasComments: boolean;
   private _views: Partial<WorksheetView>[];
   autoFilter: AutoFilter | null;
@@ -375,6 +405,7 @@ class WorksheetWriter {
     [key: string]: unknown;
   } | null;
   private _stream?: InstanceType<typeof StreamBuf>;
+  /** @deprecated Internal; not part of the public API. Removed in 1.0. */
   startedData: boolean;
   private _background?: { imageId?: number; rId?: string };
   private _headerRowCount?: number;
@@ -396,6 +427,8 @@ class WorksheetWriter {
    *
    * `WorkbookWriter.commit()` folds this into `WorkbookWriter.unsupported` (and, as before, the deprecated
    * `xlsbUnsupported`), which is where a caller looks.
+   *
+   * @deprecated Use {@link unsupported}, which reports both formats and names the sheet. Removed in 1.0.
    */
   get xlsbUnsupported(): readonly string[] {
     return this._xlsbLosses;
@@ -423,7 +456,10 @@ class WorksheetWriter {
     anchors: DrawingAnchor[];
     rels: DrawingRel[];
   };
-  /** Relationship Id - assigned by WorkbookWriter */
+  /**
+   * Relationship Id - assigned by WorkbookWriter.
+   * @deprecated Internal; not part of the public API. Removed in 1.0.
+   */
   rId?: string;
 
   /** @internal Sheets are made by `WorkbookWriter.addWorksheet`, which is the only caller. */
@@ -599,8 +635,10 @@ class WorksheetWriter {
     this.startedData = false;
   }
 
-  get workbook(): WorkbookWriterLike {
-    return this._workbook;
+  /** The workbook writer this sheet belongs to. */
+  get workbook(): TWorkbook {
+    // The workbook passed in at construction is always the writer that made the sheet.
+    return this._workbook as TWorkbook;
   }
 
   /**
@@ -614,7 +652,15 @@ class WorksheetWriter {
     return this as unknown as WorksheetData;
   }
 
+  /**
+   * @deprecated The sheet part's output while the writer encodes it; writing to it directly corrupts the part, and
+   * nothing outside the writer needs it. Removed in 1.0.
+   */
   get stream(): InstanceType<typeof StreamBuf> {
+    return this._sheetStream;
+  }
+
+  private get _sheetStream(): InstanceType<typeof StreamBuf> {
     if (!this._stream) {
       this._stream = this._workbook._openStream(worksheetPath(this.id));
 
@@ -694,7 +740,7 @@ class WorksheetWriter {
 
     this._writeCloseWorksheet();
     // signal end of stream to workbook
-    this.stream.end();
+    this._sheetStream.end();
 
     this._sheetCommentsWriter.commit();
     // also commit the hyperlinks if any
@@ -875,7 +921,7 @@ class WorksheetWriter {
       (typeof imageId !== "string" && typeof imageId !== "number") ||
       this._workbook.getImage(Number(imageId)) === undefined
     ) {
-      throw new ImageError(
+      throw new ExcelImageError(
         `${where}: the workbook has no image ${JSON.stringify(imageId)}; add it with WorkbookWriter.addImage first.`
       );
     }
@@ -909,16 +955,23 @@ class WorksheetWriter {
     return this._rows?.[index];
   }
 
+  /**
+   * The row `rowNumber`, **created when the sheet has none** — the handle a streamed row is written through.
+   * {@link findRow} looks one up without creating it.
+   */
   getRow(rowNumber: number): RowData {
     this._checkOpen("get a row");
     if (!Number.isInteger(rowNumber) || rowNumber < 1 || rowNumber > 1048576) {
-      throw new RowOutOfBoundsError(rowNumber, "Excel rows are whole numbers from 1 to 1048576");
+      throw new ExcelRowOutOfBoundsError(
+        rowNumber,
+        "Excel rows are whole numbers from 1 to 1048576"
+      );
     }
     const index = rowNumber - this._rowZero + this._rowOffset;
 
     // may fail if rows have been comitted
     if (index < this._rowOffset) {
-      throw new RowOutOfBoundsError(rowNumber, "this row has been committed");
+      throw new ExcelRowOutOfBoundsError(rowNumber, "this row has been committed");
     }
     let row = this._rows![index];
     if (!row) {
@@ -963,7 +1016,10 @@ class WorksheetWriter {
     return row ? rowFindCell(row, address.col) : undefined;
   }
 
-  // return the cell at [r,c] or address given by r. If not found, create a new one.
+  /**
+   * The cell at `r` (an address) or `[r, c]`, **created — with its row — when the sheet has none**: the handle the
+   * `Stream.setCell*` operations write through. {@link findCell} looks one up without creating it.
+   */
   getCell(r: string | number, c?: number): CellData {
     if (typeof r === "string" && c === undefined) {
       argumentChecks("WorksheetWriter.getCell").reference("address", r);
@@ -985,7 +1041,7 @@ class WorksheetWriter {
     // check cells aren't already merged
     this._merges.forEach(merge => {
       if (rangeIntersects(merge, dimensions)) {
-        throw new MergeConflictError();
+        throw new ExcelMergeConflictError();
       }
     });
 
@@ -1035,7 +1091,7 @@ class WorksheetWriter {
       range.bottom > 1048576 ||
       range.right > 16384
     ) {
-      throw new InvalidAddressError(
+      throw new ExcelInvalidAddressError(
         describe(),
         "WorksheetWriter.mergeCells: the range must name cells inside A1:XFD1048576"
       );
@@ -1071,13 +1127,13 @@ class WorksheetWriter {
 
   // =========================================================================
 
-  /** Use the workbook image `imageId` as the sheet's background. @throws {ImageError} when there is no such image. */
+  /** Use the workbook image `imageId` as the sheet's background. @throws {ExcelImageError} when there is no such image. */
   addBackgroundImage(imageId: string | number): void {
     this._checkOpen("add a background image");
     this._checkImage("WorksheetWriter.addBackgroundImage", imageId);
     const bookImage = this._workbook.getImage(Number(imageId));
     if (bookImage && isExternalImage(bookImage)) {
-      throw new ImageError(
+      throw new ExcelImageError(
         "Background images cannot be external (linked) images. " +
           "Use an embedded image (buffer/base64/filename). " +
           "External images are only supported for cell pictures and overlay watermarks."
@@ -1123,9 +1179,9 @@ class WorksheetWriter {
    *
    * `mode: "overlay"` supports external (linked) images; `mode: "header"` does
    * not — VML header/footer images require embedded media, so a linked image
-   * with `mode: "header"` throws an `ImageError`.
+   * with `mode: "header"` throws an `ExcelImageError`.
    *
-   * @throws {ImageError} If `mode: "header"` is used with an external (linked) image.
+   * @throws {ExcelImageError} If `mode: "header"` is used with an external (linked) image.
    */
   addWatermark(options: WatermarkOptions): void {
     this._checkOpen("add a watermark");
@@ -1138,12 +1194,12 @@ class WorksheetWriter {
     if (mode === "header") {
       const bookImage = this._workbook.getImage(Number(options.imageId));
       if (bookImage && isExternalImage(bookImage)) {
-        throw new ImageError(
+        throw new ExcelImageError(
           "Header watermark images cannot be external (linked) images. " +
             "Use an embedded image (buffer/base64/filename), or use overlay mode for linked images."
         );
       }
-      throw new ImageError(
+      throw new ExcelImageError(
         "Header/footer watermark images are not supported by the streaming worksheet writer. " +
           "Use a regular Workbook worksheet, or use overlay mode when streaming."
       );
@@ -1193,11 +1249,13 @@ class WorksheetWriter {
   }
 
   /**
-   * Remove the watermark from the worksheet.
+   * Remove the watermark from the worksheet. Returns `true` if it had one, as `Watermark.remove` does.
    */
-  removeWatermark(): void {
+  removeWatermark(): boolean {
+    const had = this._watermark !== null;
     this._watermark = null;
     this._media = this._media.filter(m => m._watermarkTag !== true);
+    return had;
   }
 
   /**
@@ -1223,7 +1281,7 @@ class WorksheetWriter {
           }
         };
       }
-      throw new ImageError(`Invalid image range: "${range}". Expected a range like "A1:C3".`);
+      throw new ExcelImageError(`Invalid image range: "${range}". Expected a range like "A1:C3".`);
     }
 
     // Absolute positioning (pos + ext, no cell anchors)
@@ -1298,7 +1356,7 @@ class WorksheetWriter {
   private _write(text: string): void {
     xmlBuffer.reset();
     xmlBuffer.addText(text);
-    this.stream.write(xmlBuffer);
+    this._sheetStream.write(xmlBuffer);
   }
 
   private _writeSheetProperties(
@@ -1361,14 +1419,14 @@ class WorksheetWriter {
 
     this._writeSheetFormatProperties(xmlBuffer, this.properties);
 
-    this.stream.write(xmlBuffer);
+    this._sheetStream.write(xmlBuffer);
   }
 
   private _writeColumns(): void {
     const cols = columnToModel(this.columns);
     if (cols) {
       xform.columns.prepare(cols, { styles: this._workbook.styles });
-      this.stream.write(xform.columns.toXml(cols));
+      this._sheetStream.write(xform.columns.toXml(cols));
     }
   }
 
@@ -1561,7 +1619,7 @@ class WorksheetWriter {
           );
         }
       }
-      this.stream.write(this._withFormulaNames(() => xform.row.toXml(model)));
+      this._sheetStream.write(this._withFormulaNames(() => xform.row.toXml(model)));
 
       // Count dynamic array formula cells for metadata generation
       if (model.cells) {
@@ -1592,12 +1650,12 @@ class WorksheetWriter {
       });
       xmlBuffer.addText("</mergeCells>");
 
-      this.stream.write(xmlBuffer);
+      this._sheetStream.write(xmlBuffer);
     }
   }
 
   private _writeHyperlinks(): void {
-    this.stream.write(xform.hyperlinks.toXml(this._sheetRelsWriter._hyperlinks));
+    this._sheetStream.write(xform.hyperlinks.toXml(this._sheetRelsWriter._hyperlinks));
   }
 
   private _writeConditionalFormatting(): void {
@@ -1625,7 +1683,9 @@ class WorksheetWriter {
     xform.extLst.prepare(extModel);
 
     // Render primary section (position: after hyperlinks, before dataValidations)
-    this.stream.write(this._withFormulaNames(() => xform.conditionalFormattings.toXml(written)));
+    this._sheetStream.write(
+      this._withFormulaNames(() => xform.conditionalFormattings.toXml(written))
+    );
   }
 
   /** Render with the workbook's defined names in force — see `WorkbookWriterLike.formulaNames`. */
@@ -1643,21 +1703,21 @@ class WorksheetWriter {
    */
   private _writeExtLst(): void {
     const model = { conditionalFormattings: this._writtenConditionalFormatting };
-    this.stream.write(this._withFormulaNames(() => xform.extLst.toXml(model)));
+    this._sheetStream.write(this._withFormulaNames(() => xform.extLst.toXml(model)));
   }
 
   private _writeIgnoredErrors(): void {
     if (this.ignoredErrors.length > 0) {
-      this.stream.write(xform.ignoredErrors.toXml(this.ignoredErrors));
+      this._sheetStream.write(xform.ignoredErrors.toXml(this.ignoredErrors));
     }
   }
 
   private _writeRowBreaks(): void {
-    this.stream.write(xform.rowBreaks.toXml(this.rowBreaks));
+    this._sheetStream.write(xform.rowBreaks.toXml(this.rowBreaks));
   }
 
   private _writeColBreaks(): void {
-    this.stream.write(xform.colBreaks.toXml(this.colBreaks));
+    this._sheetStream.write(xform.colBreaks.toXml(this.colBreaks));
   }
 
   private _writeDataValidations(): void {
@@ -1678,27 +1738,27 @@ class WorksheetWriter {
         this._workbook.date1904Flag?.() ?? false
       )
     );
-    this.stream.write(writer.xml);
+    this._sheetStream.write(writer.xml);
   }
 
   private _writeSheetProtection(): void {
-    this.stream.write(xform.sheetProtection.toXml(this.sheetProtection));
+    this._sheetStream.write(xform.sheetProtection.toXml(this.sheetProtection));
   }
 
   private _writePageMargins(): void {
-    this.stream.write(xform.pageMargins.toXml(this.pageSetup.margins));
+    this._sheetStream.write(xform.pageMargins.toXml(this.pageSetup.margins));
   }
 
   private _writePageSetup(): void {
-    this.stream.write(xform.pageSeteup.toXml(this.pageSetup));
+    this._sheetStream.write(xform.pageSeteup.toXml(this.pageSetup));
   }
 
   private _writeHeaderFooter(): void {
-    this.stream.write(xform.headerFooter.toXml(this.headerFooter));
+    this._sheetStream.write(xform.headerFooter.toXml(this.headerFooter));
   }
 
   private _writeAutoFilter(): void {
-    this.stream.write(xform.autoFilter.toXml(this.autoFilter));
+    this._sheetStream.write(xform.autoFilter.toXml(this.autoFilter));
   }
 
   private _writeDrawing(): void {
@@ -1745,10 +1805,15 @@ class WorksheetWriter {
     };
 
     // Write <drawing r:id="rIdN"/> into the worksheet XML
-    this.stream.write(xform.drawing.toXml({ rId: drawingRId }));
+    this._sheetStream.write(xform.drawing.toXml({ rId: drawingRId }));
   }
 
-  /** Returns the drawing model if images were added, for the workbook writer. */
+  /**
+   * The drawing model if images were added, for the workbook writer.
+   *
+   * @deprecated The workbook writer's view of the sheet while it writes the package; nothing outside the writer needs
+   * it. `getImages()` lists what was added. Removed in 1.0.
+   */
   get drawing():
     | { rId: string; name: string; anchors: DrawingAnchor[]; rels: DrawingRel[] }
     | undefined {
@@ -1774,7 +1839,7 @@ class WorksheetWriter {
           rId: pictureId
         };
       }
-      this.stream.write(xform.picture.toXml({ rId: this._background.rId }));
+      this._sheetStream.write(xform.picture.toXml({ rId: this._background.rId }));
     }
   }
 
@@ -1782,7 +1847,7 @@ class WorksheetWriter {
     if (this.hasComments) {
       xmlBuffer.reset();
       xmlBuffer.addText(`<legacyDrawing r:id="${this._sheetCommentsWriter.vmlRelId}"/>`);
-      this.stream.write(xmlBuffer);
+      this._sheetStream.write(xmlBuffer);
     }
   }
 

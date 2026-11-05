@@ -25,7 +25,7 @@ import {
 import { columnCollapsed } from "@excel/core/column";
 import { ValueType } from "@excel/core/enums";
 import { rowGetCell, getColumn, fillFormula } from "@excel/core/worksheet";
-import { getRow } from "@excel/core/worksheet-core";
+import { getRow, rowCommit } from "@excel/core/worksheet-core";
 import { Row, Workbook } from "@excel/index";
 
 const testValues = fix(testValuesJson);
@@ -65,7 +65,7 @@ export const values = {
     cellSetValue(cellAt(ws, "K1"), (testValues as any).Errors.NotApplicable);
     cellSetValue(cellAt(ws, "L1"), (testValues as any).Errors.Value);
 
-    Row.commit(ws, 1);
+    rowCommit(getRow(ws, 1));
 
     // merge cell square with numerical value
     cellSetValue(cellAt(ws, "A2"), 5);
@@ -73,7 +73,7 @@ export const values = {
 
     // merge cell square with null value
     mergeAt(ws, "C2:D3");
-    Row.commit(ws, 3);
+    rowCommit(getRow(ws, 3));
 
     cellSetValue(cellAt(ws, "A4"), 1.5);
     cellSetNumFmt(cellAt(ws, "A4"), (testValues as any).numFmt1);
@@ -83,7 +83,7 @@ export const values = {
     cellSetBorder(cellAt(ws, "C4"), (styles as any).borders.doubleRed);
     cellSetValue(cellAt(ws, "E4"), 1.5);
     cellSetBorder(cellAt(ws, "E4"), (styles as any).borders.thickRainbow);
-    Row.commit(ws, 4);
+    rowCommit(getRow(ws, 4));
 
     // test fonts and formats
     cellSetValue(cellAt(ws, "A5"), (testValues as any).str);
@@ -104,7 +104,7 @@ export const values = {
     cellSetValue(cellAt(ws, "F5"), (testValues as any).date);
     cellSetNumFmt(cellAt(ws, "F5"), (testValues as any).numFmtDate);
     cellSetFont(cellAt(ws, "F5"), (styles as any).fonts.comicSansUdB16);
-    Row.commit(ws, 5);
+    rowCommit(getRow(ws, 5));
 
     Row.setHeight(ws, 6, 42);
     (styles as any).alignments.forEach((alignment: any, index: number) => {
@@ -114,7 +114,7 @@ export const values = {
       cellSetValue(cell, alignment.text);
       cellSetAlignment(cell, alignment.alignment);
     });
-    Row.commit(ws, 6);
+    rowCommit(getRow(ws, 6));
 
     if (options.checkBadAlignments) {
       (styles as any).badAlignments.forEach((alignment: any, index: number) => {
@@ -125,7 +125,7 @@ export const values = {
         cellSetAlignment(cell, alignment.alignment);
       });
     }
-    Row.commit(ws, 7);
+    rowCommit(getRow(ws, 7));
 
     const row8 = getRow(ws, 8);
     row8.height = 40;
@@ -137,7 +137,7 @@ export const values = {
     cellSetFill(rowGetCell(row8, 3), (styles as any).fills.redGreenDarkTrellis);
     cellSetValue(rowGetCell(row8, 4), "RGB Path Gradient");
     cellSetFill(rowGetCell(row8, 4), (styles as any).fills.rgbPathGrad);
-    Row.commit(ws, 8);
+    rowCommit(getRow(ws, 8));
 
     // Old Shared Formula
     cellSetValue(cellAt(ws, "A9"), 1);

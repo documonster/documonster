@@ -128,21 +128,21 @@ export interface PdfSignatureReport {
  *   `PdfStructureError`).
  */
 export async function verifyPdfSignatures(
-  input: Uint8Array | ArrayBuffer | ArrayBufferView | Blob,
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob,
   options: VerifySignaturesOptions = {}
 ): Promise<PdfSignatureReport[]> {
-  const source = pdfBytesOrBlob("Pdf.verifySignatures", "data", input);
+  const source = pdfBytesOrBlob("Pdf.verifySignatures", "data", data);
   checkOptionalObject("Pdf.verifySignatures", "options", options);
   checkOptionalString("Pdf.verifySignatures", "options.password", options.password);
-  const data = isBlob(source) ? new Uint8Array(await source.arrayBuffer()) : source;
-  const doc = new PdfDocument(data);
+  const bytes = isBlob(source) ? new Uint8Array(await source.arrayBuffer()) : source;
+  const doc = new PdfDocument(bytes);
   if (isEncrypted(doc) && !initDecryption(doc, options.password ?? "")) {
     throw new PdfPasswordError("Failed to decrypt PDF: incorrect password");
   }
 
   const reports: PdfSignatureReport[] = [];
   for (const { fieldName, value } of findSignatureValues(doc)) {
-    reports.push(await verifyOne(data, fieldName, value));
+    reports.push(await verifyOne(bytes, fieldName, value));
   }
   return reports;
 }

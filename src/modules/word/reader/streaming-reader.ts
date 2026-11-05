@@ -3,7 +3,7 @@
  *
  * A streaming DOCX reader that yields body content (`BodyContent`) one element
  * at a time without ever materializing the whole `document.xml` DOM. It is the
- * read-side counterpart to {@link StreamingDocxWriter} and mirrors the Excel
+ * read-side counterpart to {@link DocumentWriter} and mirrors the Excel
  * module's streaming worksheet reader: large sequential content is streamed,
  * while small shared metadata parts (relationships, styles, numbering) are
  * loaded up-front — exactly as the Excel stream reader buffers sharedStrings /
@@ -76,7 +76,7 @@ import { parseStyles } from "@word/reader/styles-parser";
 import { findWatermark } from "@word/reader/watermark-parser";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
 import { resolveSecurityPolicy } from "@word/security/policy";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
   BodyContent,
   DocDefaults,
@@ -87,14 +87,14 @@ import type {
   StyleDef
 } from "@word/types";
 import { SaxParser } from "@xml/sax";
-import type { XmlElement, XmlNode, SaxTag } from "@xml/types";
+import type { XmlElement, XmlNode, XmlSaxTag } from "@xml/types";
 
 // =============================================================================
 // Public Types
 // =============================================================================
 
 /**
- * Options for {@link createDocxStreamReader} / {@link StreamingDocxReader}: those of
+ * Options for {@link DocumentReader}: those of
  * `Io.read` — an encrypted package is decrypted with `password` before its body is
  * streamed, as `Io.read` decrypts it — plus the streaming limits below.
  */
@@ -120,7 +120,7 @@ export interface StreamingReadOptions extends ReadDocxOptions {
 
 /**
  * Document-level metadata loaded before body streaming begins. Exposed as
- * read-only fields on {@link StreamingDocxReader} so consumers can resolve
+ * read-only fields on {@link DocumentReader} so consumers can resolve
  * styles / numbering while iterating body content.
  */
 export interface StreamingDocxMetadata {
@@ -135,16 +135,16 @@ export interface StreamingDocxMetadata {
 }
 
 // =============================================================================
-// StreamingDocxReader
+// DocumentReader
 // =============================================================================
 
 /**
- * Streaming reader over a DOCX package. Construct via {@link createDocxStreamReader},
+ * Streaming reader over a DOCX package. Construct with `new Stream.DocumentReader(bytes)`,
  * then consume body content with `for await (const item of reader)`.
  *
  * @example
  * ```ts
- * const reader = Streaming.createReader(bytes);
+ * const reader = new Stream.DocumentReader(bytes);
  * for await (const item of reader) {
  *   if (item.type === "paragraph") { ... }
  * }
@@ -152,10 +152,10 @@ export interface StreamingDocxMetadata {
  * const sectPr = reader.sectionProperties;
  * ```
  */
-export class StreamingDocxReader implements AsyncIterable<BodyContent> {
+export class DocumentReader implements AsyncIterable<BodyContent> {
   private _source: Uint8Array;
   private readonly _options: StreamingReadOptions;
-  private readonly _policy: Required<WordSecurityPolicy>;
+  private readonly _policy: Required<DocxSecurityPolicy>;
 
   private _started = false;
   private _consumedBytes = 0;
@@ -172,7 +172,7 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
     source: Uint8Array | ArrayBuffer | ArrayBufferView,
     options: StreamingReadOptions = {}
   ) {
-    const where = "Streaming.createReader";
+    const where = "new Stream.DocumentReader";
     const bytes = checkBytes(source, "source", where);
     checkReadOptions(options, where);
     checkLimit(options.maxElementBytes, "options.maxElementBytes", where, { optional: true });
@@ -241,7 +241,7 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
 
   [Symbol.asyncIterator](): AsyncIterator<BodyContent> {
     if (this._started) {
-      throw new DocxError("StreamingDocxReader can only be iterated once");
+      throw new DocxError("Stream.DocumentReader can only be iterated once");
     }
     this._started = true;
     return this._iterate();
@@ -650,19 +650,6 @@ async function scanSections(chunks: AsyncIterable<Uint8Array>): Promise<SectionP
   return [...inner, final ?? {}];
 }
 
-/**
- * Create a streaming DOCX reader over an in-memory package.
- *
- * @param source - The DOCX package bytes (a re-readable in-memory buffer).
- * @param options - Read + streaming options.
- */
-export function createDocxStreamReader(
-  source: Uint8Array | ArrayBuffer | ArrayBufferView,
-  options?: StreamingReadOptions
-): StreamingDocxReader {
-  return new StreamingDocxReader(source, options);
-}
-
 // =============================================================================
 // Internal: SAX → body-subtree materializer
 // =============================================================================
@@ -725,7 +712,7 @@ class BodySubtreeBuilder {
     return this._ready.splice(0, this._ready.length);
   }
 
-  private _open(tag: SaxTag): void {
+  private _open(tag: XmlSaxTag): void {
     const localName = stripWPrefix(tag.name);
 
     if (!this._inBody) {
@@ -765,7 +752,7 @@ class BodySubtreeBuilder {
     }
   }
 
-  private _close(tag: SaxTag): void {
+  private _close(tag: XmlSaxTag): void {
     const localName = stripWPrefix(tag.name);
 
     if (!this._inBody) {
@@ -829,7 +816,7 @@ class BodySubtreeBuilder {
   /** The root element of the subtree most recently completed/under construction. */
   private _completedRoot: XmlElement | undefined;
 
-  private _beginSubtree(tag: SaxTag): void {
+  private _beginSubtree(tag: XmlSaxTag): void {
     const elem = makeElement(tag);
     this._completedRoot = elem;
     if (!tag.isSelfClosing) {
@@ -847,7 +834,7 @@ class BodySubtreeBuilder {
     }
   }
 
-  private _pushChild(tag: SaxTag): void {
+  private _pushChild(tag: XmlSaxTag): void {
     const elem = makeElement(tag);
     this._approxBytes += tag.name.length;
     if (this._approxBytes > this._maxElementBytes) {
@@ -870,7 +857,7 @@ class BodySubtreeBuilder {
 // Internal helpers
 // =============================================================================
 
-function makeElement(tag: SaxTag): XmlElement {
+function makeElement(tag: XmlSaxTag): XmlElement {
   const attributes: Record<string, string> = Object.create(null);
   for (const key in tag.attributes) {
     if (Object.prototype.hasOwnProperty.call(tag.attributes, key)) {

@@ -668,7 +668,7 @@ describe("SvgSurface used directly", () => {
     const surface = new Draw.Backend.SvgSurface();
     surface.pushClip({ x: 0, y: 0, width: 5, height: 5 });
     surface.rect(0, 0, 9, 9, 0, { fill: BLUE });
-    const markup = surface.markup();
+    const markup = surface.format();
     expect((markup.match(/<g /g) ?? []).length).toBe(1);
     expect((markup.match(/<\/g>/g) ?? []).length).toBe(1);
   });
@@ -677,7 +677,7 @@ describe("SvgSurface used directly", () => {
     const surface = new Draw.Backend.SvgSurface();
     surface.popClip();
     surface.rect(0, 0, 1, 1, 0, { fill: BLUE });
-    expect(surface.markup()).not.toContain("</g>");
+    expect(surface.format()).not.toContain("</g>");
   });
 
   it("gives each clip its own id", () => {
@@ -686,7 +686,7 @@ describe("SvgSurface used directly", () => {
     surface.popClip();
     surface.pushClip({ x: 1, y: 1, width: 5, height: 5 });
     surface.popClip();
-    const markup = surface.markup();
+    const markup = surface.format();
     expect(markup).toContain('id="dc0"');
     expect(markup).toContain('id="dc1"');
   });
@@ -768,7 +768,7 @@ describe("the SVG-only filter channel", () => {
     const surface = new Draw.Backend.SvgSurface();
     surface.pushFilter('a"b');
     surface.popFilter();
-    expect(surface.markup()).toContain("&quot;");
+    expect(surface.format()).toContain("&quot;");
   });
 });
 

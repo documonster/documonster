@@ -247,7 +247,7 @@ const probe = (text: string): boolean => {
 const wb = Workbook.create({ formulaSyntaxProbe: probe });
 ```
 
-### `Formula.tokenize(source: string): Token[]`
+### `Formula.tokenize(source: string): FormulaToken[]`
 
 Pure lexer — accepts a formula string (with or without leading `=`) and
 returns a flat token stream. Throws a `FormulaParseError` on a character no
@@ -255,7 +255,7 @@ token starts with and on an error value Excel does not have (`#FOOBAR!`). The
 spill-range operator `A1#` is an `Operator` token with the value `"#"`; it is
 recognised straight after a cell reference only.
 
-### `Formula.parse(source: string | Token[]): AstNode`
+### `Formula.parse(source: string | FormulaToken[]): FormulaAstNode`
 
 Pratt parser — builds a typed AST from formula text (tokenized for you) or
 from a token stream. Throws on structural errors. `A1#` is a `UnaryOp` with
@@ -263,7 +263,7 @@ from a token stream. Throws on structural errors. `A1#` is a `UnaryOp` with
 stores, stays a function call. Each prints back as written, and the
 calculation engine evaluates both as the range the anchor spills into.
 
-### `Formula.format(ast: AstNode): string`
+### `Formula.format(ast: FormulaAstNode): string`
 
 The inverse of `parse`: prints an AST back to formula text (no leading `=`),
 with minimal parentheses.
@@ -277,9 +277,9 @@ type, or a tree `Formula.format` cannot print, is a `FormulaError`.
 
 ### Exported types
 
-From `documonster/formula`: `Token`, `TokenType`, `AstNode`, `NodeType`, and
-every member of the two unions, with the `Formula` prefix (`FormulaCellRefNode`,
-`FormulaFunctionCallNode`, `FormulaCellRefToken`, …).
+From `documonster/formula`, every one with the `Formula` prefix: `FormulaToken`,
+`FormulaTokenType`, `FormulaAstNode`, `FormulaNodeType`, and every member of the
+two unions (`FormulaCellRefNode`, `FormulaFunctionCallNode`, `FormulaCellRefToken`, …).
 
 From `documonster/excel/formula`: `FormulaFunction`, `FormulaValue`, and the
 `FormulaValueKind` tag map used to build custom-function values.

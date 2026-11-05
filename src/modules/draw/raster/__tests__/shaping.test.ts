@@ -39,7 +39,7 @@ const HEBREW_SHIN = 0x05e9; // ש — the only Hebrew letter the fixture below c
 function render(text: string, fonts: readonly RasterFontSource[]): BasicRasterCanvas {
   const canvas = new BasicRasterCanvas(400, 60);
   canvas.setFonts(fonts, { useSystemFonts: false });
-  canvas.drawText(10, 40, text, 24, "#000000", "start");
+  canvas.drawText(10, 40, text, { fontSize: 24, color: "#000000", anchor: "start" });
   return canvas;
 }
 
@@ -174,7 +174,7 @@ describe("raster shaping", () => {
     const fonts = [faceFor(ARABIC_HELLO + TAMIL, "Fixture Complex")];
     const canvas = render(`${ARABIC_HELLO} ${TAMIL}`, fonts);
 
-    const warnings = canvas.textWarnings();
+    const warnings = canvas.getTextWarnings();
     expect(warnings.join(" ")).toContain("Arabic");
     expect(warnings.join(" ")).not.toContain("render incorrectly");
   });

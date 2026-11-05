@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { keepClonedRangeMarkers } from "../core/range-markers";
 import { WordHtml } from "../html";
-import { Build, Document, Font, Io, Package, Query, Streaming, Transform } from "../index";
+import { Build, Document, Font, Io, Package, Query, Stream, Transform } from "../index";
 import type { BodyContent, Paragraph } from "../types";
 import {
   buildDocx,
@@ -101,7 +101,7 @@ describe("block-level w:customXml", () => {
         `<w:customXml w:element="s">${BS(1, "s")}${P(R("streamed"))}${BE(1)}</w:customXml>` +
         P(R("tail"))
     });
-    const reader = Streaming.createReader(source);
+    const reader = new Stream.DocumentReader(source);
     const blocks: BodyContent[] = [];
     for await (const block of reader) {
       blocks.push(block);

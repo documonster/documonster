@@ -27,15 +27,15 @@ export function isExcelError(err: unknown): err is ExcelError {
 /**
  * Error thrown when worksheet name validation fails.
  */
-export class WorksheetNameError extends ExcelError {
-  override name = "WorksheetNameError";
+export class ExcelWorksheetNameError extends ExcelError {
+  override name = "ExcelWorksheetNameError";
 }
 
 /**
  * Error thrown when trying to merge already merged cells.
  */
-export class MergeConflictError extends ExcelError {
-  override name = "MergeConflictError";
+export class ExcelMergeConflictError extends ExcelError {
+  override name = "ExcelMergeConflictError";
 
   constructor(details?: string, options?: BaseErrorOptions) {
     super(details ?? "Cannot merge already merged cells", options);
@@ -62,8 +62,8 @@ export class ExcelArgumentError extends ExcelError {
 }
 
 /**
- * Options for the position errors — {@link InvalidAddressError}, {@link ColumnOutOfBoundsError} and
- * {@link RowOutOfBoundsError}: the base options, the argument path the position was given at, and the public call.
+ * Options for the position errors — {@link ExcelInvalidAddressError}, {@link ExcelColumnOutOfBoundsError} and
+ * {@link ExcelRowOutOfBoundsError}: the base options, the argument path the position was given at, and the public call.
  */
 export interface PositionErrorOptions extends BaseErrorOptions {
   /**
@@ -89,8 +89,8 @@ function positionCause(options: PositionErrorOptions | undefined): BaseErrorOpti
  * An {@link ExcelArgumentError} (since this release), so the `catch` a caller writes for bad input catches it;
  * `field` names the parameter the address was given as (`addr` unless the call says otherwise).
  */
-export class InvalidAddressError extends ExcelArgumentError {
-  override name = "InvalidAddressError";
+export class ExcelInvalidAddressError extends ExcelArgumentError {
+  override name = "ExcelInvalidAddressError";
 
   constructor(
     public readonly address: string,
@@ -114,8 +114,8 @@ export class InvalidAddressError extends ExcelArgumentError {
  * An {@link ExcelArgumentError} (since this release); `field` names the parameter (`col` unless the call says
  * otherwise).
  */
-export class ColumnOutOfBoundsError extends ExcelArgumentError {
-  override name = "ColumnOutOfBoundsError";
+export class ExcelColumnOutOfBoundsError extends ExcelArgumentError {
+  override name = "ExcelColumnOutOfBoundsError";
 
   constructor(
     public readonly column: number | string,
@@ -141,8 +141,8 @@ export class ColumnOutOfBoundsError extends ExcelArgumentError {
  * An {@link ExcelArgumentError} (since this release); `field` names the parameter (`row` unless the call says
  * otherwise).
  */
-export class RowOutOfBoundsError extends ExcelArgumentError {
-  override name = "RowOutOfBoundsError";
+export class ExcelRowOutOfBoundsError extends ExcelArgumentError {
+  override name = "ExcelRowOutOfBoundsError";
 
   constructor(
     public readonly row: number,
@@ -160,7 +160,7 @@ export class RowOutOfBoundsError extends ExcelArgumentError {
   }
 }
 
-/** Options for {@link InvalidValueTypeError}: the base options plus the argument path the value was given at. */
+/** Options for {@link ExcelInvalidValueTypeError}: the base options plus the argument path the value was given at. */
 export interface InvalidValueTypeErrorOptions extends BaseErrorOptions {
   /** The path of the refused value from the parameter name (`values[2]`, `value.richText[0].text`). Default `value`. */
   field?: string;
@@ -173,8 +173,8 @@ export interface InvalidValueTypeErrorOptions extends BaseErrorOptions {
  * It is an {@link ExcelArgumentError}, so one `catch` handles every refused argument; `field` names where the value was
  * given (`values[2]`, `value.richText[0].text`).
  */
-export class InvalidValueTypeError extends ExcelArgumentError {
-  override name = "InvalidValueTypeError";
+export class ExcelInvalidValueTypeError extends ExcelArgumentError {
+  override name = "ExcelInvalidValueTypeError";
 
   constructor(
     public readonly valueType: string,
@@ -207,8 +207,8 @@ export class XlsxParseError extends ExcelError {
 /**
  * Error thrown when an operation is not supported.
  */
-export class ExcelNotSupportedError extends ExcelError {
-  override name = "ExcelNotSupportedError";
+export class ExcelUnsupportedFeatureError extends ExcelError {
+  override name = "ExcelUnsupportedFeatureError";
 
   /**
    * What could not be expressed or recovered, one entry per item.
@@ -341,8 +341,8 @@ export class ExcelDownloadError extends ExcelError {
 /**
  * Error thrown when pivot table configuration is invalid.
  */
-export class PivotTableError extends ExcelError {
-  override name = "PivotTableError";
+export class ExcelPivotTableError extends ExcelError {
+  override name = "ExcelPivotTableError";
 }
 
 /**
@@ -352,12 +352,12 @@ export class PivotTableError extends ExcelError {
  * name, e.g. `options.series[0].values`) and every `catch` for either class, and
  * `isExcelError`, still answers.
  */
-export class ChartOptionsError extends ExcelArgumentError {
-  override name = "ChartOptionsError";
+export class ExcelChartOptionsError extends ExcelArgumentError {
+  override name = "ExcelChartOptionsError";
 
   constructor(field: string, message: string, options?: BaseErrorOptions);
   /**
-   * @deprecated Pass the field first: `new ChartOptionsError(field, message, options)`. This
+   * @deprecated Pass the field first: `new ExcelChartOptionsError(field, message, options)`. This
    * form leaves `field` empty. Removed in 1.0.
    */
   constructor(message: string, options?: BaseErrorOptions);
@@ -378,30 +378,31 @@ export class ChartOptionsError extends ExcelArgumentError {
 /**
  * Error thrown when table configuration or operation is invalid.
  */
-export class TableError extends ExcelError {
-  override name = "TableError";
+export class ExcelTableError extends ExcelError {
+  override name = "ExcelTableError";
 }
 
 /**
  * Error thrown when a defined name cannot be added — it is a table's name, and tables and defined names share one
  * namespace in Excel.
  */
-export class DefinedNameError extends ExcelError {
-  override name = "DefinedNameError";
+export class ExcelDefinedNameError extends ExcelError {
+  override name = "ExcelDefinedNameError";
 }
 
 /**
  * Error thrown when image processing fails.
  */
-export class ImageError extends ExcelError {
-  override name = "ImageError";
+export class ExcelImageError extends ExcelError {
+  override name = "ExcelImageError";
 }
 
 /**
- * Error thrown when max items limit is exceeded.
+ * Error thrown when a read exceeds a declared limit — `maxRows` / `maxCols`, or the most items a list may hold — the
+ * counterpart of `DocxLimitExceededError` and `PdfLimitExceededError`.
  */
-export class MaxItemsExceededError extends ExcelError {
-  override name = "MaxItemsExceededError";
+export class ExcelLimitExceededError extends ExcelError {
+  override name = "ExcelLimitExceededError";
 
   constructor(
     public readonly itemType: string,
@@ -455,3 +456,61 @@ export class XlsbFormulaDecodeError extends ExcelError {
     );
   }
 }
+
+// --- Deprecated names (renamed to carry the module prefix). Removed in 1.0. ---
+
+/** @deprecated Use {@link ExcelWorksheetNameError}. Removed in 1.0. */
+export const WorksheetNameError = ExcelWorksheetNameError;
+/** @deprecated Use {@link ExcelWorksheetNameError}. Removed in 1.0. */
+export type WorksheetNameError = ExcelWorksheetNameError;
+/** @deprecated Use {@link ExcelMergeConflictError}. Removed in 1.0. */
+export const MergeConflictError = ExcelMergeConflictError;
+/** @deprecated Use {@link ExcelMergeConflictError}. Removed in 1.0. */
+export type MergeConflictError = ExcelMergeConflictError;
+/** @deprecated Use {@link ExcelInvalidAddressError}. Removed in 1.0. */
+export const InvalidAddressError = ExcelInvalidAddressError;
+/** @deprecated Use {@link ExcelInvalidAddressError}. Removed in 1.0. */
+export type InvalidAddressError = ExcelInvalidAddressError;
+/** @deprecated Use {@link ExcelColumnOutOfBoundsError}. Removed in 1.0. */
+export const ColumnOutOfBoundsError = ExcelColumnOutOfBoundsError;
+/** @deprecated Use {@link ExcelColumnOutOfBoundsError}. Removed in 1.0. */
+export type ColumnOutOfBoundsError = ExcelColumnOutOfBoundsError;
+/** @deprecated Use {@link ExcelRowOutOfBoundsError}. Removed in 1.0. */
+export const RowOutOfBoundsError = ExcelRowOutOfBoundsError;
+/** @deprecated Use {@link ExcelRowOutOfBoundsError}. Removed in 1.0. */
+export type RowOutOfBoundsError = ExcelRowOutOfBoundsError;
+/** @deprecated Use {@link ExcelInvalidValueTypeError}. Removed in 1.0. */
+export const InvalidValueTypeError = ExcelInvalidValueTypeError;
+/** @deprecated Use {@link ExcelInvalidValueTypeError}. Removed in 1.0. */
+export type InvalidValueTypeError = ExcelInvalidValueTypeError;
+/** @deprecated Use {@link ExcelPivotTableError}. Removed in 1.0. */
+export const PivotTableError = ExcelPivotTableError;
+/** @deprecated Use {@link ExcelPivotTableError}. Removed in 1.0. */
+export type PivotTableError = ExcelPivotTableError;
+/** @deprecated Use {@link ExcelChartOptionsError}. Removed in 1.0. */
+export const ChartOptionsError = ExcelChartOptionsError;
+/** @deprecated Use {@link ExcelChartOptionsError}. Removed in 1.0. */
+export type ChartOptionsError = ExcelChartOptionsError;
+/** @deprecated Use {@link ExcelTableError}. Removed in 1.0. */
+export const TableError = ExcelTableError;
+/** @deprecated Use {@link ExcelTableError}. Removed in 1.0. */
+export type TableError = ExcelTableError;
+/** @deprecated Use {@link ExcelDefinedNameError}. Removed in 1.0. */
+export const DefinedNameError = ExcelDefinedNameError;
+/** @deprecated Use {@link ExcelDefinedNameError}. Removed in 1.0. */
+export type DefinedNameError = ExcelDefinedNameError;
+/** @deprecated Use {@link ExcelImageError}. Removed in 1.0. */
+export const ImageError = ExcelImageError;
+/** @deprecated Use {@link ExcelImageError}. Removed in 1.0. */
+export type ImageError = ExcelImageError;
+/** @deprecated Use {@link ExcelLimitExceededError}. Removed in 1.0. */
+export const MaxItemsExceededError = ExcelLimitExceededError;
+/** @deprecated Use {@link ExcelLimitExceededError}. Removed in 1.0. */
+export type MaxItemsExceededError = ExcelLimitExceededError;
+/**
+ * @deprecated Use {@link ExcelUnsupportedFeatureError} — the same class, named as Word's `DocxUnsupportedFeatureError` is.
+ * Removed in 1.0.
+ */
+export const ExcelNotSupportedError = ExcelUnsupportedFeatureError;
+/** @deprecated Use {@link ExcelUnsupportedFeatureError}. Removed in 1.0. */
+export type ExcelNotSupportedError = ExcelUnsupportedFeatureError;

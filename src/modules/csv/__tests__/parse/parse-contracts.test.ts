@@ -211,11 +211,11 @@ describe("inputs are checked with CsvError", () => {
   });
 
   it("number helpers", () => {
-    expect(() => Csv.formatNumber(1.5, ";" as never)).toThrow(CsvError);
-    expect(() => Csv.formatNumber("1.5" as never, ",")).toThrow(CsvError);
-    expect(() => Csv.parseNumber(15 as never, ".")).toThrow(CsvError);
-    expect(() => Csv.parseNumber("1;5", ";" as never)).toThrow(CsvError);
-    expect(Csv.parseNumber("", ".")).toBeNaN();
+    expect(() => Csv.formatNumber(1.5, { decimalSeparator: ";" as never })).toThrow(CsvError);
+    expect(() => Csv.formatNumber("1.5" as never)).toThrow(CsvError);
+    expect(() => Csv.parseNumber(15 as never)).toThrow(CsvError);
+    expect(() => Csv.parseNumber("1;5", { decimalSeparator: ";" as never })).toThrow(CsvError);
+    expect(Csv.parseNumber("")).toBeNaN();
   });
 });
 
@@ -299,7 +299,7 @@ describe("r3: objname is refused where it cannot be honoured (TX-B6)", () => {
     await expect(
       collect(Csv.parseRows("id,v\nx,1\nx,2", { headers: true, objname: "id" }))
     ).rejects.toThrow(CsvError);
-    expect(() => Csv.createParserStream({ headers: true, objname: "id" })).toThrow(CsvError);
+    expect(() => new Csv.ParserStream({ headers: true, objname: "id" })).toThrow(CsvError);
   });
 });
 
@@ -357,6 +357,16 @@ describe("X12: argument errors are CsvArgumentError with a field", () => {
     ["format cell", () => Csv.format([[Symbol("x")]] as never), "data"],
     ["forceQuote", () => Csv.forceQuote(1 as never), "value"],
     ["parseNumber", () => Csv.parseNumber("1", ";" as never), "decimalSeparator"],
+    [
+      "parseNumber options",
+      () => Csv.parseNumber("1", { decimalSeparator: ";" as never }),
+      "options.decimalSeparator"
+    ],
+    [
+      "applyDynamicTypingToRow options",
+      () => Csv.applyDynamicTypingToRow({ a: "1" }, true, { castDate: "a" as never }),
+      "options.castDate"
+    ],
     ["stripBom", () => Csv.stripBom(1 as never), "input"],
     ["getRowValues", () => Csv.getRowValues(1 as never), "row"],
     ["getRowValuesByHeaders", () => Csv.getRowValuesByHeaders([], 1 as never), "headers"],
@@ -366,7 +376,7 @@ describe("X12: argument errors are CsvArgumentError with a field", () => {
     ["generateData", () => Csv.generateData({ rows: -1 }), "options.rows"],
     [
       "parser stream",
-      () => Csv.createParserStream({ headers: true, objname: "a" }),
+      () => new Csv.ParserStream({ headers: true, objname: "a" }),
       "options.objname"
     ]
   ])("%s", (_label, fn, field) => {

@@ -80,7 +80,7 @@ import type {
   SeriesAxis
 } from "@excel/chart/model/types";
 import { escapeXml } from "@excel/chart/shared/chart-utils";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { EMU_PER_POINT, EMU_PER_PX } from "@utils/units";
 
 const DEFAULT_AXIS_START_ID = 100000000;
@@ -224,10 +224,10 @@ function makeXAxisData(
   return xValueType === "text" ? makeCatData(input) : makeNumericAxisData(input);
 }
 
-/** Throw a {@link ChartOptionsError} naming `field` unless `condition` holds. */
+/** Throw a {@link ExcelChartOptionsError} naming `field` unless `condition` holds. */
 function assertChartOptions(condition: unknown, field: string, message: string): void {
   if (!condition) {
-    throw new ChartOptionsError(field, message);
+    throw new ExcelChartOptionsError(field, message);
   }
 }
 
@@ -940,14 +940,14 @@ function validateAxisOptions(opts: AddAxisOptions | undefined, path: string): vo
  * `"RRGGBBAA"` form. The alpha byte, when present, is decoded into
  * `color.alpha` on the OOXML 0–100000 scale (0 = fully transparent,
  * 100000 = fully opaque) rather than discarded. Throws
- * `ChartOptionsError` when the input is not a valid hex triplet so the
+ * `ExcelChartOptionsError` when the input is not a valid hex triplet so the
  * caller sees the mistake at the assignment site rather than via a
  * downstream XML parser rejection.
  */
 export function hexToColor(hex: string): ChartColor {
   const cleaned = hex.replace(/^#/, "").toUpperCase();
   if (!/^[0-9A-F]{6}([0-9A-F]{2})?$/.test(cleaned)) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "color",
       `Invalid hex colour: ${JSON.stringify(hex)}. Expected 6-digit (or 8-digit with alpha) hex like "#FF0000".`
     );
@@ -975,10 +975,10 @@ function buildPivotSourceXml(source: PivotChartSource): string {
   const name = typeof source === "string" ? source : source.name;
   const fmtId = typeof source === "string" ? 0 : (source.fmtId ?? 0);
   if (!name) {
-    throw new ChartOptionsError("options.pivotSource", "Pivot chart source name is required.");
+    throw new ExcelChartOptionsError("options.pivotSource", "Pivot chart source name is required.");
   }
   if (!Number.isInteger(fmtId) || fmtId < 0) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.pivotSource.fmtId",
       "Pivot chart source fmtId must be a non-negative integer."
     );
@@ -1521,7 +1521,7 @@ function applyPictureFillToSeries(
       pictureStackUnit: pictureFill.scale
     };
   } else if (barOnlyFieldsUsed) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "options.pictureFill",
       "pictureFill.applyToFront / applyToSides / applyToEnd / scale are only valid for bar / bar3D series (mapped to c:pictureOptions in CT_BarSer). Use the plain `fill` / `spPr.fill.blip` form for other series types, or omit the bar-only hints."
     );
@@ -1742,7 +1742,10 @@ export function buildChartSeriesForType(
   // handled above. Falling back to `buildBarSeries` silently would mis-map
   // any new chart type introduced in the future.
   const _exhaustive: never = chartType;
-  throw new ChartOptionsError("options.type", `Unsupported chart type: ${String(_exhaustive)}.`);
+  throw new ExcelChartOptionsError(
+    "options.type",
+    `Unsupported chart type: ${String(_exhaustive)}.`
+  );
 }
 
 export function applyChartSeriesOptionsPatch(
@@ -2288,13 +2291,13 @@ function buildChartTypeGroup(
       // are 2-D-only. Reject them loud here so the options validator
       // catches the mistake before the writer silently drops them.
       if (opts.overlap !== undefined) {
-        throw new ChartOptionsError(
+        throw new ExcelChartOptionsError(
           "options.overlap",
           'bar3D charts do not support `overlap` (valid only on 2-D `bar`). Remove the field or switch to `type: "bar"`.'
         );
       }
       if (opts.serLines !== undefined) {
-        throw new ChartOptionsError(
+        throw new ExcelChartOptionsError(
           "options.serLines",
           'bar3D charts do not support `serLines` (valid only on 2-D `bar`). Remove the field or switch to `type: "bar"`.'
         );
@@ -2443,7 +2446,7 @@ function buildChartTypeGroup(
       // than silently dropping it at emit time so the mistake
       // surfaces at authoring.
       if (opts.varyColors !== undefined) {
-        throw new ChartOptionsError(
+        throw new ExcelChartOptionsError(
           "options.varyColors",
           "stock charts do not support `varyColors` (not in CT_StockChart). Remove the field or switch to a line / bar / area chart."
         );
@@ -2495,7 +2498,7 @@ function buildChartTypeGroup(
     }
     default: {
       const _exhaustive: never = type;
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
         "options.type",
         `Unsupported chart type: ${String(_exhaustive)}.`
       );

@@ -145,7 +145,7 @@ if (helloEntry) {
 // 8. ZipEditor — modify existing archives
 // =============================================================================
 
-const editor8 = await Archive.editZip(zipBytes1);
+const editor8 = await Archive.ZipEditor.open(zipBytes1);
 editor8.set("new-file.txt", "Added by editor");
 editor8.delete("binary.bin");
 editor8.rename("hello.txt", "greeting.txt");
@@ -169,7 +169,7 @@ const plan = new Archive.ZipEditPlan();
 plan.set("readme.md", "# Updated README");
 plan.delete("data.json");
 
-const editor9 = await Archive.editZip(zipBytes1);
+const editor9 = await Archive.ZipEditor.open(zipBytes1);
 editor9.apply(plan);
 
 const planned = await editor9.toBuffer();

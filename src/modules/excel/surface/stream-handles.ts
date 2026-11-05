@@ -1,10 +1,4 @@
-import type {
-  CellData,
-  CellValueInputType,
-  CellValueType,
-  CellView,
-  NoteConfig
-} from "@excel/core/cell";
+import type { CellData, CellView, NoteConfig } from "@excel/core/cell";
 import {
   cellGetValue,
   cellSetAlignment,
@@ -50,7 +44,16 @@ import {
 } from "@excel/core/worksheet-core";
 import { ExcelArgumentError, ExcelStreamStateError } from "@excel/errors";
 import { checkComment, checkNote } from "@excel/surface/argument-checks";
-import type { Alignment, Borders, CellValue, Fill, Font, NumFmt, Protection } from "@excel/types";
+import type {
+  Alignment,
+  Borders,
+  CellValue,
+  CellValueInput,
+  Fill,
+  Font,
+  NumFmt,
+  Protection
+} from "@excel/types";
 import { argumentChecks, checkNumber } from "@excel/utils/arguments";
 import type { ValuesOptions } from "@excel/utils/numbered-values";
 import { checkStyleFacet } from "@excel/utils/style-checks";
@@ -70,7 +73,7 @@ function checkRowOpen(operation: string, row: RowData): void {
 
 // --- streaming cell handle operations (operate on a `CellData`) ---
 /** A streamed cell's value. */
-export function getCellValue(c: CellData): CellValueType {
+export function getCellValue(c: CellData): CellValue {
   checkCellHandle(c);
   return cellGetValue(c);
 }
@@ -81,10 +84,10 @@ export function getCellValue(c: CellData): CellValueType {
  *
  * @throws {ExcelStreamStateError} when the cell's row has been committed.
  */
-export function setCellValue(c: CellData, v: CellValueInputType): void {
+export function setCellValue(c: CellData, value: CellValueInput): void {
   checkCellHandle(c);
   checkRowOpen("set a cell value", c.row);
-  cellSetValue(c, v);
+  cellSetValue(c, value);
 }
 /** A read-only view of a streamed cell: its address, value, type and formatting. */
 export function getCellView(c: CellData): CellView {
@@ -338,7 +341,13 @@ export function setRowAlignment(r: RowData, value: Partial<Alignment> | undefine
   checkStyleFacet("Stream.setRowAlignment", "alignment", value, "value");
   rowSetAlignment(r, value);
 }
-/** The cell of a streamed row at a column (`3` or `"C"`), created when it has none. */
+/**
+ * The cell of a streamed row at a column (`3` or `"C"`), **created when the row has none there**.
+ *
+ * This hands out the handle every `setCell*` writes through, so — like `getStyle` on the document model — creating
+ * what it names is its purpose: a streamed row is output being composed, not a record being read. It is the same
+ * get-or-create the writer's own `getCell` does; `WorksheetWriter#findCell` looks a cell up without creating it.
+ */
 export function getRowCell(r: RowData, col: string | number): CellData {
   checkRowHandle(r);
   return coreRowGetCell(r, col);
@@ -354,6 +363,8 @@ export function commitRow(r: RowData): void {
 export type { CellData as CellHandle } from "@excel/core/cell";
 /** A streaming row handle. */
 export type { RowData as RowHandle } from "@excel/core/row";
+/** A streaming column handle — what `WorksheetWriter#getColumn` returns and the `setColumn*` operations take. */
+export type { ColumnData as ColumnHandle } from "@excel/core/column";
 
 /**
  * @deprecated Use {@link getRowValues} with `{ base: 1 }` — this reads the row 1-based, by column number. Removed in

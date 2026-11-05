@@ -75,7 +75,7 @@ const bytes = await doc.toBuffer();
 
 `sequenceDiagram` · `gantt` · `timeline` · `journey` · `kanban` · `mindmap` · `gitGraph` · `quadrantChart` · `xychart` · `radar` · `sankey` · `packet` · `block` · `pie`
 
-会自己决定尺寸的盒子 —— 类图的分隔区堆叠、带技术说明行的 C4 元素 —— 通过 `LayoutOptions.measureNode` 把尺寸告诉布局。
+会自己决定尺寸的盒子 —— 类图的分隔区堆叠、带技术说明行的 C4 元素 —— 通过 `MermaidLayoutOptions.measureNode` 把尺寸告诉布局。
 
 ---
 
@@ -105,11 +105,11 @@ const list = Mermaid.toDrawList(diagram);
 
 ## 选项
 
-`Mermaid.toSvg` 与 `Mermaid.toDrawList` 接受 `MermaidRenderOptions`,它继承 `LayoutOptions`:
+`Mermaid.toSvg` 与 `Mermaid.toDrawList` 接受 `MermaidRenderOptions`,它继承 `MermaidLayoutOptions`:
 
 | 选项            | 类型                          | 说明                                      |
 | --------------- | ----------------------------- | ----------------------------------------- |
-| `theme`         | `ThemeOptions`                | 颜色覆盖;未指定的沿用默认值               |
+| `theme`         | `MermaidThemeOptions`         | 颜色覆盖;未指定的沿用默认值               |
 | `background`    | `string`                      | 背景填充。`"transparent"`(默认)不生成背板 |
 | `fontSize`      | `number`                      | 标签字号                                  |
 | `fontFamily`    | `string`                      | 标签字体                                  |

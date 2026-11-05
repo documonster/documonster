@@ -21,7 +21,12 @@
  */
 
 import type { DrawList } from "@draw/types";
-import { namedCall } from "@excel/chart/api/call";
+import {
+  checkFillArguments,
+  checkObjectArgument,
+  checkStringArgument,
+  namedCall
+} from "@excel/chart/api/call";
 import type { ChartFillNumRefOptions, ChartFillRefOptions } from "@excel/chart/api/types";
 import {
   fillChartCaches,
@@ -45,14 +50,23 @@ import type {
   AddChartOptions,
   AddComboChartOptions,
   AddChartSeriesOptions,
+  ChartColorsModel,
   ChartModel,
+  ChartStyleModel,
   NumberReference,
   StringReference
 } from "@excel/chart/model/types";
 import { chartDrawList, renderChartPng, renderChartSvg } from "@excel/chart/render/chart-renderer";
 import type { ChartRenderOptions } from "@excel/chart/render/chart-renderer";
+import {
+  buildChartColors,
+  buildChartStyle,
+  parseChartColors,
+  parseChartStyle
+} from "@excel/chart/serialize/chart-sidecar";
 import type { WorkbookData } from "@excel/core/workbook-core";
-import type { WorksheetData } from "@excel/core/worksheet-core";
+import { checkWorksheet, type WorksheetData } from "@excel/core/worksheet-core";
+import { argumentChecks } from "@excel/utils/arguments";
 
 // Every function here runs through `namedCall`, so an argument error says which call received
 // it (`ChartClassic.createModel: options.series must …`) — the builders are shared with
@@ -62,7 +76,7 @@ import type { WorksheetData } from "@excel/core/worksheet-core";
 /**
  * A classic chart model from options — bar, line, pie, scatter and the rest.
  *
- * @throws {ChartOptionsError} an option has no valid reading (its `field` names it).
+ * @throws {ExcelChartOptionsError} an option has no valid reading (its `field` names it).
  */
 export function createModel(options: AddChartOptions): ChartModel {
   return namedCall("ChartClassic.createModel", () => buildChartModel(options));
@@ -82,9 +96,10 @@ export function createOptionsFromRows<T extends object>(
   rows: readonly T[],
   options: AddChartFromRowsOptions<T>
 ): AddChartOptions {
-  return namedCall("ChartClassic.createOptionsFromRows", () =>
-    chartOptionsFromRows(worksheet, rows, options)
-  );
+  return namedCall("ChartClassic.createOptionsFromRows", () => {
+    checkWorksheet(worksheet, "worksheet");
+    return chartOptionsFromRows(worksheet, rows, options);
+  });
 }
 
 /** A classic chart's options from a table of `worksheet` — the same builder `Chart.createOptionsFromTable` uses. */
@@ -93,9 +108,10 @@ export function createOptionsFromTable(
   table: Parameters<typeof chartOptionsFromTable>[1],
   options: AddChartFromTableOptions
 ): AddChartOptions {
-  return namedCall("ChartClassic.createOptionsFromTable", () =>
-    chartOptionsFromTable(worksheet, table, options)
-  );
+  return namedCall("ChartClassic.createOptionsFromTable", () => {
+    checkWorksheet(worksheet, "worksheet");
+    return chartOptionsFromTable(worksheet, table, options);
+  });
 }
 
 /**
@@ -129,6 +145,7 @@ export function fillCaches(
   workbook: WorkbookData,
   options: ChartFillRefOptions = {}
 ): void {
+  checkFillArguments("ChartClassic.fillCaches", workbook, options);
   fillChartCaches(model, workbook, options.worksheet);
 }
 
@@ -141,6 +158,9 @@ export function fillNumRef(
   workbook: WorkbookData,
   options: ChartFillNumRefOptions = {}
 ): void {
+  checkObjectArgument("ChartClassic.fillNumRef", "ref", ref);
+  checkFillArguments("ChartClassic.fillNumRef", workbook, options);
+  argumentChecks("ChartClassic.fillNumRef").boolean("options.date1904", options.date1904);
   fillNumRefImpl(ref, workbook, options.date1904, options.worksheet);
 }
 
@@ -150,6 +170,8 @@ export function fillStrRef(
   workbook: WorkbookData,
   options: ChartFillRefOptions = {}
 ): void {
+  checkObjectArgument("ChartClassic.fillStrRef", "ref", ref);
+  checkFillArguments("ChartClassic.fillStrRef", workbook, options);
   fillStrRefImpl(ref, workbook, options.worksheet);
 }
 
@@ -163,7 +185,7 @@ export function fillStrRef(
  * fonts, and those two options do not apply. For the characters no font covered, draw the list
  * yourself: `Draw.toRgba(ChartClassic.toDrawList(model), { fonts }).uncoveredCodePoints`.
  *
- * @throws {ChartOptionsError} `model` is not a classic chart model, or an option has no valid
+ * @throws {ExcelChartOptionsError} `model` is not a classic chart model, or an option has no valid
  *   reading — a `width`, `height`, `scale` or `dpi` that is not a finite number > 0, a title
  *   that is not text, a `background` that is not a colour, or `fonts` / `useSystemFonts` of
  *   the wrong shape.
@@ -175,7 +197,7 @@ export async function toPng(model: ChartModel, options?: ChartRenderOptions): Pr
 /**
  * Render a classic chart model to SVG markup.
  *
- * @throws {ChartOptionsError} as {@link toPng}.
+ * @throws {ExcelChartOptionsError} as {@link toPng}.
  */
 export function toSvg(model: ChartModel, options?: ChartRenderOptions): string {
   return renderChartSvg(model, options, "ChartClassic.toSvg");
@@ -187,7 +209,7 @@ export function toSvg(model: ChartModel, options?: ChartRenderOptions): string {
  * useSystemFonts: false })` for pixels that do not depend on the host's fonts, or a PDF page
  * through `Pdf.createDrawSurface`.
  *
- * @throws {ChartOptionsError} as {@link toPng}.
+ * @throws {ExcelChartOptionsError} as {@link toPng}.
  */
 export function toDrawList(model: ChartModel, options?: ChartRenderOptions): DrawList {
   return chartDrawList(model, options, "ChartClassic.toDrawList");
@@ -201,10 +223,25 @@ export * as Backend from "@excel/chart/api/classic-backend";
 
 // --- Sidecar parts (chart style / chart colours XML) ---
 /** The chart colours part (`colorsN.xml`) for a colours model. */
-export { buildChartColors as toColorsXml } from "@excel/chart/serialize/chart-sidecar";
+export function toColorsXml(model: ChartColorsModel): string {
+  checkObjectArgument("ChartClassic.toColorsXml", "model", model);
+  return buildChartColors(model);
+}
+
 /** The chart style part (`styleN.xml`) for a style model. */
-export { buildChartStyle as toStyleXml } from "@excel/chart/serialize/chart-sidecar";
+export function toStyleXml(model: ChartStyleModel): string {
+  checkObjectArgument("ChartClassic.toStyleXml", "model", model);
+  return buildChartStyle(model);
+}
+
 /** Read a chart colours part into a model; what it does not describe is kept as the raw XML. */
-export { parseChartColors as fromColorsXml } from "@excel/chart/serialize/chart-sidecar";
+export function fromColorsXml(rawXml: string): ChartColorsModel {
+  checkStringArgument("ChartClassic.fromColorsXml", "rawXml", rawXml);
+  return parseChartColors(rawXml);
+}
+
 /** Read a chart style part into a model; what it does not describe is kept as the raw XML. */
-export { parseChartStyle as fromStyleXml } from "@excel/chart/serialize/chart-sidecar";
+export function fromStyleXml(rawXml: string): ChartStyleModel {
+  checkStringArgument("ChartClassic.fromStyleXml", "rawXml", rawXml);
+  return parseChartStyle(rawXml);
+}

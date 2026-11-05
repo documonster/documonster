@@ -55,6 +55,9 @@ import {
 
 // Shared type + platform-independent exports
 export * from "@stream/index.base";
+// The guard for the `AbortError` above: true for any error named `"AbortError"`, so a native
+// `DOMException` from `fetch` or `signal.throwIfAborted()` answers too.
+export { isAbortError } from "@utils/errors";
 
 // Everything node:stream does not name
 export * as Streams from "@stream/surface/streams.browser";
@@ -63,6 +66,8 @@ export * as Streams from "@stream/surface/streams.browser";
 export { Readable, Duplex, Transform, PassThrough } from "@stream/kernel/classes";
 export type { ReadableOptions, DuplexOptions, TransformOptions } from "@stream/kernel/classes";
 export { Writable } from "@stream/kernel/writable";
+// `WritableSide` is the interface the browser `Writable` implements, so it is part of that
+// class's published shape and has to be nameable from this entry.
 export type { WritableOptions, WritableSide } from "@stream/kernel/writable";
 export { getDefaultHighWaterMark, setDefaultHighWaterMark } from "@stream/kernel/state";
 
@@ -90,16 +95,24 @@ export { duplexPair } from "@stream/browser/duplex-pair";
 // =============================================================================
 
 /**
- * @deprecated Use {@link Streams.PullStream} (or build one with {@link Streams.createPullStream}).
+ * @deprecated Use {@link Streams.PullStream} (`new Streams.PullStream(options)`).
  * Removed in 1.0.
  */
 export const PullStream = PullStreamImpl;
+/**
+ * @deprecated Use {@link Streams.PullStream} (`new Streams.PullStream(options)`).
+ * Removed in 1.0.
+ */
 export type PullStream = PullStreamImpl;
 /**
- * @deprecated Use {@link Streams.BufferedStream} (or build one with {@link Streams.createBufferedStream}).
+ * @deprecated Use {@link Streams.BufferedStream} (`new Streams.BufferedStream(options)`).
  * Removed in 1.0.
  */
 export const BufferedStream = BufferedStreamImpl;
+/**
+ * @deprecated Use {@link Streams.BufferedStream} (`new Streams.BufferedStream(options)`).
+ * Removed in 1.0.
+ */
 export type BufferedStream = BufferedStreamImpl;
 /** @deprecated Use {@link Streams.createStringChunk}. Removed in 1.0. */
 export const createStringChunk = createStringChunkImpl;
@@ -117,9 +130,9 @@ export const createWritable = createWritableImpl;
 export const createTransform = createTransformImpl;
 /** @deprecated Use {@link Streams.createPassThrough}. Removed in 1.0. */
 export const createPassThrough = createPassThroughImpl;
-/** @deprecated Use {@link Streams.createPullStream}. Removed in 1.0. */
+/** @deprecated Use `new Streams.PullStream(options)`. Removed in 1.0. */
 export const createPullStream = createPullStreamImpl;
-/** @deprecated Use {@link Streams.createBufferedStream}. Removed in 1.0. */
+/** @deprecated Use `new Streams.BufferedStream(options)`. Removed in 1.0. */
 export const createBufferedStream = createBufferedStreamImpl;
 /** @deprecated Use {@link Streams.createDuplex}. Removed in 1.0. */
 export const createDuplex = createDuplexImpl;
@@ -142,12 +155,16 @@ export const fromString = fromStringImpl;
 /** @deprecated Use {@link Streams.createTransform}, which this duplicated. Removed in 1.0. */
 export const transform = transformImpl;
 /**
- * @deprecated Use {@link Streams.Collector} (or build one with {@link Streams.createCollector}).
+ * @deprecated Use {@link Streams.Collector} (`new Streams.Collector(options)`).
  * Removed in 1.0.
  */
 export const Collector = CollectorImpl;
+/**
+ * @deprecated Use {@link Streams.Collector} (`new Streams.Collector(options)`).
+ * Removed in 1.0.
+ */
 export type Collector<T = Uint8Array> = CollectorImpl<T>;
-/** @deprecated Use {@link Streams.createCollector}. Removed in 1.0. */
+/** @deprecated Use `new Streams.Collector(options)`. Removed in 1.0. */
 export const createCollector = createCollectorImpl;
 /** @deprecated Use {@link Streams.waitForFinished}. Removed in 1.0. */
 export const finishedAll = finishedAllImpl;

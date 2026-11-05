@@ -2,7 +2,13 @@
  * Whole names: a name can be looked up and deleted however it is defined — a reference, a formula, a sheet-scoped
  * name — and `list` says when a name is hidden.
  */
-import { Cell, DefinedNameError, DefinedNames, ExcelArgumentError, Workbook } from "@excel/index";
+import {
+  Cell,
+  ExcelDefinedNameError,
+  DefinedNames,
+  ExcelArgumentError,
+  Workbook
+} from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 function workbook() {
@@ -79,7 +85,7 @@ describe("DefinedNames.setModel", () => {
         { name: "N", ranges: ["S!$A$1"] },
         { name: "n", ranges: ["S!$A$2"] }
       ])
-    ).toThrow(DefinedNameError);
+    ).toThrow(ExcelDefinedNameError);
     expect(DefinedNames.getModel(dn)).toEqual(before);
   });
 

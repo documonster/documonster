@@ -42,7 +42,7 @@ export class StreamStateError extends StreamError {
   }
 }
 
-/** Options for {@link StreamTypeError} and {@link UnsupportedStreamTypeError}. */
+/** Options for {@link StreamArgumentError} and {@link StreamUnsupportedTypeError}. */
 export interface StreamErrorOptions extends BaseErrorOptions {
   /**
    * The argument or option at fault, when the error is about one: the path from the parameter
@@ -51,17 +51,18 @@ export interface StreamErrorOptions extends BaseErrorOptions {
   field?: string;
   /**
    * The public call that refused the argument (`Streams.fromString`), which a
-   * {@link StreamTypeError} message then starts with.
+   * {@link StreamArgumentError} message then starts with.
    */
   where?: string;
 }
 
 /**
- * Error thrown when data type conversion fails, or when an argument is of the wrong type —
- * then `field` names the argument or option.
+ * The stream module's argument error: an argument, an option or a written chunk is not what
+ * the call accepts. `field` names the argument or option, and `where` (when given) the public
+ * call, which the message then starts with.
  */
-export class StreamTypeError extends StreamError {
-  override name = "StreamTypeError";
+export class StreamArgumentError extends StreamError {
+  override name = "StreamArgumentError";
   /** The argument or option at fault; absent when the error is about a stream's contents. */
   readonly field?: string;
 
@@ -82,12 +83,17 @@ export class StreamTypeError extends StreamError {
   }
 }
 
+/** @deprecated Use {@link StreamArgumentError}. Removed in 1.0. */
+export const StreamTypeError = StreamArgumentError;
+/** @deprecated Use {@link StreamArgumentError}. Removed in 1.0. */
+export type StreamTypeError = StreamArgumentError;
+
 /**
  * Error thrown when a stream type is not supported. `operation` is the public call that was
  * given it (`Streams.bytes`), which the message starts with.
  */
-export class UnsupportedStreamTypeError extends StreamError {
-  override name = "UnsupportedStreamTypeError";
+export class StreamUnsupportedTypeError extends StreamError {
+  override name = "StreamUnsupportedTypeError";
 
   /** The argument at fault, when the error is about one; absent for a stream's contents. */
   readonly field?: string;
@@ -103,3 +109,8 @@ export class UnsupportedStreamTypeError extends StreamError {
     }
   }
 }
+
+/** @deprecated Use {@link StreamUnsupportedTypeError}. Removed in 1.0. */
+export const UnsupportedStreamTypeError = StreamUnsupportedTypeError;
+/** @deprecated Use {@link StreamUnsupportedTypeError}. Removed in 1.0. */
+export type UnsupportedStreamTypeError = StreamUnsupportedTypeError;

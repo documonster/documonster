@@ -858,7 +858,7 @@ function isPaneName(value: unknown): value is SheetPane["activePane"] {
  *
  * **The one address decoder in this file, and there were two returning the same shape.** The other scanned its own
  * regex and checked no bounds, so `AAAAA1` yielded column 475,254 — the sheet's last is 16,383 — while this one raises
- * `ColumnOutOfBoundsError` through the shared parser and reports `undefined`. They also disagreed about a
+ * `ExcelColumnOutOfBoundsError` through the shared parser and reports `undefined`. They also disagreed about a
  * sheet-qualified reference. Two functions with one signature, one of them silently wrong, in a file whose other
  * duplicate pair (`columnLetter` against the `encodeCol` it imported) differed the same way.
  *
@@ -1135,7 +1135,7 @@ function sharedFormulaRanges(
       // **`tryDecodeRange`, not `decodeCell`, because the guard below is unreachable otherwise.**
       //
       // `decodeCell` throws on a malformed address; it never returns `undefined`. So a follower whose `sharedFormula` was
-      // empty raised `InvalidAddressError` out of `Workbook.toBuffer` rather than being skipped, and the `=== undefined`
+      // empty raised `ExcelInvalidAddressError` out of `Workbook.toBuffer` rather than being skipped, and the `=== undefined`
       // test read as protection that was not there. The same shape appeared twice more in `write/cells.ts`. A single cell
       // decodes to a 1×1 range, which is what these two addresses are.
       const hereRange = tryDecodeRange(cell.address ?? "");

@@ -64,10 +64,10 @@ describe("TAR header fields", () => {
       ArchiveError
     );
     expect(() =>
-      Archive.createTar().add("a", "x", { type: Archive.TAR_TYPE.GNU_LONG_NAME })
+      Archive.createTar().add("a", "x", { type: Archive.TarType.GNU_LONG_NAME })
     ).toThrow(ArchiveError);
-    const fifo = readBack(Archive.createTar().add("f", "", { type: Archive.TAR_TYPE.FIFO }));
-    expect(fifo.get("f")!.info.type).toBe(Archive.TAR_TYPE.FIFO);
+    const fifo = readBack(Archive.createTar().add("f", "", { type: Archive.TarType.FIFO }));
+    expect(fifo.get("f")!.info.type).toBe(Archive.TarType.FIFO);
   });
 });
 

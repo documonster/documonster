@@ -33,11 +33,11 @@ export type {
   XmlSink,
 
   // SAX types
-  SaxTag,
-  SaxEvent,
-  SaxEventAny,
-  SaxHandlers,
-  SaxOptions,
+  XmlSaxTag,
+  XmlSaxEvent,
+  XmlSaxEventAny,
+  XmlSaxHandlers,
+  XmlSaxOptions,
 
   // Invalid character handling
   XmlInvalidCharHandling,
@@ -54,7 +54,12 @@ export type {
   ToPlainObjectOptions,
   ParseXmlToObjectOptions,
   InvalidCharHandling,
-  WritableTarget
+  WritableTarget,
+  SaxTag,
+  SaxEvent,
+  SaxEventAny,
+  SaxHandlers,
+  SaxOptions
 } from "@xml/types";
 
 // =============================================================================

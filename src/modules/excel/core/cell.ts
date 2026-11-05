@@ -22,7 +22,7 @@ import {
 import type { TemporalKind, TemporalPlainValue } from "@excel/core/temporal";
 import type { Workbook } from "@excel/core/workbook";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ExcelError, InvalidValueTypeError } from "@excel/errors";
+import { ExcelError, ExcelInvalidValueTypeError } from "@excel/errors";
 import type {
   Style,
   DecodedAddress,
@@ -124,7 +124,7 @@ export interface CellModel {
 // Internal interface for Value type objects (value-boxing representation).
 interface ICellValue {
   model: CellModel;
-  value: CellValueType;
+  value: CellValue;
   type: ValueType;
   effectiveType: ValueType;
   address: string;
@@ -140,7 +140,9 @@ interface ICellValue {
   isMergedTo?(master: CellData): boolean;
 }
 
+/** @deprecated Use `CellValue`. Removed in 1.0. */
 export type CellValueType = CellValue;
+/** @deprecated Use `CellValueInput`. Removed in 1.0. */
 export type CellValueInputType = CellValueInput;
 
 /**
@@ -542,7 +544,7 @@ export function cellToCsvString(c: CellData): string {
   return c._value.toCsvString();
 }
 
-export function cellGetValue(c: CellData): CellValueType {
+export function cellGetValue(c: CellData): CellValue {
   return c._value.value;
 }
 
@@ -609,7 +611,7 @@ export function cellDate1904(cell: CellData): boolean {
   return workbook?.properties?.date1904 === true;
 }
 
-export function cellSetValue(c: CellData, v: CellValueInputType): void {
+export function cellSetValue(c: CellData, v: CellValueInput): void {
   if (cellType(c) === Types.Merge) {
     cellSetValue(c._value.master!, v);
     return;
@@ -649,14 +651,18 @@ function refuseValue(
   message: string
 ): never {
   const field = siteField(at, path);
-  throw new InvalidValueTypeError(valueType, at ? `${at.where}: ${field}: ${message}` : message, {
-    field
-  });
+  throw new ExcelInvalidValueTypeError(
+    valueType,
+    at ? `${at.where}: ${field}: ${message}` : message,
+    {
+      field
+    }
+  );
 }
 
 /**
  * Refuse a value no cell can hold, at the call that supplied it. With `at`, the error names the call and the
- * argument; every refusal is an {@link InvalidValueTypeError}, which is an `ExcelArgumentError`.
+ * argument; every refusal is an {@link ExcelInvalidValueTypeError}, which is an `ExcelArgumentError`.
  *
  * A number that is not finite has no representation in a workbook — Excel has no `NaN` or `Infinity` — and was
  * accepted, kept in memory, and written as an empty cell, so the value disappeared without a word. The same holds for
@@ -740,7 +746,7 @@ function refuseShape(
           ? String(value)
           : "an object";
   const field = siteField(at, argument);
-  throw new InvalidValueTypeError(
+  throw new ExcelInvalidValueTypeError(
     Array.isArray(value) ? "array" : value === null ? "null" : typeof value,
     at
       ? `${at.where}: ${field} must be ${expected}, got ${shown}.`
@@ -921,7 +927,7 @@ function daysInMonth(year: number, month: number): number {
  */
 export function validateDateParts(parts: Partial<ExcelDateTimeParts>, date1904: boolean): void {
   const fail = (message: string): never => {
-    throw new InvalidValueTypeError("date parts", message);
+    throw new ExcelInvalidValueTypeError("date parts", message);
   };
   const entries = Object.entries(parts) as [keyof ExcelDateTimeParts, number | undefined][];
   if (entries.every(([, value]) => value === undefined)) {
@@ -1079,7 +1085,7 @@ export function cellGetTemporal(c: CellData, kind?: TemporalKind): TemporalPlain
   }
   const detected = cellDateKind(c);
   if (detected === "duration") {
-    throw new InvalidValueTypeError(
+    throw new ExcelInvalidValueTypeError(
       "duration",
       "this cell's number format is an elapsed-time one, so its serial is a length of time rather than a " +
         "calendar value and has no Temporal Plain* equivalent. Use Cell.getDateParts, or pass an explicit " +
@@ -1211,7 +1217,7 @@ export function cellHtml(c: CellData): string {
  * Freezing one projection while the rest stay live would be inconsistent.)
  */
 export interface CellView {
-  readonly value: CellValueType;
+  readonly value: CellValue;
   readonly numFmt: string | NumFmt | undefined;
   readonly text: string;
   /** The workbook's date system, which turning a `Date` value back into the serial it displays needs. */
@@ -1768,10 +1774,10 @@ class MergeValue {
       cellAddMergeRef(master);
     }
   }
-  get value(): CellValueType {
+  get value(): CellValue {
     return cellGetValue(this._master);
   }
-  set value(value: CellValueInputType | CellData) {
+  set value(value: CellValueInput | CellData) {
     if (isCellData(value)) {
       if (this._master) {
         cellReleaseMergeRef(this._master);
@@ -1873,7 +1879,7 @@ class FormulaValue {
       this.model.isDynamicArray = value.isDynamicArray;
     }
   }
-  validate(value: CellValueType): void {
+  validate(value: CellValue): void {
     switch (Value.getType(value)) {
       case Types.Null:
       case Types.String:
@@ -1883,7 +1889,7 @@ class FormulaValue {
       case Types.Hyperlink:
       case Types.Formula:
       default:
-        throw new InvalidValueTypeError(
+        throw new ExcelInvalidValueTypeError(
           String(Value.getType(value)),
           "Cannot process that type of result value"
         );
@@ -2130,7 +2136,7 @@ function jsonText(value: unknown): string {
   try {
     text = JSON.stringify(value);
   } catch (error) {
-    throw new InvalidValueTypeError(
+    throw new ExcelInvalidValueTypeError(
       "object",
       `A cell cannot hold this object: ${(error as Error).message}`,
       {
@@ -2139,7 +2145,10 @@ function jsonText(value: unknown): string {
     );
   }
   if (text === undefined) {
-    throw new InvalidValueTypeError(typeof value, "A cell cannot hold a value with no JSON text.");
+    throw new ExcelInvalidValueTypeError(
+      typeof value,
+      "A cell cannot hold a value with no JSON text."
+    );
   }
   return text;
 }
@@ -2189,7 +2198,7 @@ function isCellData(v: unknown): v is CellData {
 
 // Value is a place to hold common Value type functions.
 const Value = {
-  getType(value: CellValueInputType): number {
+  getType(value: CellValueInput): number {
     if (value === null || value === undefined) {
       return Types.Null;
     }
@@ -2283,10 +2292,10 @@ const Value = {
     []
   ),
 
-  create(type: number, cell: CellData, value?: CellValueInputType | CellData): ICellValue {
+  create(type: number, cell: CellData, value?: CellValueInput | CellData): ICellValue {
     const T = this.types[type];
     if (!T) {
-      throw new InvalidValueTypeError(String(type), "Could not create Value");
+      throw new ExcelInvalidValueTypeError(String(type), "Could not create Value");
     }
     return new T(cell, value as never) as unknown as ICellValue;
   }

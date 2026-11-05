@@ -34,9 +34,14 @@ import {
 } from "@excel/chart/bridge/excel-chart-host";
 import type { ChartExModel as ChartExModelType } from "@excel/chart/model/chart-ex-types";
 import {
+  EXCEL_CHART_EX_PRESETS as EXCEL_CHART_EX_PRESETS_IMPL,
+  EXCEL_CHART_PRESETS as EXCEL_CHART_PRESETS_IMPL
+} from "@excel/chart/model/chart-presets";
+import {
   canRenderChartExAsVectorPdf as canRenderChartExAsVectorPdfImpl,
   checkChartExModel,
-  drawChartExPdf as drawChartExPdfImpl
+  drawChartExPdf as drawChartExPdfImpl,
+  VECTOR_PDF_CHART_EX_LAYOUT_IDS as VECTOR_PDF_CHART_EX_LAYOUT_IDS_IMPL
 } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf as drawChartPdfImpl } from "@excel/chart/render/chart-renderer";
 import type {
@@ -59,19 +64,30 @@ export type { ChartFillNumRefOptions, ChartFillRefOptions } from "@excel/chart/a
 export type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 
 /**
- * Invalid chart options, references, presets or topology throw `ChartOptionsError`, an
- * `ExcelError` — the same classes `documonster/excel` publishes. `ChartEx.fromXml` reports
- * malformed XML with `documonster/xml`'s `XmlParseError` (see `isXmlError`).
+ * Invalid chart options, references, presets or topology throw `ExcelChartOptionsError`, and an
+ * argument of the wrong type or shape throws `ExcelArgumentError` — both `ExcelError`s, the same
+ * classes `documonster/excel` publishes. `ChartEx.fromXml` reports malformed XML with
+ * `documonster/xml`'s `XmlParseError` (see `isXmlError`).
  */
-export { ChartOptionsError, ExcelError, isExcelError } from "@excel/errors";
-export type { ChartHandle } from "@excel/core/worksheet-core";
 export {
-  CHART_EX_PRESETS,
-  CHART_PRESETS,
-  EXCEL_CHART_EX_PRESETS,
-  EXCEL_CHART_PRESETS
-} from "@excel/chart/model/chart-presets";
-export { VECTOR_PDF_CHART_EX_LAYOUT_IDS } from "@excel/chart/render/chart-ex-renderer";
+  ExcelArgumentError,
+  ExcelChartOptionsError,
+  ExcelError,
+  isExcelError,
+  // Deprecated pre-prefix name; removed in 1.0.
+  ChartOptionsError
+} from "@excel/errors";
+export type { ChartHandle } from "@excel/core/worksheet-core";
+export { CHART_EX_PRESETS, CHART_PRESETS } from "@excel/chart/model/chart-presets";
+/** @deprecated The preset names are the keys of the table: `Object.keys(CHART_PRESETS)`. Removed in 1.0. */
+export const EXCEL_CHART_PRESETS = EXCEL_CHART_PRESETS_IMPL;
+/** @deprecated The preset names are the keys of the table: `Object.keys(CHART_EX_PRESETS)`. Removed in 1.0. */
+export const EXCEL_CHART_EX_PRESETS = EXCEL_CHART_EX_PRESETS_IMPL;
+/**
+ * @deprecated It only answers the deprecated {@link canRenderChartExAsVectorPdf}: every Office 2016 chart now has a
+ * vector picture through `ChartEx.toDrawList`. Removed in 1.0.
+ */
+export const VECTOR_PDF_CHART_EX_LAYOUT_IDS = VECTOR_PDF_CHART_EX_LAYOUT_IDS_IMPL;
 export type {
   AddChartExFromRowsOptions,
   AddChartExFromTableOptions,
@@ -436,10 +452,10 @@ export const getTxPrColor = DrawingMlNs.getTxPrColor;
 export const buildSpPr = DrawingMlNs.createSpPr;
 /** @deprecated Use `DrawingMl.createTxPr`. Removed in 1.0. */
 export const buildTxPr = DrawingMlNs.createTxPr;
-/** @deprecated Use `DrawingMl.setSpPrFill`. Removed in 1.0. */
-export const setSpPrFill = DrawingMlNs.setSpPrFill;
-/** @deprecated Use `DrawingMl.setSpPrLine`. Removed in 1.0. */
-export const setSpPrLine = DrawingMlNs.setSpPrLine;
+/** @deprecated Use `DrawingMl.withSpPrFill`, which — as this always did — returns a copy rather than editing `spPr`. Removed in 1.0. */
+export const setSpPrFill = DrawingMlNs.withSpPrFill;
+/** @deprecated Use `DrawingMl.withSpPrLine`, which — as this always did — returns a copy rather than editing `spPr`. Removed in 1.0. */
+export const setSpPrLine = DrawingMlNs.withSpPrLine;
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";

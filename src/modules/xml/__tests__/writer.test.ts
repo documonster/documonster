@@ -197,7 +197,7 @@ describe("XmlWriter", () => {
     it("should support save/commit", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.leafNode("child", undefined, "text");
       w.commit();
       w.closeNode();
@@ -207,7 +207,7 @@ describe("XmlWriter", () => {
     it("should support save/rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.leafNode("unwanted");
       w.rollback();
       w.leafNode("wanted");
@@ -218,9 +218,9 @@ describe("XmlWriter", () => {
     it("should support nested save/rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.openNode("outer");
-      w.save();
+      w.snapshot();
       w.leafNode("inner-bad");
       w.rollback();
       w.leafNode("inner-good");
@@ -327,7 +327,7 @@ describe("XmlWriter", () => {
     it("should restore _leaf and _open state after rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.writeText("text");
       w.rollback();
       // After rollback, _leaf should be true and _open should be true
@@ -339,9 +339,9 @@ describe("XmlWriter", () => {
     it("should handle double save/rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.leafNode("a");
-      w.save();
+      w.snapshot();
       w.leafNode("b");
       w.rollback(); // removes b
       w.rollback(); // removes a

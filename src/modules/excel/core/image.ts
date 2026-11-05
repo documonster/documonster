@@ -1,7 +1,7 @@
 import type { AnchorData, AnchorModel } from "@excel/core/anchor";
 import { anchorClone, anchorCreate, anchorModel } from "@excel/core/anchor";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ImageError } from "@excel/errors";
+import { ExcelImageError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 
 export interface ImageHyperlinks {
@@ -195,7 +195,7 @@ export function imageModel(img: WorksheetImage): ImageModel {
     case "image": {
       const range = img.range;
       if (!range) {
-        throw new ImageError("Image has no range");
+        throw new ExcelImageError("Image has no range");
       }
       // Absolute positioning — no cell anchors
       if (range.pos) {
@@ -228,7 +228,7 @@ export function imageModel(img: WorksheetImage): ImageModel {
       };
     }
     default:
-      throw new ImageError("Invalid Image Type");
+      throw new ExcelImageError("Invalid Image Type");
   }
 }
 

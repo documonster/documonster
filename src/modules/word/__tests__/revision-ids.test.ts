@@ -12,7 +12,7 @@ import { unzip } from "@archive/read-archive";
 import { createZip } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
-import { Build, Document, Io, Package, Query, Streaming, Transform } from "../index";
+import { Build, Document, Io, Package, Query, Stream, Transform } from "../index";
 import type { DocxDocument, Paragraph, RevisionInfo, StyleDef, Table } from "../types";
 
 const W = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`;
@@ -224,7 +224,7 @@ describe("revision wrappers: unique ids", () => {
 
   it("is unique in a streamed package", async () => {
     const rev: RevisionInfo = { id: 1, author: "Ann" };
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     writer.add(Build.paragraph([Build.insertedRun(Build.text("a"), rev)]));
     writer.add(Build.paragraph([Build.insertedRun(Build.text("b"), rev)]));
     const found = await packageWrappers(await writer.finalize());
@@ -357,7 +357,7 @@ describe("revision ids: every kind of revision", () => {
 
   it("does so in a streamed package too", async () => {
     const doc = mixed();
-    const writer = Streaming.createWriter({
+    const writer = new Stream.DocumentWriter({
       styles: doc.styles,
       sectionProperties: doc.sectionProperties
     });
@@ -394,8 +394,8 @@ describe("revision ids: one id space per package", () => {
     Build.paragraph([Build.insertedRun(Build.text(text), { id: 1, author: "Ann" })]);
 
   it("keeps interleaved streamed packages apart", async () => {
-    const a = Streaming.createWriter();
-    const b = Streaming.createWriter();
+    const a = new Stream.DocumentWriter();
+    const b = new Stream.DocumentWriter();
     a.add(tracked("a1"));
     b.add(tracked("b1"));
     a.add(tracked("a2"));

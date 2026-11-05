@@ -292,7 +292,7 @@ describe("Documonster.Excel Browser Tests", () => {
       const ws = Workbook.addWorksheet(wb, "names");
 
       Cell.setValue(ws, "A1", 100);
-      Cell.setName(ws, "A1", "MyValue");
+      Cell.setNames(ws, "A1", ["MyValue"]);
 
       Cell.setValue(ws, "B1", { formula: "MyValue * 2", result: 200 });
 

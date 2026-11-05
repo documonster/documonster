@@ -18,7 +18,7 @@ import { XmlError } from "@xml/errors";
 import { query, queryAll } from "@xml/query";
 import { SaxParser, parseSax } from "@xml/sax";
 import { XmlStreamWriter } from "@xml/stream-writer";
-import type { SaxTag, XmlWritableTarget } from "@xml/types";
+import type { XmlSaxTag, XmlWritableTarget } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
@@ -372,7 +372,7 @@ describe("Attribute edge cases", () => {
 describe("Namespace edge cases", () => {
   it("should handle namespace undeclaration", () => {
     const parser = new SaxParser({ xmlns: true });
-    const tags: SaxTag[] = [];
+    const tags: XmlSaxTag[] = [];
     parser.on("opentag", tag => tags.push({ ...tag }));
     parser.write('<root xmlns="http://default"><child xmlns="">text</child></root>');
     parser.close();
@@ -384,7 +384,7 @@ describe("Namespace edge cases", () => {
     // Multi-colon QNames are invalid in namespace mode and produce an error,
     // but parsing continues with error recovery
     const parser = new SaxParser({ xmlns: true });
-    const tags: SaxTag[] = [];
+    const tags: XmlSaxTag[] = [];
     const errors: string[] = [];
     parser.on("opentag", tag => tags.push({ ...tag }));
     parser.on("error", e => errors.push(e.message));

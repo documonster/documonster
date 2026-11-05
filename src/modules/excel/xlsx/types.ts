@@ -15,7 +15,8 @@ export type StreamListener = Parameters<IEventEmitter["on"]>[1];
  */
 type EmitterLike = XlsxEmitterLike;
 
-export interface IParseStream extends EmitterLike {
+/** An event-emitter stream of a package's bytes, with `pipe` — the oldest shape `Workbook.readStream` reads. */
+export interface XlsxParseStream extends EmitterLike {
   pipe(dest: any): any;
   [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | string>;
 }
@@ -54,7 +55,7 @@ export interface XlsxReadOptions {
    */
   base64?: boolean;
   /**
-   * Refuse a worksheet with more rows than this, by throwing `MaxItemsExceededError`.
+   * Refuse a worksheet with more rows than this, by throwing `ExcelLimitExceededError`.
    *
    * **A guard, not a preview.** This used to say "rows beyond this limit are silently skipped. Useful for previewing
    * very large sheets without loading everything into memory" — which is the opposite of what happens and of what the
@@ -66,7 +67,7 @@ export interface XlsxReadOptions {
    */
   maxRows?: number;
   /**
-   * Refuse a worksheet with more columns than this, by throwing `MaxItemsExceededError`.
+   * Refuse a worksheet with more columns than this, by throwing `ExcelLimitExceededError`.
    *
    * A guard, exactly as {@link maxRows} is — and its description was wrong in the same way.
    */
@@ -112,7 +113,7 @@ export interface XlsxZipReadLimits {
   /**
    * Whether each part is checked against the CRC-32 the package records for it, failing
    * the read on a mismatch with an `ExcelFileError` whose `cause` is the archive's
-   * `Crc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
    * @default true
    */
   checkCrc32?: boolean;

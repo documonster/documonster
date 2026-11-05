@@ -241,8 +241,9 @@ export function renderPageToSvg(
   // italic face. Passing a callback that drops those flags made every bold run
   // measure as regular, so later runs on the line overlapped it.
   const layout = layoutDocumentFull(doc);
+  checkPageNumber(layout, pageNumber, "Layout.pageToSvg");
 
-  return renderPageFromLayout(layout, pageNumber, withChartContext(options, doc));
+  return renderLayoutPage(layout, pageNumber, withChartContext(options, doc));
 }
 
 /**
@@ -273,7 +274,7 @@ export function renderDocumentToSvg(doc: DocxDocument, options?: RenderOptions):
   const svgPages: string[] = [];
   const pageOptions = withChartContext(options, doc);
   for (let page = 1; page <= layout.totalPages; page++) {
-    svgPages.push(renderPageFromLayout(layout, page, pageOptions));
+    svgPages.push(renderLayoutPage(layout, page, pageOptions));
   }
   return svgPages;
 }
@@ -366,16 +367,44 @@ export function renderPageFromLayout(
   pageNumber: number,
   options?: RenderOptions
 ): string {
-  // Out of range stays a RangeError, as it always was; not a page number at all is an argument
-  // error, which `NaN` used to slip past (`NaN < 1` is false) to fail on `undefined`.
-  checkInteger(pageNumber, "pageNumber", "Layout.computedPageToSvg");
+  checkLayout(layout, "Layout.computedPageToSvg");
+  checkPageNumber(layout, pageNumber, "Layout.computedPageToSvg");
   checkRenderOptions(options, "Layout.computedPageToSvg");
-  if (pageNumber < 1 || pageNumber > layout.totalPages) {
-    throw new RangeError(
-      `Page number ${pageNumber} out of range. Document has ${layout.totalPages} page(s).`
+  return renderLayoutPage(layout, pageNumber, options);
+}
+
+/** A {@link LayoutDocument} as `Layout.compute` returns it: its pages and their count. */
+function checkLayout(layout: unknown, where: string): asserts layout is LayoutDocument {
+  checkRecord(layout, "layout", where);
+  const { pages, totalPages } = layout as Partial<LayoutDocument>;
+  if (!Array.isArray(pages)) {
+    invalidArgument(where, "layout.pages", "an array (a layout from Layout.compute)", pages);
+  }
+  checkInteger(totalPages, "layout.totalPages", where, { min: 0, max: pages.length });
+}
+
+/** A 1-based page of `layout`, which the message states the range of. */
+function checkPageNumber(layout: LayoutDocument, pageNumber: unknown, where: string): void {
+  const total = layout.totalPages;
+  checkInteger(pageNumber, "pageNumber", where);
+  if ((pageNumber as number) < 1 || (pageNumber as number) > total) {
+    invalidArgument(
+      where,
+      "pageNumber",
+      total > 0
+        ? `a page number 1–${total} (the document has ${total} page(s))`
+        : "a page of the document, which has none",
+      pageNumber
     );
   }
+}
 
+/** One page of a layout whose arguments have been checked. */
+function renderLayoutPage(
+  layout: LayoutDocument,
+  pageNumber: number,
+  options: RenderOptions | undefined
+): string {
   const page = layout.pages[pageNumber - 1];
   const { geometry } = page;
   const elements: string[] = [];

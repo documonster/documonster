@@ -30,7 +30,7 @@ import { Xml } from "documonster/xml";
 import { Xml } from "documonster/xml";
 
 const w = new Xml.Writer();
-w.openXml(Xml.StdDocAttributes);
+w.openXml(Xml.DEFAULT_DECLARATION);
 w.openNode("root", { version: "1.0" });
 w.leafNode("item", { id: "1" }, "hello");
 w.leafNode("item", { id: "2" }, "world");
@@ -144,7 +144,7 @@ Xml.decode("&lt;hello&gt;"); // "<hello>"
 
 ```
 src/modules/xml/
-├── types.ts              # 核心类型（XmlNode、XmlSink、SaxTag 等）
+├── types.ts              # 核心类型（XmlNode、XmlSink、XmlSaxTag 等）
 ├── errors.ts             # XmlError、XmlParseError、XmlWriteError
 ├── encode.ts             # Xml.encode、Xml.decode、Xml.validateName、Xml.encodeCData 等
 ├── writer.ts             # Xml.Writer（缓冲式，支持回滚）
@@ -163,7 +163,7 @@ src/modules/xml/
 ```
 XmlSink（接口）
 ├── Xml.Writer        — 在内存中构建 XML 字符串
-│                      支持回滚/事务（save/commit/rollback）
+│                      支持回滚/事务（snapshot/commit/rollback）
 │                      适用于：中小型 XML、试探性写入
 │
 └── Xml.StreamWriter  — 直接写入 XmlWritableTarget
@@ -215,7 +215,7 @@ Xml.SaxParser  — 事件驱动的流式解析器
 | `writeComment(text)`            | 写入 `<!--...-->` 注释          |
 | `closeAll()`                    | 关闭所有打开的元素              |
 | `toString()`                    | 获取构建的 XML 字符串           |
-| `save()`                        | 保存回滚快照                    |
+| `snapshot()`                    | 保存回滚快照                    |
 | `commit()`                      | 丢弃快照（保留更改）            |
 | `rollback()`                    | 恢复到快照（丢弃更改）          |
 | `reset()`                       | 清除所有内容                    |
@@ -228,7 +228,7 @@ Xml.SaxParser  — 事件驱动的流式解析器
 由 `new Xml.StreamWriter(target)` 创建。与 `Xml.Writer` 方法相同（都实现 `XmlSink`），区别在于：
 
 - 无 `toString()` — 内容已写入目标
-- 无 `save()` / `commit()` / `rollback()` — 流式写入不可逆
+- 无 `snapshot()` / `commit()` / `rollback()` — 流式写入不可逆
 - 无 `cursor` — 流式模式不适用
 
 两种写入器在已写出任何内容后都拒绝 `openXml`(`XmlWriteError`):XML 只允许声明出现在文档最开头。`Xml.parse` 在这一点上是宽松的,会静默丢弃位置不对的 `<?xml …?>`,因为它要读取其他程序写出的文件。
@@ -263,8 +263,8 @@ Xml.SaxParser  — 事件驱动的流式解析器
 ```text
 Xml.parseSax(
   iterable: AsyncIterable<string | Uint8Array | ArrayBuffer>,
-  options?: SaxOptions
-): AsyncGenerator<SaxEventAny[]>
+  options?: XmlSaxOptions
+): AsyncGenerator<XmlSaxEventAny[]>
 ```
 
 ### Xml.parse

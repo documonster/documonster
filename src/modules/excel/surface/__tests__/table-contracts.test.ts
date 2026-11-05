@@ -2,7 +2,7 @@
  * Table edits check what they are given before anything on the sheet changes: positions, values, the area against the
  * sheet's other tables, names against the workbook, and the handle against removal.
  */
-import { Cell, ExcelArgumentError, Row, Table, TableError, Workbook } from "@excel";
+import { Cell, ExcelArgumentError, Row, Table, ExcelTableError, Workbook } from "@excel";
 import { describe, expect, it } from "vitest";
 
 function setup() {
@@ -27,7 +27,7 @@ function cells(ws: ReturnType<typeof setup>["ws"], addresses: string[]): unknown
 describe("row and column positions", () => {
   it.each([99, -1, 1.5, Number.NaN, 3])("addRow refuses position %s and changes nothing", at => {
     const { ws, t } = setup();
-    expect(() => Table.addRow(t, [5, 6], at)).toThrow(TableError);
+    expect(() => Table.addRow(t, [5, 6], at)).toThrow(ExcelTableError);
     expect(Table.getModel(t).rows).toEqual([
       [1, 2],
       [3, 4]
@@ -51,7 +51,7 @@ describe("row and column positions", () => {
     const { ws, t } = setup();
     expect(() => Table.addRow(t, [5, 6, 7])).toThrow(/2 column/);
     expect(() => Table.addRow(t, [5, Number.NaN])).toThrow();
-    expect(() => Table.addRow(t, null as never)).toThrow(TableError);
+    expect(() => Table.addRow(t, null as never)).toThrow(ExcelTableError);
     expect(cells(ws, ["A4", "B4", "C4"])).toEqual([null, null, null]);
     expect(Table.getRef(t)).toBe("A1:B3");
   });
@@ -64,7 +64,7 @@ describe("row and column positions", () => {
     [0, Number.NaN]
   ])("removeRows refuses (%s, %s)", (index, count) => {
     const { t } = setup();
-    expect(() => Table.removeRows(t, index, count)).toThrow(TableError);
+    expect(() => Table.removeRows(t, index, count)).toThrow(ExcelTableError);
     expect(Table.getModel(t).rows).toHaveLength(2);
   });
 
@@ -81,7 +81,7 @@ describe("row and column positions", () => {
     [0, -1]
   ])("removeColumns refuses (%s, %s)", (index, count) => {
     const { t } = setup();
-    expect(() => Table.removeColumns(t, index, count)).toThrow(TableError);
+    expect(() => Table.removeColumns(t, index, count)).toThrow(ExcelTableError);
     expect(Table.getModel(t).columns.map(column => column.name)).toEqual(["a", "b"]);
   });
 
@@ -93,7 +93,7 @@ describe("row and column positions", () => {
 
   it.each([99, -1, Number.NaN])("addColumn refuses position %s", at => {
     const { ws, t } = setup();
-    expect(() => Table.addColumn(t, { name: "c" }, [7, 8], at)).toThrow(TableError);
+    expect(() => Table.addColumn(t, { name: "c" }, [7, 8], at)).toThrow(ExcelTableError);
     expect(Cell.getValue(ws, "C1")).toBeNull();
   });
 
@@ -126,7 +126,7 @@ describe("tables cannot overlap", () => {
   it("setRef refuses to move onto another table", () => {
     const { ws, t } = setup();
     Table.add(ws, { name: "T_d", ref: "D1", columns: [{ name: "d" }], rows: [[5]] });
-    expect(() => Table.setRef(t, "C1")).toThrow(TableError);
+    expect(() => Table.setRef(t, "C1")).toThrow(ExcelTableError);
     expect(Table.getRef(t)).toBe("A1:B3");
     expect(Cell.getValue(ws, "D1")).toBe("d");
   });
@@ -175,7 +175,7 @@ describe("a refused add or setModel leaves the sheet as it was", () => {
     const model = { name: "T", ref: "A1", columns: [{ name: "a" }], rows: [[1]] };
     const t = Table.add(ws, model);
     model.columns[0].name = "changed";
-    expect(Table.getColumnName(Table.getColumn(t, 0))).toBe("a");
+    expect(Table.getColumnName(Table.getColumn(t, 0)!)).toBe("a");
     expect(model).toEqual({ name: "T", ref: "A1", columns: [{ name: "changed" }], rows: [[1]] });
   });
 });
@@ -183,7 +183,7 @@ describe("a refused add or setModel leaves the sheet as it was", () => {
 describe("a removed table's handle refuses edits", () => {
   it("after Table.remove", () => {
     const { ws, t } = setup();
-    const column = Table.getColumn(t, 0);
+    const column = Table.getColumn(t, 0)!;
     expect(Table.remove(ws, t)).toBe(true);
     expect(() => Table.setRef(t, "D10")).toThrow(ExcelArgumentError);
     expect(() => Table.addRow(t, [1, 2])).toThrow(ExcelArgumentError);
@@ -206,7 +206,7 @@ describe("a removed table's handle refuses edits", () => {
 
   it("the view of a removed column refuses edits", () => {
     const { t } = setup();
-    const column = Table.getColumn(t, 1);
+    const column = Table.getColumn(t, 1)!;
     Table.removeColumns(t, 1);
     expect(() => Table.setColumnName(column, "x")).toThrow(ExcelArgumentError);
     expect(() => Table.setColumnFilterButton(column, false)).toThrow(ExcelArgumentError);
@@ -289,6 +289,10 @@ describe("setters check their values", () => {
     ["setHeaderRow", "yes"],
     ["setTotalsRow", 1],
     ["setTheme", 42],
+    ["setFirstColumnStyle", "x"],
+    ["setLastColumnStyle", 0],
+    ["setRowStripes", 1],
+    ["setColumnStripes", null],
     ["setShowFirstColumn", "x"],
     ["setShowLastColumn", 0],
     ["setShowRowStripes", 1],
@@ -303,6 +307,19 @@ describe("setters check their values", () => {
   });
 
   it.each([
+    ["setFirstColumnStyle", "setShowFirstColumn", "hasFirstColumnStyle"],
+    ["setLastColumnStyle", "setShowLastColumn", "hasLastColumnStyle"],
+    ["setRowStripes", "setShowRowStripes", "hasRowStripes"],
+    ["setColumnStripes", "setShowColumnStripes", "hasColumnStripes"]
+  ] as const)("Table.%s, and its deprecated %s, read back with Table.%s", (name, old, has) => {
+    const { t } = setup();
+    Table[name](t, true);
+    expect(Table[has](t)).toBe(true);
+    Table[old](t, false);
+    expect(Table[has](t)).toBe(false);
+  });
+
+  it.each([
     ["setColumnName", 42],
     ["setColumnFilterButton", "x"],
     ["setColumnTotalsRowLabel", 42],
@@ -312,7 +329,7 @@ describe("setters check their values", () => {
     ["setColumnTotalsRowFunction", "bogus"]
   ] as const)("Table.%s refuses %s", (name, value) => {
     const { t } = setup();
-    const column = Table.getColumn(t, 0);
+    const column = Table.getColumn(t, 0)!;
     expect(() => (Table[name] as (v: unknown, x: unknown) => void)(column, value)).toThrow(
       ExcelArgumentError
     );
@@ -340,7 +357,7 @@ describe("setters check their values", () => {
 
   it("a written table carries what the setters were given", async () => {
     const { wb, t } = setup();
-    Table.setColumnTotalsRowLabel(Table.getColumn(t, 0), "Sum");
+    Table.setColumnTotalsRowLabel(Table.getColumn(t, 0)!, "Sum");
     Table.setTotalsRow(t, true);
     await expect(Workbook.toBuffer(wb)).resolves.toBeInstanceOf(Uint8Array);
   });

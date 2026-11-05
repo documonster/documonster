@@ -7,7 +7,7 @@
 import { Writable } from "stream";
 
 import { toBinaryChunk } from "@stream/core/binary-chunk";
-import { StreamTypeError } from "@stream/errors";
+import { StreamArgumentError } from "@stream/errors";
 import type { WritableStreamOptions, ICollector } from "@stream/types";
 import { chunksToString, concatUint8Arrays } from "@utils/binary";
 
@@ -71,7 +71,7 @@ export class Collector<T = Uint8Array> extends Writable {
     for (let i = 0; i < len; i++) {
       const normalized = toBinaryChunk(chunks[i]);
       if (!normalized) {
-        throw new StreamTypeError("Uint8Array", "non-binary data");
+        throw new StreamArgumentError("Uint8Array", "non-binary data");
       }
       binaryChunks[i] = normalized;
       totalLength += normalized.length;

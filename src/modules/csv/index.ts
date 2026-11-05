@@ -92,6 +92,7 @@ export type { CsvFormatData } from "@csv/format/formatter";
 export type {
   CsvGenerateOptions,
   CsvGenerateResult,
+  CsvGenerator,
   ColumnDef as CsvColumnDef,
   GeneratorColumnConfig as CsvGeneratorColumnConfig,
   BuiltinColumnType as CsvBuiltinColumnType,
@@ -100,7 +101,8 @@ export type {
   StopCondition as CsvStopCondition,
   StopContext as CsvStopContext
 } from "@csv/utils/generate";
-export type { DecimalSeparator as CsvDecimalSeparator } from "@csv/utils/number";
+export type { DecimalSeparator as CsvDecimalSeparator, CsvNumberOptions } from "@csv/utils/number";
+export type { CsvDynamicTypingOptions } from "@csv/utils/dynamic-typing";
 
 // Streaming/async parser input + row shapes.
 export type {
@@ -185,7 +187,7 @@ export type DecimalSeparator = CsvNumber.DecimalSeparator;
 // Errors
 // =============================================================================
 
-export { CsvError, CsvArgumentError, CsvWorkerError, isCsvError } from "@csv/errors";
+export { CsvError, CsvArgumentError, isCsvError } from "@csv/errors";
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";

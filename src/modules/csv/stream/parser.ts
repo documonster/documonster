@@ -182,21 +182,21 @@ export class CsvParserStream extends Transform {
   constructor(options: CsvParseOptions = {}) {
     // In objectMode (default), emit Row objects; when objectMode === false, emit JSON strings.
     super({ objectMode: options?.objectMode !== false });
-    checkParserStreamOptions(options, "Csv.createParserStream");
+    checkParserStreamOptions(options, "new Csv.ParserStream");
     this.options = options;
     this.chunkSize = options.chunkSize ?? 1000;
 
     // Reuse a single decoder instance and enable streaming decode to correctly handle
     // multi-byte characters split across chunks.
     // Use options.encoding if provided (default: utf-8)
-    this.decoder = createCsvTextDecoder(options.encoding, "Csv.createParserStream");
+    this.decoder = createCsvTextDecoder(options.encoding, "new Csv.ParserStream");
 
     // Check if auto-detection is requested (delimiter === "")
     const delimiterOption = options.delimiter ?? ",";
     this.autoDetectDelimiter = delimiterOption === "";
 
     // Create unified config and state using parse-core factory
-    const { config } = createParseConfig({ options, where: "Csv.createParserStream" });
+    const { config } = createParseConfig({ options, where: "new Csv.ParserStream" });
     this.parseConfig = config;
     this.parseState = createParseState(config);
 
@@ -707,7 +707,7 @@ export class CsvParserStream extends Transform {
     const prepared = applyFirstChunkPreprocessing(
       this.buffer,
       this.options.beforeFirstChunk,
-      "Csv.createParserStream"
+      "new Csv.ParserStream"
     );
     this.beforeFirstChunkApplied = true;
     this.bomStripped = true;
@@ -1475,11 +1475,4 @@ export class CsvParserStream extends Transform {
       callback(null, { row, isValid: true });
     }
   }
-}
-
-/**
- * Create parser stream factory
- */
-export function createCsvParserStream(options: CsvParseOptions = {}): CsvParserStream {
-  return new CsvParserStream(options);
 }

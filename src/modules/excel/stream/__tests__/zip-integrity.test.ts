@@ -2,7 +2,7 @@
  * A package part whose bytes no longer match the CRC-32 the package records for it is
  * reported, by the buffered and the streaming reader alike, instead of read as data.
  */
-import { Crc32MismatchError } from "@archive/core/errors";
+import { ZipCrc32MismatchError } from "@archive/core/errors";
 import { Cell, Stream, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { describe, expect, it } from "vitest";
@@ -57,12 +57,12 @@ describe("XLSX package integrity", () => {
 });
 
 /**
- * A damaged part is an `ExcelFileError` — which `isExcelError` answers for — with the archive's `Crc32MismatchError` as
+ * A damaged part is an `ExcelFileError` — which `isExcelError` answers for — with the archive's `ZipCrc32MismatchError` as
  * its cause, as a package that is not one is reported.
  */
 function damagedPackage() {
   return expect.objectContaining({
     name: "ExcelFileError",
-    cause: expect.any(Crc32MismatchError)
+    cause: expect.any(ZipCrc32MismatchError)
   });
 }

@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Archive } from "@archive";
+import { concatUint8Arrays } from "@utils/binary";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 const dir = mkdtempSync(path.join(tmpdir(), "documonster-zip-editor-preserve-"));
@@ -87,12 +88,12 @@ async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array[]>
 }
 
 async function edited(source: Uint8Array, output: "buffer" | "stream"): Promise<Uint8Array> {
-  const editor = await Archive.editZip(source);
+  const editor = await Archive.ZipEditor.open(source);
   editor.set("added.txt", "new");
   if (output === "buffer") {
     return editor.toBuffer();
   }
-  return Archive.concatUint8Arrays(await collect(editor.stream()));
+  return concatUint8Arrays(await collect(editor.stream()));
 }
 
 describe.each(["buffer", "stream"] as const)("ZipEditor %s output", output => {
@@ -131,12 +132,12 @@ describe.each(["buffer", "stream"] as const)("ZipEditor %s output", output => {
       .add("b.txt", "B", { modTime: date })
       .toBufferSync();
     process.env.TZ = "America/New_York";
-    const editor = await Archive.editZip(source);
+    const editor = await Archive.ZipEditor.open(source);
     editor.rename("b.txt", "c.txt");
     const out =
       output === "buffer"
         ? await editor.toBuffer()
-        : Archive.concatUint8Arrays(await collect(editor.stream()));
+        : concatUint8Arrays(await collect(editor.stream()));
     for (const [from, to] of [
       ["a.txt", "a.txt"],
       ["b.txt", "c.txt"]

@@ -2,7 +2,7 @@
  * Round-3 review fixes in the CSV and Markdown bridges: the sheet-name rule, typed errors for a non-workbook, a
  * non-string input and non-object options.
  */
-import { ExcelArgumentError, Workbook, Worksheet, WorksheetNameError } from "@excel";
+import { ExcelArgumentError, Workbook, Worksheet, ExcelWorksheetNameError } from "@excel";
 import { ExcelCsv } from "@excel/bridge/csv";
 import { ExcelMarkdown } from "@excel/bridge/markdown";
 import { describe, expect, it } from "vitest";
@@ -13,10 +13,10 @@ describe("R3-C2 the 31-character rule", () => {
   it("ExcelCsv reads", async () => {
     const wb = Workbook.create();
     await expect(ExcelCsv.addWorksheet(wb, "a", { sheetName: "c".repeat(40) })).rejects.toThrow(
-      WorksheetNameError
+      ExcelWorksheetNameError
     );
     await expect(ExcelCsv.read("a", { sheetName: "c".repeat(40) })).rejects.toThrow(
-      WorksheetNameError
+      ExcelWorksheetNameError
     );
     expect(Workbook.listWorksheets(wb)).toEqual([]);
   });
@@ -24,7 +24,7 @@ describe("R3-C2 the 31-character rule", () => {
   it("ExcelMarkdown reads, before any sheet is added", () => {
     const wb = Workbook.create();
     expect(() => ExcelMarkdown.addWorksheet(wb, MD, { sheetName: "m".repeat(40) })).toThrow(
-      WorksheetNameError
+      ExcelWorksheetNameError
     );
     expect(Workbook.listWorksheets(wb)).toEqual([]);
     // A name this bridge makes up (`…_2`) is shortened to fit rather than refused: the caller never wrote it. See

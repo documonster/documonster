@@ -27,13 +27,15 @@ export { DocxArgumentError, DocxError, isDocxError } from "@word/errors";
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";
 export { HTML_BULLET_LIST_NUM_ID, HTML_NUMBERED_LIST_NUM_ID } from "@word/convert/html/html-import";
-export type {
-  HtmlRenderOptions,
-  HtmlRenderResult,
-  HtmlImportOptions,
-  HtmlToDocxResult
+import type {
+  HtmlRenderOptions as DocxHtmlRenderOptions,
+  HtmlRenderResult as DocxHtmlRenderResult,
+  HtmlImportOptions as DocxHtmlImportOptions,
+  HtmlToDocxResult as HtmlToDocxResultImpl
 } from "@word/convert/html/html";
-export type { HtmlBodyResult } from "@word/convert/html/html-document";
+export type { DocxHtmlRenderOptions, DocxHtmlRenderResult, DocxHtmlImportOptions };
+import type { HtmlBodyResult as DocxHtmlBodyResult } from "@word/convert/html/html-document";
+export type { DocxHtmlBodyResult };
 
 /** @deprecated Use {@link WordHtml.fromDocx}. Removed in 1.0. */
 export const renderToHtml = renderToHtmlImpl;
@@ -51,3 +53,23 @@ export const htmlToDocx = htmlToDocxImpl;
  * @deprecated Use {@link WordHtml.toDocxBody}`(html).body`. Removed in 1.0.
  */
 export const htmlToDocxBody = htmlToDocxBodyImpl;
+
+// =============================================================================
+// Deprecated unprefixed type names — every flat operation type of this entry carries `Docx`
+// =============================================================================
+
+/** @deprecated Use {@link DocxHtmlRenderOptions}. Removed in 1.0. */
+export type HtmlRenderOptions = DocxHtmlRenderOptions;
+/** @deprecated Use {@link DocxHtmlRenderResult}. Removed in 1.0. */
+export type HtmlRenderResult = DocxHtmlRenderResult;
+/** @deprecated Use {@link DocxHtmlImportOptions}. Removed in 1.0. */
+export type HtmlImportOptions = DocxHtmlImportOptions;
+/**
+ * The result of the deprecated `htmlToDocx`.
+ *
+ * @deprecated Use {@link WordHtml.toDocxBody}, whose result is {@link DocxHtmlBodyResult}. Removed
+ * in 1.0.
+ */
+export type HtmlToDocxResult = HtmlToDocxResultImpl;
+/** @deprecated Use {@link DocxHtmlBodyResult}. Removed in 1.0. */
+export type HtmlBodyResult = DocxHtmlBodyResult;

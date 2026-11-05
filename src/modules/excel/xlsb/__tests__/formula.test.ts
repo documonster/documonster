@@ -17,7 +17,7 @@
 import { extractAll } from "@archive/unzip/extract";
 import { Cell, DefinedNames, Workbook, Worksheet } from "@excel";
 import { expectValidXlsb } from "@excel/__tests__/helpers/expect-valid-xlsb";
-import { ExcelNotSupportedError, XlsbParseError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError, XlsbParseError } from "@excel/errors";
 import {
   decodePtg,
   encodePtg,
@@ -183,7 +183,7 @@ describe("token round trip", () => {
         } catch (error) {
           // An unsupported construct is a legitimate outcome; a wrong answer is not.
           expect(error, `seed ${seed}/${iteration}: ${source}`).toBeInstanceOf(
-            ExcelNotSupportedError
+            ExcelUnsupportedFeatureError
           );
           continue;
         }
@@ -263,7 +263,9 @@ describe("what the codec refuses", () => {
 
   it("reports an unknown token rather than skipping it", () => {
     // Skipping would silently drop part of an expression.
-    expect(() => decodePtg(Uint8Array.of(0x7f), CONTEXT, "A1")).toThrow(ExcelNotSupportedError);
+    expect(() => decodePtg(Uint8Array.of(0x7f), CONTEXT, "A1")).toThrow(
+      ExcelUnsupportedFeatureError
+    );
   });
 });
 

@@ -5,7 +5,14 @@
  *
  * Reading such a file keeps it as read — refusing would make the file unreadable — and the validator reports it.
  */
-import { Cell, DefinedNameError, DefinedNames, Table, TableError, Workbook } from "@excel/index";
+import {
+  Cell,
+  ExcelDefinedNameError,
+  DefinedNames,
+  Table,
+  ExcelTableError,
+  Workbook
+} from "@excel/index";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { describe, expect, it } from "vitest";
 
@@ -47,8 +54,8 @@ describe("one namespace for tables and defined names", () => {
   it("refuses a defined name that is a table's name", () => {
     const { wb } = workbookWithTable("Maß");
     const names = Workbook.getDefinedNames(wb);
-    expect(() => DefinedNames.addFormula(names, "MASS", "1")).toThrow(DefinedNameError);
-    expect(() => DefinedNames.add(names, "S!$A$1", "maß")).toThrow(DefinedNameError);
+    expect(() => DefinedNames.addFormula(names, "MASS", "1")).toThrow(ExcelDefinedNameError);
+    expect(() => DefinedNames.add(names, "S!$A$1", "maß")).toThrow(ExcelDefinedNameError);
     expect(DefinedNames.list(names)).toEqual([]);
   });
 
@@ -58,7 +65,7 @@ describe("one namespace for tables and defined names", () => {
     DefinedNames.addFormula(Workbook.getDefinedNames(wb), "Rate", "1");
     expect(() =>
       Table.add(ws, { name: "RATE", ref: "A1", columns: [{ name: "x" }], rows: [[1]] })
-    ).toThrow(TableError);
+    ).toThrow(ExcelTableError);
     expect(Table.list(ws)).toEqual([]);
     const table = Table.add(ws, {
       name: "Other",
@@ -66,7 +73,7 @@ describe("one namespace for tables and defined names", () => {
       columns: [{ name: "x" }],
       rows: [[1]]
     });
-    expect(() => Table.setName(table, "rate")).toThrow(TableError);
+    expect(() => Table.setName(table, "rate")).toThrow(ExcelTableError);
     expect(Table.getName(table)).toBe("Other");
   });
 

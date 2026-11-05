@@ -32,7 +32,7 @@ describe("tar.gz reading is incremental", () => {
     for await (const entry of Archive.parseTarGzStream(source())) {
       doneAtFirst ??= sourceDone;
       seen.push(entry.info.path);
-      await entry.data();
+      await entry.bytes();
     }
     expect(seen).toEqual(["first.txt", "big.bin"]);
     expect(doneAtFirst).toBe(false);
@@ -217,7 +217,7 @@ describe("parseTarGzStream on a damaged gzip stream", () => {
         const bytes = (await damaged())[damage]!;
         const iteration = (async () => {
           for await (const entry of Archive.parseTarGzStream(toSource(bytes))) {
-            await entry.data();
+            await entry.bytes();
           }
         })();
         await expect(iteration).rejects.toBeInstanceOf(ArchiveError);
@@ -273,7 +273,7 @@ describe("parseTarGzStream on a damaged gzip stream", () => {
     for (const toSource of Object.values(sources)) {
       const seen: Array<[string, number]> = [];
       for await (const entry of Archive.parseTarGzStream(toSource(tgz))) {
-        seen.push([entry.info.path, (await entry.data()).length]);
+        seen.push([entry.info.path, (await entry.bytes()).length]);
       }
       expect(seen).toEqual([
         ["a.txt", 5],

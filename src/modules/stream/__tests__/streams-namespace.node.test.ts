@@ -22,12 +22,45 @@ describe("Streams namespace", () => {
     expect(await Streams.json(Streams.fromJson({ x: [1, 2] }))).toEqual({ x: [1, 2] });
   });
 
-  it("factories build the classes whose value exports are deprecated", () => {
+  it("publishes the stream classes, built with their constructors", () => {
     expect(Streams.ChunkedBuilder).toBe(ChunkedBuilder);
     expect(Streams.TransactionalChunkedBuilder).toBe(TransactionalChunkedBuilder);
-    expect(Streams.createCollector()).toBeInstanceOf(Collector);
-    expect(Streams.createPullStream()).toBeInstanceOf(PullStream);
-    expect(Streams.createBufferedStream()).toBeInstanceOf(BufferedStream);
+    expect(new Streams.Collector()).toBeInstanceOf(Collector);
+    expect(new Streams.PullStream()).toBeInstanceOf(PullStream);
+    expect(new Streams.BufferedStream()).toBeInstanceOf(BufferedStream);
+  });
+
+  it("keeps the deprecated constructor-forwarding factories", async () => {
+    expect(Streams.createCollector()).toBeInstanceOf(Streams.Collector);
+    expect(Streams.createPullStream()).toBeInstanceOf(Streams.PullStream);
+    expect(Streams.createBufferedStream()).toBeInstanceOf(Streams.BufferedStream);
+    expect(entry.createCollector).toBe(Streams.createCollector);
+    expect(entry.createPullStream).toBe(Streams.createPullStream);
+    expect(entry.createBufferedStream).toBe(Streams.createBufferedStream);
+    // The constructor performs the checks the factory used to name.
+    expect(() => Streams.createPullStream({ highWaterMark: -1 })).toThrow(/^Streams\.PullStream: /);
+    expect(() => Streams.createBufferedStream({ batchSize: 0 })).toThrow(
+      /^Streams\.BufferedStream: /
+    );
+    const collector = Streams.createCollector<string>({ objectMode: true });
+    await new Promise<void>(resolve => collector.end("x", () => resolve()));
+    expect(collector.chunks).toEqual(["x"]);
+  });
+
+  it("keeps UnsupportedStreamTypeError as a deprecated name of StreamUnsupportedTypeError", () => {
+    expect(entry.UnsupportedStreamTypeError).toBe(entry.StreamUnsupportedTypeError);
+    expect(new entry.UnsupportedStreamTypeError("op", "type").name).toBe(
+      "StreamUnsupportedTypeError"
+    );
+  });
+
+  it("keeps StreamTypeError as a deprecated name of StreamArgumentError", () => {
+    expect(entry.StreamTypeError).toBe(entry.StreamArgumentError);
+    const error = new entry.StreamTypeError("a string", "number", { field: "x", where: "W" });
+    expect(error).toBeInstanceOf(entry.StreamArgumentError);
+    expect(error).toBeInstanceOf(entry.StreamError);
+    expect(error.field).toBe("x");
+    expect(error.message).toBe("W: expected a string, got number");
   });
 
   it("keeps every flat helper as a deprecated forward", () => {
@@ -82,7 +115,7 @@ describe("Streams namespace", () => {
   });
 
   it("LowLevel.SinkAdapter writes through to the sink", async () => {
-    const collector = Streams.createCollector();
+    const collector = new Streams.Collector();
     const sink = new Streams.LowLevel.SinkAdapter(collector);
     expect(sink).toBeInstanceOf(SinkAdapter);
     await sink.write(new TextEncoder().encode("hi"));

@@ -8,11 +8,11 @@ import {
   Cell,
   ExcelArgumentError,
   ExcelStreamStateError,
-  ImageError,
+  ExcelImageError,
   Stream,
   Workbook,
   Worksheet,
-  WorksheetNameError
+  ExcelWorksheetNameError
 } from "@excel";
 import { describe, expect, it } from "vitest";
 
@@ -41,7 +41,7 @@ describe("WorkbookWriter.addWorksheet", () => {
     name => {
       const { wb } = writer();
       wb.addWorksheet("S");
-      expect(() => wb.addWorksheet(name)).toThrow(WorksheetNameError);
+      expect(() => wb.addWorksheet(name)).toThrow(ExcelWorksheetNameError);
     }
   );
 
@@ -97,9 +97,9 @@ describe("streamed cells and rows", () => {
   it("pictures must name an image of the workbook", () => {
     const { wb } = writer();
     const ws = wb.addWorksheet("S");
-    expect(() => ws.addImage(999, "B2:C3")).toThrow(ImageError);
-    expect(() => ws.addBackgroundImage(999)).toThrow(ImageError);
-    expect(() => wb.addImage({} as never)).toThrow(ImageError);
+    expect(() => ws.addImage(999, "B2:C3")).toThrow(ExcelImageError);
+    expect(() => ws.addBackgroundImage(999)).toThrow(ExcelImageError);
+    expect(() => wb.addImage({} as never)).toThrow(ExcelImageError);
     expect(ws.getImages()).toEqual([]);
   });
 

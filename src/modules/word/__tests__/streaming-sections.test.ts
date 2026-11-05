@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Build, Document, Io, Streaming } from "../index";
+import { Build, Document, Io, Stream } from "../index";
 import type { HeaderDef, SectionProperties } from "../index";
 import { packageIssues, packageParts, partText } from "./roundtrip-integrity.helpers";
 
@@ -51,7 +51,7 @@ function sections(parts: Map<string, Uint8Array>): string[][] {
 
 describe("streaming writer section breaks", () => {
   it("name the headers and footers the package has, as the buffered writer does", async () => {
-    const stream = Streaming.createWriter({ headers, footers, sectionProperties: final });
+    const stream = new Stream.DocumentWriter({ headers, footers, sectionProperties: final });
     stream.add(Build.paragraph([Build.text("Cover")], { sectionProperties: inner }));
     stream.add(Build.textParagraph("Body"));
     const fromStream = await packageParts(await stream.finalize());

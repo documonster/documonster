@@ -37,7 +37,7 @@ function pathFor(file: string, format: "xlsx" | "xlsb"): string {
  * losing 33 items. The helper written to make losses visible was hiding them, and the cast is what let it.
  *
  * The real reporting channel is the refusal: `unsupported: "error"` is the default and throws an
- * `ExcelNotSupportedError` carrying `items`. So the report is obtained by *asking for* the refusal and
+ * `ExcelUnsupportedFeatureError` carrying `items`. So the report is obtained by *asking for* the refusal and
  * reading it, then writing again with `"ignore"`. That serialises twice, which is a real cost and the
  * reason to state it: for an example it is fractions of a second, and the alternative is a number nobody
  * can trust. A caller who needs both in one pass wants a public API that returns the list without

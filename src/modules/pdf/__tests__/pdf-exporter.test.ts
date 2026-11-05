@@ -430,7 +430,7 @@ describe("excelToPdf", () => {
         ]),
         extension: "png"
       });
-      Watermark.add(ws, { imageId, mode: "header", headerWidth: 12, headerHeight: 12 });
+      Watermark.set(ws, { imageId, mode: "header", headerWidth: 12, headerHeight: 12 });
 
       const pdf = await excelToPdf(wb);
       const result = await readPdf(pdf);
@@ -459,7 +459,7 @@ describe("excelToPdf", () => {
             ]),
             extension: "png"
           });
-          Watermark.add(ws, {
+          Watermark.set(ws, {
             imageId,
             mode: "header",
             headerWidth: 300,
@@ -677,7 +677,7 @@ describe("excelToPdf", () => {
       const ws = Workbook.addWorksheet(wb, "FooterImage");
       Cell.setValue(ws, "A1", "Data");
       const imageId = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
-      Watermark.add(ws, {
+      Watermark.set(ws, {
         imageId,
         mode: "header",
         position: "RF",
@@ -706,8 +706,8 @@ describe("excelToPdf", () => {
       Cell.setValue(ws, "A1", "Data");
       const imageId = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
 
-      Watermark.add(ws, { imageId, mode: "header", position: "LH" });
-      Watermark.add(ws, { imageId, mode: "header", position: "LH" });
+      Watermark.set(ws, { imageId, mode: "header", position: "LH" });
+      Watermark.set(ws, { imageId, mode: "header", position: "LH" });
 
       expect(ws.headerFooter.oddHeader).toBe("&L&G");
       expect((await readPdf(await excelToPdf(wb))).pages[0].images).toHaveLength(1);
@@ -719,8 +719,8 @@ describe("excelToPdf", () => {
       Cell.setValue(ws, "A1", "Data");
       const imageId = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
 
-      Watermark.add(ws, { imageId, mode: "header", position: "LH" });
-      Watermark.add(ws, { imageId, mode: "header", position: "CF" });
+      Watermark.set(ws, { imageId, mode: "header", position: "LH" });
+      Watermark.set(ws, { imageId, mode: "header", position: "CF" });
 
       expect(ws.headerFooter.oddHeader).toBeNull();
       expect(ws.headerFooter.oddFooter).toBe("&C&G");
@@ -741,7 +741,7 @@ describe("excelToPdf", () => {
         ]),
         extension: "png"
       });
-      Watermark.add(ws, {
+      Watermark.set(ws, {
         imageId,
         mode: "header",
         applyTo: "even",

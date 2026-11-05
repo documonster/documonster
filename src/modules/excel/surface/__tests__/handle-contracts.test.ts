@@ -6,7 +6,7 @@ import {
   Chartsheet,
   ExcelArgumentError,
   Form,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   Workbook,
   Worksheet
 } from "@excel";
@@ -43,8 +43,8 @@ describe("Form checkboxes", () => {
   it("the link is a cell, a range or a defined name", () => {
     const { ws } = book();
     const cb = Form.addCheckbox(ws, "D2");
-    expect(() => Form.setLink(cb, "not a ref !!")).toThrow(InvalidAddressError);
-    expect(() => Form.addCheckbox(ws, "D5", { link: "x y" })).toThrow(InvalidAddressError);
+    expect(() => Form.setLink(cb, "not a ref !!")).toThrow(ExcelInvalidAddressError);
+    expect(() => Form.addCheckbox(ws, "D5", { link: "x y" })).toThrow(ExcelInvalidAddressError);
     Form.setLink(cb, "=$C$3");
     expect(Form.getLink(cb)).toBe("$C$3");
     Form.setLink(cb, "'My Sheet'!B2");
@@ -53,7 +53,7 @@ describe("Form checkboxes", () => {
     expect(Form.getLink(cb)).toBe("Choice");
     Form.setLink(cb, "Other!Choice");
     expect(Form.getLink(cb)).toBe("Other!Choice");
-    expect(() => Form.setLink(cb, "Other!not a name")).toThrow(InvalidAddressError);
+    expect(() => Form.setLink(cb, "Other!not a name")).toThrow(ExcelInvalidAddressError);
   });
 
   it("setChecked takes a boolean", () => {

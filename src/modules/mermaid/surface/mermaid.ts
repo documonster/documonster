@@ -29,8 +29,8 @@ export { resolveTheme } from "@mermaid/theme";
 
 /**
  * A text node with `lines` stacked in the middle of `box`, for a caller drawing its own boxes
- * from a layout (`NodeBox`, `GroupBox` and `EdgeRoute.label` all have the box shape).
- * `NodeBox.lines` and `EdgeRoute.label.lines` are already wrapped; a `GroupBox` has a single
+ * from a layout (`MermaidNodeBox`, `MermaidGroupBox` and `MermaidEdgeRoute.label` all have the box shape).
+ * `MermaidNodeBox.lines` and `MermaidEdgeRoute.label.lines` are already wrapped; a `MermaidGroupBox` has a single
  * `text` instead, so pass `[group.text]`. The style is any text style; its anchor is always
  * `middle`, and an omitted `fill` is black (where a raw text node without one is not drawn)
  * and an omitted `family` is the engine's default face.

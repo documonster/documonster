@@ -10,7 +10,7 @@
 
 import type { SdtProperties, StructuredDocumentTag } from "@word/types";
 import { normaliseCheckState } from "@word/writer/checkbox-writer";
-import type { WordRenderContext } from "@word/writer/render-context";
+import type { DocxRenderContext } from "@word/writer/render-context";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
@@ -29,7 +29,7 @@ import type { XmlSink } from "@xml/types";
 export function renderSdtPr(
   xml: XmlSink,
   sdt: StructuredDocumentTag,
-  ctx?: WordRenderContext
+  ctx?: DocxRenderContext
 ): void {
   renderSdtProperties(xml, sdt.properties, ctx);
 }
@@ -38,7 +38,7 @@ export function renderSdtPr(
 export function renderSdtProperties(
   xml: XmlSink,
   p: SdtProperties | undefined,
-  ctx?: WordRenderContext
+  ctx?: DocxRenderContext
 ): void {
   if (!p) {
     return;

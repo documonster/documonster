@@ -41,7 +41,8 @@ describe("Csv.format option checks", () => {
   ])("refuses %s in %j", (option, options) => {
     expectCsvError(() => Csv.format(rows, options as Parameters<typeof Csv.format>[1]), option);
     expectCsvError(
-      () => Csv.createFormatterStream(options as Parameters<typeof Csv.createFormatterStream>[0]),
+      () =>
+        new Csv.FormatterStream(options as ConstructorParameters<typeof Csv.FormatterStream>[0]),
       option
     );
   });
@@ -81,7 +82,7 @@ describe("Csv.parse option checks", () => {
   ])("refuses %s in %j", (option, options) => {
     expectCsvError(() => Csv.parse("a,b\n1,2", options as Parameters<typeof Csv.parse>[1]), option);
     expectCsvError(
-      () => Csv.createParserStream(options as Parameters<typeof Csv.createParserStream>[0]),
+      () => new Csv.ParserStream(options as ConstructorParameters<typeof Csv.ParserStream>[0]),
       option
     );
   });

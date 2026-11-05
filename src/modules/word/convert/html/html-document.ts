@@ -39,6 +39,8 @@ import type {
  * every image decoded from a `data:` URL. A picture it cannot embed — a remote
  * or relative `src`, an undecodable `data:` URL — is written as the italic
  * `[Image: alt]` text `WordMarkdown.toDocx` writes for an image it cannot resolve.
+ * It is synchronous for that reason: nothing is fetched, so there is nothing to
+ * await — where `WordMarkdown.toDocx` is async because its `resolveImage` may be.
  *
  * @param html - The HTML string to convert.
  * @param options - Conversion settings.

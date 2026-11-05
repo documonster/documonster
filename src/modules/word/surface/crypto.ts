@@ -20,7 +20,12 @@ import {
   checkString,
   invalidArgument
 } from "@word/core/argument-checks";
-import { extractSignatures, hasDigitalSignatures } from "@word/security/digital-signatures";
+import {
+  extractSignatures,
+  hasDigitalSignatures,
+  isWellFormedSignature as isWellFormedSignatureImpl,
+  parseSignatureXml
+} from "@word/security/digital-signatures";
 import type { DigitalSignatureInfo } from "@word/security/digital-signatures";
 import { decryptDocx, verifyDocxPassword } from "@word/security/encryption";
 import type { DecryptOptions } from "@word/security/encryption";
@@ -42,10 +47,29 @@ export function verifyPassword(
 }
 export * as Agile from "@word/surface/crypto-agile";
 export * as Cfb from "@word/surface/crypto-cfb";
-export {
-  isWellFormedSignature,
-  parseSignatureXml as parseSignature
-} from "@word/security/digital-signatures";
+
+/**
+ * Parse the metadata of one signature part (`_xmlsignatures/sig1.xml`): its XML
+ * text and the part's file name (`"sig1.xml"`).
+ */
+export function parseSignature(xml: string, fileName: string): DigitalSignatureInfo {
+  const where = "WordCrypto.parseSignature";
+  checkString(xml, "xml", where);
+  checkString(fileName, "fileName", where);
+  return parseSignatureXml(xml, fileName);
+}
+
+/**
+ * Whether a parsed signature has the elements XMLDSig requires (`Signature`,
+ * `SignedInfo`, `SignatureValue`, `KeyInfo`). Not a cryptographic check — see
+ * `cryptographicStatus`.
+ */
+export function isWellFormedSignature(info: DigitalSignatureInfo): boolean {
+  const where = "WordCrypto.isWellFormedSignature";
+  checkRecord(info, "info", where);
+  checkString(info.rawXml, "info.rawXml", where);
+  return isWellFormedSignatureImpl(info);
+}
 
 export type { DecryptOptions } from "@word/security/encryption";
 

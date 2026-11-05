@@ -20,7 +20,7 @@ import {
   getWorkbookModel
 } from "@excel/core/workbook.browser";
 import type { XlsxWritable } from "@excel/core/xlsx-io-types";
-import { ImageError, TableError } from "@excel/errors";
+import { ExcelImageError, ExcelTableError } from "@excel/errors";
 import type { ThreadedCommentPerson } from "@excel/types";
 import {
   claimArrayRange,
@@ -606,7 +606,7 @@ async function addMedia(
   const resolved = await Promise.all(
     (model.media as WorkbookMediaLike[]).map(async (medium, index) => {
       if (medium.type !== "image") {
-        throw new ImageError("Unsupported media");
+        throw new ExcelImageError("Unsupported media");
       }
 
       // External (linked) images carry only a `link` target — no bytes are
@@ -642,7 +642,7 @@ async function addMedia(
         };
       }
 
-      throw new ImageError("Unsupported media");
+      throw new ExcelImageError("Unsupported media");
     })
   );
 
@@ -1859,7 +1859,7 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
       const nameKey = excelNameKey(table.name);
       const existingSheet = tableNameMap.get(nameKey);
       if (existingSheet !== undefined) {
-        throw new TableError(
+        throw new ExcelTableError(
           `Duplicate table name "${table.name}": already used in worksheet "${existingSheet}". ` +
             `Table names must be unique across the entire workbook (case-insensitive).`
         );

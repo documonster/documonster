@@ -160,3 +160,16 @@ describe("ALL_TOOLS", () => {
     }
   });
 });
+
+describe("calling a tool's handler outside a server", () => {
+  it("validates with the recipe AnyToolDefinition documents, for every shipped tool", async () => {
+    for (const tool of ALL_TOOLS) {
+      expect(() => z.object(tool.inputSchema), tool.name).not.toThrow();
+    }
+    const help = ALL_TOOLS.find(tool => tool.name === "documonster_help")!;
+    const args = z.object(help.inputSchema).parse({ topic: "overview" });
+    const result = await help.handler(args, { config: await makeConfig() });
+    expect(result.isError).not.toBe(true);
+    expect(() => z.object(help.inputSchema).parse({ topic: 42 })).toThrow();
+  });
+});

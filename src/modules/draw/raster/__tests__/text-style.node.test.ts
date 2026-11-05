@@ -31,7 +31,7 @@ function chainFor(style: RasterTextStyle): readonly { familyName?: string }[] {
 function inkOf(style: RasterTextStyle): number {
   resetDiscoveredFonts();
   const canvas = new BasicRasterCanvas(500, 60);
-  canvas.drawText(10, 40, TEXT, 28, "#000000", "start", undefined, style);
+  canvas.drawText(10, 40, TEXT, { fontSize: 28, color: "#000000", anchor: "start", ...style });
   let ink = 0;
   for (let i = 3; i < canvas.data.length; i += 4) {
     if (canvas.data[i] > 0) {

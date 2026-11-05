@@ -2,8 +2,8 @@
  * Example: stream errors + type guards
  *
  * Demonstrates:
- * - StreamError / StreamStateError / StreamTypeError /
- *   UnsupportedStreamTypeError — the stream error hierarchy
+ * - StreamError / StreamStateError / StreamArgumentError /
+ *   StreamUnsupportedTypeError — the stream error hierarchy
  * - isStreamError()  — narrow an unknown caught value to a StreamError
  * - Streams.isStream / isReadable / isWritable / Streams.isTransform / Streams.isDuplex —
  *   runtime type guards for stream shapes
@@ -17,8 +17,8 @@ import {
   isWritable,
   StreamError,
   StreamStateError,
-  StreamTypeError,
-  UnsupportedStreamTypeError,
+  StreamArgumentError,
+  StreamUnsupportedTypeError,
   Streams
 } from "@stream";
 
@@ -27,8 +27,8 @@ export function exampleErrorHierarchy(): void {
   const errors: StreamError[] = [
     new StreamError("generic failure"),
     new StreamStateError("write", "stream is destroyed"),
-    new StreamTypeError("Uint8Array", "string"),
-    new UnsupportedStreamTypeError("streamToBuffer", "object")
+    new StreamArgumentError("Uint8Array", "string"),
+    new StreamUnsupportedTypeError("streamToBuffer", "object")
   ];
 
   for (const err of errors) {

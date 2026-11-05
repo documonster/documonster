@@ -1,5 +1,5 @@
 import { createBufferReader } from "@archive/io/random-access";
-import { RemoteZipReader, Crc32MismatchError } from "@archive/unzip/remote-zip-reader";
+import { RemoteZipReader, ZipCrc32MismatchError } from "@archive/unzip/remote-zip-reader";
 import type { ZipEntry } from "@archive/zip/zip-bytes";
 import { createZip } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
@@ -900,11 +900,11 @@ describe("RemoteZipReader.open", () => {
     });
   });
 
-  describe("Crc32MismatchError", () => {
+  describe("ZipCrc32MismatchError", () => {
     it("should have correct error properties", () => {
-      const error = new Crc32MismatchError("test.txt", 0x12345678, 0xabcdef01);
+      const error = new ZipCrc32MismatchError("test.txt", 0x12345678, 0xabcdef01);
 
-      expect(error.name).toBe("Crc32MismatchError");
+      expect(error.name).toBe("ZipCrc32MismatchError");
       expect(error.path).toBe("test.txt");
       expect(error.expected).toBe(0x12345678);
       expect(error.actual).toBe(0xabcdef01);

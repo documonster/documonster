@@ -71,7 +71,7 @@ import {
   splitTextLines
 } from "@excel/chart/shared/chart-utils";
 import { getSpPrFill } from "@excel/chart/shared/shape-properties";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 
 /**
  * Local alias kept for file-level readability. ChartEx code has always
@@ -208,7 +208,7 @@ function areaOf(
 export function checkChartExModel(where: string, model: unknown): void {
   const space = (model as { chartSpace?: unknown } | null)?.chartSpace;
   if (model === null || typeof model !== "object" || space === null || typeof space !== "object") {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "model",
       `${where}: model must be an Office 2016 chart model, an object with a \`chartSpace\` — build one with ChartEx.createModel.`
     );
@@ -472,7 +472,7 @@ function nodesToSvg(nodes: readonly DrawNode[]): string {
   for (const node of nodes) {
     renderNode(node, IDENTITY, surface);
   }
-  return surface.markup();
+  return surface.format();
 }
 
 /**
@@ -2118,7 +2118,7 @@ function buildHistogramBins(
   // (e.g. `binning: { binSize: 0 }`) and edge cases where `max === min`
   // with `binCount === 0`.
   if (!(rawSize > 0) || !Number.isFinite(rawSize)) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "model",
       `Histogram bin size must be a positive finite number; got ${rawSize}.`
     );
@@ -2140,12 +2140,12 @@ function buildHistogramBins(
   // the last bin's upper bound and mis-positioning the overflow bin
   // — users with a tiny `rawSize` relative to `end - start` got a
   // chart with no visual clue that data was cut off. Fail loud with
-  // `ChartOptionsError` instead; callers with legitimately wide
+  // `ExcelChartOptionsError` instead; callers with legitimately wide
   // ranges should reduce their bin count or widen `rawSize`.
   const HISTOGRAM_BIN_CAP = 1000;
   const expectedBinCount = Math.ceil((end - start) / rawSize);
   if (expectedBinCount > HISTOGRAM_BIN_CAP) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "model",
       `Histogram would produce ${expectedBinCount} bins with binSize=${rawSize} over [${start}, ${end}]; ` +
         `the renderer caps at ${HISTOGRAM_BIN_CAP}. Widen the bin size or narrow the data range.`

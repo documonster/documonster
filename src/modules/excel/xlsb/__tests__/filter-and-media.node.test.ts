@@ -161,7 +161,7 @@ describe("an overlay watermark is a drawing, not a header picture", () => {
     const imageId = Image.add(workbook, { buffer: PNG, extension: "png" });
     const sheet = Workbook.addWorksheet(workbook, "S");
     Cell.setValue(sheet, "A1", 1);
-    Watermark.add(sheet, { imageId, mode: "overlay", opacity: 0.3 });
+    Watermark.set(sheet, { imageId, mode: "overlay", opacity: 0.3 });
     const parts = await extractAll(await Workbook.toBuffer(workbook, { format }));
     const path = [...parts.keys()].find(name => /drawings\/drawing\d+\.xml$/.test(name));
     const decoder = new TextDecoder();
@@ -209,7 +209,7 @@ describe("an overlay watermark is a drawing, not a header picture", () => {
     const imageId = Image.add(workbook, { buffer: PNG, extension: "png" });
     const sheet = Workbook.addWorksheet(workbook, "S");
     Cell.setValue(sheet, "A1", 1);
-    Watermark.add(sheet, { imageId, mode: "header" });
+    Watermark.set(sheet, { imageId, mode: "header" });
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).resolves.toBeDefined();
   });
 });

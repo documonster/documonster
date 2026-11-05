@@ -1,5 +1,5 @@
 import { Enums } from "@excel/core/enums";
-import { MaxItemsExceededError } from "@excel/errors";
+import { ExcelLimitExceededError } from "@excel/errors";
 import type { Style } from "@excel/types";
 import type { ArrayRange } from "@excel/utils/array-ranges";
 import { colCache } from "@excel/utils/col-cache";
@@ -330,7 +330,7 @@ class RowXform extends BaseXform<RowModel> {
       this.model!.cells.push(cellModel);
     }
     if (this.maxItems && this.model!.cells.length > this.maxItems) {
-      throw new MaxItemsExceededError("column", this.maxItems);
+      throw new ExcelLimitExceededError("column", this.maxItems);
     }
     this.parser = undefined;
   }

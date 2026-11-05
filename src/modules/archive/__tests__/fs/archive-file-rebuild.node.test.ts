@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Archive, ArchiveError } from "@archive";
+import { concatUint8Arrays } from "@utils/binary";
 import { afterAll, describe, expect, it } from "vitest";
 
 const dir = mkdtempSync(path.join(tmpdir(), "documonster-archive-file-rebuild-"));
@@ -56,7 +57,7 @@ describe("ArchiveFile TAR read-modify-write", () => {
     for await (const chunk of file.stream()) {
       chunks.push(chunk);
     }
-    expect(tarContents(Archive.concatUint8Arrays(chunks))).toEqual({
+    expect(tarContents(concatUint8Arrays(chunks))).toEqual({
       "a.txt": "A",
       "d/b.txt": "B",
       "new.txt": "N"
@@ -73,7 +74,7 @@ describe("ArchiveFile TAR read-modify-write", () => {
     const info = Archive.unpackTarSync(out).get("x.sh")!.info;
     expect(info).toMatchObject({ mode: 0o755, uid: 7, gid: 8, uname: "u", gname: "g", mtime });
     expect(Archive.unpackTarSync(out).get("link")!.info).toMatchObject({
-      type: Archive.TAR_TYPE.SYMLINK,
+      type: Archive.TarType.SYMLINK,
       linkname: "x.sh"
     });
   });
@@ -157,7 +158,7 @@ describe("ArchiveFile ZIP edits reach every output", () => {
     for await (const chunk of edit(edited()).stream()) {
       chunks.push(chunk);
     }
-    expect(zipContents(Archive.concatUint8Arrays(chunks))).toEqual(expected);
+    expect(zipContents(concatUint8Arrays(chunks))).toEqual(expected);
   });
 });
 
@@ -204,7 +205,7 @@ describe("ArchiveFile names in the shared vocabulary", () => {
       .addSymlink("link", "a.txt", { mode: 0o755 })
       .toBufferSync();
     expect(Archive.unpackTarSync(tar).get("link")!.info).toMatchObject({
-      type: Archive.TAR_TYPE.SYMLINK,
+      type: Archive.TarType.SYMLINK,
       linkname: "a.txt",
       mode: 0o755
     });

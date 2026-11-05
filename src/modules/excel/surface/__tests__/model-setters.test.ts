@@ -9,7 +9,7 @@ import {
   Table,
   Workbook,
   Worksheet,
-  WorksheetNameError
+  ExcelWorksheetNameError
 } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
@@ -81,7 +81,7 @@ describe("Worksheet.setModel", () => {
     const { wb, ws } = sheet();
     Workbook.addWorksheet(wb, "B");
     const model = { ...Worksheet.getModel(ws), name: "B", rows: [] };
-    expect(() => Worksheet.setModel(ws, model)).toThrow(WorksheetNameError);
+    expect(() => Worksheet.setModel(ws, model)).toThrow(ExcelWorksheetNameError);
     expect(Cell.getValue(ws, "A5")).toBe(1);
     expect(Worksheet.getName(ws)).toBe("Data");
   });

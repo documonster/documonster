@@ -4,7 +4,7 @@
  * The chart colour model held six — `tint`, `shade`, `satMod`, `lumMod`, `lumOff`, `alpha` — so a colour that went
  * through it lost the rest: `satOff`, `hueMod`, `hueOff`, `alphaMod`, `alphaOff`, `comp`, `inv`, `gray`, `gamma`,
  * `invGamma`, `red` / `green` / `blue` and their `Mod` / `Off`. An unchanged chart part was written back from its raw
- * XML and kept them, but parsing (`DrawingMl.parseSpPr`), any structured edit (`setSpPrLine`, `setSpPrFill`), the
+ * XML and kept them, but parsing (`DrawingMl.parseSpPr`), any structured edit (`withSpPrLine`, `withSpPrFill`), the
  * colours sidecar (`ChartClassic.fromColorsXml` → `toColorsXml`) and the renderer all went through the six. Now each
  * colour carries `transforms`, the ordered list, and the six fields are views of it.
  */
@@ -98,7 +98,7 @@ describe("reading", () => {
 
 describe("writing", () => {
   it("a structured edit of a read spPr writes every transform back, in order", async () => {
-    const edited = DrawingMl.setSpPrLine({ _rawXml: RAW_SPPR } as never, {
+    const edited = DrawingMl.withSpPrLine({ _rawXml: RAW_SPPR } as never, {
       width: 12700,
       color: { srgb: "00FF00" }
     });

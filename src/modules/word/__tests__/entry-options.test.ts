@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { WordCrypto } from "../crypto";
 import { DocxArgumentError } from "../errors";
 import { WordHtml } from "../html";
-import { Build, Convert, Document, Io, Query, Security, Streaming, Validation } from "../index";
+import { Build, Convert, Document, Io, Query, Security, Stream, Validation } from "../index";
 import type { DocxDocument } from "../index";
 import { WordMarkdown } from "../markdown";
 
@@ -65,46 +65,53 @@ describe("decryption", () => {
 describe("streaming writer options", () => {
   it("are checked by createWriter, as Document.set* checks them", async () => {
     const header = { content: { children: [Build.textParagraph("h")] } };
-    await refused("pageSize NaN", () =>
-      Streaming.createWriter({ sectionProperties: { pageSize: { width: Number.NaN, height: 1 } } })
+    await refused(
+      "pageSize NaN",
+      () =>
+        new Stream.DocumentWriter({
+          sectionProperties: { pageSize: { width: Number.NaN, height: 1 } }
+        })
     );
-    await refused("pageSize -1", () =>
-      Streaming.createWriter({ sectionProperties: { pageSize: { width: -1, height: 1 } } })
+    await refused(
+      "pageSize -1",
+      () => new Stream.DocumentWriter({ sectionProperties: { pageSize: { width: -1, height: 1 } } })
     );
     await refused(
       "headers",
-      () => Streaming.createWriter({ headers: "x" as never }),
+      () => new Stream.DocumentWriter({ headers: "x" as never }),
       "options.headers"
     );
-    await refused("header content", () =>
-      Streaming.createWriter({ headers: new Map([["default", { content: "x" }]]) as never })
+    await refused(
+      "header content",
+      () =>
+        new Stream.DocumentWriter({ headers: new Map([["default", { content: "x" }]]) as never })
     );
     await refused(
       "styles",
-      () => Streaming.createWriter({ styles: "x" as never }),
+      () => new Stream.DocumentWriter({ styles: "x" as never }),
       "options.styles"
     );
     await refused(
       "created",
-      () => Streaming.createWriter({ coreProperties: { created: new Date(Number.NaN) } }),
+      () => new Stream.DocumentWriter({ coreProperties: { created: new Date(Number.NaN) } }),
       "options.coreProperties.created"
     );
     await refused(
       "settings",
-      () => Streaming.createWriter({ settings: { zoom: -5 } }),
+      () => new Stream.DocumentWriter({ settings: { zoom: -5 } }),
       "options.settings.zoom"
     );
     await refused(
       "app",
-      () => Streaming.createWriter({ appProperties: { pages: Number.NaN } }),
+      () => new Stream.DocumentWriter({ appProperties: { pages: Number.NaN } }),
       "options.appProperties.pages"
     );
-    await refused("options", () => Streaming.createWriter("x" as never), "options");
-    expect(Streaming.createWriter({ headers: new Map([["default", header]]) })).toBeDefined();
+    await refused("options", () => new Stream.DocumentWriter("x" as never), "options");
+    expect(new Stream.DocumentWriter({ headers: new Map([["default", header]]) })).toBeDefined();
   });
 
   it("checks addText's properties and onProgress, naming the method", async () => {
-    const w = Streaming.createWriter();
+    const w = new Stream.DocumentWriter();
     await refused("onProgress", () => w.onProgress(null as never), "cb");
     await refused("addText props", () => w.addText("x", "y" as never), "properties");
     let error: unknown;
@@ -113,11 +120,11 @@ describe("streaming writer options", () => {
     } catch (e) {
       error = e;
     }
-    expect((error as Error).message).toMatch(/^Streaming\.StreamingDocxWriter#addText: /);
+    expect((error as Error).message).toMatch(/^Stream\.DocumentWriter#addText: /);
   });
 
   it("checks a whole batch before writing any of it, naming the element", async () => {
-    const w = Streaming.createWriter();
+    const w = new Stream.DocumentWriter();
     const good = { type: "paragraph", children: [] } as const;
     let error: unknown;
     try {
@@ -126,27 +133,27 @@ describe("streaming writer options", () => {
       error = e;
     }
     expect((error as { field?: string }).field).toBe("elements[1].type");
-    expect((error as Error).message).toMatch(/^Streaming\.StreamingDocxWriter#addMany: /);
+    expect((error as Error).message).toMatch(/^Stream\.DocumentWriter#addMany: /);
     await refused("addMany", () => w.addMany(42 as never), "elements");
     // Nothing of the refused batch was written: the result is an untouched writer's.
     const doc = await Io.read(await w.finalize());
-    const untouched = await Io.read(await Streaming.createWriter().finalize());
+    const untouched = await Io.read(await new Stream.DocumentWriter().finalize());
     expect(doc.body).toEqual(untouched.body);
   });
 });
 
 describe("streaming reader", () => {
   it("checks its source and options up front, and reads Flat OPC as Io.read does", async () => {
-    await refused("null", () => Streaming.createReader(null as never), "source");
+    await refused("null", () => new Stream.DocumentReader(null as never), "source");
     await refused(
       "options",
-      () => Streaming.createReader(new Uint8Array(4), "x" as never),
+      () => new Stream.DocumentReader(new Uint8Array(4), "x" as never),
       "options"
     );
     const d = doc();
     const flat = new TextEncoder().encode(await Io.toFlatOpc(d));
     const types: string[] = [];
-    for await (const block of Streaming.createReader(flat)) {
+    for await (const block of new Stream.DocumentReader(flat)) {
       types.push(block.type);
     }
     expect(types).toEqual(["paragraph"]);

@@ -6,11 +6,11 @@ import {
   Address,
   Cell,
   Column,
-  ColumnOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   ExcelArgumentError,
   ExcelError,
   Format,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   Note,
   Range,
   Row,
@@ -98,22 +98,22 @@ describe("Worksheet.toJson", () => {
   it("refuses a range it cannot read and a header form it does not know", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    expect(() => Worksheet.toJson(ws, { range: "zz" })).toThrow(InvalidAddressError);
+    expect(() => Worksheet.toJson(ws, { range: "zz" })).toThrow(ExcelInvalidAddressError);
     expect(() => Worksheet.toJson(ws, { header: "bogus" as never })).toThrow(ExcelArgumentError);
     expect(() => Worksheet.toJson(ws, { range: -1 })).toThrow(ExcelArgumentError);
   });
 });
 
 describe("Address error classes", () => {
-  it("a string that is not a reference is an InvalidAddressError; a column past XFD is out of bounds", () => {
+  it("a string that is not a reference is an ExcelInvalidAddressError; a column past XFD is out of bounds", () => {
     for (const bad of ["garbage", "zz", "", "1A", "A1:", "GARBAGE"]) {
-      expect(() => Address.decodeCell(bad), bad).toThrow(InvalidAddressError);
+      expect(() => Address.decodeCell(bad), bad).toThrow(ExcelInvalidAddressError);
     }
-    expect(() => Address.decodeRange("garbage")).toThrow(InvalidAddressError);
-    expect(() => Address.decodeRange("A1:zz")).toThrow(InvalidAddressError);
-    expect(() => Address.decodeCol("garbage")).toThrow(InvalidAddressError);
-    expect(() => Address.decodeCell("XFE1")).toThrow(ColumnOutOfBoundsError);
-    expect(() => Address.decodeCol("XFE")).toThrow(ColumnOutOfBoundsError);
+    expect(() => Address.decodeRange("garbage")).toThrow(ExcelInvalidAddressError);
+    expect(() => Address.decodeRange("A1:zz")).toThrow(ExcelInvalidAddressError);
+    expect(() => Address.decodeCol("garbage")).toThrow(ExcelInvalidAddressError);
+    expect(() => Address.decodeCell("XFE1")).toThrow(ExcelColumnOutOfBoundsError);
+    expect(() => Address.decodeCol("XFE")).toThrow(ExcelColumnOutOfBoundsError);
   });
 
   it("names what it was given when it is not a cell object, and refuses a sheet name that is not text", () => {

@@ -7,7 +7,7 @@ import { Writable } from "node:stream";
 import {
   ExcelArgumentError,
   ExcelStreamStateError,
-  InvalidAddressError,
+  ExcelInvalidAddressError,
   Stream,
   Workbook
 } from "@excel";
@@ -28,9 +28,9 @@ function writer() {
 describe("WorksheetWriter#mergeCells", () => {
   it("refuses a sheet qualifier and a non-reference; a single cell merges nothing", () => {
     const { ws } = writer();
-    expect(() => ws.mergeCells("Other!A30:B31")).toThrow(InvalidAddressError);
-    expect(() => ws.mergeCells("zz")).toThrow(InvalidAddressError);
-    expect(() => ws.mergeCells("A10:B10", "x" as never)).toThrow(InvalidAddressError);
+    expect(() => ws.mergeCells("Other!A30:B31")).toThrow(ExcelInvalidAddressError);
+    expect(() => ws.mergeCells("zz")).toThrow(ExcelInvalidAddressError);
+    expect(() => ws.mergeCells("A10:B10", "x" as never)).toThrow(ExcelInvalidAddressError);
     ws.mergeCells("A20");
     ws.mergeCells("a1:b2");
     expect(() => ws.mergeCells("B2:C3")).toThrow();
@@ -54,7 +54,7 @@ describe("rows and cells", () => {
 
   it("getCell and getRow refuse an address off the grid with an address error", () => {
     const { ws } = writer();
-    expect(() => ws.getCell("zz")).toThrow(InvalidAddressError);
+    expect(() => ws.getCell("zz")).toThrow(ExcelInvalidAddressError);
     expect(() => ws.getRow(0)).toThrow(/whole numbers from 1/);
   });
 

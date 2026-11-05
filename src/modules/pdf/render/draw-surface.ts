@@ -12,6 +12,8 @@
  * coordinate convention is adapted at the boundary.
  */
 
+import { checkSurfaceCall } from "@draw/arguments";
+import { DrawArgumentError } from "@draw/errors";
 import type { DrawSurface } from "@draw/surface";
 import type { DrawClip, DrawPaint, DrawPathCommand, DrawPoint } from "@draw/types";
 import { DEFAULT_TEXT_FAMILY, sectorToPath } from "@draw/types";
@@ -23,8 +25,25 @@ import type {
   DrawTextOptions,
   PathOp
 } from "@pdf/builder/document-builder";
+import { PdfArgumentError } from "@pdf/errors";
 import type { PdfColor } from "@pdf/types";
 import type { Rgba01 } from "@utils/svg-lex";
+
+/**
+ * {@link checkSurfaceCall} in its strict form — a page takes no `NaN`, and a value the builder
+ * would refuse is refused here, under the surface's name rather than the builder's — reported
+ * as this module's error.
+ */
+function checkPdfSurfaceCall(where: string, method: string, args: readonly unknown[]): void {
+  try {
+    checkSurfaceCall(where, method, args, { strict: true });
+  } catch (err) {
+    if (err instanceof DrawArgumentError) {
+      throw new PdfArgumentError(err.field, err.message, { cause: err });
+    }
+    throw err;
+  }
+}
 
 /**
  * The part of a page this surface actually draws through.
@@ -130,8 +149,14 @@ export function createScaledPdfDrawSurface(
   const hasPaint = (paint: DrawPaint): boolean =>
     paint.fill !== undefined || paint.stroke !== undefined;
 
+  // The surface is a public object as well as the one the PDF exporters walk, so a caller
+  // driving it by hand gets a typed error rather than a `TypeError` from inside a primitive.
+  const check = (method: string, args: readonly unknown[]): void =>
+    checkPdfSurfaceCall(`Pdf.createDrawSurface(…).${method}`, method, args);
+
   return {
     pushClip(clip: DrawClip) {
+      check("pushClip", [clip]);
       // `q` … `W n` … `Q` is the only way to scope a clip in a content stream, so
       // the save/restore pair is what makes popClip work.
       const stream = page.getContentStream();
@@ -151,6 +176,7 @@ export function createScaledPdfDrawSurface(
     },
 
     rect(x, y, width, height, rx, paint) {
+      check("rect", [x, y, width, height, rx, paint]);
       if (!hasPaint(paint)) {
         return;
       }
@@ -177,6 +203,7 @@ export function createScaledPdfDrawSurface(
     },
 
     ellipse(cx, cy, rx, ry, paint) {
+      check("ellipse", [cx, cy, rx, ry, paint]);
       if (!hasPaint(paint)) {
         return;
       }
@@ -190,6 +217,7 @@ export function createScaledPdfDrawSurface(
     },
 
     sector(cx, cy, radius, innerRadius, startAngle, endAngle, paint) {
+      check("sector", [cx, cy, radius, innerRadius, startAngle, endAngle, paint]);
       // A PDF content stream has no arc operator, so the sector is lowered to cubics —
       // by the shared builder, not a copy of it. The copy that used to live here wound
       // an annulus's two rings the same way, and PDF fills nonzero, so a full doughnut
@@ -205,6 +233,7 @@ export function createScaledPdfDrawSurface(
     },
 
     polyline(input, closed, paint) {
+      check("polyline", [input, closed, paint]);
       if (!hasPaint(paint)) {
         return;
       }
@@ -246,6 +275,7 @@ export function createScaledPdfDrawSurface(
     },
 
     path(commands, paint) {
+      check("path", [commands, paint]);
       if (!hasPaint(paint)) {
         return;
       }
@@ -253,6 +283,7 @@ export function createScaledPdfDrawSurface(
     },
 
     text(x, y, lines, style, rotate) {
+      check("text", [x, y, lines, style, rotate]);
       if (!style.fill) {
         return;
       }

@@ -1,4 +1,4 @@
-import type { WorkbookData } from "@excel/core/workbook-core";
+import { checkWorkbook, type WorkbookData } from "@excel/core/workbook-core";
 import {
   resolveReadFormat,
   normalizeBytes,
@@ -35,7 +35,7 @@ import {
 import type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 import { createXlsxByteStream } from "@excel/core/xlsx-stream";
 import { encryptWorkbookPackage, openWorkbookPackage } from "@excel/utils/container-errors";
-import type { IParseStream, XlsxReadOptions } from "@excel/xlsx/types";
+import type { XlsxParseStream, XlsxReadOptions } from "@excel/xlsx/types";
 import { writeXlsxBytes, writeXlsxToStream } from "@excel/xlsx/write/package";
 
 export type {
@@ -80,6 +80,7 @@ export async function toBuffer(
   wb: WorkbookData,
   options?: WorkbookWriteOptions
 ): Promise<Uint8Array> {
+  checkWorkbook(wb);
   checkIoOptions("Workbook.toBuffer", options, "write");
   return packageBytes(wb, options);
 }
@@ -226,7 +227,7 @@ export async function readStream(
  */
 export async function readStream(
   wb: WorkbookData,
-  stream: IParseStream,
+  stream: XlsxParseStream,
   options?: XlsxReadOptions
 ): Promise<WorkbookData>;
 export async function readStream(
@@ -287,6 +288,7 @@ export async function writeStream(
   stream: WorkbookWritable,
   options?: WorkbookWriteOptions
 ): Promise<void> {
+  checkWorkbook(wb);
   checkIoOptions("Workbook.writeStream", options, "write");
   // A Web `WritableStream` is driven as the Node-style writable the serializers expect; anything else is refused here.
   // A Node-style writable is checked and used in this tick, so a sink that fails straight away is observed; only a
@@ -347,6 +349,7 @@ export function toStream(
   wb: WorkbookData,
   options?: XlsxStreamOptions & WorkbookWriteOptions
 ): XlsxReadable {
+  checkWorkbook(wb);
   checkIoOptions("Workbook.toStream", options, "write");
   if (options?.password !== undefined) {
     // An encrypted package is assembled and encrypted before its first byte can be handed out.

@@ -4,7 +4,7 @@
  */
 import { CsvError as CsvModuleError, isCsvError as isCsvModuleError } from "@csv";
 import * as ExcelEntry from "@excel";
-import { Row, Workbook, Worksheet, WorksheetNameError } from "@excel";
+import { Row, Workbook, Worksheet, ExcelWorksheetNameError } from "@excel";
 import * as CsvEntry from "@excel/bridge/csv";
 import { ExcelCsv } from "@excel/bridge/csv";
 import * as FormulaEntry from "@excel/bridge/formula";
@@ -117,7 +117,7 @@ describe("R4-C7 ExcelMarkdown makes up only names it can keep", () => {
     const wb = Workbook.create();
     Workbook.addWorksheet(wb, "T_2");
     expect(() => ExcelMarkdown.addWorksheets(wb, twoTables, { sheetName: "T" })).toThrow(
-      WorksheetNameError
+      ExcelWorksheetNameError
     );
     expect(Workbook.listWorksheets(wb).map(Worksheet.getName)).toEqual(["T_2"]);
   });
@@ -128,8 +128,8 @@ describe("cross: the bridge entries export the errors they throw", () => {
     for (const entry of [CsvEntry, MarkdownEntry]) {
       expect(entry.ExcelArgumentError).toBe(ExcelEntry.ExcelArgumentError);
       expect(entry.ExcelFileError).toBe(ExcelEntry.ExcelFileError);
-      expect(entry.WorksheetNameError).toBe(ExcelEntry.WorksheetNameError);
-      expect(entry.InvalidValueTypeError).toBe(ExcelEntry.InvalidValueTypeError);
+      expect(entry.ExcelWorksheetNameError).toBe(ExcelEntry.ExcelWorksheetNameError);
+      expect(entry.ExcelInvalidValueTypeError).toBe(ExcelEntry.ExcelInvalidValueTypeError);
       expect(entry.isExcelError).toBe(ExcelEntry.isExcelError);
     }
     expect(CsvEntry.ExcelDownloadError).toBe(ExcelEntry.ExcelDownloadError);

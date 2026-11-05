@@ -1,5 +1,5 @@
 /**
- * StreamingDocxWriter — sink-mode (true end-to-end streaming) tests.
+ * Stream.DocumentWriter — sink-mode (true end-to-end streaming) tests.
  *
  * Verifies:
  *  - bytes delivered through a Web `WritableStream` match the buffered
@@ -14,7 +14,7 @@ import { ZipDeflate } from "@archive/zip/stream";
 import { PartPath } from "@word/constants";
 import { describe, it, expect, vi } from "vitest";
 
-import { DocxWriteError, Build, Streaming } from "../index";
+import { DocxWriteError, Build, Stream } from "../index";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -56,10 +56,10 @@ async function describePackage(bytes: Uint8Array): Promise<string> {
     .join("\n---\n");
 }
 
-describe("StreamingDocxWriter — sink mode", () => {
+describe("Stream.DocumentWriter — sink mode", () => {
   it("delivers equivalent output through a Web WritableStream", async () => {
     // Build the same document twice: once buffered, once via sink.
-    const buffered = Streaming.createWriter();
+    const buffered = new Stream.DocumentWriter();
     for (let i = 0; i < 50; i++) {
       buffered.add(Build.textParagraph(`Paragraph ${i}`));
     }
@@ -72,7 +72,7 @@ describe("StreamingDocxWriter — sink mode", () => {
       }
     });
 
-    const piped = Streaming.createWriter({ sink: ws });
+    const piped = new Stream.DocumentWriter({ sink: ws });
     for (let i = 0; i < 50; i++) {
       piped.add(Build.textParagraph(`Paragraph ${i}`));
     }
@@ -107,7 +107,7 @@ describe("StreamingDocxWriter — sink mode", () => {
       }
     });
 
-    const writer = Streaming.createWriter({ sink: ws });
+    const writer = new Stream.DocumentWriter({ sink: ws });
     const adding = writer.addAsync(Build.textParagraph("async-output-boundary-".repeat(5000)));
     await writeStarted.promise;
 
@@ -143,7 +143,7 @@ describe("StreamingDocxWriter — sink mode", () => {
     });
 
     try {
-      const writer = Streaming.createWriter({
+      const writer = new Stream.DocumentWriter({
         sink: new WritableStream<Uint8Array>({ write(): void {} })
       });
       const adding = writer.addAsync(Build.textParagraph("tracked compression"));
@@ -183,7 +183,7 @@ describe("StreamingDocxWriter — sink mode", () => {
     });
 
     try {
-      const writer = Streaming.createWriter({
+      const writer = new Stream.DocumentWriter({
         sink: new WritableStream<Uint8Array>({ write(): void {} })
       });
       writer.add(Build.textParagraph("auxiliary boundary"));
@@ -212,7 +212,7 @@ describe("StreamingDocxWriter — sink mode", () => {
       }
     });
 
-    const writer = Streaming.createWriter({ sink: ws });
+    const writer = new Stream.DocumentWriter({ sink: ws });
     const caught = await writer
       .addAsync(Build.textParagraph("sink-error-output-".repeat(5000)))
       .catch((e: unknown) => e);
@@ -236,7 +236,7 @@ describe("StreamingDocxWriter — sink mode", () => {
     });
 
     try {
-      const writer = Streaming.createWriter({
+      const writer = new Stream.DocumentWriter({
         sink: new WritableStream<Uint8Array>({ write(): void {} })
       });
       const caught = await writer
@@ -254,7 +254,7 @@ describe("StreamingDocxWriter — sink mode", () => {
 
   it("rejects reset() in sink mode", async () => {
     const ws = new WritableStream<Uint8Array>({ write(): void {} });
-    const writer = Streaming.createWriter({ sink: ws });
+    const writer = new Stream.DocumentWriter({ sink: ws });
     writer.add(Build.textParagraph("once"));
     expect(() => writer.reset()).toThrow(/sink mode/);
     await writer.finalize();
@@ -273,7 +273,7 @@ describe("StreamingDocxWriter — sink mode", () => {
         }
       })
     };
-    const writer = Streaming.createWriter(failingSinkOpts);
+    const writer = new Stream.DocumentWriter(failingSinkOpts);
 
     // Feed elements via addAsync until a sink write has actually failed and
     // been captured. The first compressed chunk reaching the sink rejects;
@@ -304,7 +304,7 @@ describe("StreamingDocxWriter — sink mode", () => {
   });
 
   it("buffered mode (no sink) is unaffected — finalize returns full bytes", async () => {
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     writer.add(Build.textParagraph("alpha"));
     const bytes = await writer.finalize();
     expect(bytes.length).toBeGreaterThan(0);
@@ -329,7 +329,7 @@ describe("StreamingDocxWriter — sink mode", () => {
       }
     });
 
-    const writer = Streaming.createWriter({ sink: ws });
+    const writer = new Stream.DocumentWriter({ sink: ws });
 
     // ~6000 paragraphs of incompressible-ish text — multi-MB uncompressed body.
     const big = "x9q7-streaming-body-".repeat(120); // ~2.4 KB per paragraph
@@ -359,7 +359,7 @@ describe("StreamingDocxWriter — sink mode", () => {
  * collected must still reach the compressor before `addAsync` waits on the sink — or a small element's bytes would
  * sit in memory while the caller is told it was written — and before the part is closed.
  */
-describe("StreamingDocxWriter document.xml collection", () => {
+describe("Stream.DocumentWriter document.xml collection", () => {
   it("hands a short element to the compressor before addAsync resolves", async () => {
     const pushed: number[] = [];
     const originalPush = ZipDeflate.prototype.push;
@@ -373,7 +373,7 @@ describe("StreamingDocxWriter document.xml collection", () => {
       return originalPush.call(this, data, final, callback);
     });
     try {
-      const writer = Streaming.createWriter({ sink: new WritableStream<Uint8Array>() });
+      const writer = new Stream.DocumentWriter({ sink: new WritableStream<Uint8Array>() });
       const before = pushed.reduce((a, b) => a + b, 0);
       await writer.addAsync(Build.textParagraph("short"));
       const after = pushed.reduce((a, b) => a + b, 0);
@@ -386,7 +386,7 @@ describe("StreamingDocxWriter document.xml collection", () => {
   });
 
   it("writes every element when none of them fills a batch", async () => {
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     for (let i = 0; i < 3; i++) {
       writer.addText(`para-${i}`);
     }
@@ -399,12 +399,12 @@ describe("StreamingDocxWriter document.xml collection", () => {
 
   it("produces the same document.xml whether batches fill or not", async () => {
     const texts = Array.from({ length: 4000 }, (_, i) => `row ${i} 日本語 😀 <&>`);
-    const sync = Streaming.createWriter();
+    const sync = new Stream.DocumentWriter();
     for (const text of texts) {
       sync.addText(text);
     }
     const chunks: Uint8Array[] = [];
-    const sinked = Streaming.createWriter({
+    const sinked = new Stream.DocumentWriter({
       sink: new WritableStream<Uint8Array>({ write: chunk => void chunks.push(chunk) })
     });
     for (const text of texts) {
@@ -423,13 +423,13 @@ describe("StreamingDocxWriter document.xml collection", () => {
   });
 });
 
-describe("StreamingDocxWriter reset with collected XML", () => {
+describe("Stream.DocumentWriter reset with collected XML", () => {
   async function documentXml(bytes: Uint8Array): Promise<string> {
     return new TextDecoder().decode((await extractAll(bytes)).get(PartPath.Document)!.data);
   }
 
   it("does not carry XML collected before reset() into the next document", async () => {
-    const writer = Streaming.createWriter();
+    const writer = new Stream.DocumentWriter();
     writer.addText("OLD-CONTENT");
     writer.reset();
     writer.addText("NEW-CONTENT");
@@ -440,11 +440,11 @@ describe("StreamingDocxWriter reset with collected XML", () => {
   });
 
   it("writes the same document after reset() as a fresh writer does", async () => {
-    const reused = Streaming.createWriter();
+    const reused = new Stream.DocumentWriter();
     reused.addText("first document");
     await reused.finalize();
     reused.reset();
-    const fresh = Streaming.createWriter();
+    const fresh = new Stream.DocumentWriter();
     for (const writer of [reused, fresh]) {
       for (let i = 0; i < 50; i++) {
         writer.addText(`line ${i}`);

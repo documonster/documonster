@@ -61,7 +61,8 @@ describe("Stream Module - Shared Tests (Browser)", () => {
     createWritable: Streams.createWritable,
     createPassThrough: Streams.createPassThrough,
     createTransform: Streams.createTransform,
-    createCollector: Streams.createCollector,
+    createCollector: (options?: ConstructorParameters<typeof Streams.Collector>[0]) =>
+      new Streams.Collector(options),
     createDuplex: Streams.createDuplex,
     createReadableFromArray: Streams.createReadableFromArray,
     createReadableFromAsyncIterable: Streams.createReadableFromAsyncIterable,

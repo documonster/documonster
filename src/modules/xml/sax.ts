@@ -6,7 +6,7 @@
  *
  * Migrated from the excel module's parse-sax.ts into the standalone XML module.
  * Enhancements over the original:
- * - Uses @xml/types for event types (SaxTag, SaxEvent, SaxHandlers)
+ * - Uses @xml/types for event types (XmlSaxTag, XmlSaxEvent, XmlSaxHandlers)
  * - Uses @xml/errors for parse errors (XmlParseError)
  * - Exposes CDATA, comment, and processing-instruction event handlers
  * - Provides both callback API and async-generator API
@@ -18,7 +18,13 @@ import { toError } from "@utils/errors";
 import { checkBooleanOptions, checkOptionsObject, checkParserLimits } from "@xml/arguments";
 import { XmlArgumentError, XmlParseError } from "@xml/errors";
 import type { XmlParseLimit } from "@xml/errors";
-import type { XmlInvalidCharHandling, SaxEvent, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
+import type {
+  XmlInvalidCharHandling,
+  XmlSaxEvent,
+  XmlSaxHandlers,
+  XmlSaxOptions,
+  XmlSaxTag
+} from "@xml/types";
 
 // =============================================================================
 // Character Codes
@@ -266,8 +272,8 @@ class SaxParser {
   private text: string = "";
   private name: string = "";
   private q: number | null = null;
-  private tags: SaxTag[] = [];
-  private tag: SaxTag | null = null;
+  private tags: XmlSaxTag[] = [];
+  private tag: XmlSaxTag | null = null;
   /** Names repeated on the tag being opened, reported when it opens — `null` until the first one. */
   private duplicateAttributes: string[] | null = null;
   private entity: string = "";
@@ -303,7 +309,7 @@ class SaxParser {
   private sawInternalSubset = false;
 
   // Event handlers
-  private _handlers: SaxHandlers = {};
+  private _handlers: XmlSaxHandlers = {};
 
   /**
    * Whether to keep `prefixedAttributes`. Off unless a consumer asks, so a parse that does not need it pays one
@@ -321,7 +327,7 @@ class SaxParser {
    */
   prefixedAttributes = 0;
 
-  constructor(options?: SaxOptions) {
+  constructor(options?: XmlSaxOptions) {
     checkOptionsObject("Xml.SaxParser", options);
     checkBooleanOptions("Xml.SaxParser", options as Record<string, unknown> | undefined, [
       "position",
@@ -398,14 +404,14 @@ class SaxParser {
    * event replaces the first (it does not add a listener, as `EventEmitter.on` would).
    * Without an `error` handler, the first error is thrown out of {@link write} / {@link close}.
    */
-  on(name: "opentag", handler: (tag: SaxTag) => void): void;
+  on(name: "opentag", handler: (tag: XmlSaxTag) => void): void;
   on(name: "text", handler: (text: string) => void): void;
-  on(name: "closetag", handler: (tag: SaxTag) => void): void;
+  on(name: "closetag", handler: (tag: XmlSaxTag) => void): void;
   on(name: "cdata", handler: (text: string) => void): void;
   on(name: "comment", handler: (text: string) => void): void;
   on(name: "pi", handler: (target: string, body: string) => void): void;
   on(name: "error", handler: (err: Error) => void): void;
-  on<K extends keyof SaxHandlers>(name: K, handler: SaxHandlers[K]): void {
+  on<K extends keyof XmlSaxHandlers>(name: K, handler: XmlSaxHandlers[K]): void {
     checkEventName("on", name);
     if (typeof handler !== "function") {
       throw new XmlArgumentError(
@@ -417,13 +423,13 @@ class SaxParser {
   }
 
   /** Remove the handler for an event. */
-  off(name: keyof SaxHandlers): void {
+  off(name: keyof XmlSaxHandlers): void {
     checkEventName("off", name);
     delete this._handlers[name];
   }
 
   /** Return the currently-registered handler for an event, if any. */
-  getHandler<K extends keyof SaxHandlers>(name: K): SaxHandlers[K] {
+  getHandler<K extends keyof XmlSaxHandlers>(name: K): XmlSaxHandlers[K] {
     return this._handlers[name];
   }
 
@@ -2030,7 +2036,7 @@ class SaxParser {
   }
 
   /** Extract xmlns declarations from tag attributes and populate tag namespace fields. */
-  private applyNamespaces(tag: SaxTag): void {
+  private applyNamespaces(tag: XmlSaxTag): void {
     const XML_NS = "http://www.w3.org/XML/1998/namespace";
     const XMLNS_NS = "http://www.w3.org/2000/xmlns/";
 
@@ -2292,7 +2298,7 @@ function decodeUtf8(decoder: TextDecoder, chunk: Uint8Array | undefined, stream:
 /**
  * Parse an async-iterable of XML chunks as a stream of SAX event batches.
  *
- * Yields an array of {@link SaxEvent} per input chunk. This is the
+ * Yields an array of {@link XmlSaxEvent} per input chunk. This is the
  * primary integration point for streaming XML parsing.
  *
  * @param iterable - Async iterable of string or Uint8Array chunks.
@@ -2309,8 +2315,8 @@ function decodeUtf8(decoder: TextDecoder, chunk: Uint8Array | undefined, stream:
  */
 async function* parseSax(
   iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
-  options?: SaxOptions
-): AsyncGenerator<SaxEvent[], void, undefined> {
+  options?: XmlSaxOptions
+): AsyncGenerator<XmlSaxEvent[], void, undefined> {
   checkChunkSource("Xml.parseSax", iterable);
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new SaxParser(options);
@@ -2320,7 +2326,7 @@ async function* parseSax(
     error = err;
   });
 
-  let events: SaxEvent[] = [];
+  let events: XmlSaxEvent[] = [];
   parser.on("opentag", value => events.push({ eventType: "opentag", value }));
   parser.on("text", value => events.push({ eventType: "text", value }));
   parser.on("closetag", value => events.push({ eventType: "closetag", value }));

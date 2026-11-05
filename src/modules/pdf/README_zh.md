@@ -451,7 +451,7 @@ const incremental = await editor.toBuffer({ incremental: true }); // 保留原�
 页索引从 0 开始,在编辑器的整个生命期内每页只有一个索引:`0` 到 `pageCount - 1` 是读入时的页,
 用 `addPage()` 或 `copyPagesFrom()` 添加的页按添加顺序排在其后。`getPage`、`removePage`、`rotatePage`、
 `isPageRemoved` 与 `splitPages` 都接受整个范围;凡不指向任何页的索引——越界、小数、`NaN`、非数字——都抛出
-`PdfStructureError`。删除页面不会给其他页重新编号。`pageCount` 始终是读入时的页数;`outputPageCount`
+`PdfArgumentError`,其 `field` 指明参数(`index`;`splitPages` 为 `options.pageIndices[i]`)。删除页面不会给其他页重新编号。`pageCount` 始终是读入时的页数;`outputPageCount`
 是现在写出时的页数。`getPage` 对每页返回同一个句柄:对读入或复制的页,它画在页面原有内容之上;对用
 `addPage()` 添加的页,它直接画在该页上(`addPage()` 返回的构建器也画在这一页上)。删除添加的页会把它排除在
 输出之外;旋转它会设置它的 `/Rotate`。`splitPages({ pageIndices })` 与 `copyPagesFrom(source, { pageIndices })` 指名页面,
@@ -586,13 +586,13 @@ src/modules/pdf/
 ## 写入选项
 
 `Pdf.fromTable()` 接受 `PdfExportOptions`。`Pdf.fromExcel()` 接受
-`ExcelToPdfOptions`,它继承相同的写入选项,并额外提供类型严格的可选公式重算回调:
+`PdfFromExcelOptions`,它继承相同的写入选项,并额外提供类型严格的可选公式重算回调:
 
 ```typescript
 import { ExcelFormula } from "documonster/excel/formula";
-import { Pdf, type ExcelToPdfOptions } from "documonster/pdf";
+import { Pdf, type PdfFromExcelOptions } from "documonster/pdf";
 
-const options: ExcelToPdfOptions = {
+const options: PdfFromExcelOptions = {
   recalculate: ExcelFormula.calculate,
   fitToPage: true
 };
@@ -605,7 +605,7 @@ const bytes = await Pdf.fromExcel(workbook, options);
 ```typescript
 interface PdfExportOptions {
   // 页面布局
-  pageSize?: PageSizeName | PdfPageSize; // "A4"、"LETTER"、"A3" 等,或 { width, height }
+  pageSize?: PdfPageSizeName | PdfPageSize; // "A4"、"LETTER"、"A3" 等,或 { width, height }
   orientation?: "portrait" | "landscape";
   margins?: Partial<PdfMargins>; // { top, right, bottom, left },单位为点(72pt = 1in)
   horizontalCentered?: boolean; // 水平居中(默认:取工作表 pageSetup)
@@ -645,7 +645,6 @@ interface PdfExportOptions {
   modDate?: Date;
 
   // 字体
-  font?: Uint8Array; // 旧版单 TrueType 字体快捷选项
   fonts?: PdfFontConfig; // 命名字体族、样式 face、TTC 选择和 fallback
   defaultFontFamily?: string; // 后备字体族(默认:"Helvetica")
   defaultFontSize?: number; // 后备字号(默认:11)
@@ -698,12 +697,12 @@ await Pdf.fromChart(chart, { ...common, title: "Revenue" });
 请按**名称**选择工作表(`sheets: ["Summary", "Q1"]`,比较时忽略大小写;不存在的名称抛出 `PdfArgumentError`)。
 数字位置已弃用(1.0 移除):这里从 1 开始,而 `WordExcel.toDocx` 中从 0 开始,`Workbook.getWorksheet` 中则是工作表 id,
 同一个数字在三处选中的是不同的工作表。它们仍与以前完全一样可用;传入数字的调用在编辑器中显示为删除线,而类型标注为公开的
-`ExcelToPdfOptions` 的选项不会(它可能只含名称)。
+`PdfFromExcelOptions` 的选项不会(它可能只含名称)。
 
 ## 读取选项
 
 ```typescript
-interface ReadPdfOptions {
+interface PdfExtractOptions {
   password?: string; // 加密 PDF 的密码(用户或所有者)
   pages?: number[]; // 要提取哪些页面(1 基)。省略则提取所有页面
   extractText?: boolean; // 提取文本(默认:true)
@@ -733,20 +732,20 @@ const result = await Pdf.extract(input.files[0]);
 ### 读取结果
 
 ```typescript
-interface ReadPdfResult {
+interface PdfExtractResult {
   text: string; // 所有页面的全部文本
-  pages: ReadPdfPage[]; // 逐页结果
+  pages: PdfExtractedPage[]; // 逐页结果
   metadata: PdfMetadata; // 文档元数据
   formFields: PdfFormField[]; // 表单字段(文档级)
   bookmarks: PdfBookmark[]; // 文档大纲 / 目录
 }
 
-interface ReadPdfPage {
+interface PdfExtractedPage {
   pageNumber: number; // 1 基
   text: string; // 页面文本
-  textLines: TextLine[]; // 带位置的结构化行
-  textFragments: TextFragment[]; // 带精确坐标的原始片段
-  images: ExtractedImage[]; // 提取的图像
+  textLines: PdfTextLine[]; // 带位置的结构化行
+  textFragments: PdfTextFragment[]; // 带精确坐标的原始片段
+  images: PdfExtractedImage[]; // 提取的图像
   annotations: PdfAnnotation[]; // 注释(链接、批注、高亮)
   width: number; // 页宽,单位为点
   height: number; // 页高,单位为点
@@ -1145,7 +1144,7 @@ const page = builder.addPage();
 page.drawText("报告", { x: 72, y: 760, fontFamily: "Noto Sans CJK SC" });
 ```
 
-`Pdf.fromTable()` 和 `Pdf.fromExcel()` 仍支持 `font?: Uint8Array`,作为旧版单字体快捷选项;它相当于仅配置一个默认 regular face,不能与 `fonts` 同时使用。`Builder.embedFont(bytes)` 是对应的兼容方法,并会替换 Builder 之前的字体配置。`embedFont()` 和 `embedFonts()` 必须在所有页面的首个文本命令之前调用。可以先调用 `addPage()`,前提是尚未绘制文本。
+`Builder.embedFont(source)` 是单字体快捷方法:等同于 `embedFonts({ default: { regular: source } })`,`source` 为字体字节,或用 `{ data, collectionIndex }` 选择 `.ttc` 中的某个 face;它会替换 Builder 之前的字体配置。`embedFont()` 和 `embedFonts()` 必须在所有页面的首个文本命令之前调用。可以先调用 `addPage()`,前提是尚未绘制文本。
 
 如果所有已配置 face 都缺少某字符,PDF 会显示该 face 的 `.notdef` 字形,但 ToUnicode 仍保留原始 Unicode 序列,供复制、搜索、无障碍和文本提取使用。每个嵌入 face 在单个 PDF 中最多编码 65,535 个不同 Unicode 序列。
 
@@ -1302,7 +1301,7 @@ pnpm example --filter pdf-signatures
 
 ### `Pdf.extract(data, options?)`
 
-读取 PDF 文件并提取文本、图像和元数据。返回 `Promise<ReadPdfResult>`。
+读取 PDF 文件并提取文本、图像和元数据。返回 `Promise<PdfExtractResult>`。
 
 ```typescript
 import { Pdf } from "documonster/pdf";
@@ -1376,7 +1375,7 @@ const doc = new Pdf.Builder();
 doc.setMetadata({ title, author, subject, keywords, creator, producer });
 doc.setEncryption({ ownerPassword, userPassword?, permissions? });
 doc.setPdfACompliance();       // 启用 PDF/A-1b
-doc.embedFont(fontBytes);      // 旧版单默认字体兼容 API
+doc.embedFont(fontBytes);      // 一个默认 face:字节,或 .ttc 用 { data, collectionIndex }
 // 或:doc.embedFonts(fonts);   // 完整 PdfFontConfig;后一次调用替换之前的配置
 
 const page = doc.addPage({ width?, height? }); // 返回 Pdf.PageBuilder
@@ -1519,7 +1518,7 @@ Draw.render(list, Pdf.createDrawSurface(page, { x: 72, y: 500, width: 200, heigh
 
 ### `Pdf.parseSvgPath(d)`
 
-将 SVG 路径 `d` 属性解析为 `PathOp` 对象数组,供 `drawPath()` 使用。
+将 SVG 路径 `d` 属性解析为 `PdfPathOp` 对象数组,供 `drawPath()` 使用。
 
 ```typescript
 import { Pdf } from "documonster/pdf";

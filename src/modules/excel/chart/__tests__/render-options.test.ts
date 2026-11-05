@@ -7,7 +7,7 @@ import { Draw } from "@draw/index";
 import {
   ChartClassic,
   ChartEx,
-  ChartOptionsError,
+  ExcelChartOptionsError,
   ExcelError,
   isExcelError
 } from "@excel/chart/index";
@@ -24,14 +24,14 @@ const modern = ChartEx.createModel({
   series: [{ values: "Sheet1!$B$1:$B$3" }]
 });
 
-async function refusal(run: () => unknown): Promise<ChartOptionsError> {
+async function refusal(run: () => unknown): Promise<ExcelChartOptionsError> {
   try {
     await run();
   } catch (err) {
-    expect(err).toBeInstanceOf(ChartOptionsError);
-    return err as ChartOptionsError;
+    expect(err).toBeInstanceOf(ExcelChartOptionsError);
+    return err as ExcelChartOptionsError;
   }
-  throw new Error("expected a ChartOptionsError");
+  throw new Error("expected a ExcelChartOptionsError");
 }
 
 function placedChart() {
@@ -111,17 +111,17 @@ describe("chart render options are checked at the entry (R4P-B1, X4)", () => {
   });
 });
 
-describe("ChartOptionsError carries a field and names the public call (R4P-S3, X7, X6)", () => {
+describe("ExcelChartOptionsError carries a field and names the public call (R4P-S3, X7, X6)", () => {
   it("is an ExcelArgumentError, so every existing catch still answers", () => {
-    const err = new ChartOptionsError("options.type", "bad");
+    const err = new ExcelChartOptionsError("options.type", "bad");
     expect(err).toBeInstanceOf(ExcelArgumentError);
     expect(err).toBeInstanceOf(ExcelError);
     expect(isExcelError(err)).toBe(true);
     expect(err.field).toBe("options.type");
-    expect(err.name).toBe("ChartOptionsError");
+    expect(err.name).toBe("ExcelChartOptionsError");
     expect(err.toJSON()).toMatchObject({ field: "options.type", message: "bad" });
     // The published two-argument form still compiles and runs; it has no field to give.
-    const legacy = new ChartOptionsError("message only", { cause: 1 });
+    const legacy = new ExcelChartOptionsError("message only", { cause: 1 });
     expect(legacy.message).toBe("message only");
     expect(legacy.field).toBe("");
     expect(legacy.cause).toBe(1);

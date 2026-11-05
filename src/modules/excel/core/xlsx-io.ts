@@ -8,7 +8,7 @@ import type { Readable } from "node:stream";
  * parses ZIP entries as they arrive instead of buffering the package. Selected over the
  * browser variant via the `.browser` same-name swap at build/test time.
  */
-import type { WorkbookData } from "@excel/core/workbook-core";
+import { checkWorkbook, type WorkbookData } from "@excel/core/workbook-core";
 import {
   resolveReadFormat,
   formatFromPath,
@@ -104,6 +104,7 @@ function loadXlsxReader() {
  * "Encrypt with Password" — and `Workbook.read(bytes, { password })` reads it back; `encryption` tunes it.
  */
 export async function toBuffer(wb: WorkbookData, options?: WorkbookWriteOptions): Promise<Buffer> {
+  checkWorkbook(wb);
   checkIoOptions("Workbook.toBuffer", options, "write");
   const bytes = await packageBytes(wb, options);
   return Buffer.isBuffer(bytes)
@@ -325,6 +326,7 @@ export async function writeStream(
   stream: WorkbookWritable,
   options?: WorkbookWriteOptions
 ): Promise<void> {
+  checkWorkbook(wb);
   checkIoOptions("Workbook.writeStream", options, "write");
   // A Web `WritableStream` is driven as the Node-style writable the serializers expect; anything else is refused here.
   // A Node-style writable is checked and used in this tick, so a sink that fails straight away is observed; only a
@@ -431,6 +433,7 @@ export function toStream(
   wb: WorkbookData,
   options?: XlsxStreamOptions & WorkbookWriteOptions
 ): XlsxReadable & Readable {
+  checkWorkbook(wb);
   checkIoOptions("Workbook.toStream", options, "write");
   if (options?.password !== undefined) {
     // An encrypted package is assembled and encrypted before its first byte can be handed out.
@@ -564,20 +567,27 @@ async function readFileInto(
  * Node-only: write a workbook to a file path.
  *
  * The format comes from the extension unless `options.format` says otherwise, so
- * `writeFile(wb, "report.xlsb")` writes XLSB without a second argument.
+ * `writeFile(wb, "report.xlsb")` writes XLSB without a second argument. A file the system will not let us write is
+ * an `ExcelFileError` whose `cause` is the system's error.
  */
 export async function writeFile(
   wb: WorkbookData,
   filename: string,
   options?: WorkbookWriteOptions
 ): Promise<void> {
+  checkWorkbook(wb);
   checkFilePath("Workbook.writeFile", filename);
   checkIoOptions("Workbook.writeFile", options, "write");
   const format = options?.format ?? formatFromPath(filename);
   if (format === "xlsb" || options?.password !== undefined) {
     // XLSB is written whole, and so is an encrypted package of either format.
     const { writeFile: writeFileBytes } = await import("node:fs/promises");
-    await writeFileBytes(filename, await packageBytes(wb, { ...options, format }));
+    const bytes = await packageBytes(wb, { ...options, format });
+    try {
+      await writeFileBytes(filename, bytes);
+    } catch (error) {
+      throw fileSystemError(filename, "write", error);
+    }
     return;
   }
   const stream = createWriteStream(filename);
@@ -589,11 +599,12 @@ export async function writeFile(
       stream.off("close", onClose);
     };
 
+    // Only the file stream's own failure is a file-system error; one from the writer is passed on as it is.
     const onError = (error: Error) => {
       if (!settled) {
         settled = true;
         cleanup();
-        reject(error);
+        reject(fileSystemError(filename, "write", error));
       }
     };
 

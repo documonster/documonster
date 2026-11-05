@@ -38,7 +38,7 @@ describe("isReadable / isWritable on Node", () => {
 describe("addAbortSignal", () => {
   it("refuses something that is not a stream", () => {
     expect(() => entry.addAbortSignal(new AbortController().signal, {} as never)).toThrow(
-      entry.StreamTypeError
+      entry.StreamArgumentError
     );
   });
 });
@@ -121,10 +121,10 @@ describe("consumers.text / json / bytes agree with node:stream/consumers", () =>
 
   it("still refuses what is not a stream, with a stream error", async () => {
     await expect(entry.consumers.text(null as never)).rejects.toBeInstanceOf(
-      entry.UnsupportedStreamTypeError
+      entry.StreamUnsupportedTypeError
     );
     await expect(entry.consumers.text(42 as never)).rejects.toBeInstanceOf(
-      entry.UnsupportedStreamTypeError
+      entry.StreamUnsupportedTypeError
     );
   });
 });

@@ -140,12 +140,12 @@ import {
   rowSplice
 } from "@excel/core/worksheet-core";
 import {
-  ColumnOutOfBoundsError,
+  ExcelColumnOutOfBoundsError,
   ExcelArgumentError,
-  ImageError,
-  MergeConflictError,
-  PivotTableError,
-  TableError
+  ExcelImageError,
+  ExcelMergeConflictError,
+  ExcelPivotTableError,
+  ExcelTableError
 } from "@excel/errors";
 import type {
   AddImageRange,
@@ -491,7 +491,7 @@ function checkLineSplice(
   if (kind === "rows") {
     checkRowNumber(start);
   } else if (!Number.isInteger(start) || start < 1 || start > 16384) {
-    throw new ColumnOutOfBoundsError(start);
+    throw new ExcelColumnOutOfBoundsError(start);
   }
   checkNumber(where, "count", count, { min: 0, integer: true });
 }
@@ -846,7 +846,7 @@ function _mergeCellsInternal(
   // check cells aren't already merged
   Object.values(ws._merges).forEach((merge: RangeData) => {
     if (rangeIntersects(merge, dimensions)) {
-      throw new MergeConflictError();
+      throw new ExcelMergeConflictError();
     }
   });
 
@@ -1139,7 +1139,7 @@ export function addShape(ws: WorksheetData, options: AddShapeOptions): ShapeMode
   const range = options.range;
   // A shape must cover an area, mirroring images. Reject inputs that resolve
   // to no size up front, with a clear shape-specific message — otherwise the
-  // failure surfaces much later as a confusing `ImageError` from the internal
+  // failure surfaces much later as a confusing `ExcelImageError` from the internal
   // range parser when the worksheet is serialized.
   const hasArea =
     (typeof range === "string" && range.includes(":")) ||
@@ -1147,7 +1147,7 @@ export function addShape(ws: WorksheetData, options: AddShapeOptions): ShapeMode
       range !== null &&
       ("br" in range || "ext" in range || "pos" in range));
   if (!hasArea) {
-    throw new ImageError(
+    throw new ExcelImageError(
       'addShape requires a range covering an area: a cell range like "B2:D5", or an object with `br`, `ext`, or `pos`.'
     );
   }
@@ -1709,7 +1709,7 @@ export function addBackgroundImage(ws: WorksheetData, imageId: string | number):
   checkWorksheetAttached(ws);
   const bookImage = getImage(ws._workbook, imageId);
   if (bookImage && isExternalImage(bookImage)) {
-    throw new ImageError(
+    throw new ExcelImageError(
       "Background images cannot be external (linked) images. " +
         "Use an embedded image (buffer/base64/filename). " +
         "External images are only supported for cell pictures and overlay watermarks."
@@ -1751,7 +1751,7 @@ export function addWatermark(ws: WorksheetData, options: WatermarkOptions): void
   if (mode === "header") {
     const bookImage = getImage(ws._workbook, options.imageId);
     if (bookImage && isExternalImage(bookImage)) {
-      throw new ImageError(
+      throw new ExcelImageError(
         "Header watermark images cannot be external (linked) images. " +
           "Use an embedded image (buffer/base64/filename), or use overlay mode for linked images."
       );
@@ -1990,7 +1990,7 @@ export function setHeaderFooterImage(ws: WorksheetData, options: HeaderFooterIma
   checkWorksheetAttached(ws);
   const bookImage = getImage(ws._workbook, options.imageId);
   if (bookImage && isExternalImage(bookImage)) {
-    throw new ImageError(
+    throw new ExcelImageError(
       "Header/footer images cannot be external (linked) images. " +
         "Use an embedded image (buffer/base64/filename)."
     );
@@ -2146,6 +2146,7 @@ export async function protect(
   passwordOrOptions?: string | ProtectSheetOptions,
   legacyOptions?: Partial<SheetProtection>
 ): Promise<void> {
+  checkWorksheet(ws);
   checkWorksheetAttached(ws);
   const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
   ws.sheetProtection = await buildSheetProtection(password, options);
@@ -2178,7 +2179,7 @@ export async function verifyPassword(ws: WorksheetData, password: string): Promi
  * cell's are, its area must not overlap another table, and its name and display name must be free in the workbook.
  * (`Table.add` refuses a name Excel cannot hold before this runs; the deprecated `Table.create` corrects one.)
  *
- * @throws {TableError} When a check fails — the name is already taken in the workbook (case-insensitive), or the
+ * @throws {ExcelTableError} When a check fails — the name is already taken in the workbook (case-insensitive), or the
  * table would overlap another one.
  */
 export function addTable(ws: WorksheetData, model: TableProperties): TableData {
@@ -2190,18 +2191,18 @@ export function addTable(ws: WorksheetData, model: TableProperties): TableData {
   // `Table.create` model's is corrected by `tableValidate`, and the duplicate checks compare that.
   const nameKey = excelNameKey(tableName(table));
   if (ws.tables[tableName(table)]) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table name "${tableName(table)}" already exists in worksheet "${getSheetName(ws)}".`
     );
   }
   if (getSheetWorkbook(ws)._tableNames.has(nameKey)) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table name "${tableName(table)}" already exists in the workbook. ` +
         `Table names must be unique across the entire workbook, compared as Excel compares them (case-insensitive).`
     );
   }
   if (definedNamesHasName(getSheetWorkbook(ws)._definedNames, tableName(table))) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table name "${tableName(table)}" is a defined name in the workbook. ` +
         `Tables and defined names share one namespace, compared as Excel compares them (case-insensitive).`
     );
@@ -2220,7 +2221,7 @@ export function addTable(ws: WorksheetData, model: TableProperties): TableData {
  * Remove a table — by its handle, or by `name`: its stored name or the one it was added under, as
  * {@link getTable} resolves it. Returns `true` if the sheet had it. Its handle refuses edits afterwards.
  *
- * @throws {PivotTableError} when a pivot table reads its data from the table: the pivot cache would name a table
+ * @throws {ExcelPivotTableError} when a pivot table reads its data from the table: the pivot cache would name a table
  * that no longer exists.
  */
 export function removeTable(ws: WorksheetData, name: string | TableData): boolean {
@@ -2268,7 +2269,7 @@ export function getPivotTables(ws: WorksheetData): PivotTable[] {
  * caches are written from the pivot tables that remain.
  *
  * A pivot table something else is bound to cannot be removed while that binding
- * exists, since it would point at nothing — this throws a {@link PivotTableError}:
+ * exists, since it would point at nothing — this throws a {@link ExcelPivotTableError}:
  * - a pivot chart (remove the chart first, `Chart.remove`);
  * - a slicer or timeline of a loaded workbook. Those are preserved as written and
  *   cannot be edited here, so such a pivot table stays.
@@ -2282,12 +2283,12 @@ export function removePivotTable(ws: WorksheetData, pivot: PivotTable | number):
   const target = ws.pivotTables[idx];
   const wb = getSheetWorkbook(ws);
   if (isPivotChartSource(wb, target)) {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       `Pivot table "${target.name ?? `PivotTable${target.tableNumber}`}" is the source of a pivot chart; remove the chart first.`
     );
   }
   if (isPivotFilterTarget(wb, target, ws.id)) {
-    throw new PivotTableError(
+    throw new ExcelPivotTableError(
       `Pivot table "${target.name ?? `PivotTable${target.tableNumber}`}" is filtered by a slicer or timeline; it cannot be removed.`
     );
   }

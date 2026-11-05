@@ -360,8 +360,8 @@ describe("PdfDocumentBuilder and PdfEditor argument checks", () => {
     expect(argumentError(call).field).toBe(field);
   });
 
-  it("keeps a RangeError for a bookmark parent that is an integer out of range", () => {
-    expect(() => new Pdf.Builder().addBookmark("t", 0, 3)).toThrow(RangeError);
+  it("refuses a bookmark parent that is an integer out of range (field parent)", () => {
+    expect(argumentError(() => new Pdf.Builder().addBookmark("t", 0, 3)).field).toBe("parent");
   });
 
   it("refuses bad editor arguments before recording an edit", async () => {
@@ -476,5 +476,55 @@ describe("converter option checks", () => {
         Pdf.createDrawSurface(p, { x: 0, y: 0, width: 1, height: 1 }, { scale: 0 })
       ).field
     ).toBe("options.scale");
+  });
+});
+
+describe("the surface Pdf.createDrawSurface returns", () => {
+  const W = "Pdf.createDrawSurface(…)";
+  const RED = { r: 1, g: 0, b: 0, a: 1 };
+  const surface = () => Pdf.createDrawSurface(page(), { x: 0, y: 0, width: 10, height: 10 });
+
+  it("refuses what the page could not take, under its own name", () => {
+    // Each was a `TypeError` from inside the primitive, or a refusal by
+    // `Pdf.PageBuilder#drawRect` for a call the caller never made.
+    for (const [call, field] of [
+      [() => surface().rect(0, 0, 1, 1, 0, null as never), "paint"],
+      [() => surface().rect(Number.NaN, 0, 1, 1, 0, { fill: RED }), "x"],
+      [() => surface().ellipse(0, 0, 1, 1, { fill: { r: 2, g: 0, b: 0, a: 1 } }), "paint.fill.r"],
+      [() => surface().polyline([null] as never, false, { stroke: RED }), "points[0]"],
+      [() => surface().path(null as never, { fill: RED }), "commands"],
+      [
+        () => surface().text(0, 0, [{ text: "a", dy: 0 }], { size: 10, fill: RED }, Number.NaN),
+        "rotate"
+      ],
+      [() => surface().text(0, 0, null as never, { size: 10 }, 0), "lines"],
+      [() => surface().pushClip!(undefined as never), "clip"]
+    ] as const) {
+      const err = argumentError(call);
+      expect(err.field).toBe(field);
+      expect(err.message.startsWith(`${W}.`)).toBe(true);
+    }
+  });
+
+  it("still draws what the walker hands it", () => {
+    const s = surface();
+    s.rect(0, 0, 1, 1, 0, { fill: RED });
+    s.text(0, 5, [{ text: "a", dy: 0 }], { size: 4, fill: RED }, 0);
+  });
+});
+
+describe("Pdf.Editor#splitPages", () => {
+  it("refuses a value that is neither an options object nor a list of indices", async () => {
+    const builder = new Pdf.Builder();
+    builder.addPage();
+    const editor = Pdf.Editor.read(await builder.toBuffer());
+    for (const bad of [42, true]) {
+      const err = await argumentRejection(() => editor.splitPages(bad as never));
+      expect(err.field).toBe("options");
+      expect(err.message.startsWith("Pdf.Editor#splitPages: options must be")).toBe(true);
+    }
+    // The deprecated positional list, and `null` for every page, are read as before.
+    expect(await editor.splitPages([0])).toHaveLength(1);
+    expect(await editor.splitPages(null)).toHaveLength(1);
   });
 });

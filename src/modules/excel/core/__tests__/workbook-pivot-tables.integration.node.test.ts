@@ -2690,7 +2690,7 @@ describe("Workbook", () => {
         expect(xml).toContain('ref="E5:F6"');
       });
 
-      it("rejects malformed ref values with a PivotTableError", async () => {
+      it("rejects malformed ref values with a ExcelPivotTableError", async () => {
         const workbook = Workbook.create();
         const source = Workbook.addWorksheet(workbook, "Data");
         Row.addMany(source, TEST_DATA);

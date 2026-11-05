@@ -1,3 +1,4 @@
+import { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
 /**
  * `Stream` namespace surface — browser entry.
  *
@@ -5,13 +6,18 @@
  * writer/reader classes resolve to their browser variants (Web Streams,
  * no Node file-path sinks).
  */
-export { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
+import type { WorksheetWriter as WorksheetWriterOf } from "@excel/stream/worksheet-writer";
+
+export { WorkbookWriter };
 export { WorkbookReader } from "@excel/stream/workbook-reader.browser";
 
 export * from "@excel/surface/stream-handles";
 
-/** The worksheet writer handed out by `WorkbookWriter.addWorksheet`. */
-export type { WorksheetWriter } from "@excel/stream/worksheet-writer";
+/**
+ * The worksheet writer handed out by `WorkbookWriter.addWorksheet`; its `workbook` is that
+ * {@link WorkbookWriter}.
+ */
+export type WorksheetWriter = WorksheetWriterOf<WorkbookWriter>;
 /** The worksheet reader yielded by `WorkbookReader.read`. */
 export type { WorksheetReader } from "@excel/stream/worksheet-reader";
 /** The hyperlink reader yielded by `WorkbookReader.read`. */

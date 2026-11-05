@@ -1,4 +1,4 @@
-import { MaxItemsExceededError } from "@excel/errors";
+import { ExcelLimitExceededError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
@@ -129,7 +129,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
           // The concrete child may declare `tag` as a private member; probe it
           // structurally for the diagnostic message.
           const childTag = (this.childXform as unknown as { tag?: string }).tag ?? "";
-          throw new MaxItemsExceededError(childTag, this.maxItems);
+          throw new ExcelLimitExceededError(childTag, this.maxItems);
         }
       }
       return true;

@@ -130,7 +130,7 @@ import {
 import type { ChartPlacement } from "@excel/core/worksheet";
 import { checkWorksheet } from "@excel/core/worksheet-core";
 import type { ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { checkListTarget } from "@excel/surface/argument-checks";
 import {
   checkChartRange,
@@ -471,9 +471,9 @@ export function addPivotCombo(
  * (`pivotTable`). {@link applyPreset}, {@link createOptionsFromTable} and {@link createOptionsFromRows} build it from
  * a preset, a table or plain rows.
  *
- * @throws {InvalidAddressError} when `range` is not a reference.
+ * @throws {ExcelInvalidAddressError} when `range` is not a reference.
  * @throws {ExcelArgumentError} when `range` or a series is malformed.
- * @throws {ChartOptionsError} when the chart's options are invalid.
+ * @throws {ExcelChartOptionsError} when the chart's options are invalid.
  */
 export function place(
   ws: WorksheetData,
@@ -516,7 +516,7 @@ export function applyPreset(
   check.record("options", options);
   if (!Object.hasOwn(CHART_PRESETS, preset) && !Object.hasOwn(CHART_EX_PRESETS, preset)) {
     // Naming only the Office 2016 family, as the fallback did, sent a caller who meant a classic preset astray.
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
       "preset",
       `Chart.applyPreset: unknown chart preset ${JSON.stringify(preset)}; expected a classic preset such as ` +
         `"columnClustered" or an Office 2016 one such as "histogram".`
@@ -757,7 +757,7 @@ export function removeUserShapes(c: ChartHandle): void {
 
 /**
  * Copy the chart onto `targetWs` at `range` (by default beside where it sits), and return the copy's part number; see
- * {@link list} for its handle.
+ * {@link list} for its handle. Pass the chart's own worksheet (`c.worksheet`) to copy it beside itself.
  */
 export function copyTo(c: ChartHandle, targetWs: WorksheetData, range?: AddChartRange): number {
   if (range !== undefined) {
@@ -766,8 +766,16 @@ export function copyTo(c: ChartHandle, targetWs: WorksheetData, range?: AddChart
   return namedCall("Chart.copyTo", () => chartCopyTo(c, targetWs, range));
 }
 
-/** Copy the chart onto its own sheet at `range` (by default beside it), and return the copy's part number. */
-export function clone(c: ChartHandle, range?: AddChartRange): number {
+/**
+ * Copy the chart onto its own sheet at `range` (by default beside it), and return the copy's part number.
+ *
+ * @deprecated Use {@link copyTo} with the chart's own worksheet — `Chart.copyTo(c, c.worksheet, range)`. It places the
+ * same copy at the same default position; this name suggested an independent copy, as `Document.clone` returns, but it
+ * adds a chart to the sheet and returns its part number. Removed in 1.0.
+ */
+export const clone = cloneChart;
+
+function cloneChart(c: ChartHandle, range?: AddChartRange): number {
   if (range !== undefined) {
     // A range that is not one failed inside with a `TypeError`.
     checkChartRange("Chart.clone", range);
@@ -848,7 +856,7 @@ export {
   chartAnchorModel as getAnchorModel,
   chartTitle as getTitle,
   chartTotalSeriesCount as getTotalSeriesCount,
-  chartChartTypes as getChartTypes,
+  chartChartTypes as getTypes,
   chartAxes as getAxes,
   chartCategoryAxis as getCategoryAxis,
   chartValueAxis as getValueAxis,
@@ -885,7 +893,7 @@ export const anchorModel = chartAnchorModel;
 export const title = chartTitle;
 /** @deprecated Use {@link getTotalSeriesCount}. Removed in 1.0. */
 export const totalSeriesCount = chartTotalSeriesCount;
-/** @deprecated Use {@link getChartTypes}. Removed in 1.0. */
+/** @deprecated Use {@link getTypes}. Removed in 1.0. */
 export const chartTypes = chartChartTypes;
 /** @deprecated Use {@link getAxes}. Removed in 1.0. */
 export const axes = chartAxes;

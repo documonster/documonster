@@ -1,13 +1,13 @@
 import { parseXml, findChild, attr } from "@xml/dom";
 import { SaxParser } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
+import type { XmlSaxTag } from "@xml/types";
 import { describe, it, expect } from "vitest";
 
 describe("Namespace support", () => {
   describe("SaxParser with xmlns", () => {
     it("should parse default namespace", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<root xmlns="http://example.com"/>');
       parser.close();
@@ -20,7 +20,7 @@ describe("Namespace support", () => {
 
     it("should parse prefixed namespace", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<x:root xmlns:x="http://example.com"/>');
       parser.close();
@@ -34,7 +34,7 @@ describe("Namespace support", () => {
 
     it("should inherit namespace from parent", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<x:root xmlns:x="http://example.com"><x:child/></x:root>');
       parser.close();
@@ -49,7 +49,7 @@ describe("Namespace support", () => {
 
     it("should handle multiple namespace prefixes", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<root xmlns:a="http://a.com" xmlns:b="http://b.com"><a:foo/><b:bar/></root>');
       parser.close();
@@ -63,7 +63,7 @@ describe("Namespace support", () => {
 
     it("should handle namespace override in child", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<x:root xmlns:x="http://v1"><x:child xmlns:x="http://v2"/></x:root>');
       parser.close();
@@ -75,7 +75,7 @@ describe("Namespace support", () => {
 
     it("should handle unprefixed elements with default namespace", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<root xmlns="http://default"><child/></root>');
       parser.close();
@@ -88,7 +88,7 @@ describe("Namespace support", () => {
 
     it("should not set namespace fields when xmlns is false", () => {
       const parser = new SaxParser({ xmlns: false });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<x:root xmlns:x="http://example.com"/>');
       parser.close();
@@ -100,7 +100,7 @@ describe("Namespace support", () => {
 
     it("should handle OOXML-style namespaces", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       const xml = [
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
@@ -123,8 +123,8 @@ describe("Namespace support", () => {
 
     it("should handle self-closing tags with namespace", () => {
       const parser = new SaxParser({ xmlns: true });
-      const openTags: SaxTag[] = [];
-      const closeTags: SaxTag[] = [];
+      const openTags: XmlSaxTag[] = [];
+      const closeTags: XmlSaxTag[] = [];
       parser.on("opentag", tag => openTags.push({ ...tag }));
       parser.on("closetag", tag => closeTags.push({ ...tag }));
       parser.write('<root xmlns:x="http://example.com"><x:self/><x:after/></root>');
@@ -142,7 +142,7 @@ describe("Namespace support", () => {
   describe("Reserved namespace rules", () => {
     it("should pre-bind xml prefix", () => {
       const parser = new SaxParser({ xmlns: true });
-      const tags: SaxTag[] = [];
+      const tags: XmlSaxTag[] = [];
       parser.on("opentag", tag => tags.push({ ...tag }));
       parser.write('<root xml:lang="en"/>');
       parser.close();

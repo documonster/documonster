@@ -59,6 +59,23 @@ describe("X5 file paths are checked at the call, and file errors keep their caus
     expect((error as Error).message).toContain(`Failed to read ${kind} file`);
     expect(((error as Error).cause as { code?: string }).code).toBe("ENOENT");
   });
+
+  it.each<[string, (path: string) => Promise<unknown>]>([
+    ["CSV", path => ExcelCsv.writeFile(Workbook.create(), path)],
+    ["Markdown", path => ExcelMarkdown.writeFile(Workbook.create(), path)],
+    ["Excel", path => Workbook.writeFile(Workbook.create(), path)],
+    ["Excel", path => Workbook.writeFile(Workbook.create(), path, { format: "xlsb" })]
+  ])("a %s file the system will not write keeps the system's error", async (kind, run) => {
+    const target = join(await dir(), "no", "such", "dir");
+    const error = await run(target).then(
+      () => undefined,
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(ExcelFileError);
+    expect((error as ExcelFileError).operation).toBe("write");
+    expect((error as Error).message).toContain(`Failed to write ${kind} file`);
+    expect(((error as Error).cause as { code?: string }).code).toBe("ENOENT");
+  });
 });
 
 describe("X1 ExcelCsv.readFile decodes the file as options.encoding says", () => {

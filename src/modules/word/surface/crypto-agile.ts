@@ -20,15 +20,13 @@ import type { AgileEncryptionInfo, DecryptOptions } from "@word/security/encrypt
 import {
   decryptPackage as decryptAgilePackage,
   deriveEncryptionKey,
+  parseEncryptionInfoXml,
   verifyPassword as verifyAgilePassword
 } from "@word/security/encryption";
 import { HASH_ALGORITHM_NAMES } from "@word/security/hash-names";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 
-export {
-  parseEncryptionInfoXml as parseEncryptionInfo,
-  AGILE_BLOCK_KEYS as BLOCK_KEYS
-} from "@word/security/encryption";
+export { AGILE_BLOCK_KEYS as BLOCK_KEYS } from "@word/security/encryption";
 
 const KEY_BITS: ReadonlySet<number> = new Set([128, 192, 256]);
 
@@ -59,8 +57,20 @@ function checkKeyInfo(info: unknown, field: string, where: string): void {
 }
 
 /**
- * Derive an Agile encryption key from `password`, the info's salt, spin count,
- * hash and key size, and a block key (one of {@link BLOCK_KEYS}).
+ * Parse the XML of an Agile `EncryptionInfo` stream — the stream's bytes after
+ * its 8-byte version header, decoded as text.
+ *
+ * @throws {DocxDecryptionError} If the XML is not Agile encryption info.
+ */
+export function parseEncryptionInfo(xml: string): AgileEncryptionInfo {
+  checkString(xml, "xml", "WordCrypto.Agile.parseEncryptionInfo");
+  return parseEncryptionInfoXml(xml);
+}
+
+/**
+ * Derive an Agile encryption key from the info's salt, spin count, hash and key
+ * size, `password`, and a block key (one of {@link BLOCK_KEYS}). The info comes
+ * first, as in {@link verifyPassword} and {@link decryptPackage}.
  *
  * @throws {DocxArgumentError} If an argument would derive a key other than the
  *   one asked for: a hash other than SHA-1, SHA-256, SHA-384 or SHA-512 (either
@@ -69,18 +79,18 @@ function checkKeyInfo(info: unknown, field: string, where: string): void {
  *   than 128, 192 or 256 bits.
  */
 export async function deriveKey(
-  password: string,
   info: {
     keySalt: Uint8Array;
     spinCount: number;
     hashAlgorithm: string;
     keyBits: number;
   },
+  password: string,
   blockKey: Uint8Array
 ): Promise<Uint8Array> {
   const where = "WordCrypto.Agile.deriveKey";
-  checkString(password, "password", where);
   checkKeyInfo(info, "info", where);
+  checkString(password, "password", where);
   const block = checkBytes(blockKey, "blockKey", where);
   return deriveEncryptionKey(
     password,

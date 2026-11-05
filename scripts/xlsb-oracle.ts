@@ -448,7 +448,7 @@ const CASES: Case[] = [
       const sheet = sheetWithData(workbook, "Pictured");
       const id = Image.add(workbook, { buffer: PNG, extension: "png" } as never);
       Image.place(sheet as never, id, { tl: { col: 4, row: 1 }, br: { col: 7, row: 6 } } as never);
-      Watermark.add(sheet, { imageId: id, mode: "header" } as never);
+      Watermark.set(sheet, { imageId: id, mode: "header" } as never);
       return workbook;
     }
   },

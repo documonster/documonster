@@ -234,7 +234,7 @@ function parseChartExTree(root: XmlElement, rawXml: string): ChartExModel {
       clrMapOvr: rawElement(root, "cx:clrMapOvr"),
       // ChartSpace-level `spPr` / `txPr` are captured as structured-
       // with-rawXml by `parseRawSpPr` / `parseRawTxPr` so downstream
-      // mutations (setSpPrFill, etc.) still work without losing the
+      // mutations (withSpPrFill, etc.) still work without losing the
       // original XML for the unchanged field subset.
       spPr: chartSpacespPr,
       txPr: parseRawTxPr(root, "cx:txPr"),
@@ -1166,7 +1166,7 @@ function parseRawSpPr(el: XmlElement | undefined): ShapeProperties | undefined {
   //
   // Writers (`chart-ex-renderer.renderSpPr`, `chart-space-xform._renderSpPr`)
   // prefer `_rawXml` when present. Mutation APIs in `shape-properties.ts`
-  // (`setSpPrFill`, `setSpPrLine`, `buildSpPr`) return a new object without
+  // (`withSpPrFill`, `withSpPrLine`, `buildSpPr`) return a new object without
   // `_rawXml`, which causes the writer to take the structured path. This
   // matches the contract documented at `shape-properties.ts:927`.
   const structured = parseSpPr({ _rawXml: raw });

@@ -13,12 +13,7 @@
 import { Readable, Writable, Transform, pipeline } from "stream";
 import { promisify } from "util";
 
-import {
-  createReadableFromArray,
-  createTransform,
-  createCollector,
-  pipeline as myPipeline
-} from "../src/modules/stream/index";
+import { Streams, pipeline as myPipeline } from "../src/modules/stream/index";
 
 const pipelineAsync = promisify(pipeline);
 
@@ -73,11 +68,11 @@ async function benchmarkNative(chunks: Buffer[]): Promise<number> {
 async function benchmarkWrapped(chunks: Buffer[]): Promise<number> {
   const start = performance.now();
 
-  const readable = createReadableFromArray(chunks, { objectMode: false });
+  const readable = Streams.createReadableFromArray(chunks, { objectMode: false });
 
-  const transform = createTransform<Buffer, Buffer>(chunk => chunk, { objectMode: false });
+  const transform = Streams.createTransform<Buffer, Buffer>(chunk => chunk, { objectMode: false });
 
-  const collector = createCollector<Buffer>({ objectMode: false });
+  const collector = new Streams.Collector<Buffer>({ objectMode: false });
 
   await myPipeline(readable, transform, collector);
 

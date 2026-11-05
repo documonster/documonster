@@ -9,7 +9,7 @@
  * - Functional ZIP, the same shape: Archive.packZip / Archive.packZipSync to build,
  *   Archive.unpackZip / Archive.unpackZipSync to read back into a Map.
  * - Error class handling: deliberately trigger and catch ZipParseError,
- *   Crc32MismatchError, and PasswordRequiredError.
+ *   ZipCrc32MismatchError, and ZipPasswordRequiredError.
  *
  * Usage: pnpm example --filter archive-functional-tar-errors
  * Output: tmp/archive-examples/functional.tar, functional.tar.gz, functional.zip
@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Archive, ZipParseError, Crc32MismatchError, PasswordRequiredError } from "../index";
+import { Archive, ZipParseError, ZipCrc32MismatchError, ZipPasswordRequiredError } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -54,7 +54,7 @@ console.log("\n2. Functional parse (Archive.parseTar):");
 
 const parsed = Archive.parseTar(tarBytes);
 for (const entry of parsed) {
-  const data = await entry.data();
+  const data = await entry.bytes();
   console.log(`  ${entry.info.path} (type=${entry.info.type}): ${data.length} bytes`);
 }
 
@@ -169,13 +169,13 @@ try {
 }
 
 // =============================================================================
-// 7. Error handling — Crc32MismatchError
+// 7. Error handling — ZipCrc32MismatchError
 // =============================================================================
 //
 // Build a STORED (uncompressed) ZIP so we can flip a payload byte without
 // breaking decompression, then read it back with CRC checking enabled. The
 // RemoteZipReader.extract(path, { checkCrc32: true }) path validates the checksum and
-// throws Crc32MismatchError on mismatch.
+// throws ZipCrc32MismatchError on mismatch.
 
 try {
   const marker = "ZZZUNIQUEPAYLOADZZZ";
@@ -205,16 +205,16 @@ try {
   const reader = await Archive.RemoteZipReader.fromReader(Archive.createBufferReader(corrupted));
   await reader.extract("payload.txt", { checkCrc32: true });
   await reader.close();
-  console.log("  Crc32MismatchError: UNEXPECTED — no error thrown");
+  console.log("  ZipCrc32MismatchError: UNEXPECTED — no error thrown");
 } catch (err) {
   console.log(
-    `  Crc32MismatchError caught: ${err instanceof Crc32MismatchError}` +
+    `  ZipCrc32MismatchError caught: ${err instanceof ZipCrc32MismatchError}` +
       ` (name=${err instanceof Error ? err.name : "?"})`
   );
 }
 
 // =============================================================================
-// 8. Error handling — PasswordRequiredError
+// 8. Error handling — ZipPasswordRequiredError
 // =============================================================================
 //
 // Create an encrypted ZIP, then attempt extraction without a password via the
@@ -232,10 +232,10 @@ try {
   const reader = await Archive.RemoteZipReader.fromReader(Archive.createBufferReader(encrypted));
   await reader.extract("secret.txt"); // no password supplied → throws
   await reader.close();
-  console.log("  PasswordRequiredError: UNEXPECTED — no error thrown");
+  console.log("  ZipPasswordRequiredError: UNEXPECTED — no error thrown");
 } catch (err) {
   console.log(
-    `  PasswordRequiredError caught: ${err instanceof PasswordRequiredError}` +
+    `  ZipPasswordRequiredError caught: ${err instanceof ZipPasswordRequiredError}` +
       ` (name=${err instanceof Error ? err.name : "?"})`
   );
 }

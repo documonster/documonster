@@ -52,47 +52,76 @@ describe("PdfEditor — removing pages", () => {
     expect(await texts(await editor.toBuffer())).toEqual(["P2", "P4"]);
   });
 
-  it("an index outside the document throws PdfStructureError, as it always did", async () => {
+  /** The `PdfArgumentError` a call throws, so its `field` can be asserted. */
+  function argumentError(call: () => unknown): PdfArgumentError {
+    try {
+      call();
+    } catch (error) {
+      expect(error).toBeInstanceOf(PdfArgumentError);
+      return error as PdfArgumentError;
+    }
+    throw new Error("expected the call to throw");
+  }
+
+  it("an index outside the document throws PdfArgumentError (field index)", async () => {
     const editor = Pdf.Editor.read(await pages("P1"));
     for (const index of [1, -1, Infinity, -0.5]) {
-      expect(() => editor.isPageRemoved(index)).toThrow(PdfStructureError);
-      expect(() => editor.removePage(index)).toThrow(PdfStructureError);
-      expect(() => editor.getPage(index)).toThrow(PdfStructureError);
-      expect(() => editor.rotatePage(index, 90)).toThrow(PdfStructureError);
+      expect(argumentError(() => editor.isPageRemoved(index)).field).toBe("index");
+      expect(argumentError(() => editor.removePage(index)).field).toBe("index");
+      expect(argumentError(() => editor.getPage(index)).field).toBe("index");
+      expect(argumentError(() => editor.rotatePage(index, 90)).field).toBe("index");
     }
   });
 
-  it("a fractional or NaN index throws PdfStructureError instead of matching no page", async () => {
+  it("a fractional or NaN index throws PdfArgumentError instead of matching no page", async () => {
     const editor = Pdf.Editor.read(await pages("P1", "P2"));
     for (const index of [0.5, NaN]) {
-      expect(() => editor.isPageRemoved(index)).toThrow(PdfStructureError);
-      expect(() => editor.removePage(index)).toThrow(PdfStructureError);
-      expect(() => editor.getPage(index)).toThrow(PdfStructureError);
-      expect(() => editor.rotatePage(index, 90)).toThrow(PdfStructureError);
+      expect(argumentError(() => editor.isPageRemoved(index)).field).toBe("index");
+      expect(argumentError(() => editor.removePage(index)).field).toBe("index");
+      expect(argumentError(() => editor.getPage(index)).field).toBe("index");
+      expect(argumentError(() => editor.rotatePage(index, 90)).field).toBe("index");
     }
     // The rejected calls recorded nothing.
     expect(await texts(await editor.toBuffer())).toEqual(["P1", "P2"]);
   });
 
-  it("the message names what was passed when it is not a number", async () => {
+  it("a rotation that is not a quarter turn throws PdfArgumentError (field degrees)", async () => {
+    const editor = Pdf.Editor.read(await pages("P1"));
+    for (const degrees of [45, -90, 360, NaN]) {
+      const error = argumentError(() => editor.rotatePage(0, degrees));
+      expect(error.field).toBe("degrees");
+      expect(error.message).toBe(
+        `Pdf.Editor#rotatePage: degrees must be 0, 90, 180 or 270, got ${degrees}`
+      );
+    }
+    expect(new TextDecoder("latin1").decode(await editor.toBuffer())).not.toContain("/Rotate");
+  });
+
+  it("the message names the call, and what was passed when it is not a number", async () => {
     const editor = Pdf.Editor.read(await pages("P1", "P2", "P3"));
     const bad = (index: unknown) => editor.removePage(index as number);
     const fails = (call: () => unknown, message: string) => {
-      expect(call).toThrow(PdfStructureError);
-      expect(call).toThrow(message);
+      expect(argumentError(call).message).toBe(message);
     };
-    fails(() => bad("1"), 'Page index must be an integer, got string "1"');
-    fails(() => bad("9"), 'Page index must be an integer, got string "9"');
-    fails(() => bad(null), "Page index must be an integer, got null");
-    fails(() => bad(undefined), "Page index must be an integer, got undefined");
-    fails(() => bad(1n), "Page index must be an integer, got bigint 1");
-    fails(() => bad([0, 2]), "Page index must be an integer, got an array (2 items)");
-    fails(() => bad({}), "Page index must be an integer, got object [object Object]");
-    fails(() => editor.getPage(1.5), "Page index must be an integer, got 1.5");
-    fails(() => editor.getPage(NaN), "Page index must be an integer, got NaN");
-    fails(() => editor.isPageRemoved(2.5), "Page index must be an integer, got 2.5");
-    fails(() => editor.rotatePage(0.5, 90), "Page index must be an integer, got 0.5");
-    fails(() => editor.getPage(3), "Page index 3 out of range (0-2)");
+    const remove = "Pdf.Editor#removePage: index must be an integer, got";
+    fails(() => bad("1"), `${remove} string "1"`);
+    fails(() => bad("9"), `${remove} string "9"`);
+    fails(() => bad(null), `${remove} null`);
+    fails(() => bad(undefined), `${remove} undefined`);
+    fails(() => bad(1n), `${remove} bigint 1`);
+    fails(() => bad([0, 2]), `${remove} an array (2 items)`);
+    fails(() => bad({}), `${remove} object [object Object]`);
+    fails(() => editor.getPage(1.5), "Pdf.Editor#getPage: index must be an integer, got 1.5");
+    fails(() => editor.getPage(NaN), "Pdf.Editor#getPage: index must be an integer, got NaN");
+    fails(
+      () => editor.isPageRemoved(2.5),
+      "Pdf.Editor#isPageRemoved: index must be an integer, got 2.5"
+    );
+    fails(
+      () => editor.rotatePage(0.5, 90),
+      "Pdf.Editor#rotatePage: index must be an integer, got 0.5"
+    );
+    fails(() => editor.getPage(3), "Pdf.Editor#getPage: index 3 names no page (0-2)");
     await expect(editor.splitPages(["1" as unknown as number])).rejects.toThrow(
       new PdfStructureError('Pdf.Editor#splitPages: page index must be an integer, got string "1"')
     );
@@ -104,15 +133,21 @@ describe("PdfEditor — removing pages", () => {
 
   it("an index past the original pages names an added page once one is added", async () => {
     const editor = Pdf.Editor.read(await pages("P1", "P2"));
-    expect(() => editor.removePage(2)).toThrow(/^Page index 2 out of range \(0-1\)$/);
+    expect(() => editor.removePage(2)).toThrow(
+      /^Pdf\.Editor#removePage: index 2 names no page \(0-1\)$/
+    );
     editor.addPage();
     // `pageCount` keeps meaning the pages the document was read with.
     expect(editor.pageCount).toBe(2);
     expect(editor.outputPageCount).toBe(3);
     editor.removePage(2);
     expect(editor.outputPageCount).toBe(2);
-    expect(() => editor.removePage(3)).toThrow(/^Page index 3 out of range \(0-2\)$/);
-    expect(() => editor.removePage(-1)).toThrow(/^Page index -1 out of range \(0-2\)$/);
+    expect(() => editor.removePage(3)).toThrow(
+      /^Pdf\.Editor#removePage: index 3 names no page \(0-2\)$/
+    );
+    expect(() => editor.removePage(-1)).toThrow(
+      /^Pdf\.Editor#removePage: index -1 names no page \(0-2\)$/
+    );
   });
 
   it.each([

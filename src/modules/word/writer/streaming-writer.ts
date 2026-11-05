@@ -29,7 +29,7 @@
  *     awaited via {@link SinkAdapter}). Total writer-side memory then
  *     stays O(largest_part) regardless of final DOCX size.
  *   - When `options.sink` is omitted, compressed bytes accumulate in
- *     `_outputChunks` and `finalize()` returns the assembled
+ *     `_outputChunks` and `toBuffer()` returns the assembled
  *     `Uint8Array`. Total memory is O(compressed_docx_size).
  */
 
@@ -75,7 +75,7 @@ import { walkBlocks } from "@word/core/walker";
 import { planWatermark } from "@word/core/watermark-sections";
 import type { WatermarkPlan } from "@word/core/watermark-sections";
 import { DocxWriteError } from "@word/errors";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
   AbstractNumbering,
   AppProperties,
@@ -144,7 +144,7 @@ import {
   getRelationshipCount,
   renderRelationships
 } from "@word/writer/relationships";
-import type { RevisionIdMap, WordRenderContext } from "@word/writer/render-context";
+import type { RevisionIdMap, DocxRenderContext } from "@word/writer/render-context";
 import {
   closeStoryPart,
   createRenderContext,
@@ -258,7 +258,7 @@ export interface StreamingDocxOptions {
    * (preserve / strip / reject) so opaque rawXml fields behave consistently
    * with the buffered `packageDocx` writer.
    */
-  readonly securityPolicy?: WordSecurityPolicy;
+  readonly securityPolicy?: DocxSecurityPolicy;
 
   /**
    * Output sink. When provided, compressed bytes flow through it as soon
@@ -272,17 +272,17 @@ export interface StreamingDocxOptions {
    *  - Any duck-typed object exposing `write(chunk)` + `end()` plus
    *    `once("drain"|"error"|"close"|"finish", …)` listeners
    *
-   * When the sink is provided, {@link StreamingDocxWriter.finalize}
-   * resolves to a zero-length `Uint8Array` (the bytes have already
-   * been delivered to the sink — the empty return is a sentinel that
-   * keeps `finalize`'s return type stable across both modes). Use
-   * {@link StreamingDocxWriter.addAsync} (instead of
-   * {@link StreamingDocxWriter.add}) when you want each `add` call to
+   * When the sink is provided, {@link DocumentWriter.commit} ends the
+   * sink once the document is complete, and
+   * {@link DocumentWriter.toBuffer} is refused — the bytes are in the
+   * sink, not the writer. Use
+   * {@link DocumentWriter.addAsync} (instead of
+   * {@link DocumentWriter.add}) when you want each `add` call to
    * await actual sink drain — that gives true end-to-end backpressure
    * for tight production loops.
    *
    * When omitted, behaviour is unchanged: compressed bytes accumulate
-   * internally and `finalize()` returns the assembled `Uint8Array`.
+   * internally and `toBuffer()` returns the assembled `Uint8Array`.
    */
   readonly sink?: AnySink;
 }
@@ -328,20 +328,38 @@ function checkStreamedBlocks(elements: unknown, where: string): void {
  * When constructed with `options.sink`, compressed bytes are pushed into
  * the sink as soon as the ZIP layer produces them, with backpressure
  * awaited via {@link SinkAdapter}; in this mode peak memory is
- * O(largest_part) and `finalize()` resolves to a zero-length
- * `Uint8Array` (the bytes are already in the sink). Without a sink,
- * compressed bytes accumulate in `_outputChunks` and `finalize()`
- * returns the assembled `Uint8Array` (peak memory
- * O(compressed_docx_size)).
+ * O(largest_part), `commit()` ends the sink and `toBuffer()` is
+ * refused (the bytes are already in the sink). Without a sink,
+ * compressed bytes accumulate in `_outputChunks` and `toBuffer()`
+ * returns the complete file (peak memory O(compressed_docx_size)).
+ *
+ * Every writer finishes with `commit()`; a writer that owns its output
+ * additionally hands it over with `toBuffer()`, which commits first if
+ * needed.
  *
  * Use {@link addAsync} (instead of {@link add}) when driving the sink
  * variant to obtain true end-to-end backpressure: each call awaits all
  * pending sink writes before resolving.
+ *
+ * @example
+ * ```ts
+ * const writer = new Stream.DocumentWriter({
+ *   styles: [{ type: "paragraph", styleId: "Normal", name: "Normal" }]
+ * });
+ *
+ * for (let i = 0; i < 100000; i++) {
+ *   writer.addText(`Paragraph ${i}`);
+ * }
+ *
+ * const buffer = await writer.toBuffer();
+ * ```
  */
-export class StreamingDocxWriter {
+export class DocumentWriter {
   private readonly _options: StreamingDocxOptions;
   private _elementCount = 0;
   private _finalized = false;
+  /** The running or settled {@link commit}; `undefined` until the writer is committed. */
+  private _finished: Promise<void> | undefined;
   private _onProgress?: StreamingProgressCallback;
 
   // Per-instance XML buffer (avoids module-level singleton data race)
@@ -401,7 +419,7 @@ export class StreamingDocxWriter {
   // ("Chart content was not registered with a relationship id") and
   // hyperlinks/images dangle.
   private _documentRels!: RelationshipsState;
-  private _renderCtx!: WordRenderContext;
+  private _renderCtx!: DocxRenderContext;
   /** Charts encountered in body content; rendered to `word/charts/chartN.xml` at finalize time. */
   private readonly _bodyCharts: ChartContent[] = [];
   /** ChartEx items encountered in body content. */
@@ -462,7 +480,7 @@ export class StreamingDocxWriter {
    * numbering definitions or builder images in `options` share an id.
    */
   constructor(options: StreamingDocxOptions = {}) {
-    checkStreamingOptions(options, "Streaming.createWriter");
+    checkStreamingOptions(options, "new Stream.DocumentWriter");
     // Sanitize image/font file names up-front. They get embedded into
     // ZIP entry paths and into rels Target attributes; a hostile name
     // (e.g. `../../etc/passwd.png` from a round-tripped untrusted DOCX)
@@ -478,7 +496,7 @@ export class StreamingDocxWriter {
   /** Set a progress callback. */
   onProgress(cb: StreamingProgressCallback): this {
     if (typeof cb !== "function") {
-      invalidArgument("Streaming.StreamingDocxWriter#onProgress", "cb", "a function", cb);
+      invalidArgument("Stream.DocumentWriter#onProgress", "cb", "a function", cb);
     }
     this._onProgress = cb;
     return this;
@@ -490,14 +508,14 @@ export class StreamingDocxWriter {
    * can be garbage collected — it is not retained.
    */
   add(element: BodyContent): this {
-    checkStreamedBlock(element, "element", "Streaming.StreamingDocxWriter#add");
+    checkStreamedBlock(element, "element", "Stream.DocumentWriter#add");
     return within("element", () => this._add(element));
   }
 
   /** Write an element {@link checkStreamedBlock} has checked. */
   private _add(element: BodyContent): this {
     if (this._finalized) {
-      throw new DocxWriteError("StreamingDocxWriter: cannot add elements after finalize()");
+      throw new DocxWriteError("Stream.DocumentWriter: cannot add elements after commit()");
     }
 
     // Sink-mode early failure: if a previous chunk already failed to
@@ -508,7 +526,7 @@ export class StreamingDocxWriter {
     // disrupted by silent queueing.
     if (this._sinkAdapter && this._streamError) {
       throw new DocxWriteError(
-        `StreamingDocxWriter: sink already failed (${this._streamError.message})`,
+        `Stream.DocumentWriter: sink already failed (${this._streamError.message})`,
         { cause: this._streamError }
       );
     }
@@ -521,7 +539,7 @@ export class StreamingDocxWriter {
 
     // Register any chart/hyperlink/image references this element introduces
     // BEFORE serializing it, so the per-element renderBodyContent call has a
-    // populated WordRenderContext (chart rIds, hyperlink rIds, image remap).
+    // populated DocxRenderContext (chart rIds, hyperlink rIds, image remap).
     this._registerElementReferences(element);
 
     // ECMA-376 §17.13.5.34: a `<w:tbl>` must be followed by a paragraph
@@ -547,7 +565,7 @@ export class StreamingDocxWriter {
 
   /** Add multiple body elements at once. Every one is checked before any is written. */
   addMany(elements: readonly BodyContent[]): this {
-    checkStreamedBlocks(elements, "Streaming.StreamingDocxWriter#addMany");
+    checkStreamedBlocks(elements, "Stream.DocumentWriter#addMany");
     elements.forEach((el, i) => within(`elements[${i}]`, () => this._add(el)));
     return this;
   }
@@ -565,7 +583,7 @@ export class StreamingDocxWriter {
    * rejection was captured into `_streamError` surface here.
    */
   async addAsync(element: BodyContent): Promise<this> {
-    checkStreamedBlock(element, "element", "Streaming.StreamingDocxWriter#addAsync");
+    checkStreamedBlock(element, "element", "Stream.DocumentWriter#addAsync");
     return this._addAsync(element);
   }
 
@@ -586,7 +604,7 @@ export class StreamingDocxWriter {
    * so backpressure is honoured between every body element.
    */
   async addManyAsync(elements: readonly BodyContent[]): Promise<this> {
-    checkStreamedBlocks(elements, "Streaming.StreamingDocxWriter#addManyAsync");
+    checkStreamedBlocks(elements, "Stream.DocumentWriter#addManyAsync");
     for (let i = 0; i < elements.length; i++) {
       await this._addAsync(elements[i]!, `elements[${i}]`);
     }
@@ -595,7 +613,7 @@ export class StreamingDocxWriter {
 
   /** Add a paragraph with simple text content. */
   addText(content: string, properties?: Paragraph["properties"]): this {
-    const where = "Streaming.StreamingDocxWriter#addText";
+    const where = "Stream.DocumentWriter#addText";
     checkString(content, "content", where);
     checkRecord(properties, "properties", where, { optional: true });
     checkParagraphProperties(properties, "properties", where);
@@ -612,22 +630,74 @@ export class StreamingDocxWriter {
   }
 
   /**
+   * Finish the document.
+   *
+   * Writes the closing body, every auxiliary part and the ZIP central
+   * directory. With `options.sink` it then drains every pending write and
+   * ends the sink; without one the bytes stay in the writer for
+   * {@link toBuffer}.
+   *
+   * @throws {DocxWriteError} If the writer was already committed, or the
+   * ZIP pipeline or the sink failed (the sink is aborted in that case).
+   */
+  async commit(): Promise<void> {
+    if (this._finalized) {
+      throw new DocxWriteError("Stream.DocumentWriter: already committed");
+    }
+    this._finalized = true;
+    this._finished = this._finish();
+    await this._finished;
+  }
+
+  /**
+   * The complete DOCX file. Commits first when {@link commit} has not been
+   * called; afterwards it may be called again and resolves to the same bytes.
+   *
+   * @throws {DocxWriteError} If the writer was given `options.sink` — the
+   * bytes went to the sink and the writer holds none — or committing failed.
+   */
+  async toBuffer(): Promise<Uint8Array> {
+    if (this._sinkAdapter) {
+      throw new DocxWriteError(
+        "Stream.DocumentWriter#toBuffer: the document was written to options.sink; the writer holds no bytes"
+      );
+    }
+    if (this._finished) {
+      await this._finished;
+    } else {
+      await this.commit();
+    }
+    const bytes = this._assembleOutput();
+    this._outputChunks = [bytes];
+    return bytes;
+  }
+
+  /**
    * Finalize the document.
    *
    * - Without `options.sink`: returns the assembled `Uint8Array`
    *   containing the full DOCX file.
    * - With `options.sink`: drains any pending sink writes, calls
-   *   `sink.end()`, and resolves to a zero-length `Uint8Array`. The
-   *   DOCX bytes have already been delivered to the sink — the empty
-   *   return is a sentinel signalling "writer is done; consumer keeps
-   *   the data".
+   *   `sink.end()`, and resolves to a zero-length `Uint8Array`.
+   *
+   * @deprecated Use {@link commit} to finish the document and
+   * {@link toBuffer} to obtain its bytes. Removed in 1.0.
    */
   async finalize(): Promise<Uint8Array> {
     if (this._finalized) {
-      throw new DocxWriteError("StreamingDocxWriter: already finalized");
+      throw new DocxWriteError("Stream.DocumentWriter: already finalized");
     }
     this._finalized = true;
+    this._finished = this._finish();
+    await this._finished;
+    if (this._sinkAdapter) {
+      return EMPTY_U8;
+    }
+    return this._assembleOutput();
+  }
 
+  /** Write the trailing parts and close the archive and, in sink mode, the sink. */
+  private async _finish(): Promise<void> {
     if (this._onProgress) {
       this._onProgress({ elementsWritten: this._elementCount, phase: "finalizing" });
     }
@@ -678,7 +748,7 @@ export class StreamingDocxWriter {
       // open (and a Web stream locked) behind a failed write.
       await this._sinkAdapter?.abort(this._streamError);
       throw new DocxWriteError(
-        `StreamingDocxWriter: ZIP finalization failed (${this._streamError.message})`,
+        `Stream.DocumentWriter: ZIP finalization failed (${this._streamError.message})`,
         { cause: this._streamError }
       );
     }
@@ -687,11 +757,7 @@ export class StreamingDocxWriter {
       // Close the sink so the consumer knows the byte stream is complete.
       // Errors raised during close (e.g. underlying file system) propagate.
       await this._sinkAdapter.end();
-      return EMPTY_U8;
     }
-
-    // Buffered mode: assemble and return the DOCX bytes.
-    return this._assembleOutput();
   }
 
   /** Reset the writer for reuse. */
@@ -706,11 +772,12 @@ export class StreamingDocxWriter {
   reset(): this {
     if (this._sinkAdapter) {
       throw new DocxWriteError(
-        "StreamingDocxWriter: reset() is not supported in sink mode; create a new writer instance per document."
+        "Stream.DocumentWriter: reset() is not supported in sink mode; create a new writer instance per document."
       );
     }
     this._elementCount = 0;
     this._finalized = false;
+    this._finished = undefined;
     this._headerWritten = false;
     this._prevWasTable = false;
     this._outputChunks = [];
@@ -840,7 +907,7 @@ export class StreamingDocxWriter {
     // drain only after compression completes so browser output is included.
     await this._pendingDrain;
     if (this._streamError) {
-      throw new DocxWriteError(`StreamingDocxWriter: ${message} (${this._streamError.message})`, {
+      throw new DocxWriteError(`Stream.DocumentWriter: ${message} (${this._streamError.message})`, {
         cause: this._streamError
       });
     }
@@ -1059,7 +1126,7 @@ export class StreamingDocxWriter {
       const policy = this._options.missingImagePolicy ?? "throw";
       if (policy === "warn") {
         console.warn(
-          `[StreamingDocxWriter] image rId "${rId}" referenced by content ` +
+          `[Stream.DocumentWriter] image rId "${rId}" referenced by content ` +
             `but not present in options.images. Output will be missing this ` +
             `relationship and may not open in Word.`
         );
@@ -2096,26 +2163,6 @@ export class StreamingDocxWriter {
 }
 
 /**
- * Create a new streaming DOCX writer.
- *
- * @example
- * ```ts
- * const writer = Streaming.createWriter({
- *   styles: [{ type: "paragraph", styleId: "Normal", name: "Normal" }]
- * });
- *
- * for (let i = 0; i < 100000; i++) {
- *   writer.addText(`Paragraph ${i}`);
- * }
- *
- * const buffer = await writer.finalize();
- * ```
- */
-export function createDocxStream(options?: StreamingDocxOptions): StreamingDocxWriter {
-  return new StreamingDocxWriter(options);
-}
-
-/**
  * The writer's options, each checked as the `Document.*` setter for the same
  * field checks it — so a bad value is refused when the writer is created, not
  * at `finalize()` after every element has streamed.
@@ -2231,7 +2278,7 @@ function sanitizeStreamingOptions(options: StreamingDocxOptions): StreamingDocxO
       const safe = uniqueSanitizedName(img.fileName, used, "image.bin");
       assertWritableImage(
         { fileName: safe, mediaType: img.mediaType, contentType: img.contentType },
-        "Streaming.createWriter",
+        "new Stream.DocumentWriter",
         `options.images[${i}]`
       );
       if (safe !== img.fileName) {

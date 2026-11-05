@@ -7,7 +7,7 @@
 import { unzip } from "@archive/read-archive";
 import { describe, it, expect } from "vitest";
 
-import { Build, Document, Io, Package, Streaming, Template, Transform } from "../../index";
+import { Build, Document, Io, Package, Stream, Template, Transform } from "../../index";
 import type { Paragraph, ParagraphChild } from "../../index";
 
 async function partsOf(bytes: Uint8Array): Promise<Map<string, string>> {
@@ -82,7 +82,7 @@ describe("bookmark ids in every part", () => {
   });
 
   it("are unique in the streaming writer", async () => {
-    const stream = Streaming.createWriter({
+    const stream = new Stream.DocumentWriter({
       headers: new Map([["default", { content: { children: [mark("head")] } }]]),
       footnotes: [{ id: 1, content: [mark("note")] }]
     });
@@ -247,7 +247,7 @@ describe("bookmarks in preserved raw XML", () => {
   });
 
   it("are renumbered in the streaming writer against what was already streamed", async () => {
-    const stream = Streaming.createWriter();
+    const stream = new Stream.DocumentWriter();
     stream.add(mark("model", 3));
     stream.add(
       Build.paragraph([raw('<w:bookmarkStart w:id="3" w:name="raw"/><w:bookmarkEnd w:id="3"/>')])

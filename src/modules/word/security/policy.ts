@@ -51,7 +51,7 @@ import { checkBoolean, checkOneOf, checkRecord, invalidArgument } from "@word/co
 // Security Policy Interface
 // =============================================================================
 
-export interface WordSecurityPolicy {
+export interface DocxSecurityPolicy {
   /** Whether to preserve VBA project binary on read/write. Default: true (preserve but don't execute). */
   readonly preserveVbaProject?: boolean;
   /** Whether to preserve OLE embedded objects. Default: true. */
@@ -79,7 +79,7 @@ export interface WordSecurityPolicy {
 // =============================================================================
 
 /** Default security policy: preserve everything, generous limits. */
-export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = Object.freeze({
+export const DEFAULT_SECURITY_POLICY: Required<DocxSecurityPolicy> = Object.freeze({
   preserveVbaProject: true,
   preserveOleObjects: true,
   preserveAltChunks: true,
@@ -93,7 +93,7 @@ export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = Object.free
 });
 
 /** Strict security policy: strip dangerous content, tight limits. */
-export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = Object.freeze({
+export const STRICT_SECURITY_POLICY: Required<DocxSecurityPolicy> = Object.freeze({
   preserveVbaProject: false,
   preserveOleObjects: false,
   preserveAltChunks: false,
@@ -118,8 +118,8 @@ export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = Object.freez
  * @returns A fully resolved security policy.
  */
 export function resolveSecurityPolicy(
-  policy?: Partial<WordSecurityPolicy>
-): Required<WordSecurityPolicy> {
+  policy?: Partial<DocxSecurityPolicy>
+): Required<DocxSecurityPolicy> {
   if (!policy) {
     return DEFAULT_SECURITY_POLICY;
   }
@@ -141,7 +141,7 @@ export function resolveSecurityPolicy(
 }
 
 const RAW_XML_POLICIES = new Set<string>(["preserve", "strip", "reject"] satisfies NonNullable<
-  WordSecurityPolicy["rawXmlPolicy"]
+  DocxSecurityPolicy["rawXmlPolicy"]
 >[]);
 
 const POLICY_FLAGS = [
@@ -169,7 +169,7 @@ const POLICY_KEYS: ReadonlySet<string> = new Set([
  */
 export function checkSecurityPolicy(value: unknown, field: string, where: string): void {
   checkRecord(value, field, where);
-  const policy = value as Partial<WordSecurityPolicy>;
+  const policy = value as Partial<DocxSecurityPolicy>;
   // Unknown keys are refused here and nowhere else: a misspelt limit
   // (`maxEntries` for `maxPartCount`) would otherwise leave the real one at
   // its default, weakening the policy with nothing said.

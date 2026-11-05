@@ -4,7 +4,7 @@
  * `replaceChartsheetChart(wb, sheet, chart)` — not the validator's own `options.series[0].values` — and the message
  * starts with the call. Nothing is added or replaced.
  */
-import { ChartOptionsError, Chartsheet, ExcelArgumentError, Workbook } from "@excel";
+import { ExcelChartOptionsError, Chartsheet, ExcelArgumentError, Workbook } from "@excel";
 import { describe, expect, it } from "vitest";
 
 const GOOD = { type: "bar", series: [{ values: "A!$A$1:$A$2" }] } as never;
@@ -29,7 +29,7 @@ describe("chartsheet chart errors are rooted at the caller's parameter", () => {
   it("Workbook.addChartsheet", () => {
     const wb = book();
     const error = caught(() => Workbook.addChartsheet(wb, "CS", { chart: BAD }));
-    expect(error).toBeInstanceOf(ChartOptionsError);
+    expect(error).toBeInstanceOf(ExcelChartOptionsError);
     expect(error.field).toBe("options.chart.series[0].values");
     expect(error.message).toMatch(/^Workbook\.addChartsheet: /);
     expect(error.message).toContain("options.chart.series[0].values");

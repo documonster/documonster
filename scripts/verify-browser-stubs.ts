@@ -80,6 +80,10 @@ const REQUIRE_BROWSER_STUB: readonly { readonly module: string; readonly why: st
   {
     module: "src/modules/draw/raster/system-raster-font.ts",
     why: "per-platform system font directories for the rasteriser"
+  },
+  {
+    module: "src/modules/word/surface/io.ts",
+    why: "the Node `Io` adds `readFile` / `writeFile`, which can only throw in a browser"
   }
 ];
 
