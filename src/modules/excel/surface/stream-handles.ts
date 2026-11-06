@@ -1,8 +1,9 @@
 import type { CellData, CellView, NoteConfig } from "@excel/core/cell";
 import {
-  cellGetValue,
+  cellReadValue,
   cellSetAlignment,
   cellSetBorder,
+  cellComment,
   cellSetComment,
   cellSetFill,
   cellSetFont,
@@ -75,7 +76,7 @@ function checkRowOpen(operation: string, row: RowData): void {
 /** A streamed cell's value. */
 export function getCellValue(c: CellData): CellValue {
   checkCellHandle(c);
-  return cellGetValue(c);
+  return cellReadValue(c);
 }
 
 /**
@@ -172,14 +173,36 @@ export function setCellProtection(c: CellData, value: Partial<Protection> | unde
  * Set a streamed cell's note: text, or a note configuration — checked as `Cell.setNote` checks it. A note of the wrong
  * shape used to be accepted and failed when the row was committed, with a `TypeError` from inside the comment writer.
  */
-export function setCellNote(c: CellData, note: string | NoteConfig): void {
+export function setCellNote(
+  c: CellData,
+  note: string | NoteConfig,
+  options?: { readonly author?: string }
+): void {
   checkCellHandle(c);
   checkRowOpen("set a cell note", c.row);
   checkNote("Stream.setCellNote", "note", note);
-  cellSetNote(c, note);
+  const check = argumentChecks("Stream.setCellNote");
+  if (check.record("options", options)) {
+    check.string("options.author", options.author);
+  }
+  cellSetNote(c, note, options?.author);
 }
 
-/** Set or clear (`undefined`) a streamed cell's comment, checked as `Cell.setComment` checks it. */
+/** Remove a streamed cell's note. Returns whether there was one. */
+export function removeCellNote(c: CellData): boolean {
+  checkCellHandle(c);
+  checkRowOpen("remove a cell note", c.row);
+  if (cellComment(c) === undefined) {
+    return false;
+  }
+  cellSetComment(c, undefined);
+  return true;
+}
+
+/**
+ * @deprecated A comment is the cell's note with its author: `Stream.setCellNote(c, note, { author })`, and
+ * {@link removeCellNote} for `undefined`. Removed in 1.0.
+ */
 export function setCellComment(c: CellData, comment: NoteConfig | NoteData | undefined): void {
   checkCellHandle(c);
   checkRowOpen("set a cell comment", c.row);

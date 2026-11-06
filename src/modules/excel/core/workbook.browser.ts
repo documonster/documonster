@@ -31,7 +31,7 @@ import type {
   AddChartsheetOptions,
   AddPivotChartsheetOptions
 } from "@excel/core/chartsheet";
-import { createChartsheet } from "@excel/core/chartsheet";
+import { checkChartsheetOptions, createChartsheet } from "@excel/core/chartsheet";
 import { createDefinedNames, definedNamesHasName } from "@excel/core/defined-names";
 import { withPivotChartSource } from "@excel/core/pivot-chart";
 import type { PivotTable } from "@excel/core/pivot-table";
@@ -58,7 +58,9 @@ import {
   setChartStyle,
   validateSheetName
 } from "@excel/core/workbook-core";
-import type { UnrecognizedValue, WorkbookCreateOptions } from "@excel/core/workbook-io-types";
+import type { WorkbookCreateOptions } from "@excel/core/workbook-create-options";
+import { createOptionsSchema } from "@excel/core/workbook-create-options";
+import type { UnrecognizedValue } from "@excel/core/workbook-io-types";
 import type { ExternalLinkModel } from "@excel/core/workbook-model";
 import type { Worksheet, WorksheetModel } from "@excel/core/worksheet";
 import {
@@ -83,7 +85,8 @@ import type {
   ThreadedCommentPerson,
   WorkbookProtection
 } from "@excel/types";
-import { argumentChecks } from "@excel/utils/arguments";
+import type {} from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import { synthGuid } from "@excel/utils/guid";
 import { renameTablesInFormula } from "@excel/utils/reference-rewrite";
 import { splitPasswordOptions, verifySheetPassword } from "@excel/utils/sheet-protection";
@@ -93,6 +96,8 @@ import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { RuntimeValue } from "@formula/runtime/values";
 import { excelNameKey, sheetNameKey } from "@utils/name-key";
 import { isRecordArgument } from "@utils/object";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // =============================================================================
 // Internal Types
@@ -136,13 +141,8 @@ function isChartExType(type: string): boolean {
 
 /** A new, empty workbook. `options.formulaSyntaxProbe` decides how defined names that may be formulas are classified. */
 export function createWorkbook(options?: WorkbookCreateOptions): WorkbookData {
-  const check = argumentChecks("Workbook.create");
-  if (options !== null && check.record("options", options)) {
-    const probe = options.formulaSyntaxProbe;
-    if (probe !== undefined && probe !== null && typeof probe !== "function") {
-      check.fail("options.formulaSyntaxProbe", "a function", probe);
-    }
-  }
+  // `null` has always been taken as no options.
+  checkSchema("Workbook.create", "options", createOptionsSchema.nullable().optional(), options);
   const wb = {} as WorkbookData;
   wb._tableNames = new Set<string>();
 
@@ -594,6 +594,11 @@ export function listUnrecognizedValues(wb: WorkbookData): UnrecognizedValue[] {
 }
 
 /** Options for {@link discardUnrecognizedValues}. */
+const discardOptionsSchema = s.object(
+  { filter: s.function<(setting: UnrecognizedValue) => boolean>().optional() },
+  { readonly: true }
+);
+
 export interface DiscardUnrecognizedValuesOptions {
   /**
    * Which kept settings to drop: called with each — its sheet, its path (`pageSetup.orientation`) and its text — and
@@ -601,6 +606,12 @@ export interface DiscardUnrecognizedValuesOptions {
    */
   readonly filter?: (setting: UnrecognizedValue) => boolean;
 }
+
+const _discardOptionsMatch: SchemaMatches<
+  typeof discardOptionsSchema,
+  DiscardUnrecognizedValuesOptions
+> = true;
+void _discardOptionsMatch;
 
 /**
  * Drop the sheet settings a read kept because they are outside their setting's vocabulary — what
@@ -620,12 +631,13 @@ export function discardUnrecognizedValues(
   options?: DiscardUnrecognizedValuesOptions
 ): number {
   checkWorkbook(wb);
-  const check = argumentChecks("Workbook.discardUnrecognizedValues");
-  check.record("options", options);
+  checkSchema(
+    "Workbook.discardUnrecognizedValues",
+    "options",
+    discardOptionsSchema.optional(),
+    options
+  );
   const filter = options?.filter;
-  if (filter !== undefined && typeof filter !== "function") {
-    check.fail("options.filter", "a function", filter);
-  }
   let discarded = 0;
   for (const ws of getWorksheets(wb)) {
     const sheet = getSheetName(ws);
@@ -674,6 +686,7 @@ export function addChartsheet(
 ): ChartsheetData {
   checkWorkbook(wb);
   const sheetName = _validateChartsheetName(wb, name ?? `Chart${wb._chartsheets.length + 1}`);
+  checkChartsheetOptions("Workbook.addChartsheet", options, false);
   const sheetNo = _nextChartsheetNo(wb);
   const id = _nextSheetId(wb);
   // Assign a unified `orderNo` across worksheets and chartsheets so
@@ -765,6 +778,7 @@ export function addPivotChartsheet(
   options: AddPivotChartsheetOptions
 ): ChartsheetData {
   checkWorkbook(wb);
+  checkChartsheetOptions("Workbook.addPivotChartsheet", options, true);
   const chart = chartArgument("Workbook.addPivotChartsheet", "options.chart", () =>
     withPivotChartSource(pivotTable, options.chart)
   );
@@ -1168,6 +1182,19 @@ export interface RegisterFunctionOptions {
   returnsArray?: boolean;
 }
 
+const arity = () => s.number({ integer: true, min: 0, max: 255 }).optional();
+const registerFunctionOptionsSchema = s.object({
+  minArity: arity(),
+  maxArity: arity(),
+  volatile: s.boolean().optional(),
+  returnsArray: s.boolean().optional()
+});
+const _registerFunctionOptionsMatch: SchemaMatches<
+  typeof registerFunctionOptionsSchema,
+  RegisterFunctionOptions
+> = true;
+void _registerFunctionOptionsMatch;
+
 /**
  * Register a custom worksheet function the formula engine calls when a formula uses `name` (compared without
  * regard to case). A registered name shadows a built-in one of the same name.
@@ -1188,11 +1215,13 @@ export function registerFunction(
   if (typeof fn !== "function") {
     check.fail("fn", "a function", fn);
   }
-  if (check.record("options", options)) {
-    check.number("options.minArity", options.minArity, { min: 0, max: 255, integer: true });
-    check.number("options.maxArity", options.maxArity, { min: 0, max: 255, integer: true });
-    check.boolean("options.volatile", options.volatile);
-    check.boolean("options.returnsArray", options.returnsArray);
+  checkSchema(
+    "Workbook.registerFunction",
+    "options",
+    registerFunctionOptionsSchema.optional(),
+    options
+  );
+  if (options) {
     if ((options.minArity ?? 0) > (options.maxArity ?? 255)) {
       check.fail("options.minArity", "at most options.maxArity", options.minArity);
     }
@@ -1205,6 +1234,11 @@ export function registerFunction(
   // consumer of the `Workbook` namespace — carry the formula runtime for a member most of them never
   // call. `core/formula-adapter.ts` converts on the way into the engine instead; see
   // {@link WorkbookFunctionDescriptor}.
+  //
+  // Keyed by `toUpperCase()`, not `excelNameKey`, on purpose: the formula parser canonicalises a
+  // call's name the same way (`stripFunctionPrefix(name.toUpperCase())`) and the evaluator looks the
+  // key up as it is, so registration has to produce the key the lookup produces. Changing one side
+  // alone would make every registered function unreachable.
   wb.userFunctions.set(name.toUpperCase(), {
     minArity: options?.minArity ?? 0,
     maxArity: options?.maxArity ?? 255,

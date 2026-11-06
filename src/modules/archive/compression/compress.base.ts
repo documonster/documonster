@@ -10,7 +10,7 @@
  */
 
 import { ByteQueue } from "@archive/core/byte-queue";
-import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitExceededError } from "@archive/core/errors";
 
 /**
  * Compression options
@@ -74,7 +74,7 @@ export interface CompressOptions {
    * Decompression only: maximum number of output bytes to produce.
    *
    * Decompression stops as soon as the output would exceed this bound and a
-   * `ArchiveLimitError` is thrown, so a small payload that inflates to
+   * `ArchiveLimitExceededError` is thrown, so a small payload that inflates to
    * gigabytes (a "decompression bomb") never gets materialised. Ignored by
    * compression. Default: unbounded.
    */
@@ -204,7 +204,7 @@ export async function streamToUint8Array(
     if (maxOutputLength !== undefined && out.length + value.length > maxOutputLength) {
       // Stop pulling: the transform is cancelled by the caller, so nothing
       // beyond this chunk is ever produced or buffered.
-      throw new ArchiveLimitError("maxOutputLength", maxOutputLength);
+      throw new ArchiveLimitExceededError("maxOutputLength", maxOutputLength);
     }
     out.append(value);
   }
@@ -237,7 +237,7 @@ export async function transformWithStream(
     (error: unknown) => {
       // A limit hit leaves the transform mid-flight; cancel it so the
       // pending write settles and no further output is produced.
-      if (error instanceof ArchiveLimitError) {
+      if (error instanceof ArchiveLimitExceededError) {
         reader.cancel(error).catch(() => {
           // ignore
         });

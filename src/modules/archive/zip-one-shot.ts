@@ -6,7 +6,12 @@
  * progress, streaming output or lazy reads.
  */
 
-import { checkReadOptions, checkZipOptions, ZIP_READ_LIMITS } from "@archive/core/entry-checks";
+import {
+  checkReadOptions,
+  checkZipEncryptionOptions,
+  checkZipOptions,
+  ZIP_READ_LIMITS
+} from "@archive/core/entry-checks";
 import { ArchiveArgumentError } from "@archive/core/errors";
 import { collect } from "@archive/io/archive-sink";
 import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
@@ -60,21 +65,24 @@ export async function packZip(
   options?: Omit<ZipOptions, "format">
 ): Promise<Uint8Array> {
   checkZipOptions("Archive.packZip", options);
-  const archive = new ZipArchive({ ...options, format: "zip" });
+  checkZipEncryptionOptions("Archive.packZip", options);
+  const archive = new ZipArchive(options);
   addZipEntries(archive, entries, "Archive.packZip");
   return archive.toBuffer();
 }
 
 /**
  * Build a ZIP archive from in-memory entries synchronously. Sources must be strings,
- * `Uint8Array`s or `ArrayBuffer`s; encryption is not available synchronously.
+ * `Uint8Array`s or `ArrayBuffer`s. `"zipcrypto"` encryption is written synchronously; AES needs
+ * {@link packZip}, as it runs on Web Crypto.
  */
 export function packZipSync(
   entries: ReadonlyMap<string, string | Uint8Array | ArrayBuffer> | Iterable<TarEntryInput>,
   options?: Omit<ZipOptions, "format">
 ): Uint8Array {
   checkZipOptions("Archive.packZipSync", options);
-  const archive = new ZipArchive({ ...options, format: "zip" });
+  checkZipEncryptionOptions("Archive.packZipSync", options);
+  const archive = new ZipArchive(options);
   addZipEntries(archive, entries, "Archive.packZipSync");
   return archive.toBufferSync();
 }

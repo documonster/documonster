@@ -25,7 +25,7 @@
  */
 import type { Font } from "@excel/types";
 import { encodeWideString, readWideString, XlsbReader } from "@excel/xlsb/binary";
-import { COLOR_SIZE, encodeColor, readColor } from "@excel/xlsb/color";
+import { encodeColor, readColor } from "@excel/xlsb/color";
 import { INFERRED_VALUES } from "@excel/xlsb/spec/records";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
@@ -318,6 +318,3 @@ function popcount(value: number): number {
   }
   return count;
 }
-
-/** Bytes a `BrtColor` occupies inside a font, re-exported so the spec table can assert it. */
-export const FONT_COLOR_SIZE = COLOR_SIZE;

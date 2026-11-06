@@ -87,6 +87,7 @@ import type {
   ChartToPdfOptions as PdfFromChartOptions,
   ExcelToPdfOptions as PdfFromExcelOptions
 } from "@pdf/excel-bridge";
+import type { PdfAnnotationRect as PdfAnnotationRectType } from "@pdf/reader/annotation-extractor";
 import type { TextFragment as PdfTextFragment } from "@pdf/reader/content-interpreter";
 import type { ExtractedImage as PdfExtractedImage } from "@pdf/reader/image-extractor";
 import type {
@@ -171,7 +172,12 @@ export type {
   PdfTextFragment
 };
 export type { PdfMetadata } from "@pdf/reader/metadata-reader";
-export type { PdfAnnotation, PdfRect } from "@pdf/reader/annotation-extractor";
+export type { PdfAnnotation, PdfAnnotationRect } from "@pdf/reader/annotation-extractor";
+/**
+ * @deprecated Use {@link PdfAnnotationRect}. A rectangle by its corners, as an annotation's
+ * `/Rect` gives it; the general name read as the `{ x, y, width, height }` shape. Removed in 1.0.
+ */
+export type PdfRect = PdfAnnotationRectType;
 export type { PdfFormField, PdfFormFieldType } from "@pdf/reader/form-extractor";
 export type { PdfBookmark } from "@pdf/reader/bookmark-extractor";
 export type { PdfTable, PdfTableRow, PdfTableCell } from "@pdf/reader/table-extractor";
@@ -269,6 +275,7 @@ export {
   PdfFontError,
   PdfStructureError,
   PdfPasswordError,
+  PdfUnsupportedFeatureError,
   PdfLimitExceededError,
   PdfSignatureInvalidationError,
   PdfSignaturePlaceholderMissingError,

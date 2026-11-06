@@ -18,6 +18,7 @@ import {
   checkStringArray,
   invalidArgument
 } from "@word/core/argument-checks";
+import { markDerived } from "@word/core/ownership";
 import type {
   DocxDocument,
   BodyContent,
@@ -106,8 +107,8 @@ const BASIC_CHART_TYPES: ReadonlySet<string> = new Set<ChartType>([
  * integer ≥ 0 or a non-empty string, and values must be finite numbers, one
  * per category when the binding gives `categories`.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The DocxDocument to modify.
  * @param chartBindings - Array of chart bindings to apply.
@@ -161,7 +162,7 @@ export function bindChartData(
     }
   }
 
-  return { ...doc, body: newBody };
+  return markDerived({ ...doc, body: newBody }, doc);
 }
 
 /** The bindings' shape and values, before any is applied. */

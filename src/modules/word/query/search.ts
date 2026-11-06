@@ -4,15 +4,16 @@
  * Functions for searching, counting, and extracting text from a DocxDocument.
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import {
   checkHandle,
   checkInteger,
-  checkRecord,
   checkString,
   invalidArgument
 } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
 import { extractParagraphText } from "@word/core/text-utils";
-import { walkDocument } from "@word/core/walker";
+import { walkDocument, walkOptionsShape } from "@word/core/walker";
 import type { DocxVisitor, WalkOptions } from "@word/core/walker";
 import { resolveHeadingLevel } from "@word/query/heading";
 import { indexStyles } from "@word/query/style-resolve";
@@ -257,6 +258,14 @@ export interface ListTablesOptions extends WalkOptions {
   readonly topLevelOnly?: boolean;
 }
 
+const listTablesOptionsSchema = w.record({
+  ...walkOptionsShape,
+  topLevelOnly: w.boolean().optional()
+});
+const _listTablesOptionsMatch: SchemaMatches<typeof listTablesOptionsSchema, ListTablesOptions> =
+  true;
+void _listTablesOptionsMatch;
+
 /**
  * List all tables in the document.
  *
@@ -271,7 +280,7 @@ export interface ListTablesOptions extends WalkOptions {
  */
 export function listTables(doc: DocxDocument, options?: ListTablesOptions): readonly Table[] {
   checkHandle(doc, "document", "doc", "Query.listTables");
-  checkRecord(options, "options", "Query.listTables", { optional: true });
+  checkSchema(listTablesOptionsSchema.optional(), options, "Query.listTables");
   if (options?.topLevelOnly) {
     return doc.body.filter((b): b is Table => b.type === "table");
   }

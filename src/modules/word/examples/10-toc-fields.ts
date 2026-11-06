@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Document, Build } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -231,6 +231,6 @@ Document.addParagraph(
   ])
 );
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "10-toc-fields.docx"), buf);
 console.log(`  → 10-toc-fields.docx (${buf.length} bytes)`);

@@ -111,10 +111,15 @@ export function buildDataValidation(sheet: Worksheet.Handle): void {
   } as never);
 }
 
-/** A threaded-style comment and a plain note — two parts, and only one of them is named by a record. */
+/** A note with run-list text and an author, and a plain-text note. */
 export function buildComments(sheet: Worksheet.Handle): void {
-  Cell.setComment(sheet, "B2", { texts: [{ text: "Checked against the ledger." }] } as never);
-  Cell.setNote(sheet, "B3", "Estimate only." as never);
+  Cell.setNote(
+    sheet,
+    "B2",
+    { texts: [{ text: "Checked against the ledger." }] },
+    { author: "Audit" }
+  );
+  Cell.setNote(sheet, "B3", "Estimate only.");
 }
 
 /** An external link, an internal one, and an email — the three destinations `BrtHLink` distinguishes. */

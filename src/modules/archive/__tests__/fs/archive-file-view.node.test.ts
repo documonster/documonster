@@ -36,7 +36,8 @@ writeFileSync(diskFile, "from disk");
 utimesSync(diskFile, fixedTime, fixedTime);
 
 const decoder = new TextDecoder();
-const text = (bytes: Uint8Array | null) => (bytes === null ? null : decoder.decode(bytes));
+const text = (bytes: Uint8Array | undefined) =>
+  bytes === undefined ? undefined : decoder.decode(bytes);
 
 const zipSource = () =>
   Archive.ArchiveFile.fromBuffer(
@@ -92,10 +93,10 @@ describe("ArchiveFile ZIP reads reflect pending edits", () => {
     expect(text(await file.readEntry("new.txt"))).toBe("N");
     expect(text(file.readEntrySync("a.txt"))).toBe("A2");
     expect(text(await file.readEntry("d/z.txt"))).toBe("C");
-    expect(await file.readEntry("b.txt")).toBeNull();
+    expect(await file.readEntry("b.txt")).toBeUndefined();
     expect(await file.readAsText("new.txt")).toBe("N");
     expect(file.readAsTextSync("d/z.txt")).toBe("C");
-    expect(file.getEntry("b.txt")).toBeNull();
+    expect(file.getEntry("b.txt")).toBeUndefined();
   });
 
   it("describes every entry as the write records it", async () => {

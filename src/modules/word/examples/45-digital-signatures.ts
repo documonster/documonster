@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WordCrypto } from "../crypto";
-import { Document, Io } from "../index";
+import { Document } from "../index";
 import type { OpaquePart } from "../index";
 
 const outDir = path.resolve(
@@ -117,7 +117,7 @@ for (const s of sigs) {
 // demo we pass dropSignaturesOnModify:false so the signature stays in the
 // resulting DOCX — note the signature is no longer cryptographically valid,
 // only structurally present.
-const bytes = await Io.toBuffer(docWithSig, {
+const bytes = await Document.toBuffer(docWithSig, {
   securityPolicy: { dropSignaturesOnModify: false }
 });
 fs.writeFileSync(path.join(outDir, "45-signed.docx"), bytes);

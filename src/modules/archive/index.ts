@@ -6,6 +6,8 @@
  * Constants, error classes and types are flat.
  */
 
+import type { Stats } from "node:fs";
+
 import {
   compress as compressImpl,
   compressSync as compressSyncImpl,
@@ -276,9 +278,9 @@ export const createZlibStream = createZlibStreamImpl;
 export const createUnzlibStream = createUnzlibStreamImpl;
 /** @deprecated Use {@link Compression.hasDeflateRaw}. Removed in 1.0. */
 export const hasDeflateRaw = hasDeflateRawImpl;
-/** @deprecated Use {@link Compression.Workers.WorkerPool}. Removed in 1.0. */
+/** @deprecated Use {@link Compression.Workers.Pool}. Removed in 1.0. */
 export const WorkerPool = WorkerPoolImpl;
-/** @deprecated Use {@link Compression.Workers.WorkerPool}. Removed in 1.0. */
+/** @deprecated Use {@link Compression.Workers.Pool}. Removed in 1.0. */
 export type WorkerPool = WorkerPoolImpl;
 /** @deprecated Use {@link Compression.Workers.getDefaultPool}. Removed in 1.0. */
 export const getDefaultWorkerPool = getDefaultWorkerPoolImpl;
@@ -326,10 +328,20 @@ export const writeFileBytesSync = writeFileBytesSyncImpl;
 export const setFileTime = setFileTimeImpl;
 /** @deprecated Use {@link Fs.setFileTimeSync}. Removed in 1.0. */
 export const setFileTimeSync = setFileTimeSyncImpl;
-/** @deprecated Use {@link Fs.safeStats}. Removed in 1.0. */
-export const safeStats = safeStatsImpl;
-/** @deprecated Use {@link Fs.safeStatsSync}. Removed in 1.0. */
-export const safeStatsSync = safeStatsSyncImpl;
+/**
+ * @deprecated Use {@link Fs.safeStats}, which answers `undefined` for a missing file. This keeps the
+ * `null` it always answered. Removed in 1.0.
+ */
+export async function safeStats(filePath: string): Promise<Stats | null> {
+  return (await safeStatsImpl(filePath)) ?? null;
+}
+/**
+ * @deprecated Use {@link Fs.safeStatsSync}, which answers `undefined` for a missing file. This keeps
+ * the `null` it always answered. Removed in 1.0.
+ */
+export function safeStatsSync(filePath: string): Stats | null {
+  return safeStatsSyncImpl(filePath) ?? null;
+}
 /** @deprecated Use {@link Fs.readFileText}. Removed in 1.0. */
 export const readFileText = readFileTextImpl;
 /** @deprecated Use {@link Fs.readFileTextSync}. Removed in 1.0. */

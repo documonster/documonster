@@ -48,6 +48,7 @@ import {
   columnCreate,
   columnSetValuesAt,
   columnValuesAt,
+  checkWorksheet,
   checkWorksheetAttached,
   findColumn,
   findColumnNumber,
@@ -55,6 +56,9 @@ import {
   getColumnKey
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
+import { ExcelColumnOutOfBoundsError, ExcelStreamStateError } from "@excel/errors";
+import type { StreamWorksheet } from "@excel/surface/stream-targets";
+import { asStreamWorksheet, refuseWrittenRows } from "@excel/surface/stream-targets";
 import type {
   Alignment,
   Borders,
@@ -66,13 +70,15 @@ import type {
   Protection,
   Style
 } from "@excel/types";
-import { argumentChecks, checkNumber } from "@excel/utils/arguments";
+import { argumentChecks, checkNumber, checkSchema } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
 import { copyPlain } from "@excel/utils/copy-plain";
 import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
 import { numberedValues } from "@excel/utils/numbered-values";
 import type { ValuesBase, ValuesOptions } from "@excel/utils/numbered-values";
 import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** @deprecated Use `Worksheet.Handle`. Removed in 1.0. */
 export type Sheet = WorksheetData;
@@ -100,7 +106,8 @@ export interface AutoFitOptions extends AutoFitColumnOptions {
  * Every declared column's definition as plain data — the shape
  * {@link setDefinitions} takes. It is a copy, style included: editing it changes nothing.
  */
-export function getDefinitions(ws: WorksheetData): ColumnDefn[] {
+export function getDefinitions(ws: WorksheetData | StreamWorksheet): ColumnDefn[] {
+  readColumns(ws);
   return copyPlain(getColumnDefinitions(ws));
 }
 
@@ -112,7 +119,11 @@ export function getDefinitions(ws: WorksheetData): ColumnDefn[] {
  * width from 0 to 255, an outline level from 0 to 7, a boolean `hidden`, keys that are distinct non-empty strings,
  * headers a cell can hold and a valid style.
  */
-export function setDefinitions(ws: WorksheetData, definitions: readonly ColumnDefn[]): void {
+export function setDefinitions(
+  ws: WorksheetData | StreamWorksheet,
+  definitions: readonly ColumnDefn[]
+): void {
+  editColumns(ws, "set the column definitions");
   const where = "Column.setDefinitions";
   const check = argumentChecks(where);
   check.required("definitions", definitions);
@@ -138,6 +149,38 @@ export function setDefinitions(ws: WorksheetData, definitions: readonly ColumnDe
     }
   });
   setColumns(ws, definitions);
+}
+
+/**
+ * `ws` as the column helpers take it. A streaming worksheet writer stands in for a worksheet there — it carries the same
+ * column fields — so the readers of a column's own settings serve it as they are.
+ */
+function readColumns(ws: WorksheetData | StreamWorksheet): asserts ws is WorksheetData {
+  // Nothing to check: the assertion is the point.
+  void ws;
+}
+
+/**
+ * {@link readColumns}, for an edit: a streaming writer writes its columns with its first committed row, so a setting
+ * written into the file (width, style, header…) is refused after that rather than accepted and lost. A key is not
+ * written — it only says which property of a row object `addRow` reads into the column — so a `keyOnly` edit stays
+ * open until the sheet is committed.
+ */
+function editColumns(
+  ws: WorksheetData | StreamWorksheet,
+  operation: string,
+  { keyOnly = false }: { keyOnly?: boolean } = {}
+): asserts ws is WorksheetData {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    writer._checkOpen(operation);
+    if (!keyOnly && writer.areColumnsWritten()) {
+      throw new ExcelStreamStateError(
+        operation,
+        "the sheet's columns were written with its first committed row"
+      );
+    }
+  }
 }
 
 /** Excel's widest column, in characters ("Excel specifications and limits"). */
@@ -167,6 +210,7 @@ function checkBase(where: string, options: ValuesOptions | undefined): void {
  * {@link has}) — the sheet's column count, and the mirror of `Row.getCount`.
  */
 export function getCount(ws: WorksheetData): number {
+  refuseWrittenRows(ws, "Column.getCount", "count columns by their cells");
   return lastColumn(ws);
 }
 
@@ -185,6 +229,7 @@ function lastColumn(ws: WorksheetData): number {
 
 /** How many columns hold a value in at least one row. */
 export function getActualCount(ws: WorksheetData): number {
+  refuseWrittenRows(ws, "Column.getActualCount", "count columns by their cells");
   return getActualColumnCount(ws);
 }
 
@@ -193,6 +238,7 @@ export function getActualCount(ws: WorksheetData): number {
  * outline level) — the mirror of `Row.has`. Creates nothing.
  */
 export function has(ws: WorksheetData, col: string | number): boolean {
+  refuseWrittenRows(ws, "Column.has", "read the cells of a column");
   const n = findColumnNumber(ws, col);
   const own = ws._columns[n - 1];
   if (own !== undefined && !columnIsDefault(own)) {
@@ -208,6 +254,7 @@ export function has(ws: WorksheetData, col: string | number): boolean {
  * only columns holding a value.
  */
 export function getLast(ws: WorksheetData): number | undefined {
+  refuseWrittenRows(ws, "Column.getLast", "find the last column by its cells");
   const n = lastColumn(ws);
   return n > 0 ? n : undefined;
 }
@@ -225,6 +272,7 @@ export function splice(
   count: number,
   ...inserts: (readonly CellValueInput[])[]
 ): void {
+  refuseWrittenRows(ws, "Column.splice", "splice columns");
   spliceColumns(ws, start, count, ...(inserts as CellValue[][]));
 }
 
@@ -238,6 +286,7 @@ export function each(
   callback: (colNumber: number) => void,
   options?: EachOptions
 ): void {
+  refuseWrittenRows(ws, "Column.each", "walk the cells of its columns");
   if (typeof callback !== "function") {
     argumentChecks("Column.each").fail("callback", "a function", callback);
   }
@@ -272,6 +321,7 @@ export function eachAddress(
   callback: (address: string, row: number, col: number) => void,
   options?: EachOptions
 ): void {
+  refuseWrittenRows(ws, "Column.eachAddress", "walk the cells of a column");
   if (typeof callback !== "function") {
     argumentChecks("Column.eachAddress").fail("callback", "a function", callback);
   }
@@ -290,6 +340,20 @@ export function eachAddress(
   }
 }
 
+const autoFitColumnShape = { includeHiddenRows: s.boolean().optional() };
+const autoFitColumnOptionsSchema = s.object(autoFitColumnShape);
+const _autoFitColumnOptionsMatch: SchemaMatches<
+  typeof autoFitColumnOptionsSchema,
+  AutoFitColumnOptions
+> = true;
+void _autoFitColumnOptionsMatch;
+
+const column = () =>
+  s.union([s.string(), s.number()], { expected: "a column letter or number" }).optional();
+const autoFitOptionsSchema = s.object({ ...autoFitColumnShape, start: column(), end: column() });
+const _autoFitOptionsMatch: SchemaMatches<typeof autoFitOptionsSchema, AutoFitOptions> = true;
+void _autoFitOptionsMatch;
+
 /**
  * Fit column widths to their content, as Excel's AutoFit does: one column, or a
  * span (`{ start, end }`, defaulting to the used range) when given only options.
@@ -305,12 +369,39 @@ export function autoFit(
   colOrOptions?: string | number | AutoFitOptions,
   options?: AutoFitColumnOptions
 ): void {
+  refuseWrittenRows(ws, "Column.autoFit", "fit a column to its cells");
   if (typeof colOrOptions === "string" || typeof colOrOptions === "number") {
-    autoFitColumn(ws, findColumnNumber(ws, colOrOptions), options);
+    const col = autoFitColumnNumber(ws, colOrOptions, "col");
+    checkSchema("Column.autoFit", "options", autoFitColumnOptionsSchema.optional(), options);
+    autoFitColumn(ws, col, options);
     return;
   }
+  checkWorksheet(ws);
+  checkSchema("Column.autoFit", "options", autoFitOptionsSchema.optional(), colOrOptions);
   const { start, end, ...rest } = colOrOptions ?? {};
-  autoFitColumns(ws, start, end, rest);
+  // Resolved here, so a column past XFD is refused rather than counted up to.
+  autoFitColumns(
+    ws,
+    start === undefined ? undefined : autoFitColumnNumber(ws, start, "options.start"),
+    end === undefined ? undefined : autoFitColumnNumber(ws, end, "options.end"),
+    rest
+  );
+}
+
+/** `findColumnNumber`, with a column off the sheet reported at `field` of `Column.autoFit`. */
+function autoFitColumnNumber(ws: WorksheetData, col: string | number, field: string): number {
+  try {
+    return findColumnNumber(ws, col);
+  } catch (cause) {
+    if (cause instanceof ExcelColumnOutOfBoundsError) {
+      throw new ExcelColumnOutOfBoundsError(col, undefined, {
+        field,
+        where: "Column.autoFit",
+        cause
+      });
+    }
+    throw cause;
+  }
 }
 
 // --- identity ---
@@ -318,22 +409,28 @@ export function autoFit(
 /**
  * The 1-based column number for a key, letter or number.
  *
- * This is the bridge from a column *key* to the `(row, col)` form the `Cell`
- * namespace takes: `Cell.setValue(ws, row, Column.getNumber(ws, "total"), v)`.
+ * This is the bridge from a column *key* to the `{ row, col }` position the `Cell`
+ * namespace takes: `Cell.setValue(ws, { row, col: Column.getNumber(ws, "total") }, v)`.
  */
-export function getNumber(ws: WorksheetData, col: string | number): number {
+export function getNumber(ws: WorksheetData | StreamWorksheet, col: string | number): number {
+  readColumns(ws);
   return findColumnNumber(ws, col);
 }
 
 /** The column letter (`"A"`, `"AB"`) for a key, letter or number. */
-export function getLetter(ws: WorksheetData, col: string | number): string {
+export function getLetter(ws: WorksheetData | StreamWorksheet, col: string | number): string {
+  readColumns(ws);
   return colCache.n2l(findColumnNumber(ws, col));
 }
 
 // --- width ---
 
 /** The column's width in characters, or `undefined` when it has none of its own. Creates nothing. */
-export function getWidth(ws: WorksheetData, col: string | number): number | undefined {
+export function getWidth(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): number | undefined {
+  readColumns(ws);
   return findColumn(ws, col)?.width;
 }
 /**
@@ -342,7 +439,12 @@ export function getWidth(ws: WorksheetData, col: string | number): number | unde
  *
  * @throws {ExcelArgumentError} when `width` is not a number in that range.
  */
-export function setWidth(ws: WorksheetData, col: string | number, width: number | undefined): void {
+export function setWidth(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number,
+  width: number | undefined
+): void {
+  editColumns(ws, "set a column width");
   if (width === undefined) {
     const existing = findColumn(ws, col);
     checkWorksheetAttached(ws);
@@ -362,20 +464,29 @@ export function setWidth(ws: WorksheetData, col: string | number, width: number 
 // --- header / key ---
 
 /** The column's header, as {@link setHeader} or a definition set it, or `undefined`. Creates nothing. */
-export function getHeader(ws: WorksheetData, col: string | number): ColumnHeaderValue | undefined {
+export function getHeader(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): ColumnHeaderValue | undefined {
+  readColumns(ws);
   return findColumn(ws, col)?.header;
 }
 /** Set the column's header and write it into the column's first cell(s) — one per value of an array header. */
 export function setHeader(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number,
   header: ColumnHeaderValue
 ): void {
+  editColumns(ws, "set a column header");
   checkHeader(header, "Column.setHeader", "header");
   columnSetHeader(getColumn(ws, col), header);
 }
 /** The column's key, or `undefined`. Creates nothing. */
-export function getKey(ws: WorksheetData, col: string | number): string | undefined {
+export function getKey(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): string | undefined {
+  readColumns(ws);
   return findColumn(ws, col)?.key;
 }
 /**
@@ -386,7 +497,12 @@ export function getKey(ws: WorksheetData, col: string | number): string | undefi
  *
  * @throws {ExcelArgumentError} when `key` is not a non-empty string, or another column already has it.
  */
-export function setKey(ws: WorksheetData, col: string | number, key: string): void {
+export function setKey(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number,
+  key: string
+): void {
+  editColumns(ws, "set a column key", { keyOnly: true });
   const check = argumentChecks("Column.setKey");
   check.required("key", key);
   check.string("key", key, { nonEmpty: true });
@@ -404,23 +520,35 @@ export function setKey(ws: WorksheetData, col: string | number, key: string): vo
 // --- visibility / outline ---
 
 /** Whether the column is hidden. Creates nothing. */
-export function isHidden(ws: WorksheetData, col: string | number): boolean {
+export function isHidden(ws: WorksheetData | StreamWorksheet, col: string | number): boolean {
+  readColumns(ws);
   const c = findColumn(ws, col);
   return c !== undefined && columnHidden(c);
 }
 /** Hide or show the column. */
-export function setHidden(ws: WorksheetData, col: string | number, hidden: boolean): void {
+export function setHidden(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number,
+  hidden: boolean
+): void {
+  editColumns(ws, "hide a column");
   argumentChecks("Column.setHidden").required("hidden", hidden);
   argumentChecks("Column.setHidden").boolean("hidden", hidden);
   columnSetHidden(getColumn(ws, col), hidden);
 }
 /** The column's outline (grouping) level, `0` when it has none. Creates nothing. */
-export function getOutlineLevel(ws: WorksheetData, col: string | number): number {
+export function getOutlineLevel(ws: WorksheetData | StreamWorksheet, col: string | number): number {
+  readColumns(ws);
   const c = findColumn(ws, col);
   return c ? columnOutlineLevel(c) : 0;
 }
 /** Set the column's outline (grouping) level, a whole number from 0 to 7. */
-export function setOutlineLevel(ws: WorksheetData, col: string | number, level: number): void {
+export function setOutlineLevel(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number,
+  level: number
+): void {
+  editColumns(ws, "set a column outline level");
   checkNumber("Column.setOutlineLevel", "level", level, { min: 0, max: 7, integer: true });
   columnSetOutlineLevel(getColumn(ws, col), level);
 }
@@ -438,13 +566,22 @@ export function setOutlineLevel(ws: WorksheetData, col: string | number, level: 
  * because the caller may mutate in place, and a cell created afterwards must copy
  * what the column says then — see `core/style-sharing.ts`.
  */
-export function getStyle(ws: WorksheetData, col: string | number): Partial<Style> {
+export function getStyle(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): Partial<Style> {
+  editColumns(ws, "edit a column style");
   const { style } = getColumn(ws, col);
   invalidateSharedCellStyle(style);
   return style;
 }
 /** Merge `style` into the column's style and the style of the cells it applies to; see {@link setNumFmt}. */
-export function setStyle(ws: WorksheetData, col: string | number, style: Partial<Style>): void {
+export function setStyle(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number,
+  style: Partial<Style>
+): void {
+  editColumns(ws, "set a column style");
   checkStyle("Column.setStyle", style);
   columnSetStyle(getColumn(ws, col), style);
 }
@@ -454,7 +591,11 @@ export function setStyle(ws: WorksheetData, col: string | number, style: Partial
  * column — the read-only counterpart of {@link getStyle}: it creates nothing, and editing
  * what it returns changes nothing.
  */
-export function findStyle(ws: WorksheetData, col: string | number): Partial<Style> | undefined {
+export function findStyle(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): Partial<Style> | undefined {
+  readColumns(ws);
   const column = findColumn(ws, col);
   return column ? (copyStyle(column.style) as Partial<Style>) : undefined;
 }
@@ -488,52 +629,62 @@ export function findStyle(ws: WorksheetData, col: string | number): Partial<Styl
  * ```
  */
 export function setNumFmt(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number,
   value: string | NumFmt | undefined
 ): void {
+  editColumns(ws, "set a column number format");
   checkStyleFacet("Column.setNumFmt", "numFmt", value, "value");
   columnSetNumFmt(getColumn(ws, col), value);
 }
 
 /** Set the font of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
 export function setFont(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number,
   value: Partial<Font> | undefined
 ): void {
+  editColumns(ws, "set a column font");
   checkStyleFacet("Column.setFont", "font", value, "value");
   columnSetFont(getColumn(ws, col), value);
 }
 /** Set the alignment of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
 export function setAlignment(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number,
   value: Partial<Alignment> | undefined
 ): void {
+  editColumns(ws, "set a column alignment");
   checkStyleFacet("Column.setAlignment", "alignment", value, "value");
   columnSetAlignment(getColumn(ws, col), value);
 }
 /** Set the borders of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
 export function setBorder(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number,
   value: Partial<Borders> | undefined
 ): void {
+  editColumns(ws, "set a column border");
   checkStyleFacet("Column.setBorder", "border", value, "value");
   columnSetBorder(getColumn(ws, col), value);
 }
 /** Set the fill of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
-export function setFill(ws: WorksheetData, col: string | number, value: Fill | undefined): void {
+export function setFill(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number,
+  value: Fill | undefined
+): void {
+  editColumns(ws, "set a column fill");
   checkStyleFacet("Column.setFill", "fill", value, "value");
   columnSetFill(getColumn(ws, col), value);
 }
 /** Set the protection of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
 export function setProtection(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number,
   value: Partial<Protection> | undefined
 ): void {
+  editColumns(ws, "set a column protection");
   checkStyleFacet("Column.setProtection", "protection", value, "value");
   columnSetProtection(getColumn(ws, col), value);
 }
@@ -554,33 +705,51 @@ function facet<K extends keyof Style>(
  * record, and what they return is a copy, so editing it changes nothing. Change a
  * facet with its setter ({@link setFont}, …).
  */
-export function getNumFmt(ws: WorksheetData, col: string | number): Style["numFmt"] | undefined {
+export function getNumFmt(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): Style["numFmt"] | undefined {
+  readColumns(ws);
   return facet(ws, col, "numFmt");
 }
 /** A copy of the column's own font, or `undefined`. Creates nothing; see {@link getNumFmt}. */
-export function getFont(ws: WorksheetData, col: string | number): Partial<Font> | undefined {
+export function getFont(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): Partial<Font> | undefined {
+  readColumns(ws);
   return facet(ws, col, "font");
 }
 /** A copy of the column's own alignment, or `undefined`. Creates nothing. */
 export function getAlignment(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number
 ): Partial<Alignment> | undefined {
+  readColumns(ws);
   return facet(ws, col, "alignment");
 }
 /** A copy of the column's own borders, or `undefined`. Creates nothing. */
-export function getBorder(ws: WorksheetData, col: string | number): Partial<Borders> | undefined {
+export function getBorder(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): Partial<Borders> | undefined {
+  readColumns(ws);
   return facet(ws, col, "border");
 }
 /** A copy of the column's own fill, or `undefined`. Creates nothing. */
-export function getFill(ws: WorksheetData, col: string | number): Fill | undefined {
+export function getFill(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): Fill | undefined {
+  readColumns(ws);
   return facet(ws, col, "fill");
 }
 /** A copy of the column's own protection, or `undefined`. Creates nothing. */
 export function getProtection(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   col: string | number
 ): Partial<Protection> | undefined {
+  readColumns(ws);
   return facet(ws, col, "protection");
 }
 
@@ -597,7 +766,11 @@ export function getProtection(
  * fields off a column handle by hand: hand-copying re-implements the
  * normalisation and silently drifts the moment a field or a fallback changes.
  */
-export function getDefinition(ws: WorksheetData, col: string | number): ColumnDefn {
+export function getDefinition(
+  ws: WorksheetData | StreamWorksheet,
+  col: string | number
+): ColumnDefn {
+  readColumns(ws);
   return copyPlain(columnDefn(findColumn(ws, col) ?? columnCreate(ws, findColumnNumber(ws, col))));
 }
 
@@ -626,7 +799,7 @@ export function getDefinition(ws: WorksheetData, col: string | number): ColumnDe
  * const colNumber = Column.getNumber(ws, "C");
  * Column.getValues(ws, "C", { base: 1 }).forEach((value, rowNumber) => {
  *   if (typeof value === "number" && value < 0) {
- *     Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
+ *     Cell.setFont(ws, { row: rowNumber, col: colNumber }, { color: { argb: "FFC00000" } });
  *   }
  * });
  * ```
@@ -636,6 +809,7 @@ export function getValues(
   col: string | number,
   options?: ValuesOptions
 ): CellValue[] {
+  refuseWrittenRows(ws, "Column.getValues", "read the values of a column");
   checkBase("Column.getValues", options);
   return columnValuesAt(ws, findColumnNumber(ws, col), options?.base === 1 ? 1 : 0);
 }
@@ -669,6 +843,7 @@ export function setValues(
   values: readonly CellValueInput[],
   options?: ValuesOptions
 ): void {
+  refuseWrittenRows(ws, "Column.setValues", "write values down a column");
   const check = argumentChecks("Column.setValues");
   check.required("values", values);
   check.array("values", values);
@@ -703,7 +878,9 @@ export function setValues(
  * Column.addPageBreak(ws, "F"); // the next page starts at column G
  * ```
  */
-export function addPageBreak(ws: WorksheetData, col: string | number): void {
+export function addPageBreak(ws: WorksheetData | StreamWorksheet, col: string | number): void {
+  readColumns(ws);
+  asStreamWorksheet(ws)?._checkOpen("add a page break");
   columnAddPageBreak(getColumn(ws, col));
 }
 

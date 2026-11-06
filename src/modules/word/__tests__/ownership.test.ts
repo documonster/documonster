@@ -170,6 +170,184 @@ describe("every other function returning a document leaves its input unchanged",
   });
 });
 
+/** Every kind of in-place edit `Document.*` makes, each through a different path. */
+const EDITS: [string, (doc: DocxDocument) => void][] = [
+  ["addParagraph", doc => Document.addParagraph(doc, "added")],
+  ["addContent", doc => Document.addContent(doc, Build.textParagraph("added"))],
+  ["insertContent", doc => Document.insertContent(doc, 0, Build.textParagraph("first"))],
+  ["removeContent", doc => void Document.removeContent(doc, 0)],
+  ["addSectionBreak", doc => Document.addSectionBreak(doc, { titlePage: true })],
+  ["addStyle", doc => Document.addStyle(doc, { type: "paragraph", styleId: "Normal", name: "N" })],
+  ["useDefaultStyles", doc => Document.useDefaultStyles(doc)],
+  ["addImage", doc => void Document.addImage(doc, new Uint8Array([1]), "png", 10, 10)],
+  ["addFootnote", doc => void Document.addFootnote(doc, "more")],
+  ["addEndnote", doc => void Document.addEndnote(doc, "more")],
+  ["addComment", doc => void Document.addComment(doc, "A", "more")],
+  ["addBulletList", doc => Document.addBulletList(doc, ["x"])],
+  ["addNumberedList", doc => Document.addNumberedList(doc, ["x"])],
+  ["addFont", doc => Document.addFont(doc, { name: "Arial" })],
+  [
+    "addCustomProperty",
+    doc => Document.addCustomProperty(doc, "Due", { type: "string", value: "x" })
+  ],
+  [
+    "setHeader",
+    doc => Document.setHeader(doc, "default", { children: [Build.textParagraph("h")] })
+  ],
+  ["setFooter", doc => Document.setFooter(doc, "first", { children: [Build.textParagraph("f")] })],
+  ["replaceText", doc => void Document.replaceText(doc, /Ann|\{\{name\}\}|brown/g, "X")],
+  ["mailMerge", doc => void Document.mailMerge(doc, { Name: "Z" })],
+  ["acceptAllRevisions", doc => void Document.acceptAllRevisions(doc)],
+  ["rejectAllRevisions", doc => void Document.rejectAllRevisions(doc)],
+  ["acceptRevision", doc => void Document.acceptRevision(doc, 1)],
+  ["setCompatibilityMode", doc => Document.setCompatibilityMode(doc, 12)],
+  ["discardUnrecognizedValues", doc => void Document.discardUnrecognizedValues(doc)]
+];
+
+const DERIVE: [string, (doc: DocxDocument) => Promise<DocxDocument> | DocxDocument][] = [
+  ["Template.fill", doc => Template.fill(doc, { name: "Ann" })],
+  [
+    "Template.fillFromSource",
+    doc => Template.fillFromSource(doc, Template.createJsonDataSource({ name: "Ann" }))
+  ],
+  ["Transform.merge", doc => Transform.merge([doc, rich()])],
+  ["Transform.split", doc => Transform.split(doc)[0]!],
+  [
+    "Transform.updateFields",
+    doc => {
+      Document.addTableOfContents(doc);
+      return Transform.updateFields(doc);
+    }
+  ],
+  ["Transform.map", doc => Transform.map(doc, {})],
+  ["Transform.fillFormFields", doc => Transform.fillFormFields(doc, new Map([["FullName", "J"]]))],
+  [
+    "Transform.resolveDataBindings",
+    doc => {
+      Document.addContent(doc, {
+        type: "sdt",
+        properties: { dataBinding: { xpath: "/root/n", storeItemId: "{abc}" } },
+        content: [Build.textParagraph("unbound")]
+      });
+      return Transform.resolveDataBindings(doc, new Map([["{abc}", "<root><n>B</n></root>"]]));
+    }
+  ],
+  ["Security.protect", doc => Security.protect(doc, { edit: "readOnly" })],
+  [
+    "Security.unprotect",
+    async doc => {
+      Document.setSettings(doc, { documentProtection: { edit: "readOnly", enforcement: true } });
+      return Security.unprotect(doc);
+    }
+  ],
+  ["Vba.add", doc => Vba.add(doc, OLE2)],
+  ["Vba.remove", doc => Vba.remove(doc)],
+  [
+    "Font.addEmbedded",
+    doc =>
+      Font.addEmbedded(doc, [
+        {
+          fontDef: { name: "Calibri", embedRegular: "rIdF1" },
+          embeddedFont: { rId: "rIdF1", data: new Uint8Array([1, 2]), fileName: "font1.ttf" }
+        }
+      ])
+  ],
+  ["Ole.add", doc => Ole.add(doc, Ole.createEmbedding(OLE2, "Package"))]
+];
+
+describe("Document.* copies what a derived document shares before editing it", () => {
+  const cases = DERIVE.flatMap(([from, derive]) =>
+    EDITS.map(([edit, run]) => [from, edit, derive, run] as const)
+  );
+
+  it.each(cases)("%s, then %s on the result", async (_from, _edit, derive, run) => {
+    const input = rich();
+    const result = await derive(input);
+    expect(result).not.toBe(input);
+    const before = structuredClone(input);
+    run(result);
+    expect(input).toEqual(before);
+  });
+
+  it.each(cases)("%s, then %s on the input", async (_from, _edit, derive, run) => {
+    const input = rich();
+    const result = await derive(input);
+    const before = structuredClone(result);
+    run(input);
+    expect(result).toEqual(before);
+  });
+
+  it("keeps a container a document claimed when the caller spreads the document", () => {
+    const a = rich();
+    const b = { ...a };
+    for (const [, run] of EDITS.slice(0, 17)) {
+      run(b);
+    }
+    expect(a.body).not.toBe(b.body);
+    expect(a.body).toEqual(rich().body);
+  });
+
+  it("reproduces the reported case", async () => {
+    const a = Document.create();
+    Document.addParagraph(a, "one");
+    const b = await Security.protect(a, { edit: "readOnly" });
+    Document.addParagraph(b, "two");
+    expect(a.body).toHaveLength(1);
+    expect(b.body).toHaveLength(2);
+    Document.addParagraph(a, "three");
+    expect(b.body).toHaveLength(2);
+  });
+
+  it("copies a shared container once, then edits it in place", async () => {
+    const a = rich();
+    const b = await Security.protect(a, { edit: "readOnly" });
+    Document.addParagraph(b, "x");
+    const body = b.body;
+    expect(body).not.toBe(a.body);
+    Document.addParagraph(b, "y");
+    Document.insertContent(b, 0, Build.textParagraph("z"));
+    expect(b.body).toBe(body);
+  });
+
+  it("gives a derived document a tree of its own once, before a deep edit", async () => {
+    const a = rich();
+    const b = Transform.map(a, {});
+    Document.replaceText(b, "brown", "grey");
+    const tree = b.body;
+    Document.replaceText(b, "grey", "red");
+    Document.acceptAllRevisions(b);
+    expect(b.body).toBe(tree);
+    expect(bodyText(a)).toContain("brown");
+  });
+});
+
+describe("Document.* edits a document it owns in place", () => {
+  it("appends to a created document without copying its body", () => {
+    const doc = Document.create();
+    const body = doc.body;
+    for (let i = 0; i < 3; i++) {
+      Document.addParagraph(doc, `p${i}`);
+    }
+    Document.addFootnote(doc, "n");
+    const notes = doc.footnotes;
+    Document.addFootnote(doc, "m");
+    expect(doc.body).toBe(body);
+    expect(doc.footnotes).toBe(notes);
+  });
+
+  it("keeps the arrays of a hand-built or read document", async () => {
+    const body: Paragraph[] = [];
+    const doc = { body } as DocxDocument;
+    Document.addParagraph(doc, "x");
+    expect(body).toHaveLength(1);
+    const read = await Io.read(await Io.toBuffer(rich()));
+    const readBody = read.body;
+    Document.addParagraph(read, "x");
+    Document.replaceText(read, "x", "y");
+    expect(read.body).toBe(readBody);
+  });
+});
+
 describe("Document.clone", () => {
   it("copies every kind of value the model holds", async () => {
     const doc = await Io.read(await Io.toBuffer(rich()));
@@ -292,5 +470,21 @@ describe("Document.clone", () => {
     const id = Document.allocateBookmarkId(doc);
     const copy = Document.clone(doc);
     expect(Document.allocateBookmarkId(copy)).toBeGreaterThan(id);
+  });
+});
+
+describe("the copy a shared document makes before a tree edit", () => {
+  it("shares bytes, keeps the derived document unchanged, and copes with values structuredClone refuses", async () => {
+    const doc = rich();
+    const derived = await Security.protect(doc, { edit: "readOnly" });
+    const bytes = doc.images![0]!.data;
+    (doc as unknown as { extra: unknown }).extra = { onRead: () => 1 };
+
+    expect(Document.replaceText(doc, "{{name}}", "Ada")).toBeGreaterThan(0);
+
+    // The edit reached `doc` only; the media bytes were not duplicated for it.
+    expect(Query.extractText(doc)).toContain("Ada");
+    expect(Query.extractText(derived)).not.toContain("Ada");
+    expect(doc.images![0]!.data).toBe(bytes);
   });
 });

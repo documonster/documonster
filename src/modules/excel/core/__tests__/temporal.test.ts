@@ -156,16 +156,22 @@ describe("Cell.getDateParts / Cell.setDateParts", () => {
     // argument after the value, so its overload resolution is the one that could plausibly mis-dispatch — a
     // `kind` read as a column, or the parts read as a row.
     const ws = sheet();
-    Cell.setDateParts(ws, 1, 2, { year: 2024, month: 6, day: 1 });
-    Cell.setDateParts(ws, 2, 2, { hour: 14, minute: 45 }, "time");
-    expect(Cell.getDateParts(ws, 1, 2)).toMatchObject({ year: 2024, month: 6, day: 1 });
-    expect(Cell.getDateParts(ws, 1, 2)).toEqual(Cell.getDateParts(ws, "B1"));
-    expect(Cell.getDateKind(ws, 1, 2)).toBe("date");
-    expect(Cell.getDateParts(ws, 2, 2)).toMatchObject({ hour: 14, minute: 45 });
-    expect(Cell.getDateKind(ws, 2, 2)).toBe("time");
+    Cell.setDateParts(ws, { row: 1, col: 2 }, { year: 2024, month: 6, day: 1 });
+    Cell.setDateParts(ws, { row: 2, col: 2 }, { hour: 14, minute: 45 }, "time");
+    expect(Cell.getDateParts(ws, { row: 1, col: 2 })).toMatchObject({
+      year: 2024,
+      month: 6,
+      day: 1
+    });
+    expect(Cell.getDateParts(ws, { row: 1, col: 2 })).toEqual(Cell.getDateParts(ws, "B1"));
+    expect(Cell.getDateKind(ws, { row: 1, col: 2 })).toBe("date");
+    expect(Cell.getDateParts(ws, { row: 2, col: 2 })).toMatchObject({ hour: 14, minute: 45 });
+    expect(Cell.getDateKind(ws, { row: 2, col: 2 })).toBe("time");
     if (withTemporal) {
-      expect(String(Cell.getTemporal(ws, 2, 2))).toBe("14:45:00");
-      expect(String(Cell.getTemporal(ws, 1, 2))).toBe(String(Cell.getTemporal(ws, "B1")));
+      expect(String(Cell.getTemporal(ws, { row: 2, col: 2 }))).toBe("14:45:00");
+      expect(String(Cell.getTemporal(ws, { row: 1, col: 2 }))).toBe(
+        String(Cell.getTemporal(ws, "B1"))
+      );
     }
   });
 

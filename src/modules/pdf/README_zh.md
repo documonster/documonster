@@ -156,7 +156,7 @@ const result = await Pdf.extract(bytes, {
 // 提取书签(大纲树)
 const result = await Pdf.extract(bytes, { extractBookmarks: true });
 for (const bm of result.bookmarks) {
-  console.log(bm.title, `→ page ${bm.pageIndex + 1}`);
+  console.log(bm.title, bm.pageIndex === undefined ? "(no page)" : `→ page ${bm.pageIndex + 1}`);
 }
 
 // 提取表格(基于文本位置的启发式检测)
@@ -754,7 +754,7 @@ interface PdfExtractedPage {
 
 interface PdfAnnotation {
   subtype: string; // "Link"、"Text"、"Highlight"、"FreeText"、"Stamp" 等
-  rect: PdfRect; // 边界矩形 { x1, y1, x2, y2 }
+  rect: PdfAnnotationRect; // 边界矩形 { x1, y1, x2, y2 }
   contents: string; // 文本内容
   author: string; // 作者 / 标题
   uri: string; // 对于 Link:目标 URI
@@ -775,17 +775,22 @@ interface PdfFormField {
 }
 
 interface PdfMetadata {
-  title?: string;
-  author?: string;
-  subject?: string;
-  keywords?: string;
-  creator?: string;
-  producer?: string;
+  // 文本字段:文档未提供时为 ""。
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  creator: string;
+  producer: string;
+  // 文档未提供(或不是有效日期)时字段不存在。
   creationDate?: Date;
-  modificationDate?: Date;
+  modDate?: Date;
+  pageSize?: { width: number; height: number }; // 第一页,单位为点
+  xmpXml?: string; // 原始 XMP 数据包
   pdfVersion: string;
   pageCount: number;
   encrypted: boolean;
+  custom: Record<string, string>; // Info 字典中的其他条目
 }
 ```
 

@@ -10,9 +10,9 @@
  * to the streaming API (`Stream.RowHandle`).
  */
 import type { CellData } from "@excel/core/cell";
-import { cellType, checkCellValue } from "@excel/core/cell";
+import { cellType, checkRowList, checkRowValues } from "@excel/core/cell";
 import { ValueType } from "@excel/core/enums";
-import type { RowDimensions, RowModel } from "@excel/core/row";
+import type { RowData, RowDimensions, RowModel } from "@excel/core/row";
 import {
   rowActualCellCount,
   rowAddPageBreak,
@@ -59,7 +59,14 @@ import {
   rowSetValues
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { ExcelArgumentError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
+import type { StreamWorksheet } from "@excel/surface/stream-targets";
+import {
+  asStreamWorksheet,
+  checkStreamRowsHeld,
+  checkStreamRowsOpen,
+  refuseWrittenRows
+} from "@excel/surface/stream-targets";
 import type {
   Alignment,
   Borders,
@@ -151,37 +158,49 @@ function styleCode(
 // --- adding / inserting / removing rows ---
 
 /**
- * A row's values are a list (by column), an object (by column key), or nothing for an empty row. Anything else — a
- * bare number, a string — used to add an empty row without a word.
+ * Row `row` for an edit, created when absent (`create`) — refused once a streaming writer has written it, as
+ * `Stream.setRow*` refuses an edit through a committed row's handle. The row number is checked first.
  */
-function checkRowValues(where: string, values: unknown, argument = "values"): void {
-  if (values === null || values === undefined) {
-    return;
-  }
-  if (Array.isArray(values) || (typeof values === "object" && !(values instanceof Date))) {
-    // Each value as `Cell.setValue` checks it, before the row is created — a refused value used to leave it behind.
-    for (const [key, value] of Object.entries(values)) {
-      checkCellValue(value, {
-        where,
-        field: Array.isArray(values) ? `${argument}[${key}]` : `${argument}.${key}`
-      });
-    }
-    return;
-  }
-  throw new ExcelArgumentError(
-    argument,
-    `${where}: ${argument} must be an array of cell values, an object keyed by column key, or nothing; got ${typeof values}.`
-  );
+function editRow(ws: WorksheetData | StreamWorksheet, where: string, row: number): RowData;
+function editRow(
+  ws: WorksheetData | StreamWorksheet,
+  where: string,
+  row: number,
+  create: false
+): RowData | undefined;
+function editRow(
+  ws: WorksheetData | StreamWorksheet,
+  where: string,
+  row: number,
+  create = true
+): RowData | undefined {
+  checkStreamRowsOpen(ws, where, row);
+  const sheet = ws as WorksheetData;
+  return create ? getRow(sheet, row) : findRow(sheet, row);
 }
 
-function checkRowList(where: string, list: unknown): void {
-  if (!Array.isArray(list)) {
-    throw new ExcelArgumentError(
-      "values",
-      `${where}: values must be an array of rows; got ${typeof list}.`
+/** Row `row` for a read, never created — refused once a streaming writer has written it, as it no longer holds it. */
+function heldRow(
+  ws: WorksheetData | StreamWorksheet,
+  where: string,
+  row: number
+): RowData | undefined {
+  const r = findRow(ws as WorksheetData, row);
+  checkStreamRowsHeld(ws, where, row);
+  return r;
+}
+
+/**
+ * A streaming writer adds a row as given: copying the style of the row above would need that row, which it may already
+ * have written.
+ */
+function refuseStyleCopy(code: string, where: string): void {
+  if (code !== "n") {
+    throw new ExcelUnsupportedFeatureError(
+      where,
+      "a streaming worksheet writer cannot copy the style of the row above: it may already have written it"
     );
   }
-  list.forEach((values, i) => checkRowValues(where, values, `values[${i}]`));
 }
 
 /**
@@ -198,23 +217,34 @@ function checkRowList(where: string, list: unknown): void {
  * ```
  */
 export function add(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   values: RowValues | readonly CellValueInput[],
   options?: AddOptions
 ): number {
   checkRowValues("Row.add", values);
-  return addRow(ws, values as RowValues, styleCode("Row.add", options, ["above"])).number;
+  const code = styleCode("Row.add", options, ["above"]);
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    refuseStyleCopy(code, "Row.add");
+    return writer._appendCheckedRows([values as RowValues])[0].number;
+  }
+  return addRow(ws as WorksheetData, values as RowValues, code).number;
 }
 
 /** Append several rows and return their numbers. */
 export function addMany(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   values: readonly (RowValues | readonly CellValueInput[])[],
   options?: AddOptions
 ): number[] {
   const code = styleCode("Row.addMany", options, ["above"]);
   checkRowList("Row.addMany", values);
-  return values.map(v => addRow(ws, v as RowValues, code).number);
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    refuseStyleCopy(code, "Row.addMany");
+    return writer._appendCheckedRows(values as RowValues[]).map(r => r.number);
+  }
+  return values.map(v => addRow(ws as WorksheetData, v as RowValues, code).number);
 }
 
 /**
@@ -230,6 +260,7 @@ export function insert(
   values: RowValues | readonly CellValueInput[],
   options?: InsertOptions
 ): number {
+  refuseWrittenRows(ws, "Row.insert", "insert a row");
   checkRowValues("Row.insert", values);
   insertRow(ws, row, values as RowValues, styleCode("Row.insert", options, ["above", "below"]));
   return row;
@@ -242,6 +273,7 @@ export function insertMany(
   values: readonly (RowValues | readonly CellValueInput[])[],
   options?: InsertOptions
 ): number[] {
+  refuseWrittenRows(ws, "Row.insertMany", "insert rows");
   checkRowList("Row.insertMany", values);
   insertRows(
     ws,
@@ -262,6 +294,7 @@ export function duplicate(
   count: number,
   options?: DuplicateOptions
 ): void {
+  refuseWrittenRows(ws, "Row.duplicate", "duplicate a row");
   duplicateRow(ws, row, count, options?.insert ?? false);
 }
 
@@ -278,6 +311,7 @@ export function splice(
   count: number,
   ...inserts: (RowValues | readonly CellValueInput[])[]
 ): void {
+  refuseWrittenRows(ws, "Row.splice", "splice rows");
   inserts.forEach((values, i) => checkRowValues("Row.splice", values, `inserts[${i}]`));
   spliceRows(ws, start, count, ...(inserts as RowValues[]));
 }
@@ -286,23 +320,26 @@ export function splice(
 
 /** The number of the last row that exists — the sheet's row count. */
 export function getCount(ws: WorksheetData): number {
+  refuseWrittenRows(ws, "Row.getCount", "count its rows");
   return getRowCount(ws);
 }
 
 /** How many rows actually hold a value. */
 export function getActualCount(ws: WorksheetData): number {
+  refuseWrittenRows(ws, "Row.getActualCount", "count its rows");
   return getActualRowCount(ws);
 }
 
 /** The number of the last row that exists — {@link getCount} — or `undefined` for an empty sheet. */
 export function getLast(ws: WorksheetData): number | undefined {
+  refuseWrittenRows(ws, "Row.getLast", "find its last row");
   const n = getRowCount(ws);
   return n > 0 ? n : undefined;
 }
 
 /** Whether row `row` exists. Never creates it. */
-export function has(ws: WorksheetData, row: number): boolean {
-  return findRow(ws, row) !== undefined;
+export function has(ws: WorksheetData | StreamWorksheet, row: number): boolean {
+  return heldRow(ws, "Row.has", row) !== undefined;
 }
 
 /**
@@ -315,6 +352,7 @@ export function each(
   callback: (rowNumber: number) => void,
   options?: EachOptions
 ): void {
+  refuseWrittenRows(ws, "Row.each", "walk its rows");
   if (typeof callback !== "function") {
     argumentChecks("Row.each").fail("callback", "a function", callback);
   }
@@ -335,7 +373,7 @@ export function each(
  * every column up to the row's last cell is visited, without creating cells.
  */
 export function eachAddress(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   callback: (address: string, row: number, col: number) => void,
   options?: EachOptions
@@ -343,7 +381,7 @@ export function eachAddress(
   if (typeof callback !== "function") {
     argumentChecks("Row.eachAddress").fail("callback", "a function", callback);
   }
-  const r = findRow(ws, row);
+  const r = heldRow(ws, "Row.eachAddress", row);
   if (!r) {
     return;
   }
@@ -362,8 +400,8 @@ export function eachAddress(
  * Whether row `row` holds at least one value. A row that does not exist holds
  * none; asking never creates it.
  */
-export function hasValues(ws: WorksheetData, row: number): boolean {
-  const r = findRow(ws, row);
+export function hasValues(ws: WorksheetData | StreamWorksheet, row: number): boolean {
+  const r = heldRow(ws, "Row.hasValues", row);
   return r !== undefined && rowHasValues(r);
 }
 
@@ -371,14 +409,14 @@ export function hasValues(ws: WorksheetData, row: number): boolean {
  * How many cell slots row `row` has — the column number of its last cell,
  * empty or not. `0` for a row that does not exist.
  */
-export function getCellCount(ws: WorksheetData, row: number): number {
-  const r = findRow(ws, row);
+export function getCellCount(ws: WorksheetData | StreamWorksheet, row: number): number {
+  const r = heldRow(ws, "Row.getCellCount", row);
   return r ? rowCellCount(r) : 0;
 }
 
 /** How many cells of row `row` actually hold a value. `0` for a row that does not exist. */
-export function getActualCellCount(ws: WorksheetData, row: number): number {
-  const r = findRow(ws, row);
+export function getActualCellCount(ws: WorksheetData | StreamWorksheet, row: number): number {
+  const r = heldRow(ws, "Row.getActualCellCount", row);
   return r ? rowActualCellCount(r) : 0;
 }
 
@@ -386,8 +424,11 @@ export function getActualCellCount(ws: WorksheetData, row: number): number {
  * The first and last column of row `row` that hold a value, or `undefined` when
  * it holds none (or does not exist).
  */
-export function getDimensions(ws: WorksheetData, row: number): RowDimensions | undefined {
-  const r = findRow(ws, row);
+export function getDimensions(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): RowDimensions | undefined {
+  const r = heldRow(ws, "Row.getDimensions", row);
   return (r && rowDimensions(r)) ?? undefined;
 }
 
@@ -395,8 +436,8 @@ export function getDimensions(ws: WorksheetData, row: number): RowDimensions | u
  * Whether row `row` is collapsed — its outline level is at or above the sheet's
  * row outline level. `false` for a row that does not exist.
  */
-export function isCollapsed(ws: WorksheetData, row: number): boolean {
-  const r = findRow(ws, row);
+export function isCollapsed(ws: WorksheetData | StreamWorksheet, row: number): boolean {
+  const r = heldRow(ws, "Row.isCollapsed", row);
   return r !== undefined && rowCollapsed(r);
 }
 
@@ -405,8 +446,8 @@ export function isCollapsed(ws: WorksheetData, row: number): boolean {
  * visibility — or `undefined` when the row does not exist or has nothing to
  * write. It is a copy: editing it changes nothing.
  */
-export function getModel(ws: WorksheetData, row: number): RowModel | undefined {
-  const r = findRow(ws, row);
+export function getModel(ws: WorksheetData | StreamWorksheet, row: number): RowModel | undefined {
+  const r = heldRow(ws, "Row.getModel", row);
   const model = r && rowGetModel(r);
   return model ? copyPlain(model) : undefined;
 }
@@ -414,8 +455,8 @@ export function getModel(ws: WorksheetData, row: number): RowModel | undefined {
 // --- height ---
 
 /** The row's height in points, or `undefined` when it has none of its own. Never creates the row. */
-export function getHeight(ws: WorksheetData, row: number): number | undefined {
-  return findRow(ws, row)?.height;
+export function getHeight(ws: WorksheetData | StreamWorksheet, row: number): number | undefined {
+  return heldRow(ws, "Row.getHeight", row)?.height;
 }
 /**
  * Set the row's height in points — from 0 to 409, Excel's tallest row ("Excel specifications and limits"). `undefined`
@@ -423,11 +464,15 @@ export function getHeight(ws: WorksheetData, row: number): number | undefined {
  *
  * @throws {ExcelArgumentError} when `height` is not a number in that range.
  */
-export function setHeight(ws: WorksheetData, row: number, height: number | undefined): void {
+export function setHeight(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  height: number | undefined
+): void {
   if (height === undefined) {
     // Clearing a row that does not exist has nothing to clear; do not create it to find that out.
-    const r = findRow(ws, row);
-    checkWorksheetAttached(ws);
+    const r = editRow(ws, "Row.setHeight", row, false);
+    checkWorksheetAttached(ws as WorksheetData);
     if (r) {
       r.height = undefined;
       r.customHeight = undefined;
@@ -435,7 +480,7 @@ export function setHeight(ws: WorksheetData, row: number, height: number | undef
     return;
   }
   checkNumber("Row.setHeight", "height", height, { min: 0, max: 409 });
-  const r = getRow(ws, row);
+  const r = editRow(ws, "Row.setHeight", row);
   r.height = height;
   r.customHeight = true;
 }
@@ -447,6 +492,7 @@ export function setHeight(ws: WorksheetData, row: number, height: number | undef
 export function autoFit(ws: WorksheetData, row: number): void;
 export function autoFit(ws: WorksheetData, options?: AutoFitOptions): void;
 export function autoFit(ws: WorksheetData, rowOrOptions?: number | AutoFitOptions): void {
+  refuseWrittenRows(ws, "Row.autoFit", "fit rows to their cells");
   const check = argumentChecks("Row.autoFit");
   if (typeof rowOrOptions === "number") {
     check.number("row", rowOrOptions, { min: 1, max: MAX_ROW, integer: true });
@@ -464,25 +510,29 @@ export function autoFit(ws: WorksheetData, rowOrOptions?: number | AutoFitOption
 // --- visibility / outline ---
 
 /** Whether row `row` is hidden. Never creates the row. */
-export function isHidden(ws: WorksheetData, row: number): boolean {
-  const r = findRow(ws, row);
+export function isHidden(ws: WorksheetData | StreamWorksheet, row: number): boolean {
+  const r = heldRow(ws, "Row.isHidden", row);
   return r !== undefined && rowHidden(r);
 }
 /** Hide or show row `row`. */
-export function setHidden(ws: WorksheetData, row: number, hidden: boolean): void {
+export function setHidden(ws: WorksheetData | StreamWorksheet, row: number, hidden: boolean): void {
   argumentChecks("Row.setHidden").required("hidden", hidden);
   argumentChecks("Row.setHidden").boolean("hidden", hidden);
-  rowSetHidden(getRow(ws, row), hidden);
+  rowSetHidden(editRow(ws, "Row.setHidden", row), hidden);
 }
 /** Row `row`'s outline level, `0` when it has none. Never creates the row. */
-export function getOutlineLevel(ws: WorksheetData, row: number): number {
-  const r = findRow(ws, row);
+export function getOutlineLevel(ws: WorksheetData | StreamWorksheet, row: number): number {
+  const r = heldRow(ws, "Row.getOutlineLevel", row);
   return r ? rowOutlineLevel(r) : 0;
 }
 /** Set row `row`'s outline (grouping) level, a whole number from 0 to 7. */
-export function setOutlineLevel(ws: WorksheetData, row: number, level: number): void {
+export function setOutlineLevel(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  level: number
+): void {
   checkNumber("Row.setOutlineLevel", "level", level, { min: 0, max: 7, integer: true });
-  rowSetOutlineLevel(getRow(ws, row), level);
+  rowSetOutlineLevel(editRow(ws, "Row.setOutlineLevel", row), level);
 }
 
 // --- style ---
@@ -498,15 +548,19 @@ export function setOutlineLevel(ws: WorksheetData, row: number, level: number): 
  * because the caller may mutate in place, and a cell created afterwards must copy
  * what the row says then — see `core/style-sharing.ts`.
  */
-export function getStyle(ws: WorksheetData, row: number): Partial<Style> {
-  const style = rowGetStyle(getRow(ws, row));
+export function getStyle(ws: WorksheetData | StreamWorksheet, row: number): Partial<Style> {
+  const style = rowGetStyle(editRow(ws, "Row.getStyle", row));
   invalidateSharedCellStyle(style);
   return style;
 }
 /** Merge `style` into row `row`'s style and the style of every cell it already has. */
-export function setStyle(ws: WorksheetData, row: number, style: Partial<Style>): void {
+export function setStyle(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  style: Partial<Style>
+): void {
   checkStyle("Row.setStyle", style);
-  rowSetStyle(getRow(ws, row), style);
+  rowSetStyle(editRow(ws, "Row.setStyle", row), style);
 }
 
 /**
@@ -514,8 +568,11 @@ export function setStyle(ws: WorksheetData, row: number, style: Partial<Style>):
  * read-only counterpart of {@link getStyle}: it creates nothing, and editing what it
  * returns changes nothing.
  */
-export function findStyle(ws: WorksheetData, row: number): Partial<Style> | undefined {
-  const r = findRow(ws, row);
+export function findStyle(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): Partial<Style> | undefined {
+  const r = heldRow(ws, "Row.findStyle", row);
   return r ? (copyStyle(r.style) as Partial<Style>) : undefined;
 }
 
@@ -535,9 +592,13 @@ export type { ValuesBase, ValuesOptions };
  * Row.getValues(ws, 2, { base: 1 }); // [, "Ada", 42]
  * ```
  */
-export function getValues(ws: WorksheetData, row: number, options?: ValuesOptions): CellValue[] {
+export function getValues(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  options?: ValuesOptions
+): CellValue[] {
   checkBase("Row.getValues", options);
-  const r = findRow(ws, row);
+  const r = heldRow(ws, "Row.getValues", row);
   if (!r) {
     return [];
   }
@@ -555,7 +616,7 @@ export function getValues(ws: WorksheetData, row: number, options?: ValuesOption
  * read by column key.
  */
 export function setValues(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   values: RowValues | readonly CellValueInput[],
   options?: ValuesOptions
@@ -563,7 +624,7 @@ export function setValues(
   checkRowValues("Row.setValues", values);
   checkBase("Row.setValues", options);
   rowSetValues(
-    getRow(ws, row),
+    editRow(ws, "Row.setValues", row),
     (options && Array.isArray(values) ? numberedValues(values, options.base) : values) as RowValues
   );
 }
@@ -589,58 +650,67 @@ function checkBase(where: string, options: ValuesOptions | undefined): void {
  * Passing `undefined` clears the facet, on the row and on its cells.
  */
 export function setNumFmt(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   value: string | NumFmt | undefined
 ): void {
   checkStyleFacet("Row.setNumFmt", "numFmt", value, "value");
-  rowSetNumFmt(getRow(ws, row), value);
+  rowSetNumFmt(editRow(ws, "Row.setNumFmt", row), value);
 }
 /** Set the font of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
-export function setFont(ws: WorksheetData, row: number, value: Partial<Font> | undefined): void {
+export function setFont(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  value: Partial<Font> | undefined
+): void {
   checkStyleFacet("Row.setFont", "font", value, "value");
-  rowSetFont(getRow(ws, row), value);
+  rowSetFont(editRow(ws, "Row.setFont", row), value);
 }
 /** Set the alignment of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setAlignment(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   value: Partial<Alignment> | undefined
 ): void {
   checkStyleFacet("Row.setAlignment", "alignment", value, "value");
-  rowSetAlignment(getRow(ws, row), value);
+  rowSetAlignment(editRow(ws, "Row.setAlignment", row), value);
 }
 /** Set the borders of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setBorder(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   value: Partial<Borders> | undefined
 ): void {
   checkStyleFacet("Row.setBorder", "border", value, "value");
-  rowSetBorder(getRow(ws, row), value);
+  rowSetBorder(editRow(ws, "Row.setBorder", row), value);
 }
 /** Set the fill of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
-export function setFill(ws: WorksheetData, row: number, value: Fill | undefined): void {
+export function setFill(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  value: Fill | undefined
+): void {
   checkStyleFacet("Row.setFill", "fill", value, "value");
-  rowSetFill(getRow(ws, row), value);
+  rowSetFill(editRow(ws, "Row.setFill", row), value);
 }
 /** Set the protection of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setProtection(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   value: Partial<Protection> | undefined
 ): void {
   checkStyleFacet("Row.setProtection", "protection", value, "value");
-  rowSetProtection(getRow(ws, row), value);
+  rowSetProtection(editRow(ws, "Row.setProtection", row), value);
 }
 
 /** A copy of one facet of row `row`'s own style. Creates nothing and shares nothing. */
 function facet<K extends keyof Style>(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
+  where: string,
   row: number,
   key: K
 ): Style[K] | undefined {
-  const value = findRow(ws, row)?.style[key];
+  const value = heldRow(ws, where, row)?.style[key];
   return value === undefined ? undefined : copyStyleFacet(key, value);
 }
 
@@ -650,28 +720,43 @@ function facet<K extends keyof Style>(
  * and what they return is a copy, so editing it changes nothing. Change a facet with
  * its setter ({@link setFont}, …).
  */
-export function getNumFmt(ws: WorksheetData, row: number): Style["numFmt"] | undefined {
-  return facet(ws, row, "numFmt");
+export function getNumFmt(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): Style["numFmt"] | undefined {
+  return facet(ws, "Row.getNumFmt", row, "numFmt");
 }
 /** A copy of row `row`'s own font, or `undefined`. Creates nothing; see {@link getNumFmt}. */
-export function getFont(ws: WorksheetData, row: number): Partial<Font> | undefined {
-  return facet(ws, row, "font");
+export function getFont(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): Partial<Font> | undefined {
+  return facet(ws, "Row.getFont", row, "font");
 }
 /** A copy of row `row`'s own alignment, or `undefined`. Creates nothing. */
-export function getAlignment(ws: WorksheetData, row: number): Partial<Alignment> | undefined {
-  return facet(ws, row, "alignment");
+export function getAlignment(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): Partial<Alignment> | undefined {
+  return facet(ws, "Row.getAlignment", row, "alignment");
 }
 /** A copy of row `row`'s own borders, or `undefined`. Creates nothing. */
-export function getBorder(ws: WorksheetData, row: number): Partial<Borders> | undefined {
-  return facet(ws, row, "border");
+export function getBorder(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): Partial<Borders> | undefined {
+  return facet(ws, "Row.getBorder", row, "border");
 }
 /** A copy of row `row`'s own fill, or `undefined`. Creates nothing. */
-export function getFill(ws: WorksheetData, row: number): Fill | undefined {
-  return facet(ws, row, "fill");
+export function getFill(ws: WorksheetData | StreamWorksheet, row: number): Fill | undefined {
+  return facet(ws, "Row.getFill", row, "fill");
 }
 /** A copy of row `row`'s own protection, or `undefined`. Creates nothing. */
-export function getProtection(ws: WorksheetData, row: number): Partial<Protection> | undefined {
-  return facet(ws, row, "protection");
+export function getProtection(
+  ws: WorksheetData | StreamWorksheet,
+  row: number
+): Partial<Protection> | undefined {
+  return facet(ws, "Row.getProtection", row, "protection");
 }
 
 // --- commit ---
@@ -683,13 +768,13 @@ export function getProtection(ws: WorksheetData, row: number): Partial<Protectio
  * @deprecated A document-model sheet has nothing to commit — every edit applies as it is made — and a streamed row is
  * committed through its handle: `Stream.commitRow(ws.getRow(row))`. Removed in 1.0.
  */
-export function commit(ws: WorksheetData, row: number): void {
+export function commit(ws: WorksheetData | StreamWorksheet, row: number): void {
   // Only a streaming writer has a commit step, and only there is the row materialised to be written out. A
   // document-model sheet is checked, as every reader checks it, and left as it was.
-  if (typeof (ws as { _commitRow?: unknown } | null | undefined)?._commitRow === "function") {
-    rowCommit(getRow(ws, row));
+  if (asStreamWorksheet(ws)) {
+    rowCommit(getRow(ws as WorksheetData, row));
   } else {
-    findRow(ws, row);
+    findRow(ws as WorksheetData, row);
   }
 }
 
@@ -712,8 +797,8 @@ export function commit(ws: WorksheetData, row: number): void {
  * Row.addPageBreak(ws, 20); // page 2 starts at row 21
  * ```
  */
-export function addPageBreak(ws: WorksheetData, row: number): void {
-  rowAddPageBreak(getRow(ws, row));
+export function addPageBreak(ws: WorksheetData | StreamWorksheet, row: number): void {
+  rowAddPageBreak(editRow(ws, "Row.addPageBreak", row));
 }
 
 // --- deprecated names ---
@@ -723,29 +808,33 @@ export const getHidden = isHidden;
 /**
  * @deprecated Use {@link getValues} with `{ base: 1 }`. Removed in 1.0.
  */
-export function values(ws: WorksheetData, row: number): CellValue[] {
+export function values(ws: WorksheetData | StreamWorksheet, row: number): CellValue[] {
   return getValues(ws, row, { base: 1 });
 }
 
 /**
  * @deprecated Address the cell by position through the `Cell` namespace
- * (`Cell.getValue(ws, row, col)`). Removed in 1.0.
+ * (`Cell.getValue(ws, { row, col })`). Removed in 1.0.
  */
-export function getCell(ws: WorksheetData, row: number, col: string | number): CellData {
-  return rowGetCell(getRow(ws, row), col);
+export function getCell(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  col: string | number
+): CellData {
+  return rowGetCell(editRow(ws, "Row.getCell", row), col);
 }
 /**
  * @deprecated Use {@link eachAddress}, which visits by position and takes its
  * options last. Removed in 1.0.
  */
 export function eachCell(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   row: number,
   optOrCallback: { includeEmpty?: boolean } | ((cell: CellData, colNumber: number) => void),
   maybeCallback?: (cell: CellData, colNumber: number) => void
 ): void {
   // An absent row has no cells to visit, with or without `includeEmpty`; do not create it to find that out.
-  const r = findRow(ws, row);
+  const r = heldRow(ws, "Row.eachCell", row);
   if (r) {
     rowEachCell(r, optOrCallback as never, maybeCallback);
   }

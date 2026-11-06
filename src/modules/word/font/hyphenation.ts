@@ -15,13 +15,14 @@
  */
 
 import { isRecordArgument } from "@utils/object";
+import type { SchemaMatches } from "@utils/schema";
 import {
-  checkInteger,
   checkRecord,
   checkString,
   checkStringArray,
   invalidArgument
 } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
 
 // =============================================================================
 // Public API
@@ -46,6 +47,19 @@ export interface HyphenateOptions {
   /** The character inserted at each break point. Default: "\u00AD" (soft hyphen). */
   readonly hyphenChar?: string;
 }
+
+const hyphenateOptionsSchema = w.record({ hyphenChar: w.string().optional() });
+const _hyphenateOptionsMatch: SchemaMatches<typeof hyphenateOptionsSchema, HyphenateOptions> = true;
+void _hyphenateOptionsMatch;
+
+const hyphenationOptionsSchema = w.record({
+  minLeft: w.integer({ min: 0 }).optional(),
+  minRight: w.integer({ min: 0 }).optional(),
+  hyphenChar: w.string().optional()
+});
+const _hyphenationOptionsMatch: SchemaMatches<typeof hyphenationOptionsSchema, HyphenationOptions> =
+  true;
+void _hyphenationOptionsMatch;
 
 /** Hyphenation pattern set for a language. */
 export interface HyphenationPatterns {
@@ -74,9 +88,7 @@ export function createHyphenator(
   checkString(patterns.language, "patterns.language", where, { optional: true });
   checkStringArray(patterns.patterns, "patterns.patterns", where);
   checkStringArray(patterns.exceptions, "patterns.exceptions", where, { optional: true });
-  checkRecord(options, "options", where, { optional: true });
-  checkInteger(options?.minLeft, "options.minLeft", where, { optional: true, min: 0 });
-  checkInteger(options?.minRight, "options.minRight", where, { optional: true, min: 0 });
+  checkSchema(hyphenationOptionsSchema.optional(), options, where);
   const minLeft = options?.minLeft ?? 2;
   const minRight = options?.minRight ?? 2;
 
@@ -4356,7 +4368,6 @@ function checkHyphenationArguments(
     checkString(options, "hyphenChar", where, { optional: true });
     return (options as string | undefined) ?? "\u00AD";
   }
-  const hyphenChar = (options as HyphenateOptions).hyphenChar;
-  checkString(hyphenChar, "options.hyphenChar", where, { optional: true });
-  return hyphenChar ?? "\u00AD";
+  checkSchema(hyphenateOptionsSchema, options, where);
+  return options.hyphenChar ?? "\u00AD";
 }

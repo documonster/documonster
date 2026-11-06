@@ -93,7 +93,17 @@ describe("Draw.Backend.BasicRasterCanvas", () => {
     expectRefusal(() => c.fillCircle(0, 0, 1, {} as never), `${W}#fillCircle`, "color");
     expectRefusal(() => c.fillEllipse(0, 0, 1, 1, {} as never), `${W}#fillEllipse`, "color");
     expectRefusal(() => c.strokeEllipse(0, 0, 1, 1, 42 as never), `${W}#strokeEllipse`, "options");
-    expectRefusal(() => c.strokeCircle(0, 0, 1, {} as never), `${W}#strokeCircle`, "color");
+    expectRefusal(() => c.strokeCircle(0, 0, 1, 42 as never), `${W}#strokeCircle`, "options");
+    expectRefusal(
+      () => c.strokeCircle(0, 0, 1, { color: {} } as never),
+      `${W}#strokeCircle`,
+      "options.color"
+    );
+    expectRefusal(
+      () => c.drawLine(0, 0, 1, 1, { width: "2" } as never),
+      `${W}#drawLine`,
+      "options.width"
+    );
     expectRefusal(() => c.fillSector(0, 0, 1, 0, 0, 1, {} as never), `${W}#fillSector`, "color");
     expectRefusal(() => c.fillPolygon(null as never, "#f00"), `${W}#fillPolygon`, "points");
     expectRefusal(

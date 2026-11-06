@@ -20,7 +20,7 @@
  */
 
 import { StyledBlankRuns, type StyledBlankRange } from "@excel/core/styled-blanks";
-import { XlsbParseError } from "@excel/errors";
+import { ExcelLimitExceededError, XlsbParseError } from "@excel/errors";
 import type { Font, HeaderFooter, IgnoredError, Margins } from "@excel/types";
 import { encodeCol } from "@excel/utils/address";
 import {
@@ -868,7 +868,12 @@ export function readWorksheetPart(
    */
   date1904 = false,
   /** The `BrtCellMeta` indices that mark a dynamic array, from the metadata part. */
-  dynamicArrayCellMetadata: ReadonlySet<number> = new Set()
+  dynamicArrayCellMetadata: ReadonlySet<number> = new Set(),
+  /**
+   * The read's `maxRows` / `maxCols`, counted as the XLSX reader counts them: row headers in the sheet, and cell
+   * records in one row. Past either the read throws `ExcelLimitExceededError` before reading further.
+   */
+  limits: { readonly maxRows?: number; readonly maxCols?: number } = {}
 ): ReadWorksheet {
   const cells: ReadCell[] = [];
   const blankRuns = new StyledBlankRuns();
@@ -919,6 +924,8 @@ export function readWorksheetPart(
   // that says whether the first one is a row or a column.
   let breakAxis: "row" | "column" | undefined;
   let currentRow: number | undefined;
+  let rowCount = 0;
+  let cellsInRow = 0;
   // The `BrtCellMeta` index applying to the next cell record, which it immediately precedes.
   let cellMetadata: number | undefined;
 
@@ -1228,6 +1235,11 @@ export function readWorksheetPart(
     if (spec.category === "row") {
       const decoded = decodeRecord(record, part);
       currentRow = numberField(decoded, "rw");
+      rowCount++;
+      cellsInRow = 0;
+      if (limits.maxRows !== undefined && rowCount > limits.maxRows) {
+        throw new ExcelLimitExceededError("row", limits.maxRows, { limit: "maxRows" });
+      }
       // `rw` is at most 1,048,575 (MS-XLSB 2.4.726). Past it the row has no cell to hold, and modelling it put a row
       // at that index of the row array — a length of a billion that every later walk over the rows paid for.
       if (currentRow !== undefined && currentRow >= XLSB_MAX_ROWS) {
@@ -1311,6 +1323,10 @@ export function readWorksheetPart(
     // for a result that cannot differ between the two calls.
     const isDynamicArray = cellMetadata !== undefined && dynamicArrayCellMetadata.has(cellMetadata);
     cellMetadata = undefined;
+    cellsInRow++;
+    if (limits.maxCols !== undefined && cellsInRow > limits.maxCols) {
+      throw new ExcelLimitExceededError("column", limits.maxCols, { limit: "maxCols" });
+    }
     const decodedCell = decodeRecord(record, part);
     const value = readCellValue(decodedCell, spec.name, sharedStrings);
     if (value === undefined) {

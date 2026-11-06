@@ -895,16 +895,16 @@ describe("Workbook Markdown integration", () => {
       const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
       const ws = readMarkdown(workbook, markdown);
 
-      expect(Cell.getValue(ws, 1, 1)).toBe("Name");
-      expect(Cell.getValue(ws, 1, 2)).toBe("Age");
+      expect(Cell.getValue(ws, { row: 1, col: 1 })).toBe("Name");
+      expect(Cell.getValue(ws, { row: 1, col: 2 })).toBe("Age");
     });
 
     it("should set data rows correctly", () => {
       const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
       const ws = readMarkdown(workbook, markdown);
 
-      expect(Cell.getValue(ws, 2, 1)).toBe("Alice");
-      expect(Cell.getValue(ws, 2, 2)).toBe("30");
+      expect(Cell.getValue(ws, { row: 2, col: 1 })).toBe("Alice");
+      expect(Cell.getValue(ws, { row: 2, col: 2 })).toBe("30");
     });
 
     it("should use custom sheet name", () => {
@@ -922,8 +922,8 @@ describe("Workbook Markdown integration", () => {
         }
       });
 
-      expect(Cell.getValue(ws, 2, 1)).toBe(42);
-      expect(Cell.getValue(ws, 3, 1)).toBe("hello");
+      expect(Cell.getValue(ws, { row: 2, col: 1 })).toBe(42);
+      expect(Cell.getValue(ws, { row: 3, col: 1 })).toBe("hello");
     });
   });
 
@@ -1038,8 +1038,8 @@ describe("Workbook Markdown integration", () => {
       const ws = Workbook.addWorksheet(workbook, "Sparse");
       Row.add(ws, ["A", "B", "C"]);
       // Create a sparse row: only set columns 1 and 3
-      Cell.setValue(ws, 2, 1, "x");
-      Cell.setValue(ws, 2, 3, "z");
+      Cell.setValue(ws, { row: 2, col: 1 }, "x");
+      Cell.setValue(ws, { row: 2, col: 3 }, "z");
 
       const result = writeMarkdown(workbook, { sheetName: "Sparse" });
       expect(result).toBeDefined();
@@ -1124,7 +1124,7 @@ describe("Workbook Markdown integration", () => {
       // Parse back with convertBr to restore the newline
       const wb2 = Workbook.create();
       const ws2 = readMarkdown(wb2, markdown, { convertBr: true });
-      expect(Cell.getValue(ws2, 2, 1)).toBe("Line1\nLine2");
+      expect(Cell.getValue(ws2, { row: 2, col: 1 })).toBe("Line1\nLine2");
     });
   });
 

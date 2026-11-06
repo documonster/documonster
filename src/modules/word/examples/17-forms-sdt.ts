@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Transform } from "../index";
+import { Document, Build, Transform } from "../index";
 import type { CustomXmlPart } from "../index";
 
 const outDir = path.resolve(
@@ -165,7 +165,7 @@ fs.mkdirSync(outDir, { recursive: true });
     )
   );
 
-  const buf = await Io.toBuffer(doc);
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "17-sdt.docx"), buf);
   console.log(`  → 17-sdt.docx (${buf.length} bytes)`);
 }
@@ -211,14 +211,14 @@ fs.mkdirSync(outDir, { recursive: true });
   const final = { ...doc, customXmlParts: [customXml] };
 
   // First save: bindings present but unresolved (Word resolves them on open)
-  const buf1 = await Io.toBuffer(final);
+  const buf1 = await Document.toBuffer(final);
   fs.writeFileSync(path.join(outDir, "17-sdt-bound.docx"), buf1);
   console.log(`  → 17-sdt-bound.docx (${buf1.length} bytes)`);
 
   // Resolve bindings ahead of time and save again — useful for tools
   // that don't know how to update bindings on open.
   const resolved = Transform.resolveDataBindings(final);
-  const buf2 = await Io.toBuffer(resolved);
+  const buf2 = await Document.toBuffer(resolved);
   fs.writeFileSync(path.join(outDir, "17-sdt-resolved.docx"), buf2);
   console.log(`  → 17-sdt-resolved.docx (${buf2.length} bytes)`);
 }

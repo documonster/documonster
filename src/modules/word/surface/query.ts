@@ -21,12 +21,14 @@ import {
   checkRecord,
   checkString
 } from "@word/core/argument-checks";
+import { checkSchema } from "@word/core/option-schema";
 import {
   collectParagraphs as collectParagraphsImpl,
   collectRuns as collectRunsImpl,
   collectTables as collectTablesImpl,
   walkBlocks as walkBlocksImpl,
-  walkDocument as walkDocumentImpl
+  walkDocument as walkDocumentImpl,
+  walkOptionsSchema
 } from "@word/core/walker";
 import type { DocxVisitor, WalkOptions, WalkPath } from "@word/core/walker";
 import { setCompatibilityMode as setCompatibilityModeImpl } from "@word/query/compat";
@@ -107,7 +109,7 @@ export { collectParagraphs as listParagraphs, collectRuns as listRuns } from "@w
 export function each(doc: DocxDocument, visitor: DocxVisitor, options?: WalkOptions): void {
   checkHandle(doc, "document", "doc", "Query.each");
   checkRecord(visitor, "visitor", "Query.each");
-  checkRecord(options, "options", "Query.each", { optional: true });
+  checkSchema(walkOptionsSchema.optional(), options, "Query.each");
   walkDocumentImpl(doc, visitor, options);
 }
 

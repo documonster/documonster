@@ -49,6 +49,65 @@ describe('an "A1" address with a column after it', () => {
   });
 });
 
+describe("a { row, col } position", () => {
+  it("addresses the same cell as its A1 text, in readers and writers", () => {
+    const ws = sheet();
+    Cell.setValue(ws, { row: 2, col: 3 }, "x");
+    Cell.setFont(ws, { row: 2, col: 3 }, { bold: true });
+    Cell.setDateParts(ws, { row: 3, col: 3 }, { year: 2024, month: 1, day: 15 });
+    expect(Cell.getValue(ws, "C2")).toBe("x");
+    expect(Cell.getFont(ws, { row: 2, col: 3 })).toEqual({ bold: true });
+    expect(Cell.has(ws, { row: 2, col: 3 })).toBe(true);
+    expect(Cell.getDateParts(ws, { row: 3, col: 3 })).toMatchObject({ year: 2024 });
+    expect(Cell.getFullAddress(ws, { row: 2, col: 3 }).address).toBe("C2");
+  });
+
+  it("accepts what Cell.getFullAddress returns", () => {
+    const ws = sheet();
+    Cell.setValue(ws, Cell.getFullAddress(ws, "D4"), 1);
+    expect(Cell.getValue(ws, "D4")).toBe(1);
+  });
+
+  it.each<[string, unknown, string]>([
+    ["row 0", { row: 0, col: 1 }, "addr.row"],
+    ["a fractional row", { row: 1.5, col: 1 }, "addr.row"],
+    ["a row past the grid", { row: 1048577, col: 1 }, "addr.row"],
+    ["a missing col", { row: 1 }, "addr.col"],
+    ["a col past XFD", { row: 1, col: 16385 }, "addr.col"],
+    ["a string col", { row: 1, col: "A" }, "addr.col"]
+  ])("refuses %s, naming the field and the call", (_name, addr, field) => {
+    const ws = sheet();
+    for (const call of [
+      () => Cell.setValue(ws, addr as never, 1),
+      () => Cell.getValue(ws, addr as never)
+    ]) {
+      expect(call).toThrow(ExcelInvalidAddressError);
+      expect(call).toThrow(expect.objectContaining({ field }));
+      expect(call).toThrow(/^Cell\.(setValue|getValue): /);
+    }
+    expect(Row.getCount(ws)).toBe(0);
+  });
+});
+
+describe("the deprecated (row, col) form", () => {
+  // Expected values are what v0.21.1 answered for the same calls.
+  it("keeps addressing (row, col) in readers and writers", () => {
+    const ws = sheet();
+    Cell.setValue(ws, 2, 3, "x");
+    Cell.setFont(ws, 2, 3, { bold: true });
+    Cell.setStyle(ws, 2, 3, { numFmt: "0.0" });
+    Cell.setNote(ws, 2, 3, "n");
+    expect(Cell.getValue(ws, 2, 3)).toBe("x");
+    expect(Cell.getFont(ws, 2, 3)).toEqual({ bold: true });
+    expect(Cell.getNumFmt(ws, 2, 3)).toBe("0.0");
+    expect(Cell.getNote(ws, 2, 3)).toBe("n");
+    expect(Cell.has(ws, 2, 3)).toBe(true);
+    expect(Cell.getFullAddress(ws, 2, 3).address).toBe("C2");
+    Cell.setFont(ws, 2, 3, undefined);
+    expect(Cell.getFont(ws, "C2")).toBeUndefined();
+  });
+});
+
 describe("Cell.setDateParts", () => {
   it.each([
     ["NaN year", { year: NaN }, undefined],

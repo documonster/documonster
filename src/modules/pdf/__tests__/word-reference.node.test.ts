@@ -19,7 +19,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { Pdf } from "@pdf/index";
-import { Io } from "@word/index";
+import { Document } from "@word/index";
 import { describe, expect, it } from "vitest";
 
 interface ExpectedPage {
@@ -46,7 +46,7 @@ describe("Word → PDF matches Microsoft Word", () => {
 
   for (const [name, pages] of Object.entries(expected)) {
     it(name, async () => {
-      const doc = await Io.read(readFileSync(join(DIR, `${name}.docx`)));
+      const doc = await Document.read(readFileSync(join(DIR, `${name}.docx`)));
       const read = await Pdf.extract(await Pdf.fromDocx(doc));
       const actual = read.pages.map(page => {
         const bold: Record<string, boolean> = {};

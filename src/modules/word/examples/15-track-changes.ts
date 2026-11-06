@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query } from "../index";
+import { Document, Build, Query } from "../index";
 import type { RevisionInfo } from "../index";
 
 const outDir = path.resolve(
@@ -105,7 +105,7 @@ Document.addParagraph(
 );
 
 // Pending — write as-is
-const pending = await Io.toBuffer(doc);
+const pending = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "15-revisions-pending.docx"), pending);
 console.log(`  → 15-revisions-pending.docx (${pending.length} bytes)`);
 
@@ -118,7 +118,7 @@ console.log(`  detected ${revisions.length} revisions`);
   const cloned = Document.clone(doc);
   Document.acceptRevision(cloned, 2); // accept the "red" insertion
   Document.rejectRevision(cloned, 1); // keep the original "brown"
-  const buf = await Io.toBuffer(cloned);
+  const buf = await Document.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-partial.docx"), buf);
   console.log(`  → 15-revisions-partial.docx (${buf.length} bytes)`);
 }
@@ -127,7 +127,7 @@ console.log(`  detected ${revisions.length} revisions`);
 {
   const cloned = Document.clone(doc);
   Document.acceptAllRevisions(cloned);
-  const buf = await Io.toBuffer(cloned);
+  const buf = await Document.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-accepted.docx"), buf);
   console.log(`  → 15-revisions-accepted.docx (${buf.length} bytes)`);
 }
@@ -136,7 +136,7 @@ console.log(`  detected ${revisions.length} revisions`);
 {
   const cloned = Document.clone(doc);
   Document.rejectAllRevisions(cloned);
-  const buf = await Io.toBuffer(cloned);
+  const buf = await Document.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-rejected.docx"), buf);
   console.log(`  → 15-revisions-rejected.docx (${buf.length} bytes)`);
 }

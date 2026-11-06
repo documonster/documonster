@@ -11,7 +11,7 @@
  * - Modern browsers (when bundled)
  */
 
-import { Stream } from "@excel/index";
+import { Stream, Workbook } from "@excel/index";
 
 async function main(): Promise<void> {
   // -------------------------------------------------------------------------
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     useSharedStrings: true
   });
 
-  const ws = writer.addWorksheet("Sheet1");
+  const ws = Workbook.addWorksheet(writer, "Sheet1");
   Stream.commitRow(ws.addRow(["Name", "Score"]));
   Stream.commitRow(ws.addRow(["Alice", 98]));
   Stream.commitRow(ws.addRow(["Bob", 87]));

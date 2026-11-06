@@ -91,7 +91,7 @@ function draw(
   const canvas = render(text, fonts);
   return {
     ink: inkedPixels(canvas),
-    uncovered: [...canvas.uncoveredCodePoints].sort((a, b) => a - b)
+    uncovered: canvas.getUncoveredCodePoints()
   };
 }
 
@@ -215,8 +215,12 @@ describe("raster font fallback", () => {
     withCjk.drawText(10, 40, "中", { fontSize: 24, color: "#000000", anchor: "start" });
     withNothing.drawText(10, 40, "中", { fontSize: 24, color: "#000000", anchor: "start" });
 
-    expect([...withCjk.uncoveredCodePoints]).toEqual([]);
-    expect([...withNothing.uncoveredCodePoints]).toEqual([HAN_ZHONG]);
+    expect(withCjk.getUncoveredCodePoints()).toEqual([]);
+    expect(withNothing.getUncoveredCodePoints()).toEqual([HAN_ZHONG]);
+    // What the canvas hands out is a copy: clearing it does not change what the render reports.
+    withNothing.getUncoveredCodePoints().length = 0;
+    withNothing.uncoveredCodePoints.clear();
+    expect(withNothing.getUncoveredCodePoints()).toEqual([HAN_ZHONG]);
     expect(inkedPixels(withCjk)).toBeGreaterThan(0);
   });
 

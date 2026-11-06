@@ -159,7 +159,7 @@ export function remove(ws: WorksheetData, chart: ChartHandle | number): boolean 
   return removeChart(ws, chart);
 }
 
-/** The sheet's charts, in the order they were placed. */
+/** The sheet's charts, in the order they were placed: the handles themselves, which {@link remove} takes. */
 export function list(ws: WorksheetData): ChartHandle[] {
   checkWorksheet(ws);
   return getCharts(ws);
@@ -710,7 +710,10 @@ function checkMutation(where: string, mutator: unknown, options: unknown): void 
   }
 }
 
-/** Apply one of Excel's 48 built-in chart styles. Returns the handle. */
+/**
+ * Apply one of Excel's 48 built-in chart styles. Returns the handle it was given, so a style can be set where the
+ * handle is passed on (`Chart.setTitle(Chart.setStyle(c, 26), "Sales")`); the other `set*` return nothing.
+ */
 export function setStyle(c: ChartHandle, style: number): ChartHandle {
   return namedCall("Chart.setStyle", () => chartSetStyle(c, style));
 }
@@ -733,7 +736,10 @@ export function removeSeries(
   return namedCall("Chart.removeSeries", () => chartRemoveSeries(c, index, groupIndex));
 }
 
-/** Point series `index` at new values (a formula such as `"Sheet1!$B$2:$B$9"`). */
+/**
+ * Point series `index` at new values (a formula such as `"Sheet1!$B$2:$B$9"`). Returns `false` when the chart-type
+ * group has no series `index`, and changes nothing then.
+ */
 export function setSeriesValues(
   c: ChartHandle,
   index: number,
@@ -756,22 +762,30 @@ export function removeUserShapes(c: ChartHandle): void {
 }
 
 /**
- * Copy the chart onto `targetWs` at `range` (by default beside where it sits), and return the copy's part number; see
- * {@link list} for its handle. Pass the chart's own worksheet (`c.worksheet`) to copy it beside itself.
+ * Copy the chart onto `targetWs` at `range` (by default beside where it sits), and return the copy's handle — as
+ * {@link place} returns the chart it adds. Pass the chart's own worksheet (`c.worksheet`) to copy it beside itself.
+ * The copy's part number is on the handle (`chartNumber`, or `chartExNumber` for an Office 2016 chart).
  */
-export function copyTo(c: ChartHandle, targetWs: WorksheetData, range?: AddChartRange): number {
+export function copyTo(
+  c: ChartHandle,
+  targetWs: WorksheetData,
+  range?: AddChartRange
+): ChartHandle {
   if (range !== undefined) {
     checkChartRange("Chart.copyTo", range);
   }
-  return namedCall("Chart.copyTo", () => chartCopyTo(c, targetWs, range));
+  namedCall("Chart.copyTo", () => chartCopyTo(c, targetWs, range));
+  // Registering a chart appends exactly one handle to the sheet, as `place` relies on.
+  return targetWs._charts[targetWs._charts.length - 1];
 }
 
 /**
  * Copy the chart onto its own sheet at `range` (by default beside it), and return the copy's part number.
  *
  * @deprecated Use {@link copyTo} with the chart's own worksheet — `Chart.copyTo(c, c.worksheet, range)`. It places the
- * same copy at the same default position; this name suggested an independent copy, as `Document.clone` returns, but it
- * adds a chart to the sheet and returns its part number. Removed in 1.0.
+ * same copy at the same default position and returns its handle; the part number this returned is the handle's
+ * `chartNumber` (`chartExNumber` for an Office 2016 chart). This name suggested an independent copy, as
+ * `Document.clone` returns, but it adds a chart to the sheet. Removed in 1.0.
  */
 export const clone = cloneChart;
 

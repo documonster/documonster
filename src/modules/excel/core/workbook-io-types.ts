@@ -12,24 +12,29 @@
  * `Uint8Array` in a browser, the stream types are each platform's own, and file-path IO is Node-only.
  */
 import type { EncryptOptions } from "@archive/office-crypto/agile";
-import type { SyntaxProbe } from "@excel/core/defined-names";
 import type { UnrecognizedValue } from "@excel/core/unrecognized-values";
 import { keptSettingsReport } from "@excel/core/unrecognized-values";
 import type { WorkbookData } from "@excel/core/workbook-core";
+import { createOptionsSchema } from "@excel/core/workbook-create-options";
+import type { WorkbookCreateOptions } from "@excel/core/workbook-create-options";
 import type { WorkbookFormat } from "@excel/core/workbook-format";
-import { isArrayBufferLike } from "@excel/core/workbook-format";
+import { isArrayBufferLike, xlsbReadOptions } from "@excel/core/workbook-format";
+import type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 import { ExcelArgumentError } from "@excel/errors";
-import type { ArgumentChecks } from "@excel/utils/arguments";
-import { argumentChecks } from "@excel/utils/arguments";
+import type {} from "@excel/utils/arguments";
+import { argumentChecks, argumentFailure, checkSchema } from "@excel/utils/arguments";
 import { decryptionOf, openWorkbookPackage } from "@excel/utils/container-errors";
 import type { WorkbookDecryption } from "@excel/utils/container-errors";
-import type { XlsxParseStream, XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
-
-/** What `Workbook.create` takes — and what a read that returns a new workbook accepts beside its own options. */
-export interface WorkbookCreateOptions {
-  /** Classifies defined-name text as formula or opaque when reading; see {@link SyntaxProbe}. */
-  readonly formulaSyntaxProbe?: SyntaxProbe;
-}
+import type {
+  XlsxParseStream,
+  XlsxReadOptions,
+  XlsxWriteOptions,
+  XlsxZipReadLimits,
+  ZipWriterOptions
+} from "@excel/xlsx/types";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+export type { WorkbookCreateOptions } from "@excel/core/workbook-create-options";
 
 /**
  * Options common to reading either format.
@@ -118,7 +123,7 @@ export interface WorkbookWriteOptions extends XlsxWriteOptions {
   /**
    * Encrypt the workbook with this password (1 to 255 characters) — Agile Encryption in an OLE compound file, what
    * Excel writes for "Encrypt with Password", for XLSX and XLSB alike; `Workbook.read(bytes, { password })` reads it
-   * back. The same option Word's `Io.toBuffer` takes. The encryption code is loaded only for a write given one, and
+   * back. The same option Word's `Document.toBuffer` takes. The encryption code is loaded only for a write given one, and
    * the package is assembled in memory before it is encrypted — `writeStream` and `toStream` included. Not
    * `Workbook.protect`'s password, which only locks the workbook's structure.
    */
@@ -216,113 +221,161 @@ export function splitCreateOptions<T extends object>(
   return { create: { formulaSyntaxProbe }, read: read as T };
 }
 
-const FORMATS: readonly WorkbookFormat[] = ["xlsx", "xlsb"];
+/** A limit: a whole number of at least `min`, or `Infinity` to lift it. `NaN` and `0` used to disable a guard. */
+function limit(min: number) {
+  const expected = `an integer >= ${min}, or Infinity`;
+  return s
+    .union([s.literal(Infinity), s.number({ integer: true, min, expected })], { expected })
+    .optional();
+}
+
+const format = () => s.literal("xlsx", "xlsb").optional();
+const flag = () => s.boolean().optional();
+
+const zipReadLimitsSchema = s.object({
+  maxEntrySize: limit(0),
+  maxTotalUncompressedSize: limit(0),
+  maxEntries: limit(0),
+  checkCrc32: flag()
+});
+const _zipReadLimitsMatch: SchemaMatches<typeof zipReadLimitsSchema, XlsxZipReadLimits> = true;
+void _zipReadLimitsMatch;
+
+const xlsxReadShape = {
+  base64: flag(),
+  maxRows: limit(1),
+  maxCols: limit(1),
+  // A string matched every node name containing it: `"sheetData"` dropped every cell of every sheet.
+  ignoreNodes: s.array(s.string({ nonEmpty: true })).optional(),
+  zip: zipReadLimitsSchema.optional(),
+  password: s.string().optional()
+};
+const xlsxReadOptionsSchema = s.object(xlsxReadShape);
+const _xlsxReadOptionsMatch: SchemaMatches<typeof xlsxReadOptionsSchema, XlsxReadOptions> = true;
+void _xlsxReadOptionsMatch;
+
+const diagnosticReadOptionsSchema = s.extend(
+  xlsxReadOptionsSchema,
+  {
+    format: format(),
+    blankCells: s.literal("keep", "collapse").optional(),
+    formulas: s.literal("preserve", "cached", "error").optional()
+  },
+  { readonly: true }
+);
+const _diagnosticReadOptionsMatch: SchemaMatches<
+  typeof diagnosticReadOptionsSchema,
+  WorkbookDiagnosticReadOptions
+> = true;
+void _diagnosticReadOptionsMatch;
+
+const readOptionsSchema = s.extend(
+  diagnosticReadOptionsSchema,
+  { unsupported: s.literal("error", "ignore").optional() },
+  { readonly: true }
+);
+const _readOptionsMatch: SchemaMatches<typeof readOptionsSchema, WorkbookReadOptions> = true;
+void _readOptionsMatch;
+
+/** `Workbook.create`'s options, which a read that returns a new workbook takes too. `null` has always meant none. */
+
+const zipWriterOptionsSchema = s.object({
+  // Past 0–9 the deflater refuses the level, and the refusal used to leave the write pending forever.
+  level: s.number({ integer: true, min: 0, max: 9 }).optional(),
+  modTime: s
+    .custom<Date>(v => v instanceof Date && !Number.isNaN(v.getTime()), "a valid Date")
+    .optional(),
+  timestamps: s.literal("dos", "dos+utc", "dos+utc+ntfs").optional()
+});
+const _zipWriterOptionsMatch: SchemaMatches<typeof zipWriterOptionsSchema, ZipWriterOptions> = true;
+void _zipWriterOptionsMatch;
+
+const xlsxWriteShape = {
+  zip: zipWriterOptionsSchema.optional(),
+  useSharedStrings: flag(),
+  useStyles: flag(),
+  templateMode: s.literal("preserve", "strict").optional(),
+  strictTemplateMode: flag(),
+  validate: flag()
+};
+const xlsxWriteOptionsSchema = s.object(xlsxWriteShape);
+const _xlsxWriteOptionsMatch: SchemaMatches<typeof xlsxWriteOptionsSchema, XlsxWriteOptions> = true;
+void _xlsxWriteOptionsMatch;
+
+const encryptOptionsSchema = s.object(
+  {
+    keyBits: s.literal(128, 192, 256).optional(),
+    hashAlgorithm: s
+      .literal("SHA-1", "SHA-256", "SHA-384", "SHA-512", "SHA1", "SHA256", "SHA384", "SHA512")
+      .optional(),
+    spinCount: s.number({ integer: true, min: 0, max: 10_000_000 }).optional()
+  },
+  { readonly: true }
+);
+const _encryptOptionsMatch: SchemaMatches<typeof encryptOptionsSchema, EncryptOptions> = true;
+void _encryptOptionsMatch;
+
+const xlsxStreamOptionsSchema = s.object({
+  ...xlsxWriteShape,
+  highWaterMark: s.number({ integer: true, min: 1 }).optional()
+});
+const _xlsxStreamOptionsMatch: SchemaMatches<typeof xlsxStreamOptionsSchema, XlsxStreamOptions> =
+  true;
+void _xlsxStreamOptionsMatch;
+
+const writeOptionsSchema = s.extend(
+  xlsxWriteOptionsSchema,
+  {
+    format: format(),
+    unsupported: s.literal("error", "ignore").optional(),
+    // MS-OFFCRYPTO caps a password at 255 characters, and an empty one would be the absence of one.
+    password: s
+      .string({ expected: "a string of 1 to 255 characters" })
+      .refine(v => v.length > 0 && v.length <= 255, "a string of 1 to 255 characters")
+      .optional(),
+    encryption: encryptOptionsSchema.optional()
+  },
+  { readonly: true }
+);
+const streamOptionsSchema = s.extend(writeOptionsSchema, {
+  highWaterMark: s.number({ integer: true, min: 1 }).optional()
+});
+const _writeOptionsMatch: SchemaMatches<typeof writeOptionsSchema, WorkbookWriteOptions> = true;
+void _writeOptionsMatch;
 
 /**
  * A read's or a write's options: an object, if given, whose `format` is one this library reads and writes. A format it
  * did not know was ignored — `toBuffer(wb, { format: "csv" })` wrote XLSX — and options that were not an object reached
- * an `in` test as a raw `TypeError`.
+ * an `in` test as a raw `TypeError`. `null` is taken as no options, as it always was.
  */
-export function checkIoOptions(where: string, options: unknown, direction: "read" | "write"): void {
-  const check = argumentChecks(where);
-  if (options === null || !check.record("options", options)) {
+const createAndReadOptionsSchema = s.all(createOptionsSchema, readOptionsSchema);
+
+export function checkIoOptions(
+  where: string,
+  options: unknown,
+  direction: "read" | "write" | "stream"
+): void {
+  if (options === null || options === undefined) {
     return;
   }
-  check.oneOf("options.format", options.format, FORMATS);
-  check.oneOf("options.unsupported", options.unsupported, ["error", "ignore"]);
   if (direction === "read") {
-    checkReadValues(check, options);
-  } else {
-    checkWriteValues(check, options);
-  }
-}
-
-/** A limit: a whole number of at least `min`, or `Infinity` to lift it. `NaN` and `0` used to disable a guard. */
-function checkLimit(check: ArgumentChecks, field: string, value: unknown, min: number): void {
-  if (value !== Infinity) {
-    check.number(field, value, { min, integer: true });
-  }
-}
-
-function checkReadValues(check: ArgumentChecks, options: Record<string, unknown>): void {
-  check.boolean("options.base64", options.base64);
-  checkLimit(check, "options.maxRows", options.maxRows, 1);
-  checkLimit(check, "options.maxCols", options.maxCols, 1);
-  // A string matched every node name containing it: `"sheetData"` dropped every cell of every sheet.
-  if (check.array("options.ignoreNodes", options.ignoreNodes)) {
-    options.ignoreNodes.forEach((node, i) =>
-      check.string(`options.ignoreNodes[${i}]`, node, { nonEmpty: true })
-    );
-  }
-  if (check.record("options.zip", options.zip)) {
-    checkLimit(check, "options.zip.maxEntrySize", options.zip.maxEntrySize, 0);
-    checkLimit(
-      check,
-      "options.zip.maxTotalUncompressedSize",
-      options.zip.maxTotalUncompressedSize,
-      0
-    );
-    checkLimit(check, "options.zip.maxEntries", options.zip.maxEntries, 0);
-    check.boolean("options.zip.checkCrc32", options.zip.checkCrc32);
-  }
-  check.oneOf("options.blankCells", options.blankCells, ["keep", "collapse"]);
-  check.oneOf("options.formulas", options.formulas, ["preserve", "cached", "error"]);
-  check.string("options.password", options.password);
-}
-
-function checkWriteValues(check: ArgumentChecks, options: Record<string, unknown>): void {
-  if (check.record("options.zip", options.zip)) {
-    // Past 0–9 the deflater refuses the level, and the refusal used to leave the write pending forever.
-    check.number("options.zip.level", options.zip.level, { min: 0, max: 9, integer: true });
-    const { modTime } = options.zip;
-    if (modTime !== undefined && !(modTime instanceof Date && !Number.isNaN(modTime.getTime()))) {
-      check.fail("options.zip.modTime", "a valid Date", modTime);
-    }
-    check.oneOf("options.zip.timestamps", options.zip.timestamps, [
-      "dos",
-      "dos+utc",
-      "dos+utc+ntfs"
-    ]);
-  }
-  check.boolean("options.useSharedStrings", options.useSharedStrings);
-  check.boolean("options.useStyles", options.useStyles);
-  check.oneOf("options.templateMode", options.templateMode, ["preserve", "strict"]);
-  check.boolean("options.strictTemplateMode", options.strictTemplateMode);
-  check.boolean("options.validate", options.validate);
-  checkWriteEncryption(check, options);
-}
-
-const KEY_BITS = [128, 192, 256];
-const HASH_NAMES = ["SHA-1", "SHA-256", "SHA-384", "SHA-512", "SHA1", "SHA256", "SHA384", "SHA512"];
-
-/**
- * A write's `password` and `encryption`: a password of 1 to 255 characters (MS-OFFCRYPTO caps it at 255, and an
- * empty one would be the absence of one), and encryption settings only beside one — checked as Word checks them.
- */
-function checkWriteEncryption(check: ArgumentChecks, options: Record<string, unknown>): void {
-  const { password, encryption } = options;
-  if (
-    password !== undefined &&
-    (typeof password !== "string" || password.length === 0 || password.length > 255)
-  ) {
-    check.fail("options.password", "a string of 1 to 255 characters", password);
-  }
-  if (encryption === undefined) {
+    checkSchema(where, "options", createAndReadOptionsSchema, options);
     return;
   }
-  if (password === undefined) {
-    check.fail("options.encryption", "set only with options.password", encryption);
-  }
-  if (check.record("options.encryption", encryption)) {
-    if (encryption.keyBits !== undefined && !KEY_BITS.includes(encryption.keyBits as number)) {
-      check.fail("options.encryption.keyBits", "one of 128, 192, 256", encryption.keyBits);
-    }
-    check.oneOf("options.encryption.hashAlgorithm", encryption.hashAlgorithm, HASH_NAMES);
-    check.number("options.encryption.spinCount", encryption.spinCount, {
-      min: 0,
-      max: 10_000_000,
-      integer: true
-    });
+  checkSchema(
+    where,
+    "options",
+    direction === "stream" ? streamOptionsSchema : writeOptionsSchema,
+    options
+  );
+  const { password, encryption } = options as WorkbookWriteOptions;
+  if (encryption !== undefined && password === undefined) {
+    throw argumentFailure(
+      where,
+      "options.encryption",
+      "set only with options.password",
+      encryption
+    );
   }
 }
 
@@ -384,6 +437,8 @@ export function checkReadStreamInput(where: string, value: unknown): void {
   if (
     typeof value === "object" &&
     candidate !== null &&
+    // Bytes are iterable — of numbers, not chunks — so they would pass for a stream and fail inside it.
+    !ArrayBuffer.isView(value) &&
     (typeof candidate.pipe === "function" ||
       typeof candidate.getReader === "function" ||
       typeof candidate[Symbol.asyncIterator] === "function" ||
@@ -393,7 +448,9 @@ export function checkReadStreamInput(where: string, value: unknown): void {
   }
   argumentChecks(where).fail(
     "stream",
-    "a readable stream, a ReadableStream or an iterable of byte chunks",
+    ArrayBuffer.isView(value)
+      ? "a readable stream, a ReadableStream or an iterable of byte chunks (pass bytes to Workbook.read)"
+      : "a readable stream, a ReadableStream or an iterable of byte chunks",
     value
   );
 }
@@ -428,7 +485,11 @@ export async function readWorkbookWithDiagnostics(
       data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
       base64?: boolean
     ) => Uint8Array | undefined;
-    readonly resolveReadFormat: (bytes: Uint8Array, format?: WorkbookFormat) => WorkbookFormat;
+    readonly resolveReadFormat: (
+      bytes: Uint8Array,
+      format?: WorkbookFormat,
+      zip?: XlsxZipReadLimits
+    ) => WorkbookFormat;
   }
 ): Promise<WorkbookReadReport> {
   checkIoOptions("Workbook.readWithDiagnostics", options, "read");
@@ -437,7 +498,10 @@ export async function readWorkbookWithDiagnostics(
   const raw = platform.normalizeBytes(data, options?.base64);
   // An encrypted workbook is decrypted first, so its package's format is the one detected.
   const bytes = raw && (await openWorkbookPackage(raw, workbookDecryption(options)));
-  if (bytes !== undefined && platform.resolveReadFormat(bytes, options?.format) === "xlsb") {
+  if (
+    bytes !== undefined &&
+    platform.resolveReadFormat(bytes, options?.format, options?.zip) === "xlsb"
+  ) {
     // Loaded here rather than injected by the caller, and on demand rather than statically. The two
     // platform variants passed in the *same* two functions — they are not platform-specific — and a
     // static import of them in either made the whole binary reader eager for every `Workbook.read`
@@ -446,10 +510,7 @@ export async function readWorkbookWithDiagnostics(
     const { commitXlsbRead, parseXlsbPackage } = await import("@excel/xlsb/read/package");
     // `blankCells` reaches here too: `readWithDiagnostics` is the same read with the report handed back instead of
     // thrown, so a caller inspecting a large formatted sheet needs the same policy the plain read offers.
-    const parsed = await parseXlsbPackage(bytes, "<buffer>", {
-      ...(options?.blankCells === undefined ? {} : { blankCells: options.blankCells }),
-      ...(options?.formulas === undefined ? {} : { formulas: options.formulas })
-    });
+    const parsed = await parseXlsbPackage(bytes, "<buffer>", xlsbReadOptions(options));
     commitXlsbRead(wb, parsed);
     wb.sourceFilePath = undefined;
     return { workbook: wb, ...parsed.diagnostics, unrecognizedValues: keptSettingsReport(wb) };

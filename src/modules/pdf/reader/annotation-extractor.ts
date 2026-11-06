@@ -31,7 +31,7 @@ import { getDictStringValue } from "@pdf/reader/reader-utils";
 // =============================================================================
 
 /** Rectangle in PDF coordinate space [x1, y1, x2, y2] */
-export interface PdfRect {
+export interface PdfAnnotationRect {
   /** Left edge (x1) */
   x1: number;
   /** Bottom edge (y1) */
@@ -42,12 +42,15 @@ export interface PdfRect {
   y2: number;
 }
 
-/** A PDF annotation extracted from a page. */
+/**
+ * A PDF annotation extracted from a page. The text fields hold `""` when the annotation does
+ * not carry that entry, as {@link PdfMetadata}'s do.
+ */
 export interface PdfAnnotation {
   /** Annotation subtype (e.g. "Link", "Text", "Highlight", "FreeText", "Stamp") */
   subtype: string;
   /** Bounding rectangle in page coordinates (points) */
-  rect: PdfRect;
+  rect: PdfAnnotationRect;
   /** Text content (/Contents entry) */
   contents: string;
   /** Author / title (/T entry) */
@@ -196,7 +199,7 @@ function parseAnnotation(
   };
 }
 
-function parseRect(obj: PdfObject | undefined, doc: PdfDocument): PdfRect | null {
+function parseRect(obj: PdfObject | undefined, doc: PdfDocument): PdfAnnotationRect | null {
   if (!obj) {
     return null;
   }

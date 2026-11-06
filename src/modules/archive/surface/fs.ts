@@ -20,8 +20,8 @@
 
 import type { Stats } from "node:fs";
 
+import { OPTIONS, checkArchiveArgument, dateSchema } from "@archive/core/arguments";
 import { ArchiveArgumentError } from "@archive/core/errors";
-import { describeValue } from "@utils/describe-value";
 import type { FileEntry, GlobOptions, TraverseOptions } from "@utils/fs";
 import {
   copyFile as copyFileImpl,
@@ -54,108 +54,96 @@ import {
   writeFileText as writeFileTextImpl,
   writeFileTextSync as writeFileTextSyncImpl
 } from "@utils/fs";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
-function fail(where: string, field: string, expected: string, value: unknown): never {
-  throw new ArchiveArgumentError(
-    field,
-    `${where}: ${field} must be ${expected}, got ${describeValue(value)}`
-  );
-}
+const optionalBoolean = () => s.boolean().optional();
 
 /** A path string. Node refuses a NUL byte with a `TypeError` of its own, so that is refused here too. */
 function checkPath(where: string, field: string, value: unknown): void {
-  if (typeof value !== "string") {
-    fail(where, field, "a path string", value);
-  }
+  checkArchiveArgument(s.string({ expected: "a path string" }), value, where, field);
   if (value.includes("\0")) {
     throw new ArchiveArgumentError(field, `${where}: ${field} must not contain a NUL byte`);
   }
 }
 
 function checkGlobPattern(where: string, field: string, value: unknown): void {
-  if (typeof value !== "string") {
-    fail(where, field, "a glob pattern string", value);
-  }
+  checkArchiveArgument(s.string({ expected: "a glob pattern string" }), value, where, field);
 }
 
-function checkOptions(where: string, options: unknown): options is Record<string, unknown> {
-  if (options === undefined) {
-    return false;
-  }
-  if (typeof options !== "object" || options === null) {
-    fail(where, "options", "an options object", options);
-  }
-  return true;
-}
+const fileFilter = () => s.function<(entry: FileEntry) => boolean>().optional();
 
-function checkOptionalBoolean(where: string, field: string, value: unknown): void {
-  if (value !== undefined && typeof value !== "boolean") {
-    fail(where, field, "a boolean", value);
-  }
-}
+const matchOptionsSchema = s.object({ dot: optionalBoolean() }, OPTIONS).optional();
 
-function checkOptionalFunction(where: string, field: string, value: unknown): void {
-  if (value !== undefined && typeof value !== "function") {
-    fail(where, field, "a function", value);
-  }
-}
+const traverseOptionsSchema = s.object(
+  { recursive: optionalBoolean(), followSymlinks: optionalBoolean(), filter: fileFilter() },
+  OPTIONS
+);
+const _traverseOptionsMatch: SchemaMatches<typeof traverseOptionsSchema, TraverseOptions> = true;
+void _traverseOptionsMatch;
+
+const globOptionsSchema = s.object(
+  {
+    cwd: s.string({ expected: "a path string" }).optional(),
+    ignore: s
+      .union(
+        [
+          s.string({ expected: "a glob pattern string" }),
+          s.array(s.string({ expected: "a glob pattern string" }))
+        ],
+        { expected: "a glob pattern or an array of them" }
+      )
+      .optional(),
+    dot: optionalBoolean(),
+    followSymlinks: optionalBoolean(),
+    filter: fileFilter()
+  },
+  OPTIONS
+);
+const _globOptionsMatch: SchemaMatches<typeof globOptionsSchema, GlobOptions> = true;
+void _globOptionsMatch;
 
 function checkMatchOptions(where: string, options: unknown): void {
-  if (checkOptions(where, options)) {
-    checkOptionalBoolean(where, "options.dot", options.dot);
-  }
+  checkArchiveArgument(matchOptionsSchema, options, where, "options");
 }
 
 function checkTraverseOptions(where: string, options: unknown): void {
-  if (checkOptions(where, options)) {
-    checkOptionalBoolean(where, "options.recursive", options.recursive);
-    checkOptionalBoolean(where, "options.followSymlinks", options.followSymlinks);
-    checkOptionalFunction(where, "options.filter", options.filter);
-  }
+  checkArchiveArgument(traverseOptionsSchema.optional(), options, where, "options");
 }
 
 function checkGlobOptions(where: string, options: unknown): void {
-  if (!checkOptions(where, options)) {
-    return;
-  }
-  if (options.cwd !== undefined) {
+  checkArchiveArgument(globOptionsSchema.optional(), options, where, "options");
+  if (options?.cwd !== undefined) {
     checkPath(where, "options.cwd", options.cwd);
   }
-  const { ignore } = options;
-  if (Array.isArray(ignore)) {
-    ignore.forEach((pattern: unknown, index) =>
-      checkGlobPattern(where, `options.ignore[${index}]`, pattern)
-    );
-  } else if (ignore !== undefined && typeof ignore !== "string") {
-    fail(where, "options.ignore", "a glob pattern or an array of them", ignore);
-  }
-  checkOptionalBoolean(where, "options.dot", options.dot);
-  checkOptionalBoolean(where, "options.followSymlinks", options.followSymlinks);
-  checkOptionalFunction(where, "options.filter", options.filter);
 }
 
 function checkData(where: string, value: unknown): void {
-  if (!(value instanceof Uint8Array)) {
-    fail(where, "data", "a Uint8Array", value);
-  }
+  checkArchiveArgument(
+    s.custom(v => v instanceof Uint8Array, "a Uint8Array"),
+    value,
+    where,
+    "data"
+  );
 }
 
 function checkContent(where: string, value: unknown): void {
-  if (typeof value !== "string") {
-    fail(where, "content", "a string", value);
-  }
+  checkArchiveArgument(s.string(), value, where, "content");
 }
 
 function checkEncoding(where: string, value: unknown): void {
-  if (value !== undefined && (typeof value !== "string" || !Buffer.isEncoding(value))) {
-    fail(where, "encoding", "a Buffer encoding name", value);
-  }
+  checkArchiveArgument(
+    s
+      .custom(v => typeof v === "string" && Buffer.isEncoding(v), "a Buffer encoding name")
+      .optional(),
+    value,
+    where,
+    "encoding"
+  );
 }
 
 function checkMtime(where: string, value: unknown): void {
-  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-    fail(where, "mtime", "a valid Date", value);
-  }
+  checkArchiveArgument(dateSchema, value, where, "mtime");
 }
 
 function checkPrefix(where: string, value: unknown): void {
@@ -249,11 +237,13 @@ export function matchGlobAny(
   options?: { dot?: boolean }
 ): boolean {
   checkPath("Fs.matchGlobAny", "filePath", filePath);
-  if (!Array.isArray(patterns)) {
-    fail("Fs.matchGlobAny", "patterns", "an array of glob patterns", patterns);
-  }
-  patterns.forEach((pattern: unknown, index) =>
-    checkGlobPattern("Fs.matchGlobAny", `patterns[${index}]`, pattern)
+  checkArchiveArgument(
+    s.array(s.string({ expected: "a glob pattern string" }), {
+      expected: "an array of glob patterns"
+    }),
+    patterns,
+    "Fs.matchGlobAny",
+    "patterns"
   );
   checkMatchOptions("Fs.matchGlobAny", options);
   return matchGlobAnyImpl(filePath, patterns, options);
@@ -287,14 +277,14 @@ export function ensureDirSync(dirPath: string): void {
   ensureDirSyncImpl(dirPath);
 }
 
-/** The stats of `filePath`, or `null` when it cannot be read. */
-export async function safeStats(filePath: string): Promise<Stats | null> {
+/** The stats of `filePath`, or `undefined` when it cannot be read. */
+export async function safeStats(filePath: string): Promise<Stats | undefined> {
   checkPath("Fs.safeStats", "filePath", filePath);
   return safeStatsImpl(filePath);
 }
 
-/** Synchronously get the stats of `filePath`, or `null` when it cannot be read. */
-export function safeStatsSync(filePath: string): Stats | null {
+/** Synchronously get the stats of `filePath`, or `undefined` when it cannot be read. */
+export function safeStatsSync(filePath: string): Stats | undefined {
   checkPath("Fs.safeStatsSync", "filePath", filePath);
   return safeStatsSyncImpl(filePath);
 }

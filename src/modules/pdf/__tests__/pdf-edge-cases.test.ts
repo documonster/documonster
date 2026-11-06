@@ -199,16 +199,20 @@ describe("PDF Rendering Edge Cases", () => {
       for (let r = 1; r <= rowCount; r++) {
         for (let c = 1; c <= colCount; c++) {
           if (c > 1) {
-            Cell.setValue(ws, r, c, 10);
+            Cell.setValue(ws, { row: r, col: c }, 10);
           }
-          Cell.setStyle(ws, r, c, {
-            border: {
-              top: { style: r === 1 ? "medium" : "thin" },
-              bottom: { style: r === rowCount ? "medium" : "thin" },
-              left: { style: c === 1 ? "medium" : "thin" },
-              right: { style: c === colCount ? "medium" : "thin" }
+          Cell.setStyle(
+            ws,
+            { row: r, col: c },
+            {
+              border: {
+                top: { style: r === 1 ? "medium" : "thin" },
+                bottom: { style: r === rowCount ? "medium" : "thin" },
+                left: { style: c === 1 ? "medium" : "thin" },
+                right: { style: c === colCount ? "medium" : "thin" }
+              }
             }
-          });
+          );
         }
       }
       Worksheet.merge(ws, `A1:A${rowCount}`);
@@ -398,7 +402,7 @@ describe("PDF Rendering Edge Cases", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       for (let c = 1; c <= 20; c++) {
         Column.setWidth(ws, c, 12);
-        Cell.setValue(ws, 1, c, `Col ${c}`);
+        Cell.setValue(ws, { row: 1, col: c }, `Col ${c}`);
       }
 
       const pdfBytes = await excelToPdf(wb, { fitToPage: true });
@@ -1102,13 +1106,17 @@ describe("PDF Rendering Edge Cases", () => {
       ];
 
       for (let i = 0; i < combos.length; i++) {
-        Cell.setValue(ws, 1, i + 1, combos[i].value);
-        Cell.setAlignment(ws, 1, i + 1, {
-          textRotation: 90,
-          horizontal: combos[i].h as any,
-          vertical: combos[i].v as any,
-          wrapText: true
-        });
+        Cell.setValue(ws, { row: 1, col: i + 1 }, combos[i].value);
+        Cell.setAlignment(
+          ws,
+          { row: 1, col: i + 1 },
+          {
+            textRotation: 90,
+            horizontal: combos[i].h as any,
+            vertical: combos[i].v as any,
+            wrapText: true
+          }
+        );
       }
 
       const pdfBytes = await excelToPdf(wb);

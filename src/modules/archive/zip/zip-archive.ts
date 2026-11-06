@@ -9,7 +9,9 @@ import {
 import {
   checkArchiveSource,
   checkEntryName,
+  checkEntryPath,
   checkString,
+  checkZipEncryptionOptions,
   checkZipEntryOptions,
   checkZipOptions
 } from "@archive/core/entry-checks";
@@ -17,6 +19,8 @@ import { ArchiveArgumentError, throwIfAborted, ArchiveError } from "@archive/cor
 import type { ZipStringEncoding } from "@archive/core/text";
 import { encodeZipString } from "@archive/core/text";
 import type { ArchiveFormat } from "@archive/core/types";
+import { isAesEncryption } from "@archive/crypto";
+import type { ZipEncryptionMethod } from "@archive/crypto/types";
 import type { ArchiveSink } from "@archive/io/archive-sink";
 import { checkSinkArgument, collect, pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
@@ -72,6 +76,17 @@ export interface ZipOptions {
 
   /** Optional string encoding for entry names/comments and archive comment. */
   encoding?: ZipStringEncoding;
+
+  /**
+   * Encrypt every entry: `"zipcrypto"` (the legacy PKWARE cipher, weak — for readers that know
+   * nothing else) or WinZip AES (`"aes-128"`, `"aes-192"`, `"aes-256"`). Default `"none"`.
+   * Needs {@link password}. AES runs on Web Crypto, so it is written by `toBuffer()` and
+   * `stream()`; `toBufferSync()` refuses it.
+   */
+  encryptionMethod?: ZipEncryptionMethod;
+
+  /** The password {@link encryptionMethod} encrypts with; given only together with it. */
+  password?: string | Uint8Array;
 
   /** Default abort signal used by streaming operations. */
   signal?: AbortSignal;
@@ -172,6 +187,8 @@ export function canUseBrowserBlobFastPath(facts: {
   hasBlobSource: boolean;
   allSourcesInMemory: boolean;
   smartStore: boolean;
+  /** This path writes no encryption headers, so an encrypted archive goes elsewhere. */
+  encrypted: boolean;
   zip64Requested: boolean;
   needsDeflate: boolean;
   hasDeflateRawCompressionStream: () => boolean;
@@ -179,7 +196,7 @@ export function canUseBrowserBlobFastPath(facts: {
   if (facts.isNode || !facts.hasBlobSource || !facts.allSourcesInMemory) {
     return false;
   }
-  if (facts.smartStore || facts.zip64Requested) {
+  if (facts.smartStore || facts.encrypted || facts.zip64Requested) {
     return false;
   }
   return !facts.needsDeflate || facts.hasDeflateRawCompressionStream();
@@ -194,6 +211,8 @@ export class ZipArchive {
     path: false | ZipPathOptions;
     encoding?: ZipStringEncoding;
     noSort: boolean;
+    encryptionMethod: ZipEncryptionMethod;
+    password?: string | Uint8Array;
   };
   private readonly _streamDefaults: {
     signal?: AbortSignal;
@@ -206,7 +225,8 @@ export class ZipArchive {
   private _sealed = false;
 
   constructor(options: ZipOptions = {}) {
-    checkZipOptions("Archive.createZip", options);
+    checkZipOptions("new Archive.ZipArchive", options);
+    checkZipEncryptionOptions("new Archive.ZipArchive", options);
     const reproducible = options.reproducible ?? false;
     this._options = {
       level: options.level ?? DEFAULT_ZIP_LEVEL,
@@ -217,7 +237,9 @@ export class ZipArchive {
       zip64: options.zip64 ?? "auto",
       path: options.path ?? false,
       encoding: options.encoding,
-      noSort: options.noSort ?? false
+      noSort: options.noSort ?? false,
+      encryptionMethod: options.encryptionMethod ?? "none",
+      password: options.password
     };
     this._streamDefaults = {
       signal: options.signal,
@@ -263,7 +285,9 @@ export class ZipArchive {
       // The in-memory fast path writes through here; without it, `path` applied to
       // `stream()` and was ignored by `toBuffer()` / `toBufferSync()`.
       path: this._options.path,
-      noSort: this._options.noSort
+      noSort: this._options.noSort,
+      encryptionMethod: this._options.encryptionMethod,
+      password: this._options.password
     };
   }
 
@@ -281,9 +305,7 @@ export class ZipArchive {
     if (this._sealed) {
       throw new ArchiveError(`${where}: cannot add entries after output has started`);
     }
-    if (!name) {
-      throw new ArchiveArgumentError("name", `${where}: name must be a non-empty string`);
-    }
+    checkEntryPath(where, name, "name");
     if (this._options.path === false) {
       checkEntryName(where, name);
     }
@@ -366,7 +388,9 @@ export class ZipArchive {
               smartStore: this._options.smartStore,
               zip64: this._options.zip64,
               path: this._options.path,
-              encoding: this._options.encoding
+              encoding: this._options.encoding,
+              encryptionMethod: this._options.encryptionMethod,
+              password: this._options.password
             })
           );
 
@@ -606,6 +630,7 @@ export class ZipArchive {
         hasBlobSource,
         allSourcesInMemory,
         smartStore: this._options.smartStore,
+        encrypted: this._options.encryptionMethod !== "none",
         // This path writes no ZIP64 records, so any entry asking for them goes elsewhere.
         zip64Requested:
           this._options.zip64 === true || this._entries.some(e => e.options?.zip64 === true),
@@ -623,8 +648,9 @@ export class ZipArchive {
     // Fast-path: when all sources are already in memory, use single-buffer ZIP builder.
     if (allSourcesInMemory) {
       // Prefer the sync builder when possible (Node.js hot path): it avoids
-      // async/Promise overhead and uses zlib sync fast paths.
-      if (!hasBlobSource) {
+      // async/Promise overhead and uses zlib sync fast paths. AES runs on Web Crypto, which
+      // has no synchronous form, so an AES archive is built by the async builder.
+      if (!hasBlobSource && !isAesEncryption(this._options.encryptionMethod)) {
         const entries = this._entries.map(entry =>
           this._toBuildEntry(entry, toUint8ArraySync(toSyncSource(entry.source)))
         );
@@ -718,7 +744,10 @@ function toInMemorySource(source: ArchiveSource): Uint8Array | ArrayBuffer | str
 }
 
 /** ZIP options with format: "tar" */
-export interface ZipOptionsTar extends Omit<ZipOptions, "onProgress"> {
+export interface ZipOptionsTar extends Omit<
+  ZipOptions,
+  "onProgress" | "encryptionMethod" | "password"
+> {
   format: "tar";
 
   /**

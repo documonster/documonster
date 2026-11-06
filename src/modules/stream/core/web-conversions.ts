@@ -15,9 +15,14 @@
  * - the adapters remove their own listeners when they are done.
  */
 
+import {
+  checkStreamArgument,
+  toWebReadableOptionsSchema,
+  webReadableOptionsSchema,
+  webWritableOptionsSchema
+} from "@stream/arguments";
 import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
-import { StreamArgumentError, StreamUnsupportedTypeError } from "@stream/errors";
-import { isEncoding } from "@stream/kernel/state";
+import { StreamUnsupportedTypeError } from "@stream/errors";
 import {
   readableFromWeb as adaptReadableFromWeb,
   readableToWeb as adaptReadableToWeb,
@@ -25,6 +30,7 @@ import {
   writableToWeb as adaptWritableToWeb
 } from "@stream/kernel/web-adapters";
 import type { IReadable, IWritable, WritableLike } from "@stream/types";
+import type { SchemaMatches } from "@utils/schema";
 
 /** `stream` if it can be written to as a Node-style writable (`write` and `end`); else a typed error. */
 export function checkWritableLike(stream: unknown): WritableLike {
@@ -104,75 +110,12 @@ function describeValue(value: unknown): string {
   return value === null ? "null" : typeof value;
 }
 
-type OptionKind = "boolean" | "highWaterMark" | "encoding" | "signal" | "strategy";
-
-function optionProblem(kind: OptionKind, value: unknown): string | undefined {
-  switch (kind) {
-    case "boolean":
-      return typeof value === "boolean" ? undefined : "a boolean";
-    case "highWaterMark":
-      return typeof value === "number" && Number.isInteger(value) && value >= 0
-        ? undefined
-        : "a non-negative integer highWaterMark";
-    case "encoding":
-      return isEncoding(value) ? undefined : "a Buffer encoding name";
-    case "signal": {
-      const signal = value as { aborted?: unknown; addEventListener?: unknown } | null;
-      return typeof signal === "object" &&
-        signal !== null &&
-        typeof signal.aborted === "boolean" &&
-        typeof signal.addEventListener === "function"
-        ? undefined
-        : "an AbortSignal";
-    }
-    case "strategy":
-      return typeof value === "object" && value !== null ? undefined : "a QueuingStrategy";
-  }
-}
-
-/**
- * Refuse an options argument the adapter would hand to a stream constructor unchecked: there it
- * failed with the platform's own `TypeError`, naming no public call.
- */
-function checkOptions(
-  where: string,
-  options: unknown,
-  fields: Readonly<Record<string, OptionKind>>
-): void {
-  if (options === undefined) {
-    return;
-  }
-  if (typeof options !== "object" || options === null || Array.isArray(options)) {
-    throw new StreamArgumentError("an options object", describeValue(options), {
-      field: "options",
-      where
-    });
-  }
-  for (const [name, kind] of Object.entries(fields)) {
-    const value = (options as Record<string, unknown>)[name];
-    const expected = value === undefined ? undefined : optionProblem(kind, value);
-    if (expected !== undefined) {
-      throw new StreamArgumentError(expected, describeValue(value), {
-        field: `options.${name}`,
-        where
-      });
-    }
-  }
-}
-
-const READABLE_FROM_WEB_OPTIONS = {
-  objectMode: "boolean",
-  highWaterMark: "highWaterMark",
-  encoding: "encoding",
-  signal: "signal"
-} as const;
-
-const WRITABLE_FROM_WEB_OPTIONS = {
-  objectMode: "boolean",
-  highWaterMark: "highWaterMark",
-  decodeStrings: "boolean",
-  signal: "signal"
-} as const;
+const _webReadableOptionsMatch: SchemaMatches<typeof webReadableOptionsSchema, WebReadableOptions> =
+  true;
+void _webReadableOptionsMatch;
+const _webWritableOptionsMatch: SchemaMatches<typeof webWritableOptionsSchema, WebWritableOptions> =
+  true;
+void _webWritableOptionsMatch;
 
 export function makeReadableFromWeb(Readable: StreamCtor): ReadableFromWeb {
   return (stream: ReadableStream, options?: WebReadableOptions) => {
@@ -181,7 +124,12 @@ export function makeReadableFromWeb(Readable: StreamCtor): ReadableFromWeb {
         field: "stream"
       });
     }
-    checkOptions("Streams.fromWebReadable", options, READABLE_FROM_WEB_OPTIONS);
+    checkStreamArgument(
+      webReadableOptionsSchema.optional(),
+      options,
+      "Streams.fromWebReadable",
+      "options"
+    );
     return adaptReadableFromWeb(Readable, stream, options);
   };
 }
@@ -193,7 +141,12 @@ export function makeWritableFromWeb(Writable: StreamCtor): WritableFromWeb {
         field: "stream"
       });
     }
-    checkOptions("Streams.fromWebWritable", options, WRITABLE_FROM_WEB_OPTIONS);
+    checkStreamArgument(
+      webWritableOptionsSchema.optional(),
+      options,
+      "Streams.fromWebWritable",
+      "options"
+    );
     return adaptWritableFromWeb(Writable, stream, options);
   };
 }
@@ -214,7 +167,12 @@ export function readableToWeb<T = any>(
       field: "stream"
     });
   }
-  checkOptions("Streams.toWebReadable", options, { strategy: "strategy" });
+  checkStreamArgument(
+    toWebReadableOptionsSchema.optional(),
+    options,
+    "Streams.toWebReadable",
+    "options"
+  );
   return adaptReadableToWeb<T>(stream, options);
 }
 

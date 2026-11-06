@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Pdf } from "documonster/pdf";
-import { Io, Query } from "documonster/word";
+import { Document, Query } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { formatToolError } from "../errors.js";
@@ -540,7 +540,7 @@ describe("mermaid fences in Markdown documents", () => {
     const text = await run(docWriteTool, fx, { path: "doc.docx", markdown: DOC });
     expect(text).toContain("mermaid diagram(s) rendered");
 
-    const doc = await Io.readFile(path.join(fx.root, "doc.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "doc.docx"));
     expect(doc.images).toHaveLength(1);
     // The source must be gone: a fence left as text is the bug this replaces.
     const body = Query.getText(doc);
@@ -559,7 +559,7 @@ describe("mermaid fences in Markdown documents", () => {
     ].join("\n");
     await run(docWriteTool, fx, { path: "wide.docx", markdown: wide });
 
-    const doc = await Io.readFile(path.join(fx.root, "wide.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "wide.docx"));
     const image = doc.body
       .flatMap(block => ("children" in block ? block.children : []))
       .flatMap(runEntry => ("content" in runEntry ? runEntry.content : []))
@@ -598,7 +598,7 @@ describe("mermaid fences in Markdown documents", () => {
     // the whole chart and can turn one page into two.
     expect(note).not.toContain("wider than the text column allows");
 
-    const doc = await Io.readFile(path.join(fx.root, "legible.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "legible.docx"));
     const media = doc.images![0]!.data;
     const view = new DataView(media.buffer, media.byteOffset);
     // 1855 × 194 untuned, so a 9.6:1 strip drawn at 3.5pt; 781 × 170 tuned, 4.6:1 at 8.4pt.
@@ -623,7 +623,7 @@ describe("mermaid fences in Markdown documents", () => {
     expect(note).toContain("wider than the text column allows");
     // Still embedded, and still inside the page: reporting the problem does not mean dropping
     // the diagram.
-    const doc = await Io.readFile(path.join(fx.root, "cramped.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "cramped.docx"));
     expect(doc.images).toHaveLength(1);
   });
 
@@ -635,7 +635,7 @@ describe("mermaid fences in Markdown documents", () => {
       diagrams: false
     });
     expect(text).not.toContain("mermaid diagram(s) rendered");
-    const doc = await Io.readFile(path.join(fx.root, "code.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "code.docx"));
     expect(doc.images ?? []).toHaveLength(0);
     expect(Query.getText(doc)).toContain("flowchart LR");
   });
@@ -647,7 +647,7 @@ describe("mermaid fences in Markdown documents", () => {
       markdown: ["Intro.", "", "```mermaid", "notADiagram", "```", "", "Outro."].join("\n")
     });
     expect(text).toContain("left as a code block");
-    const doc = await Io.readFile(path.join(fx.root, "broken.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "broken.docx"));
     const body = Query.getText(doc);
     // The prose either side has to survive: losing a document over one bad
     // diagram is a far worse failure than an unrendered diagram.
@@ -674,7 +674,7 @@ describe("mermaid fences in Markdown documents", () => {
     ].join("\n");
     const text = await run(docWriteTool, fx, { path: "two.docx", markdown });
     expect(text).toContain("2 mermaid diagram(s)");
-    const doc = await Io.readFile(path.join(fx.root, "two.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "two.docx"));
     expect(doc.images).toHaveLength(2);
     expect(Query.getText(doc)).toContain("One:");
     expect(Query.getText(doc)).toContain("Two:");
@@ -685,7 +685,7 @@ describe("mermaid fences in Markdown documents", () => {
     await writeFile(path.join(fx.root, "in.md"), DOC);
     const text = await run(docConvertTool, fx, { from: "in.md", to: "out.docx" });
     expect(text).toContain("mermaid diagram(s) rendered");
-    const doc = await Io.readFile(path.join(fx.root, "out.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "out.docx"));
     expect(doc.images).toHaveLength(1);
   });
 
@@ -701,7 +701,7 @@ describe("mermaid fences in Markdown documents", () => {
     const fx = await fixture(["--enable", "word"]);
     const text = await run(docWriteTool, fx, { path: "off.docx", markdown: DOC });
     expect(text).not.toContain("mermaid diagram(s) rendered");
-    const doc = await Io.readFile(path.join(fx.root, "off.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "off.docx"));
     expect(doc.images ?? []).toHaveLength(0);
   });
 });

@@ -9,13 +9,13 @@
  *
  * @module
  */
-
 import { decompress, decompressSync } from "@archive/compression/compress";
 import { crc32, crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { createInflateStream } from "@archive/compression/streaming-compress";
+import { DEFAULT_MAX_ENTRY_SIZE } from "@archive/core/defaults";
 import {
   ArchiveError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ZipCrc32MismatchError,
   ZipDecryptionError,
   ZipEntrySizeMismatchError,
@@ -28,7 +28,6 @@ import {
 } from "@archive/core/errors";
 import {
   ZIP_CRYPTO_HEADER_SIZE,
-  aesDecrypt,
   zipCryptoDecrypt,
   zipCryptoDecryptByte,
   zipCryptoInitKeys
@@ -43,6 +42,14 @@ import {
 } from "@archive/zip-spec/zip-records";
 import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
 import { concatUint8Arrays } from "@utils/binary";
+
+/**
+ * The AES cipher, loaded for the first AES entry read. Reading an unencrypted archive — every workbook and document —
+ * does not carry PBKDF2, HMAC and AES-CTR.
+ */
+async function loadAesDecrypt() {
+  return (await import("@archive/crypto/aes")).aesDecrypt;
+}
 
 /**
  * Local file header fixed size (30 bytes)
@@ -74,16 +81,6 @@ export interface ExtractCoreOptions {
    */
   maxEntrySize?: number;
 }
-
-/**
- * Maximum allowed uncompressed entry size for non-streaming extraction (512 MB).
- *
- * Enforced twice: against the *declared* size before anything is inflated, and
- * as the inflater's output bound, so an entry that lies about its size is
- * stopped as soon as it overruns rather than after it has been materialised.
- * The streaming extraction path (processEntryDataStream) has its own byte-level checks.
- */
-const DEFAULT_MAX_ENTRY_SIZE = 512 * 1024 * 1024;
 
 /** How one entry is inflated into memory: its output bound and how a hit is reported. */
 interface EntryInflation {
@@ -124,7 +121,7 @@ function planEntryInflation(
  * inflater raised untyped into an `ArchiveError`.
  */
 function translateInflateFailure(err: unknown, plan: EntryInflation): Error {
-  if (!(err instanceof ArchiveLimitError)) {
+  if (!(err instanceof ArchiveLimitExceededError)) {
     return toInflateError(err, plan.entry.path);
   }
   const { entry, bound } = plan;
@@ -179,6 +176,7 @@ export async function processEntryData(
 
     if (entry.encryptionMethod === "aes" && entry.aesKeyStrength) {
       // AES decryption
+      const aesDecrypt = await loadAesDecrypt();
       const decrypted = await aesDecrypt(compressedData, password, entry.aesKeyStrength);
       if (!decrypted) {
         throw new ZipDecryptionError(entry.path);
@@ -700,6 +698,7 @@ export function processEntryDataStream(
         const plan = planEntryInflation(entry, validateEntrySizes, maxEntrySize);
         // AES requires full ciphertext to verify HMAC.
         const encrypted = await collect(compressedData);
+        const aesDecrypt = await loadAesDecrypt();
         const decrypted = await aesDecrypt(encrypted, password, entry.aesKeyStrength);
         const method = entry.originalCompressionMethod ?? COMPRESSION_STORE;
         const out = await decompressData(decrypted, method, plan);

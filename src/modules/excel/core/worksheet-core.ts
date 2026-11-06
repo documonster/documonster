@@ -31,6 +31,7 @@ import {
   cellComment,
   cellCreate,
   cellGetValue,
+  cellReadValue,
   cellSetComment,
   cellSetModel,
   cellSetNumFmt,
@@ -783,6 +784,68 @@ export function getCell(ws: WorksheetData, r: number | string, c?: number): Cell
 }
 
 /**
+ * The normalised bounds of a bounded range on `ws`, refused as {@link getRangeValues} documents. `site` prefixes the
+ * public call and names the parameter, for a caller that has one.
+ */
+export function resolveRangeBounds(
+  ws: WorksheetData,
+  range: string | RangeData,
+  site?: { where: string; field: string }
+): { top: number; left: number; bottom: number; right: number } {
+  checkWorksheet(ws);
+  const r = typeof range === "string" ? rangeCreate(range) : range;
+
+  const bounds = [r.top, r.left, r.bottom, r.right];
+  const decoded = bounds.every(n => Number.isInteger(n));
+  const set = decoded && bounds.every(n => n >= 1);
+  // `rangeTl`/`rangeToString` coerce 0 and NaN bounds to 1, so an unusable range
+  // would render as a plausible-looking "A1:A1". Describe the raw bounds instead.
+  const label =
+    typeof range === "string"
+      ? range
+      : set
+        ? rangeRange(r)
+        : `{ top: ${r.top}, left: ${r.left}, bottom: ${r.bottom}, right: ${r.right} }`;
+
+  if (!decoded) {
+    // `colCache.decodeAddress` yields `undefined` for a missing row or column,
+    // which `rangeCreate` turns into a NaN bound. That covers both unbounded
+    // references ("A:A", "1:5") and strings it cannot decode at all.
+    throw new ExcelInvalidAddressError(
+      label,
+      'expected a bounded A1 range like "G7:H19" — whole-column and whole-row references have no bounds to read',
+      site
+    );
+  }
+  if (!set) {
+    // All-zero is `rangeCreate`'s unset sentinel — e.g. `Range.create()`, or the
+    // dimensions of a sheet with no cells. Reading it as "A1" would hide the bug.
+    throw new ExcelInvalidAddressError(
+      label,
+      "range bounds must be 1-based row and column numbers; this range is unset or empty",
+      site
+    );
+  }
+  if (r.sheetName) {
+    const sheetName = getSheetName(ws);
+    if (sheetNameKey(r.sheetName) !== sheetNameKey(sheetName)) {
+      throw new ExcelError(
+        `${site ? `${site.where}: ` : ""}Range "${label}" refers to worksheet "${r.sheetName}" but was read from worksheet "${sheetName}"`
+      );
+    }
+  }
+
+  // `rangeCreate` normalises reversed corners, but `RangeData` is a plain record
+  // a caller can hand-build, so normalise here too rather than deriving a
+  // negative height and failing inside `new Array()`.
+  const top = Math.min(r.top, r.bottom);
+  const bottom = Math.max(r.top, r.bottom);
+  const left = Math.min(r.left, r.right);
+  const right = Math.max(r.left, r.right);
+  return { top, left, bottom, right };
+}
+
+/**
  * Read every cell value in a rectangular range as a row-major matrix.
  *
  * The result is always exactly `bottom - top + 1` rows by `right - left + 1`
@@ -810,54 +873,7 @@ export function getCell(ws: WorksheetData, r: number | string, c?: number): Cell
  * @throws {ExcelError} If the range is qualified with a different worksheet.
  */
 export function getRangeValues(ws: WorksheetData, range: string | RangeData): CellValue[][] {
-  checkWorksheet(ws);
-  const r = typeof range === "string" ? rangeCreate(range) : range;
-
-  const bounds = [r.top, r.left, r.bottom, r.right];
-  const decoded = bounds.every(n => Number.isInteger(n));
-  const set = decoded && bounds.every(n => n >= 1);
-  // `rangeTl`/`rangeToString` coerce 0 and NaN bounds to 1, so an unusable range
-  // would render as a plausible-looking "A1:A1". Describe the raw bounds instead.
-  const label =
-    typeof range === "string"
-      ? range
-      : set
-        ? rangeRange(r)
-        : `{ top: ${r.top}, left: ${r.left}, bottom: ${r.bottom}, right: ${r.right} }`;
-
-  if (!decoded) {
-    // `colCache.decodeAddress` yields `undefined` for a missing row or column,
-    // which `rangeCreate` turns into a NaN bound. That covers both unbounded
-    // references ("A:A", "1:5") and strings it cannot decode at all.
-    throw new ExcelInvalidAddressError(
-      label,
-      'expected a bounded A1 range like "G7:H19" — whole-column and whole-row references have no bounds to read'
-    );
-  }
-  if (!set) {
-    // All-zero is `rangeCreate`'s unset sentinel — e.g. `Range.create()`, or the
-    // dimensions of a sheet with no cells. Reading it as "A1" would hide the bug.
-    throw new ExcelInvalidAddressError(
-      label,
-      "range bounds must be 1-based row and column numbers; this range is unset or empty"
-    );
-  }
-  if (r.sheetName) {
-    const sheetName = getSheetName(ws);
-    if (sheetNameKey(r.sheetName) !== sheetNameKey(sheetName)) {
-      throw new ExcelError(
-        `Range "${label}" refers to worksheet "${r.sheetName}" but was read from worksheet "${sheetName}"`
-      );
-    }
-  }
-
-  // `rangeCreate` normalises reversed corners, but `RangeData` is a plain record
-  // a caller can hand-build, so normalise here too rather than deriving a
-  // negative height and failing inside `new Array()`.
-  const top = Math.min(r.top, r.bottom);
-  const bottom = Math.max(r.top, r.bottom);
-  const left = Math.min(r.left, r.right);
-  const right = Math.max(r.left, r.right);
+  const { top, left, bottom, right } = resolveRangeBounds(ws, range);
 
   const width = right - left + 1;
   const result: CellValue[][] = new Array(bottom - top + 1);
@@ -867,7 +883,7 @@ export function getRangeValues(ws: WorksheetData, range: string | RangeData): Ce
     const rowHandle = findRow(ws, row);
     for (let col = left; col <= right; col++) {
       const cell = rowHandle ? rowFindCell(rowHandle, col) : undefined;
-      rowData[col - left] = cell ? cellGetValue(cell) : null;
+      rowData[col - left] = cell ? cellReadValue(cell) : null;
     }
     result[row - top] = rowData;
   }
@@ -1009,7 +1025,7 @@ export function columnValuesAt(ws: WorksheetData, colNumber: number, base: 0 | 1
     }
     const cell = rowFindCell(row, colNumber);
     if (cell && cellType(cell) !== Enums.ValueType.Null) {
-      v[row.number - 1 + base] = cellGetValue(cell);
+      v[row.number - 1 + base] = cellReadValue(cell);
     }
   }
   return v;

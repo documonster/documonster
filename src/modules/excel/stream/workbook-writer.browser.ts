@@ -49,11 +49,7 @@ import type {
   HeaderFooter,
   NamedStyle
 } from "@excel/types";
-import {
-  argumentChecks,
-  checkProtectCall,
-  WORKBOOK_PROTECTION_FLAGS
-} from "@excel/utils/arguments";
+import { argumentChecks, checkProtectCall, checkSchema } from "@excel/utils/arguments";
 import { unwritableFormulaReason } from "@excel/utils/array-evaluation";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import type { DrawingAnchor, DrawingRel } from "@excel/utils/drawing-utils";
@@ -90,6 +86,8 @@ import type { Writable } from "@stream";
 import { Streams } from "@stream";
 import { stringToUint8Array } from "@utils/binary";
 import { excelNameKey, sheetNameKey } from "@utils/name-key";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { base64ToUint8Array } from "@utils/utils";
 
 const EMPTY_U8 = new Uint8Array(0);
@@ -273,6 +271,62 @@ export interface WorksheetWriterConstructor<T extends WorksheetWriterLike> {
 // Base Class
 // ============================================================================
 
+const validDate = () =>
+  s.custom<Date>(v => v instanceof Date && !Number.isNaN(v.getTime()), "a valid Date").optional();
+// A level outside 0–9 used to be clamped in silence; it is refused as `Workbook.toBuffer`'s `zip.level` is.
+const level = () => s.number({ integer: true, min: 0, max: 9 }).optional();
+
+const zlibOptionsSchema = s.object({
+  flush: s.number().optional(),
+  finishFlush: s.number().optional(),
+  chunkSize: s.number().optional(),
+  windowBits: s.number().optional(),
+  level: level(),
+  memLevel: s.number().optional(),
+  strategy: s.number().optional(),
+  dictionary: s.bytes<Uint8Array | ArrayBuffer>().optional()
+});
+const _zlibOptionsMatch: SchemaMatches<typeof zlibOptionsSchema, ZlibOptions> = true;
+void _zlibOptionsMatch;
+
+const zipOptionsSchema = s.object({
+  comment: s.string().optional(),
+  forceLocalTime: s.boolean().optional(),
+  forceZip64: s.boolean().optional(),
+  store: s.boolean().optional(),
+  zlib: zlibOptionsSchema.optional(),
+  compressionOptions: s.object({ level: level() }).optional()
+});
+const _zipOptionsMatch: SchemaMatches<typeof zipOptionsSchema, WorkbookZipOptions> = true;
+void _zipOptionsMatch;
+
+const writerOptionsSchema = s.object({
+  created: validDate(),
+  modified: validDate(),
+  creator: s.string().optional(),
+  lastModifiedBy: s.string().optional(),
+  lastPrinted: validDate(),
+  useSharedStrings: s.boolean().optional(),
+  useStyles: s.boolean().optional(),
+  date1904: s.boolean().optional(),
+  zip: zipOptionsSchema.optional(),
+  stream: s
+    .custom<Writable | WritableStream<Uint8Array>>(
+      v =>
+        typeof v === "object" &&
+        v !== null &&
+        (typeof (v as { write?: unknown }).write === "function" ||
+          typeof (v as { getWriter?: unknown }).getWriter === "function"),
+      "a writable stream or a WritableStream"
+    )
+    .optional(),
+  filename: s.string().optional(),
+  trueStreaming: s.boolean().optional(),
+  format: s.literal("xlsx", "xlsb").optional()
+});
+const _writerOptionsMatch: SchemaMatches<typeof writerOptionsSchema, WorkbookWriterOptions> = true;
+void _writerOptionsMatch;
+
 export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWriterLike> {
   created: Date;
   modified: Date;
@@ -315,6 +369,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   private _xlsbUnsupported: readonly string[] = [];
   /** The spelling of each named cell style added, keyed as Excel compares the names (without regard to case). */
   private readonly _cellStyleNames = new Map<string, string>();
+  /** Each named cell style added, keyed as {@link _cellStyleNames} is — what `Workbook.getCellStyle` reads. */
+  private readonly _cellStyles = new Map<string, NamedStyleEntry>();
 
   /**
    * @deprecated Use {@link unsupported}. Removed in 1.0.
@@ -497,7 +553,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     WorksheetWriterClass: WorksheetWriterConstructor<TWorksheetWriter>
   ) {
     // `null` reached `options.created` and threw a `TypeError`; a number was read as no options at all.
-    argumentChecks("WorkbookWriter").record("options", options);
+    checkSchema("WorkbookWriter", "options", writerOptionsSchema, options);
     this.WorksheetWriterClass = WorksheetWriterClass;
     this.created = options.created || new Date();
     this.modified = options.modified || this.created;
@@ -739,7 +795,13 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     }
   }
 
+  /** @deprecated Use {@link Workbook.getDefinedNames}: `Workbook.getDefinedNames(wb)`. Removed in 1.0. */
   get definedNames(): DefinedNamesData {
+    return this._definedNames;
+  }
+
+  /** @internal What `Workbook.getDefinedNames` answers for this writer. */
+  _getDefinedNames(): DefinedNamesData {
     return this._definedNames;
   }
 
@@ -765,40 +827,65 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * when styles are disabled (`useStyles: false`). Rejects an empty name or the reserved "Normal"
    * style. A name equal to an earlier one ignoring case is that style: it is replaced, and keeps the
    * earlier spelling.
+   *
+   * @deprecated Use {@link Workbook.addCellStyle}: `Workbook.addCellStyle(wb, name, style)`. Removed in 1.0.
    */
   addCellStyle(name: string, style: NamedStyle): NamedStyleEntry {
+    return this._addCellStyle("WorkbookWriter.addCellStyle", name, style);
+  }
+
+  /** @internal What `Workbook.addCellStyle` does to this writer; `where` names the public call in an error. */
+  _addCellStyle(where: string, name: string, style: NamedStyle): NamedStyleEntry {
     this._checkNotCommitted("add a cell style");
     validateCellStyleName(name);
     // Checked as `Workbook.addCellStyle` checks it: a missing style was spread into an empty one.
-    const check = argumentChecks("WorkbookWriter.addCellStyle");
+    const check = argumentChecks(where);
     check.required("style", style);
     check.record("style", style);
-    checkStyle("WorkbookWriter.addCellStyle", style);
+    checkStyle(where, style);
     const key = excelNameKey(name);
     const stored = this._cellStyleNames.get(key) ?? name;
     this._cellStyleNames.set(key, stored);
     const entry: NamedStyleEntry = { ...structuredClone(style), name: stored };
+    // The registry keeps its own copy: the entry is handed back to the caller (the deprecated class form returns it),
+    // and an edit to it — a new `name` above all — must not change what `Workbook.getCellStyle` and
+    // `Cell.applyStyle` answer, which the styles part has already registered under `stored`.
+    this._cellStyles.set(key, structuredClone(entry));
     if (this.styles.registerNamedStyles) {
       this.styles.registerNamedStyles(new Map([[key, entry]]));
     }
     return entry;
   }
 
+  /** @internal The named cell style `name` (in any case), as `Workbook.getCellStyle` answers: a copy, or `undefined`. */
+  _getCellStyle(name: string): NamedStyleEntry | undefined {
+    const entry = typeof name === "string" ? this._cellStyles.get(excelNameKey(name)) : undefined;
+    return entry && structuredClone(entry);
+  }
+
+  /** @internal Every named cell style added, in order, as `Workbook.listCellStyles` lists them: copies. */
+  _listCellStyles(): NamedStyleEntry[] {
+    return [...this._cellStyles.values()].map(entry => structuredClone(entry));
+  }
+
   /**
    * Add one of Excel's built-in cell-style presets (e.g. "Heading1") and return its style name
    * (e.g. "Heading 1") for a cell's `styleName` — as `Workbook.useBuiltInCellStyle` does.
+   *
+   * @deprecated Use {@link Workbook.useBuiltInCellStyle}: `Workbook.useBuiltInCellStyle(wb, id)`. Removed in 1.0.
    */
   useBuiltInCellStyle(id: BuiltInCellStyle): string {
+    return this._useBuiltInCellStyle("WorkbookWriter.useBuiltInCellStyle", id);
+  }
+
+  /** @internal What `Workbook.useBuiltInCellStyle` does to this writer. */
+  _useBuiltInCellStyle(where: string, id: BuiltInCellStyle): string {
     this._checkNotCommitted("add a cell style");
     if (typeof id !== "string" || !Object.hasOwn(BUILTIN_CELL_STYLES, id)) {
-      argumentChecks("WorkbookWriter.useBuiltInCellStyle").fail(
-        "id",
-        `one of ${Object.keys(BUILTIN_CELL_STYLES).join(", ")}`,
-        id
-      );
+      argumentChecks(where).fail("id", `one of ${Object.keys(BUILTIN_CELL_STYLES).join(", ")}`, id);
     }
     const { name, ...style } = BUILTIN_CELL_STYLES[id];
-    return this.addCellStyle(name, style).name;
+    return this._addCellStyle(where, name, style).name;
   }
 
   /**
@@ -811,10 +898,10 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   }
 
   /**
-   * @deprecated Use {@link addCellStyle}, which returns the stored entry. Removed in 1.0.
+   * @deprecated Use {@link Workbook.addCellStyle}, which returns (a copy of) the stored entry. Removed in 1.0.
    */
   defineCellStyle(name: string, style: NamedStyle): void {
-    this.addCellStyle(name, style);
+    this._addCellStyle("WorkbookWriter.addCellStyle", name, style);
   }
 
   /** @internal */
@@ -1124,15 +1211,16 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * Linked images work with cell pictures and overlay watermarks; worksheet
    * background images and header/footer (VML) watermarks cannot be linked.
    *
-   * @example
-   * ```typescript
-   * const id = wb.addImage({ extension: "png", link: "https://example.com/logo.png" });
-   * ws.addImage(id, "B2:D6");
-   * ```
+   * @deprecated Use {@link Image.add}: `Image.add(wb, image)`, then `Image.place(ws, id, range)`. Removed in 1.0.
    */
   addImage(image: ImageData): number {
+    return this._addImage("WorkbookWriter.addImage", image);
+  }
+
+  /** @internal What `Image.add` does to this writer; `where` names the public call in an error. */
+  _addImage(where: string, image: ImageData): number {
     this._checkNotCommitted("add an image");
-    checkImageData("WorkbookWriter.addImage", image);
+    checkImageData(where, image);
     const { svg, ...raster } = image;
     if (
       svg &&
@@ -1177,10 +1265,12 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * Protect the workbook structure with an optional password — the same options object
    * `Workbook.protect(wb, { password, ...flags })` takes. Prevents users from adding, deleting,
    * renaming, moving, or copying worksheets.
+   *
+   * @deprecated Use {@link Workbook.protect}: `Workbook.protect(wb, { password, ...flags })`. Removed in 1.0.
    */
   protect(options?: ProtectWorkbookOptions): Promise<void>;
   /**
-   * @deprecated Pass the password in the options object: `protect({ password, ...options })`.
+   * @deprecated Use {@link Workbook.protect}: `Workbook.protect(wb, { password, ...options })`.
    * Removed in 1.0.
    */
   protect(password: string | undefined, options?: Partial<WorkbookProtection>): Promise<void>;
@@ -1190,18 +1280,24 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   ): Promise<void> {
     this._checkNotCommitted("protect the workbook");
     // Checked as `Workbook.protect` checks it: `{ lockStructure: "yes" }` used to be written as locked.
-    checkProtectCall(
-      "WorkbookWriter.protect",
-      passwordOrOptions,
-      legacyOptions,
-      WORKBOOK_PROTECTION_FLAGS
-    );
+    checkProtectCall("WorkbookWriter.protect", passwordOrOptions, legacyOptions, "workbook");
     const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
+    await this._protect(password, options);
+  }
+
+  /** @internal What `Workbook.protect` does to this writer, once it has checked the options. */
+  async _protect(
+    password: string | undefined,
+    options?: Partial<WorkbookProtection>
+  ): Promise<void> {
+    this._checkNotCommitted("protect the workbook");
     this.protection = await buildWorkbookProtection(password, options);
   }
 
   /**
    * Remove workbook structure protection.
+   *
+   * @deprecated Use {@link Workbook.unprotect}. Removed in 1.0.
    */
   unprotect(): void {
     this._checkNotCommitted("unprotect the workbook");
@@ -1221,7 +1317,13 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     }
   }
 
+  /** @deprecated Use {@link Workbook.addWorksheet}: `Workbook.addWorksheet(wb, name, options)`. Removed in 1.0. */
   addWorksheet(name?: string, options?: Partial<AddWorksheetOptions>): TWorksheetWriter {
+    return this._addWorksheet(name, options);
+  }
+
+  /** @internal What `Workbook.addWorksheet` does to this writer, once it has checked the options. */
+  _addWorksheet(name?: string, options?: Partial<AddWorksheetOptions>): TWorksheetWriter {
     this._checkNotCommitted("add a worksheet");
     const opts = options || {};
     const useSharedStrings =
@@ -1276,9 +1378,23 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return worksheet;
   }
 
+  /** @deprecated Use {@link Workbook.getWorksheet}: `Workbook.getWorksheet(wb, id)`. Removed in 1.0. */
   getWorksheet(id?: string | number): TWorksheetWriter | undefined {
+    // What it always answered without an id: `undefined` — its lookup visited the empty slot before the first sheet.
+    // `Workbook.getWorksheet(wb)` answers with the first sheet, as it does for a workbook.
+    return id === undefined ? undefined : this._getWorksheet(id);
+  }
+
+  /** @internal The sheets added, in tab order — what `Workbook.listWorksheets` answers for this writer. */
+  _listWorksheets(): TWorksheetWriter[] {
+    return this._worksheets.filter(Boolean);
+  }
+
+  /** @internal What `Workbook.getWorksheet` answers for this writer. */
+  _getWorksheet(id?: string | number): TWorksheetWriter | undefined {
     if (id === undefined) {
-      return this._worksheets.find(() => true);
+      // `find` visits the hole at index 0 (ids start at 1), so `() => true` answered `undefined`.
+      return this._worksheets.find(Boolean);
     }
     if (typeof id === "number") {
       return this._worksheets[id];

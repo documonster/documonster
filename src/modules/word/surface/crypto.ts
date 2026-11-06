@@ -79,7 +79,7 @@ export type { DecryptOptions } from "@word/security/encryption";
  * @param buffer - The encrypted DOCX file (CFB format).
  * @param password - The password to decrypt with.
  * @param options - Decryption limits.
- * @returns The decrypted DOCX ZIP bytes, ready for `Io.read`.
+ * @returns The decrypted DOCX ZIP bytes, ready for `Document.read`.
  * @throws {DocxDecryptionError} If the file is not encrypted, the password is
  *   wrong, or decryption fails.
  */
@@ -92,7 +92,7 @@ export async function decrypt(
   checkString(password, "password", where);
   checkRecord(options, "options", where, { optional: true });
   checkLimit(options?.maxDecryptedSize, "options.maxDecryptedSize", where, { optional: true });
-  // The cap `Io.read` applies, so a package this returns is one `Io.read` opens.
+  // The cap `Document.read` applies, so a package this returns is one `Document.read` opens.
   return decryptDocx(
     buffer,
     password,

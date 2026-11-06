@@ -1,7 +1,7 @@
 /**
  * The sheet-wide values read the way row and column values do: `{ base }` chooses the indexing, `0` for plain
  * JavaScript indexing and `1` for the index being the row and column number. Without options `Worksheet.getValues`
- * stays 1-based, as it always was. One `ValuesOptions` type serves `Row`, `Column`, `Worksheet` and `Stream`.
+ * stays 1-based, as it always was — a deprecated form, since `Row` and `Column` default to 0. One `ValuesOptions` type serves `Row`, `Column`, `Worksheet` and `Stream`.
  */
 import { Cell, ExcelArgumentError, Row, Workbook, Worksheet } from "@excel";
 import type { Column, Stream } from "@excel";
@@ -43,9 +43,7 @@ describe("Worksheet.getValues({ base })", () => {
   it("one options type everywhere", () => {
     expectTypeOf<Row.ValuesOptions>().toEqualTypeOf<ValuesOptions>();
     expectTypeOf<Column.ValuesOptions>().toEqualTypeOf<ValuesOptions>();
-    expectTypeOf<Parameters<typeof Worksheet.getValues>[1]>().toEqualTypeOf<
-      ValuesOptions | undefined
-    >();
+    expectTypeOf<Parameters<typeof Worksheet.getValues>[1]>().toEqualTypeOf<ValuesOptions>();
     expectTypeOf<Parameters<typeof Stream.getRowValues>[1]>().toEqualTypeOf<
       ValuesOptions | undefined
     >();

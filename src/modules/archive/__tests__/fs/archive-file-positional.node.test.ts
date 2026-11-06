@@ -22,7 +22,8 @@ function encrypted(): Uint8Array {
   return zip.toBufferSync();
 }
 
-const decode = (data: Uint8Array | null) => (data === null ? null : new TextDecoder().decode(data));
+const decode = (data: Uint8Array | undefined) =>
+  data === undefined ? undefined : new TextDecoder().decode(data);
 
 describe("ArchiveFile positional placeholders", () => {
   const bytes = encrypted();

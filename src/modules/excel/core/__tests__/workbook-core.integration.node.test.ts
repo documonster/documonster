@@ -832,7 +832,7 @@ describe("Workbook", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       for (let r = 1; r <= 10; r++) {
         for (let c = 1; c <= 5; c++) {
-          Cell.setValue(ws, r, c, `${r}-${c}`);
+          Cell.setValue(ws, { row: r, col: c }, `${r}-${c}`);
         }
       }
       ws.pageSetup.printArea = "A1:B5&&D1:E10";

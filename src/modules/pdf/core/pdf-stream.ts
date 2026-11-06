@@ -12,10 +12,25 @@
 import { pdfNumber } from "@pdf/core/pdf-object";
 import { PdfArgumentError } from "@pdf/errors";
 import type { PdfColor } from "@pdf/types";
+import { fail as schemaFail } from "@utils/schema";
 
 // =============================================================================
 // Content Stream Builder
 // =============================================================================
+
+/**
+ * Refuse an operand: a {@link PdfArgumentError} worded as every other refusal is
+ * (`<where>: <field> must be <expected>, got <value>`). The operand checks below are plain
+ * predicates — they run for every mark a page draws — and only the refusal goes through the schema.
+ */
+function refuse(where: string, field: string, expected: string, value: unknown): never {
+  throw schemaFail(
+    { where, field, error: (f, message) => new PdfArgumentError(f, message) },
+    "",
+    expected,
+    value
+  );
+}
 
 /**
  * A resource name as an operand: regular characters only (ISO 32000-2 §7.3.5 — no
@@ -25,20 +40,60 @@ import type { PdfColor } from "@pdf/types";
  */
 function checkResourceName(where: string, name: unknown, field = "name"): void {
   if (typeof name !== "string" || !/^[!-~]+$/.test(name) || /[()<>[\]{}/%#]/.test(name)) {
-    throw new PdfArgumentError(
-      field,
-      `${where}: ${field} must be printable ASCII without spaces, delimiters or #, got ${JSON.stringify(name)}`
-    );
+    refuse(where, field, "printable ASCII without spaces, delimiters or #", name);
   }
 }
 
 /** A style operand from 0 to `max`; anything else is not an operand the format defines. */
 function checkStyleIndex(where: string, field: string, value: unknown, max: number): void {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max) {
-    throw new PdfArgumentError(
-      field,
-      `${where}: ${field} must be an integer from 0 to ${max}, got ${String(value)}`
-    );
+    refuse(where, field, `an integer from 0 to ${max}`, value);
+  }
+}
+
+/** A colour operand: `{ r, g, b }`, each a number (non-finite channels are written as 0, as every number is). */
+function checkColor(where: string, color: unknown): void {
+  const c = color as { r?: unknown; g?: unknown; b?: unknown } | null;
+  if (
+    typeof c !== "object" ||
+    c === null ||
+    typeof c.r !== "number" ||
+    typeof c.g !== "number" ||
+    typeof c.b !== "number"
+  ) {
+    refuse(where, "color", "an object { r, g, b } of numbers", color);
+  }
+}
+
+/** A text operand: a string. */
+function checkText(where: string, field: string, value: unknown): void {
+  if (typeof value !== "string") {
+    refuse(where, field, "a string", value);
+  }
+}
+
+/** A callback: a function. */
+function checkFunction(where: string, field: string, value: unknown): void {
+  if (typeof value !== "function") {
+    refuse(where, field, "a function", value);
+  }
+}
+
+/**
+ * A list operand: an array whose items are numbers (or, with `strings`, numbers and strings),
+ * each reported at its index. An index loop, not `every`: that skips the holes of a sparse
+ * array, which the operator then wrote as nothing — a list one item short.
+ */
+function checkList(where: string, field: string, value: unknown, strings = false): void {
+  const expected = strings ? "an array of strings and numbers" : "an array of numbers";
+  if (!Array.isArray(value)) {
+    refuse(where, field, expected, value);
+  }
+  for (let i = 0; i < value.length; i++) {
+    const item: unknown = value[i];
+    if (typeof item !== "number" && !(strings && typeof item === "string")) {
+      refuse(where, `${field}[${i}]`, strings ? "a string or a number" : "a number", item);
+    }
   }
 }
 
@@ -79,6 +134,7 @@ export class PdfContentStream {
    * Use this for operators not covered by the typed API (e.g. `d1` for Type3 glyphs).
    */
   raw(operator: string): this {
+    checkText("PdfContentStream#raw", "operator", operator);
     this.parts.push(operator);
     return this;
   }
@@ -89,14 +145,20 @@ export class PdfContentStream {
    * the document's fonts are resolved at build time. The fragment occupies its
    * draw-order slot immediately, so z-order relative to other operators is
    * preserved.
+   *
+   * @internal
    */
-  deferred(produce: () => string, preflight?: () => void): this {
+  addDeferred(produce: () => string, preflight?: () => void): this {
     this.parts.push({ produce, preflight });
     return this;
   }
 
-  /** Run data-only preparation for every deferred fragment without rendering it. */
-  preflight(): void {
+  /**
+   * Run data-only preparation for every deferred fragment without rendering it.
+   *
+   * @internal
+   */
+  runPreflight(): void {
     for (const part of this.parts) {
       if (typeof part !== "string") {
         part.preflight?.();
@@ -105,8 +167,31 @@ export class PdfContentStream {
   }
 
   /**
-   * Freeze the current draw-order fragments for one build. Later writes to this
-   * stream are intentionally absent from the returned snapshot.
+   * @deprecated The builder's own machinery for text whose encoding is chosen at build time, not
+   * part of the drawing API; it leaves the public type in 1.0. Draw with the typed operators or
+   * {@link raw}.
+   */
+  deferred(produce: () => string, preflight?: () => void): this {
+    checkFunction("PdfContentStream#deferred", "produce", produce);
+    if (preflight !== undefined) {
+      checkFunction("PdfContentStream#deferred", "preflight", preflight);
+    }
+    return this.addDeferred(produce, preflight);
+  }
+
+  /**
+   * @deprecated The builder's own preparation step for deferred fragments, not part of the
+   * drawing API; it leaves the public type in 1.0.
+   */
+  preflight(): void {
+    this.runPreflight();
+  }
+
+  /**
+   * The stream's fragments as they stand, for one build: later writes to this stream do not
+   * appear in the result. The fragment list is copied, not the fragments — a deferred fragment's
+   * callbacks are shared with this stream, so this is a point-in-time view, not an independent
+   * clone.
    */
   snapshot(): PdfContentStream {
     const copy = new PdfContentStream();
@@ -126,6 +211,9 @@ export class PdfContentStream {
    * become a number of function arguments.
    */
   append(other: PdfContentStream): this {
+    if (!(other instanceof PdfContentStream)) {
+      refuse("PdfContentStream#append", "other", "a PdfContentStream", other);
+    }
     for (const part of other.parts) {
       this.parts.push(part);
     }
@@ -171,6 +259,7 @@ export class PdfContentStream {
    * Set the stroking color (used for lines, borders).
    */
   setStrokeColor(color: PdfColor): this {
+    checkColor("PdfContentStream#setStrokeColor", color);
     this.parts.push(`${pdfNumber(color.r)} ${pdfNumber(color.g)} ${pdfNumber(color.b)} RG`);
     return this;
   }
@@ -179,6 +268,7 @@ export class PdfContentStream {
    * Set the non-stroking color (used for fills, text).
    */
   setFillColor(color: PdfColor): this {
+    checkColor("PdfContentStream#setFillColor", color);
     this.parts.push(`${pdfNumber(color.r)} ${pdfNumber(color.g)} ${pdfNumber(color.b)} rg`);
     return this;
   }
@@ -201,6 +291,7 @@ export class PdfContentStream {
    * @param phase - Starting phase offset.
    */
   setDashPattern(dashArray: readonly number[], phase = 0): this {
+    checkList("PdfContentStream#setDashPattern", "dashArray", dashArray);
     const arr = dashArray.map(pdfNumber).join(" ");
     this.parts.push(`[${arr}] ${pdfNumber(phase)} d`);
     return this;
@@ -427,6 +518,7 @@ export class PdfContentStream {
    * Show a text string. The string is escaped for PDF.
    */
   showText(text: string): this {
+    checkText("PdfContentStream#showText", "text", text);
     // Check if text contains non-ASCII characters that need WinAnsi encoding
     if (hasNonAscii(text)) {
       return this.showTextWinAnsi(text);
@@ -440,6 +532,7 @@ export class PdfContentStream {
    * Used for Type1 fonts where non-ASCII characters need single-byte encoding.
    */
   showTextWinAnsi(text: string): this {
+    checkText("PdfContentStream#showTextWinAnsi", "text", text);
     let hex = "<";
     for (let i = 0; i < text.length; i++) {
       const cp = text.codePointAt(i)!;
@@ -459,6 +552,7 @@ export class PdfContentStream {
    * The hexString should be in the format `<0012003A...>`.
    */
   showTextHex(hexString: string): this {
+    checkText("PdfContentStream#showTextHex", "hexString", hexString);
     this.parts.push(`${hexString} Tj`);
     return this;
   }
@@ -477,6 +571,7 @@ export class PdfContentStream {
    * should appear.
    */
   showTextHexWithAdjustments(parts: readonly (string | number)[]): this {
+    checkList("PdfContentStream#showTextHexWithAdjustments", "parts", parts, true);
     if (parts.length === 0) {
       return this;
     }
@@ -489,6 +584,7 @@ export class PdfContentStream {
    * Move to the next line and show a text string.
    */
   nextLineShowText(text: string): this {
+    checkText("PdfContentStream#nextLineShowText", "text", text);
     if (hasNonAscii(text)) {
       let hex = "<";
       for (let i = 0; i < text.length; i++) {
@@ -547,6 +643,8 @@ export class PdfContentStream {
    * The image must be registered as a resource with the given name.
    */
   drawImage(name: string, x: number, y: number, width: number, height: number): this {
+    // Checked before `save()` writes anything, so a refusal leaves the stream as it was.
+    checkResourceName("PdfContentStream#drawImage", name);
     return this.save().concat(width, 0, 0, height, x, y).doXObject(name).restore();
   }
 
@@ -577,6 +675,8 @@ export class PdfContentStream {
    * Draw a filled rectangle.
    */
   fillRect(x: number, y: number, width: number, height: number, color: PdfColor): this {
+    // Checked before `save()` writes anything, so a refusal leaves the stream as it was.
+    checkColor("PdfContentStream#fillRect", color);
     return this.save().setFillColor(color).rect(x, y, width, height).fill().restore();
   }
 
@@ -592,6 +692,9 @@ export class PdfContentStream {
     lineWidth: number,
     dashPattern: readonly number[] = []
   ): this {
+    // Checked before `save()` writes anything, so a refusal leaves the stream as it was.
+    checkColor("PdfContentStream#drawLine", color);
+    checkList("PdfContentStream#drawLine", "dashPattern", dashPattern);
     this.save().setStrokeColor(color).setLineWidth(lineWidth);
     if (dashPattern.length > 0) {
       this.setDashPattern(dashPattern);

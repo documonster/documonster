@@ -75,7 +75,7 @@ describe("Worksheet", () => {
       expect(Cell.getValue(ws, "A1")).toBe(7);
       expect(Cell.getValue(ws, "B1")).toBe("Hello, World!");
       expect(Cell.getValue(ws, "C1")).toBe(3.14);
-      expect(Cell.getValue(ws, "D1")).toBe(now);
+      expect(Cell.getValue(ws, "D1")).toEqual(now);
       expect(Cell.getValue(ws, "E1")).toBe("Hello, World!");
       expect(Cell.getText(ws, "F1")).toBe("www.google.com");
       expect(Cell.getHyperlink(ws, "F1")).toBe("http://www.google.com");
@@ -87,7 +87,7 @@ describe("Worksheet", () => {
       expect(Cell.getResult(ws, "B2")).toBe("Hello, World!");
 
       expect(Cell.getFormula(ws, "C2")).toBe("D1");
-      expect(Cell.getResult(ws, "C2")).toBe(now);
+      expect(Cell.getResult(ws, "C2")).toEqual(now);
     });
 
     it("stores shared string values properly", () => {
@@ -352,11 +352,11 @@ describe("Worksheet", () => {
 
       expect(Cell.getValue(ws, "A2")).toBe(1);
       expect(Cell.getValue(ws, "B2")).toBe("John Doe");
-      expect(Cell.getValue(ws, "C2")).toBe(dateValue1);
+      expect(Cell.getValue(ws, "C2")).toEqual(dateValue1);
 
       expect(Cell.getValue(ws, "A3")).toBe(2);
       expect(Cell.getValue(ws, "B3")).toBe("Jane Doe");
-      expect(Cell.getValue(ws, "C3")).toBe(dateValue2);
+      expect(Cell.getValue(ws, "C3")).toEqual(dateValue2);
 
       expect(rowValues(coreGetRow(ws, 2))).toEqual([, 1, "John Doe", dateValue1]);
       expect(rowValues(coreGetRow(ws, 3))).toEqual([, 2, "Jane Doe", dateValue2]);
@@ -370,7 +370,7 @@ describe("Worksheet", () => {
       eachRow(ws, (row, rowNumber) => {
         expect(rowValues(row)).toEqual(values[rowNumber]);
         rowEachCell(row, (cell: any, colNumber: any) => {
-          expect(cellGetValue(cell)).toBe(values[rowNumber]![colNumber]);
+          expect(cellGetValue(cell)).toEqual(values[rowNumber]![colNumber]);
         });
       });
     });
@@ -387,11 +387,11 @@ describe("Worksheet", () => {
 
       expect(Cell.getValue(ws, "A1")).toBe(1);
       expect(Cell.getValue(ws, "B1")).toBe("John Doe");
-      expect(Cell.getValue(ws, "C1")).toBe(dateValue1);
+      expect(Cell.getValue(ws, "C1")).toEqual(dateValue1);
 
       expect(Cell.getValue(ws, "A2")).toBe(2);
       expect(Cell.getValue(ws, "B2")).toBe("Jane Doe");
-      expect(Cell.getValue(ws, "C2")).toBe(dateValue2);
+      expect(Cell.getValue(ws, "C2")).toEqual(dateValue2);
 
       expect(rowValues(coreGetRow(ws, 1))).toEqual([, 1, "John Doe", dateValue1]);
       expect(rowValues(coreGetRow(ws, 2))).toEqual([, 2, "Jane Doe", dateValue2]);
@@ -417,15 +417,15 @@ describe("Worksheet", () => {
 
       expect(Cell.getValue(ws, "A1")).toBe(1);
       expect(Cell.getValue(ws, "B1")).toBe("John Doe");
-      expect(Cell.getValue(ws, "D1")).toBe(dateValue1);
+      expect(Cell.getValue(ws, "D1")).toEqual(dateValue1);
 
       expect(Cell.getValue(ws, "A2")).toBe(2);
       expect(Cell.getValue(ws, "B2")).toBe("Jane Doe");
-      expect(Cell.getValue(ws, "D2")).toBe(dateValue2);
+      expect(Cell.getValue(ws, "D2")).toEqual(dateValue2);
 
       expect(Cell.getValue(ws, "A3")).toBe(3);
       expect(Cell.getValue(ws, "C3")).toBe("Sam");
-      expect(Cell.getValue(ws, "E3")).toBe(dateValue1);
+      expect(Cell.getValue(ws, "E3")).toEqual(dateValue1);
 
       expect(rowValues(coreGetRow(ws, 1))).toEqual(rows[1]);
       expect(rowValues(coreGetRow(ws, 2))).toEqual(rows[2]);
@@ -434,7 +434,7 @@ describe("Worksheet", () => {
       eachRow(ws, (row, rowNumber) => {
         expect(rowValues(row)).toEqual(rows[rowNumber]);
         rowEachCell(row, (cell: any, colNumber: any) => {
-          expect(cellGetValue(cell)).toBe(rows[rowNumber]![colNumber]);
+          expect(cellGetValue(cell)).toEqual(rows[rowNumber]![colNumber]);
         });
       });
     });
@@ -462,10 +462,10 @@ describe("Worksheet", () => {
       ]);
 
       // worksheet.columns creates a header row at row 1
-      expect(Cell.getValue(worksheet, 2, 1)).toBe(4);
-      expect(Cell.getValue(worksheet, 2, 5)).toBe("Kyle");
-      expect(Cell.getValue(worksheet, 3, 1)).toBe(5);
-      expect(Cell.getValue(worksheet, 4, 1)).toBe(6);
+      expect(Cell.getValue(worksheet, { row: 2, col: 1 })).toBe(4);
+      expect(Cell.getValue(worksheet, { row: 2, col: 5 })).toBe("Kyle");
+      expect(Cell.getValue(worksheet, { row: 3, col: 1 })).toBe(5);
+      expect(Cell.getValue(worksheet, { row: 4, col: 1 })).toBe(6);
 
       const filename = getUniqueTestFilePath(import.meta.url);
       await Workbook.writeFile(workbook, filename);
@@ -477,18 +477,18 @@ describe("Worksheet", () => {
       const ws2 = Workbook.getWorksheet(readBack, "ExampleWS")!;
       expect(ws2).toBeTruthy();
 
-      expect(Cell.getValue(ws2, 2, 1)).toBe(4);
-      expect(Cell.getValue(ws2, 2, 5)).toBe("Kyle");
+      expect(Cell.getValue(ws2, { row: 2, col: 1 })).toBe(4);
+      expect(Cell.getValue(ws2, { row: 2, col: 5 })).toBe("Kyle");
 
-      const v = Cell.getValue(ws2, 2, 9);
+      const v = Cell.getValue(ws2, { row: 2, col: 9 });
       expect(v).not.toBeNull();
       expect(v instanceof Date || typeof v === "number").toBe(true);
 
-      expect(Cell.getValue(ws2, 3, 1)).toBe(5);
-      expect(Cell.getValue(ws2, 3, 2)).toBe("Bob");
+      expect(Cell.getValue(ws2, { row: 3, col: 1 })).toBe(5);
+      expect(Cell.getValue(ws2, { row: 3, col: 2 })).toBe("Bob");
 
-      expect(Cell.getValue(ws2, 4, 1)).toBe(6);
-      expect(Cell.getValue(ws2, 4, 2)).toBe("Barbara");
+      expect(Cell.getValue(ws2, { row: 4, col: 1 })).toBe(6);
+      expect(Cell.getValue(ws2, { row: 4, col: 2 })).toBe("Barbara");
     });
 
     describe("Splice", () => {
@@ -1102,27 +1102,27 @@ describe("Worksheet", () => {
 
           // splice last 3 columns
           Column.splice(ws, 4, 3);
-          expect(Cell.getValue(ws, 1, 1)).toBe("Col-1");
-          expect(Cell.getValue(ws, 1, 2)).toBe("Col-2");
-          expect(Cell.getValue(ws, 1, 3)).toBe("Col-3");
-          expect(Cell.getValue(ws, 1, 4)).toBeNull();
-          expect(Cell.getValue(ws, 1, 5)).toBeNull();
-          expect(Cell.getValue(ws, 1, 6)).toBeNull();
-          expect(Cell.getValue(ws, 1, 7)).toBeNull();
-          expect(Cell.getValue(ws, 2, 1)).toBe(1);
-          expect(Cell.getValue(ws, 2, 2)).toBe(2);
-          expect(Cell.getValue(ws, 2, 3)).toBe(3);
-          expect(Cell.getValue(ws, 2, 4)).toBeNull();
-          expect(Cell.getValue(ws, 2, 5)).toBeNull();
-          expect(Cell.getValue(ws, 2, 6)).toBeNull();
-          expect(Cell.getValue(ws, 2, 7)).toBeNull();
-          expect(Cell.getValue(ws, 3, 1)).toBe(1);
-          expect(Cell.getValue(ws, 3, 2)).toBe(2);
-          expect(Cell.getValue(ws, 3, 3)).toBe(3);
-          expect(Cell.getValue(ws, 3, 4)).toBeNull();
-          expect(Cell.getValue(ws, 3, 5)).toBeNull();
-          expect(Cell.getValue(ws, 3, 6)).toBeNull();
-          expect(Cell.getValue(ws, 3, 7)).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 1 })).toBe("Col-1");
+          expect(Cell.getValue(ws, { row: 1, col: 2 })).toBe("Col-2");
+          expect(Cell.getValue(ws, { row: 1, col: 3 })).toBe("Col-3");
+          expect(Cell.getValue(ws, { row: 1, col: 4 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 7 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 1 })).toBe(1);
+          expect(Cell.getValue(ws, { row: 2, col: 2 })).toBe(2);
+          expect(Cell.getValue(ws, { row: 2, col: 3 })).toBe(3);
+          expect(Cell.getValue(ws, { row: 2, col: 4 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 7 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 1 })).toBe(1);
+          expect(Cell.getValue(ws, { row: 3, col: 2 })).toBe(2);
+          expect(Cell.getValue(ws, { row: 3, col: 3 })).toBe(3);
+          expect(Cell.getValue(ws, { row: 3, col: 4 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 7 })).toBeNull();
 
           expect(Column.getHeader(ws, 1)).toBe("Col-1");
           expect(Column.getHeader(ws, 2)).toBe("Col-2");
@@ -1148,27 +1148,27 @@ describe("Worksheet", () => {
 
           // splice last 3 columns
           Column.splice(ws, 4, 4);
-          expect(Cell.getValue(ws, 1, 1)).toBe("Col-1");
-          expect(Cell.getValue(ws, 1, 2)).toBe("Col-2");
-          expect(Cell.getValue(ws, 1, 3)).toBe("Col-3");
-          expect(Cell.getValue(ws, 1, 4)).toBeNull();
-          expect(Cell.getValue(ws, 1, 5)).toBeNull();
-          expect(Cell.getValue(ws, 1, 6)).toBeNull();
-          expect(Cell.getValue(ws, 1, 7)).toBeNull();
-          expect(Cell.getValue(ws, 2, 1)).toBe(1);
-          expect(Cell.getValue(ws, 2, 2)).toBe(2);
-          expect(Cell.getValue(ws, 2, 3)).toBe(3);
-          expect(Cell.getValue(ws, 2, 4)).toBeNull();
-          expect(Cell.getValue(ws, 2, 5)).toBeNull();
-          expect(Cell.getValue(ws, 2, 6)).toBeNull();
-          expect(Cell.getValue(ws, 2, 7)).toBeNull();
-          expect(Cell.getValue(ws, 3, 1)).toBe(1);
-          expect(Cell.getValue(ws, 3, 2)).toBe(2);
-          expect(Cell.getValue(ws, 3, 3)).toBe(3);
-          expect(Cell.getValue(ws, 3, 4)).toBeNull();
-          expect(Cell.getValue(ws, 3, 5)).toBeNull();
-          expect(Cell.getValue(ws, 3, 6)).toBeNull();
-          expect(Cell.getValue(ws, 3, 7)).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 1 })).toBe("Col-1");
+          expect(Cell.getValue(ws, { row: 1, col: 2 })).toBe("Col-2");
+          expect(Cell.getValue(ws, { row: 1, col: 3 })).toBe("Col-3");
+          expect(Cell.getValue(ws, { row: 1, col: 4 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 7 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 1 })).toBe(1);
+          expect(Cell.getValue(ws, { row: 2, col: 2 })).toBe(2);
+          expect(Cell.getValue(ws, { row: 2, col: 3 })).toBe(3);
+          expect(Cell.getValue(ws, { row: 2, col: 4 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 7 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 1 })).toBe(1);
+          expect(Cell.getValue(ws, { row: 3, col: 2 })).toBe(2);
+          expect(Cell.getValue(ws, { row: 3, col: 3 })).toBe(3);
+          expect(Cell.getValue(ws, { row: 3, col: 4 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 7 })).toBeNull();
 
           expect(Column.getHeader(ws, 1)).toBe("Col-1");
           expect(Column.getHeader(ws, 2)).toBe("Col-2");
@@ -1194,27 +1194,27 @@ describe("Worksheet", () => {
 
           // splice last 3 columns
           Column.splice(ws, 4, 2);
-          expect(Cell.getValue(ws, 1, 1)).toBe("Col-1");
-          expect(Cell.getValue(ws, 1, 2)).toBe("Col-2");
-          expect(Cell.getValue(ws, 1, 3)).toBe("Col-3");
-          expect(Cell.getValue(ws, 1, 4)).toBe("Col-6");
-          expect(Cell.getValue(ws, 1, 5)).toBeNull();
-          expect(Cell.getValue(ws, 1, 6)).toBeNull();
-          expect(Cell.getValue(ws, 1, 7)).toBeNull();
-          expect(Cell.getValue(ws, 2, 1)).toBe(1);
-          expect(Cell.getValue(ws, 2, 2)).toBe(2);
-          expect(Cell.getValue(ws, 2, 3)).toBe(3);
-          expect(Cell.getValue(ws, 2, 4)).toBe(6);
-          expect(Cell.getValue(ws, 2, 5)).toBeNull();
-          expect(Cell.getValue(ws, 2, 6)).toBeNull();
-          expect(Cell.getValue(ws, 2, 7)).toBeNull();
-          expect(Cell.getValue(ws, 3, 1)).toBe(1);
-          expect(Cell.getValue(ws, 3, 2)).toBe(2);
-          expect(Cell.getValue(ws, 3, 3)).toBe(3);
-          expect(Cell.getValue(ws, 3, 4)).toBe(6);
-          expect(Cell.getValue(ws, 3, 5)).toBeNull();
-          expect(Cell.getValue(ws, 3, 6)).toBeNull();
-          expect(Cell.getValue(ws, 3, 7)).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 1 })).toBe("Col-1");
+          expect(Cell.getValue(ws, { row: 1, col: 2 })).toBe("Col-2");
+          expect(Cell.getValue(ws, { row: 1, col: 3 })).toBe("Col-3");
+          expect(Cell.getValue(ws, { row: 1, col: 4 })).toBe("Col-6");
+          expect(Cell.getValue(ws, { row: 1, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 1, col: 7 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 1 })).toBe(1);
+          expect(Cell.getValue(ws, { row: 2, col: 2 })).toBe(2);
+          expect(Cell.getValue(ws, { row: 2, col: 3 })).toBe(3);
+          expect(Cell.getValue(ws, { row: 2, col: 4 })).toBe(6);
+          expect(Cell.getValue(ws, { row: 2, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 2, col: 7 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 1 })).toBe(1);
+          expect(Cell.getValue(ws, { row: 3, col: 2 })).toBe(2);
+          expect(Cell.getValue(ws, { row: 3, col: 3 })).toBe(3);
+          expect(Cell.getValue(ws, { row: 3, col: 4 })).toBe(6);
+          expect(Cell.getValue(ws, { row: 3, col: 5 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 6 })).toBeNull();
+          expect(Cell.getValue(ws, { row: 3, col: 7 })).toBeNull();
 
           expect(Column.getHeader(ws, 1)).toBe("Col-1");
           expect(Column.getHeader(ws, 2)).toBe("Col-2");

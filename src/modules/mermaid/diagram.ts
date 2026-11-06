@@ -4,8 +4,13 @@
  * Lives outside `index.ts` so the `Mermaid` namespace surface can re-export it.
  */
 
+import { rasterizePng } from "@draw/api/png";
+import type { PngImage } from "@draw/api/png";
+import { positive, rasterShape } from "@draw/api/rasterize";
+import type { RasterizeOptions } from "@draw/raster/surface";
 import { toSvg } from "@draw/svg";
 import type { DrawList, DrawNode } from "@draw/types";
+import { at, checkLayoutOptions, colour, layoutShape, optionsObject } from "@mermaid/arguments";
 import { MermaidArgumentError } from "@mermaid/errors";
 import { layoutFlowchart } from "@mermaid/layout/flowchart";
 import type { FlowLayout, LayoutOptions } from "@mermaid/layout/flowchart";
@@ -36,7 +41,7 @@ import { pieDrawList, sequenceDrawList } from "@mermaid/render/simple";
 import { stateToFlowchart } from "@mermaid/render/state";
 import { journeyDrawList, timelineDrawList } from "@mermaid/render/track";
 import { gitGraphDrawList, mindmapDrawList } from "@mermaid/render/tree";
-import { checkColour, checkThemeOptions, resolveTheme } from "@mermaid/theme";
+import { checkThemeOptions, resolveTheme } from "@mermaid/theme";
 import type { Theme, ThemeOptions } from "@mermaid/theme";
 import type {
   ArchitectureDiagram,
@@ -48,7 +53,8 @@ import type {
   RequirementDiagram,
   StateDiagram
 } from "@mermaid/types";
-import { describeValue as describeOption } from "@utils/describe-value";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** How to draw a diagram. */
 export interface MermaidRenderOptions extends LayoutOptions {
@@ -106,62 +112,35 @@ function describeValue(value: unknown): string {
   return typeof value;
 }
 
-function optionError(where: string, field: string, expected: string, value: unknown): never {
-  throw new MermaidArgumentError(
-    field,
-    `${where}: ${field} must be ${expected}; got ${describeOption(value)}.`
-  );
-}
+const renderOptionsSchema = s.object(
+  {
+    ...layoutShape,
+    // Checked by `checkThemeOptions`, which also refuses a key that is not a token.
+    theme: s.unknown<ThemeOptions>().optional(),
+    background: colour().optional()
+  },
+  { ...optionsObject, readonly: true }
+);
+const _renderOptionsMatch: SchemaMatches<typeof renderOptionsSchema, MermaidRenderOptions> = true;
+void _renderOptionsMatch;
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Check `LayoutOptions`. A `NaN` font size used to lay the diagram out as a 0×0 picture, and
- * a negative one as a plausible-looking but wrong one.
- */
-function checkLayoutOptions(where: string, options: unknown): void {
-  if (!isPlainObject(options)) {
-    optionError(where, "options", "an options object", options);
-  }
-  const positive = (field: string): void => {
-    const value = options[field];
-    if (value !== undefined && (typeof value !== "number" || !(value > 0) || value === Infinity)) {
-      optionError(where, `options.${field}`, "a finite number > 0", value);
-    }
-  };
-  const nonNegative = (field: string): void => {
-    const value = options[field];
-    if (value !== undefined && (typeof value !== "number" || !(value >= 0) || value === Infinity)) {
-      optionError(where, `options.${field}`, "a finite number >= 0", value);
-    }
-  };
-  positive("fontSize");
-  positive("maxLabelWidth");
-  positive("maxEdgeLabelWidth");
-  nonNegative("rankGap");
-  nonNegative("nodeGap");
-  nonNegative("padding");
-  if (options.fontFamily !== undefined && typeof options.fontFamily !== "string") {
-    optionError(where, "options.fontFamily", "a string", options.fontFamily);
-  }
-  if (options.measureNode !== undefined && typeof options.measureNode !== "function") {
-    optionError(where, "options.measureNode", "a function", options.measureNode);
-  }
-}
+// The raster settings are checked here rather than left to the rasteriser, so a wrong one is a
+// `MermaidArgumentError` like every other refusal of a `Mermaid.*` call.
+const toPngOptionsSchema = s.extend(
+  renderOptionsSchema,
+  {
+    ...rasterShape,
+    dpi: positive().optional()
+  },
+  { readonly: true }
+);
+const _toPngOptionsMatch: SchemaMatches<typeof toPngOptionsSchema, MermaidToPngOptions> = true;
+void _toPngOptionsMatch;
 
 /** Check `MermaidRenderOptions`: the layout options plus the theme. */
 function checkRenderOptions(where: string, options: unknown): void {
-  checkLayoutOptions(where, options);
-  checkThemeOptions(where, (options as { theme?: unknown }).theme, "options.theme");
-  const background = (options as { background?: unknown }).background;
-  if (background !== undefined && typeof background !== "string") {
-    optionError(where, "options.background", "a CSS colour string", background);
-  }
-  if (background !== undefined) {
-    checkColour(where, "options.background", background);
-  }
+  check(renderOptionsSchema, options, at(where, "options"));
+  checkThemeOptions(where, options.theme, "options.theme");
 }
 
 /**
@@ -433,4 +412,46 @@ export function mermaidToSvg(
   // `toSvg` for one as well painted it twice — the second copy from the display list,
   // which is the one every other backend sees.
   return toSvg(drawDiagram("Mermaid.toSvg", source, options));
+}
+
+/**
+ * How to draw a diagram as a PNG: {@link MermaidRenderOptions} plus the rasteriser's settings. `background` is the
+ * diagram's backdrop, as for every backend, so it is not a separate raster setting.
+ */
+export interface MermaidToPngOptions extends MermaidRenderOptions {
+  /** Device pixel ratio; values above 1 enlarge the output. Clamped to 8. */
+  readonly scale?: number;
+  /** Anti-aliasing samples per axis. `1` disables it. Clamped to 4. */
+  readonly samples?: number;
+  /**
+   * Fonts to draw text with, ahead of anything discovered on the host — in a browser the only way to draw a
+   * glyph outside ASCII. See `DrawRasterizeOptions.fonts`.
+   */
+  readonly fonts?: RasterizeOptions["fonts"];
+  /** Whether to search the host's fonts (Node only). Default: `true`. */
+  readonly useSystemFonts?: boolean;
+  /** Physical resolution in dots per inch, written into the file. Omitted, the file states none. */
+  readonly dpi?: number;
+}
+
+/**
+ * Draw a diagram as a PNG file, with what could not be drawn — check `uncoveredCodePoints`: a label in a script
+ * no available font covers comes out blank.
+ *
+ * @throws {MermaidParseError} when the source names no supported diagram.
+ */
+export function mermaidToPng(
+  source: string | MermaidDiagram,
+  options: MermaidToPngOptions = {}
+): PngImage {
+  const where = "Mermaid.toPng";
+  check(toPngOptionsSchema, options, at(where, "options"));
+  const { scale, samples, fonts, useSystemFonts, dpi } = options;
+  return rasterizePng(where, drawDiagram(where, source, options), {
+    scale,
+    samples,
+    fonts,
+    useSystemFonts,
+    dpi
+  });
 }

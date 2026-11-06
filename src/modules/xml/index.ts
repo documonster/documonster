@@ -77,6 +77,7 @@ export {
   XmlError,
   XmlArgumentError,
   XmlParseError,
+  XmlLimitExceededError,
   XmlWriteError,
   isXmlError,
   isXmlParseError

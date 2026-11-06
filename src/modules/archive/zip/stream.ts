@@ -27,7 +27,6 @@ import {
   zipCryptoInitKeys,
   zipCryptoCreateHeader,
   zipCryptoEncryptByte,
-  aesEncrypt,
   buildAesExtraField,
   randomBytes,
   isAesEncryption,
@@ -412,7 +411,9 @@ export class ZipDeflateFile {
     this._aesBuffer.length = 0;
     this._aesBufferSize = 0;
 
-    // Encrypt using AES
+    // Encrypt using AES. Loaded here, the only place it runs, so a writer that encrypts nothing — every Excel and Word
+    // package — does not carry PBKDF2, HMAC and AES-CTR in its bundle.
+    const { aesEncrypt } = await import("@archive/crypto/aes");
     const encrypted = await aesEncrypt(compressedData, this._password!, this._aesKeyStrength);
 
     this._compressedSize = encrypted.length;

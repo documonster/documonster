@@ -214,6 +214,11 @@ describe("Archive.ZipEditPlan checks the operations it is built from", () => {
 
   it("deserialize names data.ops in the caller's words", () => {
     expectArgumentError(
+      caught(() => Archive.ZipEditPlan.deserialize({ version: 2, ops: [] } as never)),
+      "data.version",
+      "Archive.ZipEditPlan.deserialize"
+    );
+    expectArgumentError(
       caught(() => Archive.ZipEditPlan.deserialize({ version: 1, ops: [null as never] })),
       "data.ops[0]",
       "Archive.ZipEditPlan.deserialize"

@@ -25,12 +25,9 @@ import {
   SyncDeflater as PureJsSyncDeflater
 } from "@archive/compression/deflate-fallback";
 import type { WorkerPool } from "@archive/compression/worker-pool/index.browser";
-import {
-  hasWorkerSupport,
-  getDefaultWorkerPool
-} from "@archive/compression/worker-pool/index.browser";
-import { isWorkerStreamStartError } from "@archive/compression/worker-pool/pool.browser";
+import { hasWorkerSupport } from "@archive/compression/worker-pool/pool.base";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import { ArchiveWorkerStreamStartError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 
@@ -258,7 +255,10 @@ function createWorkerStreamCodec(
   level: number | undefined,
   allowTransfer: boolean | undefined
 ): DeflateStream {
-  const effectivePool = pool ?? getDefaultWorkerPool();
+  // The pool — its scheduler and the worker script it boots — is loaded when a stream first asks for a worker, so a
+  // caller that never sets `useWorker` does not carry it in its bundle. Until it arrives, writes queue on the codec's
+  // write chain like any other pending write.
+  const loaded = import("@archive/compression/worker-pool/pool.browser");
 
   let endResolve: (() => void) | null = null;
   let endReject: ((err: Error) => void) | null = null;
@@ -268,19 +268,24 @@ function createWorkerStreamCodec(
   });
 
   const codec = new AsyncStreamCodec();
-  const workerStream = effectivePool.openStream(type, {
-    level,
-    allowTransfer,
-    onData: chunk => codec.emit("data", chunk),
-    onEnd: () => {
-      codec.emit("end");
-      endResolve?.();
-    },
-    onError: err => {
-      codec.emit("error", err);
-      endReject?.(err);
-    }
-  });
+  const opened = loaded.then(({ getDefaultWorkerPool }) =>
+    (pool ?? getDefaultWorkerPool()).openStream(type, {
+      level,
+      allowTransfer,
+      onData: chunk => codec.emit("data", chunk),
+      onEnd: () => {
+        codec.emit("end");
+        endResolve?.();
+      },
+      onError: err => {
+        codec.emit("error", err);
+        endReject?.(err);
+      }
+    })
+  );
+  // Rejections are taken by the write or close that awaits `opened`; this keeps one that nothing awaited — an abort
+  // before the first write — from being reported as unhandled.
+  opened.catch(() => {});
 
   // A worker that does not start — it timed out on a busy device, or failed to boot —
   // has been sent nothing, so the stream continues on the main thread with no loss.
@@ -311,9 +316,9 @@ function createWorkerStreamCodec(
         return writeTo(fallback, chunk);
       }
       try {
-        await workerStream.write(chunk);
+        await (await opened).write(chunk);
       } catch (error) {
-        if (!isWorkerStreamStartError(error)) {
+        if (!(error instanceof ArchiveWorkerStreamStartError)) {
           throw error;
         }
         await writeTo(toMainThread(), chunk);
@@ -322,9 +327,9 @@ function createWorkerStreamCodec(
     close: async () => {
       if (!fallback) {
         try {
-          await workerStream.end();
+          await (await opened).end();
         } catch (error) {
-          if (!isWorkerStreamStartError(error)) {
+          if (!(error instanceof ArchiveWorkerStreamStartError)) {
             throw error;
           }
           toMainThread();
@@ -344,7 +349,7 @@ function createWorkerStreamCodec(
       if (mainThread) {
         mainThread.destroy();
       } else {
-        workerStream.abort(err?.message);
+        void opened.then(stream => stream.abort(err?.message));
       }
     }
   });

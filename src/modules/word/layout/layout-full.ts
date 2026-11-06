@@ -22,18 +22,15 @@ import {
   measureTextWidth,
   styledFontVariant
 } from "@utils/font-metrics";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { ommlToMathML } from "@word/advanced/math-convert";
 import { finalizeDocument } from "@word/builder/document-finalize";
-import {
-  checkFinite,
-  checkHandle,
-  checkInteger,
-  checkRecord,
-  invalidArgument
-} from "@word/core/argument-checks";
+import { checkHandle } from "@word/core/argument-checks";
 import { withDisplayFields } from "@word/core/field-view";
 import { sectionReferences } from "@word/core/header-references";
 import { indexImagesByKey } from "@word/core/image-keys";
+import { checkSchema, w } from "@word/core/option-schema";
 import { extractMathText, isHyperlink, symbolText } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import { faceExtents, faceLineExtents, measureFaceText } from "@word/layout/font-face";
@@ -200,48 +197,47 @@ export interface FullLayoutOptions extends LayoutOptions {
  * @param options - Layout and font options.
  * @returns A fully positioned LayoutDocument.
  */
+const positive = () => w.finite({ positive: true }).optional();
+
+const layoutOptionsShape = {
+  defaultFontSize: positive(),
+  defaultCharsPerLine: w.integer({ min: 1 }).optional(),
+  averageCharWidth: positive(),
+  measureText: w.function<NonNullable<LayoutOptions["measureText"]>>().optional(),
+  measureTextMetrics: w.function<NonNullable<LayoutOptions["measureTextMetrics"]>>().optional()
+};
+
+const layoutOptionsSchema = w.record(layoutOptionsShape);
+const _layoutOptionsMatch: SchemaMatches<typeof layoutOptionsSchema, LayoutOptions> = true;
+void _layoutOptionsMatch;
+
 /**
- * Check layout options where they are given: every number is finite and
- * positive where a zero or negative one has no meaning (a font size, a page
- * width), and a callback is a function.
+ * Layout options: every number is finite and positive where a zero or negative one has no
+ * meaning (a font size, a page width), and a callback is a function.
  */
+const fullLayoutOptionsSchema = w.record({
+  ...layoutOptionsShape,
+  fonts: s.custom<ReadonlyMap<string, string>>(v => v instanceof Map, "a Map").optional(),
+  pageGeometry: w
+    .record({
+      pageWidth: positive(),
+      pageHeight: positive(),
+      marginTop: w.finite().optional(),
+      marginBottom: w.finite().optional(),
+      marginLeft: w.finite().optional(),
+      marginRight: w.finite().optional(),
+      headerMargin: w.finite().optional(),
+      footerMargin: w.finite().optional()
+    })
+    .optional()
+});
+const _fullLayoutOptionsMatch: SchemaMatches<typeof fullLayoutOptionsSchema, FullLayoutOptions> =
+  true;
+void _fullLayoutOptionsMatch;
+
+/** Check layout options, the parameter `field` of `where`, where they are given. */
 export function checkLayoutOptions(options: unknown, field: string, where: string): void {
-  if (options === undefined) {
-    return;
-  }
-  checkRecord(options, field, where);
-  const o = options as FullLayoutOptions;
-  const positive = { optional: true, positive: true } as const;
-  checkFinite(o.defaultFontSize, `${field}.defaultFontSize`, where, positive);
-  checkInteger(o.defaultCharsPerLine, `${field}.defaultCharsPerLine`, where, {
-    optional: true,
-    min: 1
-  });
-  checkFinite(o.averageCharWidth, `${field}.averageCharWidth`, where, positive);
-  for (const key of ["measureText", "measureTextMetrics"] as const) {
-    if (o[key] !== undefined && typeof o[key] !== "function") {
-      invalidArgument(where, `${field}.${key}`, "a function", o[key]);
-    }
-  }
-  if (o.fonts !== undefined && !(o.fonts instanceof Map)) {
-    invalidArgument(where, `${field}.fonts`, "a Map", o.fonts);
-  }
-  const g = o.pageGeometry;
-  if (g !== undefined) {
-    checkRecord(g, `${field}.pageGeometry`, where);
-    checkFinite(g.pageWidth, `${field}.pageGeometry.pageWidth`, where, positive);
-    checkFinite(g.pageHeight, `${field}.pageGeometry.pageHeight`, where, positive);
-    for (const key of [
-      "marginTop",
-      "marginBottom",
-      "marginLeft",
-      "marginRight",
-      "headerMargin",
-      "footerMargin"
-    ] as const) {
-      checkFinite(g[key], `${field}.pageGeometry.${key}`, where, { optional: true });
-    }
-  }
+  checkSchema(fullLayoutOptionsSchema.optional(), options, where, field);
 }
 
 export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOptions): LayoutDocument {

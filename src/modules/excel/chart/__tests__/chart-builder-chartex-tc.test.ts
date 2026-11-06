@@ -2371,9 +2371,10 @@ describe("TC5: Chart.copyTo round-trip", () => {
       "C1:J10"
     );
 
-    const copiedNumber = Chart.copyTo(getCharts(src)[0], dst, "A1:H10");
-    expect(copiedNumber).toBe(2);
-    expect(Chart.isEx(getCharts(dst)[0])).toBe(true);
+    const copied = Chart.copyTo(getCharts(src)[0], dst, "A1:H10");
+    expect(copied).toBe(getCharts(dst)[0]);
+    expect(copied.chartExNumber).toBe(2);
+    expect(Chart.isEx(copied)).toBe(true);
 
     const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));

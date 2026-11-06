@@ -91,7 +91,7 @@ A workbook with a password to open — what Excel writes for "Encrypt with Passw
 compound file), XLSX or XLSB — is read with its `password`, by every reader: `Workbook.read`, `readFile`,
 `readStream`, `readWithDiagnostics` and `Stream.WorkbookReader`. Every writer encrypts with one: `toBuffer`,
 `writeFile`, `writeStream` and `toStream`, for both formats; `encryption` tunes it (Office's defaults: AES-256, SHA-512,
-100,000 iterations). It is the same option, and the same implementation, as Word's `Io.read` / `Io.toBuffer`.
+100,000 iterations). It is the same option, and the same implementation, as Word's `Document.read` / `Document.toBuffer`.
 
 ```javascript
 import { Workbook, ExcelDecryptionError, ExcelEncryptedError } from "documonster/excel";
@@ -135,12 +135,38 @@ behind `import()` and arrive only when something calls for them:
 - **Comments, form controls, drawings, tables, pivot tables and chartsheets** — only when a sheet has one.
 - **The OOXML self-check** — only when it runs: `{ validate: true }`, or by default on Node outside
   production. It is off by default in a browser.
+- **ZIP-level encryption and the compression worker pool** — the AES cipher only for an encrypted entry, and the
+  worker pool only when compression is sent to a worker. An ordinary workbook needs neither.
+- **The XLSB passthrough hash** — only when writing a workbook that was read from XLSB.
 
 Bundle with code splitting enabled so those chunks stay separate; without it they are inlined into one
 file. A bundler that drops unused members of a namespace (Rollup, rolldown, Vite, webpack, rspack) also
 leaves out whatever only the members you do not call need. **esbuild keeps every member of an imported
 namespace such as `Workbook`**, so with it the code those members reach statically is included even when
 you do not call them; the lazily loaded parts above still stay out of the initial chunk.
+
+### Writing a Range
+
+`Range.setValues` writes a row-major matrix from the range's top-left cell, and the range style setters apply one
+style to every cell of a range:
+
+```typescript
+import { Range } from "documonster/excel";
+
+Range.setValues(worksheet, "A1:C3", [
+  ["Name", "Qty", "Price"],
+  ["Apple", 3, 1.5],
+  ["Pear", 5, 2]
+]);
+Range.setFont(worksheet, "A1:C1", { bold: true });
+Range.setNumFmt(worksheet, "C2:C3", "0.00");
+Range.setStyle(worksheet, "A1:C3", { alignment: { vertical: "middle" } });
+```
+
+Rows may be shorter than the range — a cell no row reaches is left as it is — but a matrix larger than the range is
+refused. Every value is checked before any cell is written, so a call that throws changes nothing. The style setters
+mean exactly what their `Cell` counterparts mean, applied to each cell: `Range.setStyle` merges, a facet setter
+replaces the facet and `undefined` clears it. `Range.setBorder` therefore borders every cell, not the range's outline.
 
 ### Reading a Range
 
@@ -173,10 +199,10 @@ Range.getValues(worksheet, Range.create(7, 7, 19, 8)); // same as "G7:H19"
 Whole-column (`"A:A"`) and whole-row (`"1:5"`) references are rejected — they
 have no bounds to read, as is an unset range. To read the whole sheet, either
 pass `Worksheet.getDimensions(worksheet)` (which is `undefined` for a sheet with
-no cells, as `Row.getLast` is) or use `Worksheet.getValues(worksheet)` — note that
-one is indexed by row _number_, so `result[1]` is row 1 and `result[0]` is empty. `{ base: 0 }` indexes it as
-`Row.getValues` and `Column.getValues` do (row 1 and column A at `0`), and `{ base: 1 }` asks for the numbered form
-explicitly.
+no cells, as `Row.getLast` is) or use `Worksheet.getValues(worksheet, { base })`. `{ base: 0 }` indexes it as
+`Row.getValues` and `Column.getValues` do (row 1 and column A at `0`); `{ base: 1 }` indexes it by row and column
+_number_, so `result[1]` is row 1 and `result[0]` is empty. Calling it without `options` is deprecated: it answers
+the numbered form, unlike `Row` and `Column`, so the base is now always stated.
 
 ### Styling Cells
 
@@ -412,7 +438,7 @@ it did. The picture stays registered in the workbook, so its id can be placed
 again before the next save; a picture whose last use you removed, and that nothing
 else references, is left out of the file when it is written. Pictures you never
 placed, or that arrived unreferenced in a file you read, are written as before. `Watermark.get(ws)` returns a copy of
-the sheet's watermark, or `null`; replace it with `Watermark.set`.
+the sheet's watermark, or `undefined`; replace it with `Watermark.set`.
 
 Every `remove` takes the item its `list` returned or that item's position (a whole number) in the list, and answers
 `false` when there is no such item. Anything else — a name, a reference string, `1.5` — names nothing and is refused
@@ -654,6 +680,12 @@ Cell.setNote(worksheet, "C1", {
   width: 200,
   height: 120
 });
+
+// The author goes in the options; read the note back without creating anything
+Cell.setNote(worksheet, "D1", "Reviewed", { author: "Alice" });
+Cell.getNote(worksheet, "D1"); // "Reviewed"
+Cell.getNoteAuthor(worksheet, "D1"); // "Alice"
+Cell.removeNote(worksheet, "D1"); // true
 ```
 
 ### Auto-Fit Column Width
@@ -2639,7 +2671,7 @@ for await (const worksheet of reader) {
 Write large XLSX files row by row:
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
 const workbook = new Stream.WorkbookWriter({
   filename: "output.xlsx",
@@ -2647,7 +2679,7 @@ const workbook = new Stream.WorkbookWriter({
   useStyles: true
 });
 
-const sheet = workbook.addWorksheet("Data");
+const sheet = Workbook.addWorksheet(workbook, "Data");
 for (let i = 0; i < 1000000; i++) {
   Stream.commitRow(sheet.addRow([`Row ${i}`, i, new Date()]));
 }
@@ -2660,7 +2692,7 @@ A named cell style registered on the writer is applied with `Stream.applyCellSty
 `Cell.applyStyle` does:
 
 ```typescript
-workbook.addCellStyle("Totals", { font: { bold: true } });
+Workbook.addCellStyle(workbook, "Totals", { font: { bold: true } });
 Stream.applyCellStyle(Stream.getRowCell(row, 3), "Totals"); // an unknown name throws
 ```
 
@@ -2677,15 +2709,72 @@ the bytes went to a `filename` or `stream`:
 
 ```typescript
 const writer = new Stream.WorkbookWriter();
-const rows = writer.addWorksheet("Data");
+const rows = Workbook.addWorksheet(writer, "Data");
 Stream.commitRow(rows.addRow([1, 2, 3]));
 const bytes = await writer.toBuffer();
+```
+
+A streaming writer takes the same namespace functions as a workbook in memory, wherever the operation makes sense
+for it — `Workbook.addWorksheet` / `getWorksheet` / `protect` / `addCellStyle`, `Worksheet.merge` / `protect`,
+`Column.setDefinitions` / `setWidth` / `setKey`, `Image.add` / `place` / `setBackground`, `Watermark.set` (overlay
+mode), `ConditionalFormatting.add` and `DataValidation.add`. The writer's own checks apply: once a sheet (or the row
+a merge reaches) is committed the edit is refused with `ExcelStreamStateError`, and so is a column edit once the
+first row is committed, since the columns are written with it. What needs the cells or the whole workbook in memory
+— `Worksheet.unmerge`, `Column.getValues` / `autoFit`, shapes, `Workbook.removeWorksheet`, chartsheets,
+`Workbook.toBuffer` — throws `ExcelUnsupportedFeatureError`; a writer is finished with its own `commit()` or
+`toBuffer()`.
+
+Cells, rows and ranges of a streamed sheet are addressed as on any sheet — `Cell.setValue(sheet, "B2", 1)`,
+`Row.setHeight(sheet, 2, 30)`, `Range.setValues(sheet, "A1:C2", rows)` — while their rows are still held. A row the
+writer has written refuses an edit or a read with `ExcelStreamStateError` (a range write is refused whole, before any
+cell changes), and what moves or walks written rows (`Row.insert`, `Row.splice`, `Row.each`, …) throws
+`ExcelUnsupportedFeatureError`. The `Stream.setCell*` / `Stream.setRow*` functions do the same through the handle
+`addRow` returns, for the row you have just added and have not addressed:
+
+```typescript
+const row = sheet.addRow(["Total", 0]);
+Stream.setRowFont(row, { bold: true }); // through the handle addRow returned
+Cell.setNumFmt(sheet, { row: row.number, col: 2 }, "0.00"); // or by position
+Stream.commitRow(row);
+```
+
+```typescript
+import {
+  Column,
+  ConditionalFormatting,
+  Image,
+  Stream,
+  Workbook,
+  Worksheet
+} from "documonster/excel";
+
+const writer = new Stream.WorkbookWriter({ filename: "report.xlsx" });
+const logo = Image.add(writer, { filename: "logo.png", extension: "png" });
+const sheet = Workbook.addWorksheet(writer, "Report");
+Column.setWidth(sheet, "A", 30);
+Image.place(sheet, logo, "E1:G4");
+sheet.addRow(["Quarterly report"]);
+Worksheet.merge(sheet, "A1:C1");
+ConditionalFormatting.add(sheet, {
+  ref: "B2:B100",
+  rules: [
+    {
+      type: "cellIs",
+      operator: "greaterThan",
+      formulae: [90],
+      style: { font: { bold: true } },
+      priority: 1
+    }
+  ]
+});
+await Worksheet.protect(sheet, { password: "pw" });
+await writer.commit();
 ```
 
 ### Web Streams (Node.js 22+ and Browsers)
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
 // Write to Web WritableStream
 const chunks: Uint8Array[] = [];
@@ -2696,7 +2785,7 @@ const writable = new WritableStream({
 });
 
 const writer = new Stream.WorkbookWriter({ stream: writable });
-const sheet = writer.addWorksheet("Sheet1");
+const sheet = Workbook.addWorksheet(writer, "Sheet1");
 Stream.commitRow(sheet.addRow(["Name", "Score"]));
 Stream.commitRow(sheet.addRow(["Alice", 98]));
 sheet.commit();
@@ -2778,22 +2867,21 @@ no whole-family bundle, so the file name names the module.
 
 ### Addressing cells
 
-Every `Cell` function takes exactly two forms — an `"A1"` address, or a 1-based
-`(row, col)` pair — and nothing else:
+Every `Cell` function names its cell with one argument: an `"A1"` address, or a 1-based
+`{ row, col }` position (a `CellPosition`):
 
 ```typescript
 Cell.setValue(ws, "B3", 42);
-Cell.setValue(ws, 3, 2, 42);
-Cell.setFont(ws, 3, 2, { bold: true }); // facet setters take both forms too
+Cell.setValue(ws, { row: 3, col: 2 }, 42);
+Cell.setFont(ws, { row: 3, col: 2 }, { bold: true }); // facet setters take both forms too
 ```
 
-Mixing them is a compile error rather than a silent misread: `Cell.getValue(ws,
-"A1", 99)` used to type-check and read `"CUA1"`, and `Cell.getValue(ws, 5)` used
-to type-check and throw at runtime. Both are now rejected.
+What `Cell.getFullAddress` returns is a position too, so it can be passed straight back. Anything after the address
+is the value, whatever the form, so a missing argument is a compile error rather than a column read as a value.
 
 A position outside the grid — row 0, column 16 385, `"ZZ0"` — is refused before anything changes, by getters and
 setters alike, with `ExcelRowOutOfBoundsError`, `ExcelColumnOutOfBoundsError` or `ExcelInvalidAddressError`. All three are
-`ExcelArgumentError`s whose `field` names the parameter (`row`, `col`, `addr`), so the one `catch` written for bad input
+`ExcelArgumentError`s whose `field` names the parameter (`addr`, or `addr.row` / `addr.col` for a position), so the one `catch` written for bad input
 catches them. A read reports the same positions found in a _file_ as the reader's parse error instead — an
 `XlsxParseError` naming the part (`XlsbParseError` for XLSB, `ExcelFileError` naming the row for CSV and Markdown), the
 position error as its `cause` — because a malformed file is not a wrong argument.
@@ -2863,14 +2951,14 @@ _input_ type grew, so no existing code and no exhaustive `switch` is affected.
 ### Columns by key
 
 `Column.*` accepts a key, a letter or a 1-based number. `Column.getNumber`
-bridges a key to the `(row, col)` form, and `Column.getDefinitions` is the
+bridges a key to a `{ row, col }` position, and `Column.getDefinitions` is the
 inverse of `Column.setDefinitions`:
 
 ```typescript
 Column.setDefinitions(ws, [{ header: "Total", key: "total", width: 12 }]);
 
 const col = Column.getNumber(ws, "total"); // 1
-Cell.setValue(ws, 2, col, 99);
+Cell.setValue(ws, { row: 2, col }, 99);
 
 // Append a column while keeping the existing definitions — no hand-copying.
 Column.setDefinitions(ws, [...Column.getDefinitions(ws), { header: "Error", key: "error" }]);
@@ -2995,11 +3083,17 @@ Cell.getValue(ws, "A1000"); // null
 Row.getCount(ws); // unchanged
 ```
 
-The style-facet readers — `getStyle`, `getFont`, `getAlignment`, `getBorder`,
-`getFill`, `getProtection` — plus `getModel` **do** create the
-cell, because what they return is live and meant to be edited in place
-(`Cell.getStyle(ws, "B2").font = { bold: true }`); there is nothing to edit until
-the cell exists. Use `Cell.has` when the question is whether a cell is there at all.
+**What a reader returns is yours.** `Cell.getValue`, the values readers (`Row`, `Column`,
+`Range`, `Worksheet.getValues`, `toAoa`, `toJson`), `getResult`, `getNote`, the style-facet
+readers (`getFont`, `getAlignment`, `getBorder`, `getFill`, `getProtection`), `findStyle`
+and `getModel` (on `Cell` and `Worksheet` as on `Row`, `Table` and `Image`) all hand out
+copies: editing one changes nothing, and the setter is how to change the workbook. A value
+given to a setter is copied too, so editing your object afterwards does not reach the cell.
+
+`Cell.getStyle` is the one exception, by design: it returns the cell's **live** style for
+editing in place (`Cell.getStyle(ws, "B2").font = { bold: true }`), and so creates the cell,
+since there is nothing to edit until it exists. Use `Cell.has` when the question is whether a
+cell is there at all.
 To read a whole region, `Range.getValues` / `Worksheet.toAoa`; for one column,
 `Column.getValues`.
 
@@ -3068,11 +3162,11 @@ const save = (wb: Workbook.Handle) => {
 Streaming types live on the `Stream` namespace, next to the streaming classes:
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
 const options: Stream.WorkbookWriterOptions = { filename: "big.xlsx", useSharedStrings: true };
 const writer = new Stream.WorkbookWriter(options);
-const sheet: Stream.WorksheetWriter = writer.addWorksheet("Data");
+const sheet: Stream.WorksheetWriter = Workbook.addWorksheet(writer, "Data");
 ```
 
 The cell-value kinds, formula kinds, Excel error strings and the common paper

@@ -57,8 +57,8 @@ describe("format selection", () => {
   it("writes XLSB when the format says so", async () => {
     const bytes = await Workbook.toBuffer(sampleWorkbook(), { format: "xlsb" });
     await expectValidXlsb(bytes, { includeWarnings: true });
-    // On Node the canonical writer returns a Buffer, and that must not change per format.
-    expect(Buffer.isBuffer(bytes)).toBe(true);
+    // Every format resolves to a plain Uint8Array, not a Buffer typed as one.
+    expect(Object.getPrototypeOf(bytes)).toBe(Uint8Array.prototype);
   });
 
   it("still writes XLSX by default", async () => {

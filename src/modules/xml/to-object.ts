@@ -9,7 +9,7 @@
  * {@link toPlainObject} from `./dom` instead.
  */
 
-import { checkBooleanOptions, checkParserLimits, checkXmlInput } from "@xml/arguments";
+import { checkParseToObjectOptions, checkXmlInput } from "@xml/arguments";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import type { ResolvedOptions } from "@xml/to-object-shared";
@@ -64,11 +64,8 @@ interface Frame {
  */
 function parseXmlToObject(xml: string, options?: XmlParseToObjectOptions): Record<string, unknown> {
   checkXmlInput("Xml.parseToObject", xml);
+  checkParseToObjectOptions("Xml.parseToObject", options);
   const opts = resolveOptions(options, "Xml.parseToObject");
-  checkBooleanOptions("Xml.parseToObject", options as Record<string, unknown> | undefined, [
-    "fragment"
-  ]);
-  checkParserLimits("Xml.parseToObject", options as Record<string, unknown> | undefined);
 
   const parser = new SaxParser({
     position: false,

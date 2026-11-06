@@ -31,7 +31,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { encodePng } from "@archive/png";
 import { Draw } from "@draw/index";
 import { Mermaid } from "@mermaid/index";
 import type { FlowchartDiagram } from "@mermaid/types";
@@ -47,11 +46,7 @@ function draw(
 ) {
   const list = Mermaid.toDrawList(source, options);
   writeFileSync(path.join(OUT, `${name}.svg`), Draw.toSvg(list, { background: "#ffffff" }));
-  const pixels = Draw.toRgba(list, { scale: 2 });
-  writeFileSync(
-    path.join(OUT, `${name}.png`),
-    encodePng(pixels.data, pixels.width, pixels.height, { dpi: 144 })
-  );
+  writeFileSync(path.join(OUT, `${name}.png`), Draw.toPng(list, { scale: 2, dpi: 144 }).png);
   return list;
 }
 

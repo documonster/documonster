@@ -18,12 +18,12 @@ const wb = Workbook.create();
 function addTable(ws, ref) {
   const range = Range.create(ref);
   ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].forEach((day, index) => {
-    Cell.setValue(ws, range.top, range.left + index, day);
+    Cell.setValue(ws, { row: range.top, col: range.left + index }, day);
   });
   let count = 1;
   for (let i = 1; i <= 6; i++) {
     for (let j = 0; j < 5; j++) {
-      Cell.setValue(ws, range.top + i, range.left + j, count++);
+      Cell.setValue(ws, { row: range.top + i, col: range.left + j }, count++);
     }
   }
 }
@@ -32,7 +32,7 @@ function addDateTable(ws, ref) {
   const range = Range.create(ref);
   ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].forEach(
     (day, index) => {
-      Cell.setValue(ws, range.top, range.left + index, day);
+      Cell.setValue(ws, { row: range.top, col: range.left + index }, day);
     }
   );
   const DAY = 86400000;
@@ -45,8 +45,8 @@ function addDateTable(ws, ref) {
 
   for (let i = 1; i <= 9; i++) {
     for (let j = 0; j < 7; j++) {
-      Cell.setValue(ws, range.top + i, range.left + j, dt);
-      Cell.setStyle(ws, range.top + i, range.left + j, { numFmt: "DD MMM" });
+      Cell.setValue(ws, { row: range.top + i, col: range.left + j }, dt);
+      Cell.setStyle(ws, { row: range.top + i, col: range.left + j }, { numFmt: "DD MMM" });
       dt = new Date(dt.getTime() + DAY);
     }
   }

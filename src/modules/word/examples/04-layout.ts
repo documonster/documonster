@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { SectionProperties } from "../index";
 
 const outDir = path.resolve(
@@ -67,7 +67,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     }
   };
   Document.setSectionProperties(doc, sect);
-  const buf = await Io.toBuffer(doc);
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-a4.docx"), buf);
   console.log(`  → 04-layout-a4.docx (${buf.length} bytes)`);
 }
@@ -162,7 +162,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     }
   });
 
-  const buf = await Io.toBuffer(doc);
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-multi-section.docx"), buf);
   console.log(`  → 04-layout-multi-section.docx (${buf.length} bytes)`);
 }
@@ -213,7 +213,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     lineNumbers: { countBy: 1, start: 1, restart: "newPage", distance: Units.cmToTwips(0.5) }
   });
 
-  const buf = await Io.toBuffer(doc);
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-decorative.docx"), buf);
   console.log(`  → 04-layout-decorative.docx (${buf.length} bytes)`);
 }
@@ -274,7 +274,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     bidi: true
   });
 
-  const buf = await Io.toBuffer(doc);
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-landscape-grid-rtl.docx"), buf);
   console.log(`  → 04-layout-landscape-grid-rtl.docx (${buf.length} bytes)`);
 }

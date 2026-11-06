@@ -46,8 +46,9 @@
  * model. For higher-level edits use `patchDocument` or `compileTemplate`.
  */
 
-import { zip } from "@archive/create-archive";
-import { unzip } from "@archive/read-archive";
+import { createZip } from "@archive/create-archive";
+import { unzipZip } from "@archive/read-archive";
+import type { SchemaMatches } from "@utils/schema";
 import { xmlEncodeAttr } from "@utils/xml-encode";
 import { PartPath } from "@word/constants";
 import { isFlatOpc } from "@word/convert/flat-opc";
@@ -56,11 +57,12 @@ import {
   checkBytes,
   checkNodeArray,
   checkOneOf,
-  checkPackageOptions,
   checkRecord,
-  checkString
+  checkString,
+  packageOptionsShape
 } from "@word/core/argument-checks";
 import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import { walkBlocks } from "@word/core/walker";
 import {
   DocxError,
@@ -70,7 +72,12 @@ import {
 } from "@word/errors";
 import { checkReadOptions } from "@word/reader/docx-reader";
 import type { ReadDocxOptions } from "@word/reader/docx-reader";
-import { checkPackageSize, createPartBudget, flatOpcEntries } from "@word/reader/package-limits";
+import {
+  checkPackageSize,
+  createPartBudget,
+  flatOpcEntries,
+  readOptionsShape
+} from "@word/reader/package-limits";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
 import { resolveSecurityPolicy } from "@word/security/policy";
 import type { BodyContent, DocxDocument, Paragraph, Table } from "@word/types";
@@ -150,16 +157,23 @@ export type IncrementalEdit =
     };
 
 /**
- * Options for `Package.edit`: how the file is read, as `Io.read` reads it
+ * Options for `Package.edit`: how the file is read, as `Document.read` reads it
  * (`password`, `securityPolicy`, `checkCrc32`), and how the result is written.
  * The result of an encrypted file is not encrypted: `WordCrypto.encrypt` it again.
  */
 export interface IncrementalEditOptions extends ReadDocxOptions {
   /** Compression level for replaced entries (0-9). Default: 6. */
   readonly compressionLevel?: number;
-  /** Timestamp for every entry of the written package, as in `Io.toBuffer`. Default: now. */
+  /** Timestamp for every entry of the written package, as in `Document.toBuffer`. Default: now. */
   readonly modTime?: Date;
 }
+
+const incrementalEditOptionsSchema = w.record({ ...readOptionsShape, ...packageOptionsShape });
+const _incrementalEditOptionsMatch: SchemaMatches<
+  typeof incrementalEditOptionsSchema,
+  IncrementalEditOptions
+> = true;
+void _incrementalEditOptionsMatch;
 
 /**
  * Apply incremental edits to an existing DOCX file.
@@ -189,7 +203,7 @@ export async function editDocxIncremental(
   const where = "Package.edit";
   const bytes = checkPackageBytes(buffer, where);
   checkIncrementalEdits(edits, where);
-  checkPackageOptions(options, "options", where);
+  checkSchema(incrementalEditOptionsSchema.optional(), options, where);
   checkReadOptions(options, where);
   // Read all entries from the original ZIP. Some third-party ZIP writers emit
   // entry paths with a leading "/" — strip it so lookups by canonical path
@@ -261,7 +275,7 @@ export async function editDocxIncremental(
   typeNewParts(parts, originalPaths);
 
   // Write back to a new ZIP
-  const archive = zip({ level: options?.compressionLevel ?? 6, modTime: options?.modTime });
+  const archive = createZip({ level: options?.compressionLevel ?? 6, modTime: options?.modTime });
   for (const [path, data] of parts) {
     archive.add(path, data);
   }
@@ -272,7 +286,7 @@ export async function editDocxIncremental(
  * List all part paths in a DOCX file without parsing the model.
  *
  * @param buffer - The DOCX file (ZIP or Flat OPC).
- * @param options - How to read it, as `Io.read` takes them (`password`, `securityPolicy`, `checkCrc32`).
+ * @param options - How to read it, as `Document.read` takes them (`password`, `securityPolicy`, `checkCrc32`).
  * @returns Array of part paths.
  */
 export async function listDocxParts(
@@ -295,7 +309,7 @@ export async function listDocxParts(
  *
  * @param buffer - The DOCX file (ZIP or Flat OPC).
  * @param path - The part path (e.g. `"word/document.xml"`).
- * @param options - How to read it, as `Io.read` takes them (`password`, `securityPolicy`, `checkCrc32`).
+ * @param options - How to read it, as `Document.read` takes them (`password`, `securityPolicy`, `checkCrc32`).
  * @returns The part's raw bytes, or undefined if the part doesn't exist.
  */
 export async function readDocxPart(
@@ -328,10 +342,10 @@ function checkPackageBytes(buffer: unknown, where: string): Uint8Array {
 /**
  * Visit every part of the package — folder entries skipped, a leading "/"
  * some ZIP writers emit stripped — until `visit` returns `true`, reading it as
- * `Io.read` does: under the options' security policy, an encrypted file
+ * `Document.read` does: under the options' security policy, an encrypted file
  * decrypted with `password` (a `DocxEncryptedError` without one), a Flat OPC
  * file as the package it holds. Bytes that are not a package are a
- * `DocxParseError`, as `Io.read` reports them.
+ * `DocxParseError`, as `Document.read` reports them.
  *
  * A part's size counts against the policy when its bytes are read, so
  * `listParts` decompresses nothing and `readPart` only the part it returns.
@@ -354,7 +368,7 @@ async function readPackageEntries(
       return;
     }
     const budget = createPartBudget(policy);
-    for await (const entry of unzip(buffer, { checkCrc32: options?.checkCrc32 }).entries()) {
+    for await (const entry of unzipZip(buffer, { checkCrc32: options?.checkCrc32 }).entries()) {
       // Folder entries are not parts (OPC §9.1.1.1) and are not written back.
       if (isDirectoryEntry(entry)) {
         continue;

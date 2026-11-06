@@ -275,7 +275,7 @@ export function setColumnStyle(view: TableColumnView, value: Partial<Style> | un
   tableColumnSetStyle(view, value);
 }
 
-/** The sheet's tables, in the order they were added. */
+/** The sheet's tables, in the order they were added: the handles themselves, which the other `Table.*` take. */
 export function list(ws: WorksheetData): TableData[] {
   checkWorksheet(ws);
   return getTables(ws);

@@ -30,6 +30,13 @@
  * const svg = Draw.toSvg(list);
  * const pixels = Draw.toRgba(list, { scale: 2 });
  * ```
+ *
+ * @example A PNG file directly.
+ * ```ts
+ * import { Mermaid } from "documonster/mermaid";
+ *
+ * const { png, uncoveredCodePoints } = Mermaid.toPng("flowchart LR\n  A --> B", { scale: 2 });
+ * ```
  */
 
 import { checkFlowchart, checkTextBox } from "@mermaid/arguments";
@@ -135,7 +142,7 @@ export {
   isMermaidError
 } from "@mermaid/errors";
 export type { MermaidParseErrorOptions } from "@mermaid/errors";
-export type { MermaidRenderOptions } from "@mermaid/diagram";
+export type { MermaidRenderOptions, MermaidToPngOptions } from "@mermaid/diagram";
 export type {
   MermaidGraphDiagram,
   MermaidLayoutOptions,

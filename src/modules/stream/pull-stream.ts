@@ -5,7 +5,8 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import { StreamArgumentError } from "@stream/errors";
+import { checkStreamArgument, pullStreamOptionsSchema } from "@stream/arguments";
+import { StreamArgumentError, StreamStateError } from "@stream/errors";
 import type { IPullStream, PullStreamOptions, PullUntilOptions } from "@stream/types";
 import { uint8ArrayIndexOf } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
@@ -46,23 +47,7 @@ export class PullStream extends EventEmitter implements IPullStream {
 
   constructor(options: PullStreamOptions = {}) {
     super();
-    if (typeof options !== "object" || options === null) {
-      throw new StreamArgumentError(
-        "an options object",
-        options === null ? "null" : typeof options,
-        {
-          field: "options",
-          where: "Streams.PullStream"
-        }
-      );
-    }
-    const hwm = options.highWaterMark;
-    if (hwm !== undefined && (typeof hwm !== "number" || Number.isNaN(hwm) || hwm < 0)) {
-      throw new StreamArgumentError("a non-negative highWaterMark", String(hwm), {
-        field: "options.highWaterMark",
-        where: "Streams.PullStream"
-      });
-    }
+    checkStreamArgument(pullStreamOptionsSchema, options, "Streams.PullStream", "options");
     if (
       options.highWaterMark !== undefined &&
       options.highWaterMark > 0 &&
@@ -114,7 +99,7 @@ export class PullStream extends EventEmitter implements IPullStream {
       });
     }
     if (this._destroyed) {
-      this.emit("error", new Error("Cannot write to destroyed stream"));
+      this.emit("error", new StreamStateError("write", "the stream is destroyed"));
       return false;
     }
 
@@ -259,13 +244,16 @@ export class PullStream extends EventEmitter implements IPullStream {
   private _pullSize(size: number): Promise<Uint8Array> {
     if (!Number.isInteger(size) || size < 0) {
       return Promise.reject(
-        new RangeError(`PullStream.pull: size must be a non-negative integer, got ${size}`)
+        new StreamArgumentError("a non-negative integer size", String(size), {
+          field: "size",
+          where: "Streams.PullStream#pull"
+        })
       );
     }
     return new Promise((resolve, reject) => {
       const tryPull = (): void => {
         if (this._destroyed) {
-          reject(new Error("Stream destroyed"));
+          reject(new StreamStateError("pull", "the stream is destroyed"));
           return;
         }
 
@@ -333,7 +321,7 @@ export class PullStream extends EventEmitter implements IPullStream {
 
       const tryPull = (): void => {
         if (this._destroyed) {
-          reject(new Error("Stream destroyed"));
+          reject(new StreamStateError("pull", "the stream is destroyed"));
           return;
         }
 

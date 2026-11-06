@@ -39,7 +39,7 @@
 ## 快速开始
 
 ```typescript
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
 // 创建文档
 const doc = Document.create();
@@ -50,11 +50,11 @@ Document.addTable(doc, [
   ["1", "2"]
 ]);
 
-const buffer = await Io.toBuffer(doc);
+const buffer = await Document.toBuffer(doc);
 // 写入文件、作为响应返回等
 
 // 读取文档
-const parsed = await Io.read(buffer);
+const parsed = await Document.read(buffer);
 console.log(parsed.body.length, "elements");
 ```
 
@@ -63,7 +63,7 @@ console.log(parsed.body.length, "elements");
 ### 文档构建器
 
 ```typescript
-import { Document, Build, Io } from "documonster/word";
+import { Document, Build, PageSizes, Units } from "documonster/word";
 
 const doc = Document.create();
 
@@ -82,12 +82,23 @@ Document.addTable(
     ["Header1", "Header2"],
     ["cell1", "cell2"]
   ],
-  { headerRow: true }
+  // headerRow 让首行在每页重复；headerRunProperties 决定它的样式
+  { headerRow: true, headerRunProperties: { bold: true } }
 );
 
 // 图片
-Document.addImage(doc, pngBytes, "png", width, height);
-Document.addFloatingImage(doc, jpgBytes, "jpeg", width, height, { wrap: { style: "square" } });
+// width / height 单位是 EMU，用 Units 换算
+Document.addImage(doc, pngBytes, {
+  type: "png",
+  width: Units.cmToEmu(5),
+  height: Units.cmToEmu(3)
+});
+Document.addFloatingImage(doc, jpgBytes, {
+  type: "jpeg",
+  width: Units.cmToEmu(4),
+  height: Units.cmToEmu(4),
+  wrap: { style: "square" }
+});
 
 // 列表
 Document.addBulletList(doc, ["Item 1", "Item 2", "Item 3"]);
@@ -95,23 +106,28 @@ Document.addNumberedList(doc, ["First", "Second", "Third"]);
 
 // 页面布局
 Document.setSectionProperties(doc, {
-  pageSize: { width: 11906, height: 16838 }, // A4
-  margins: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
+  pageSize: PageSizes.A4,
+  margins: {
+    top: Units.cmToTwips(2.5),
+    bottom: Units.cmToTwips(2.5),
+    left: Units.cmToTwips(2),
+    right: Units.cmToTwips(2)
+  }
 });
 
 // 页眉/页脚
 Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
 
 // 构建与导出
-const bytes = await Io.toBuffer(doc);
+const bytes = await Document.toBuffer(doc);
 ```
 
 ### 读取文档
 
 ```typescript
-import { Io, Query } from "documonster/word";
+import { Document, Query } from "documonster/word";
 
-const doc = await Io.read(fileBuffer);
+const doc = await Document.read(fileBuffer);
 
 // 提取文本内容
 const text = Query.getText(doc);
@@ -120,13 +136,13 @@ const text = Query.getText(doc);
 const results = Query.searchText(doc, /pattern/g);
 ```
 
-在 Node 中，`Io.readFile(path)` 与 `Io.writeFile(doc, path)` 直接读写文件；浏览器构建不提供这两个成员——请自行读取字节后交给
-`Io.read`。系统不允许读取或写入的文件报 `DocxFileError`（含 `path`、`operation`），以系统错误为 `cause`（`error.cause.code`
+在 Node 中，`Document.readFile(path)` 与 `Document.writeFile(doc, path)` 直接读写文件；浏览器构建不提供这两个成员——请自行读取字节后交给
+`Document.read`。系统不允许读取或写入的文件报 `DocxFileError`（含 `path`、`operation`），以系统错误为 `cause`（`error.cause.code`
 为 `ENOENT`、`EACCES` 等），与 Excel 的 `ExcelFileError` 一致；读到了但不是有效文档的文件报 `DocxParseError`。
 
 ### 唯一的文档对象
 
-`Document.create()` 与 `Io.read()` 返回同一种对象——`DocxDocument`，即文档的内容树
+`Document.create()` 与 `Document.read()` 返回同一种对象——`DocxDocument`，即文档的内容树
 ——所有命名空间都接收它。因此
 `Document.*` 辅助函数既能用于新建的文档，也能用于读取的文档。其字段是公开的，也可以与
 辅助函数交替直接编辑这棵树。只要两次辅助函数调用之间的每次编辑属于以下之一，新增的脚注、
@@ -140,7 +156,7 @@ const results = Query.searchText(doc, /pattern/g);
 线性的。要替换、删除或重排条目，请赋予新数组：原地修改条目（`doc.footnotes[0] = …`、
 `splice`、`sort`、修改条目对象）不会被下一次辅助函数调用看到。但这种编辑绝不会被静默写入
 文件——若它使两个脚注、尾注、批注或编号定义拥有相同 id，或使两张不同的图片共用同一个键，
-`Io.toBuffer` 会以 `DocxDuplicateIdError` 拒绝，并指明集合与 id：正文按 id 引用这些条目，
+`Document.toBuffer` 会以 `DocxDuplicateIdError` 拒绝，并指明集合与 id：正文按 id 引用这些条目，
 写出器无法判断某个引用指的是哪一条。书签与绘图 id 发生冲突时由写出器重新编号，因此对它们的
 任何编辑都是安全的。
 
@@ -153,12 +169,12 @@ const results = Query.searchText(doc, /pattern/g);
 
 图片的键——`ImageDef.rId` 或其 `aliasRIds` 之一——在每个部件中都指向这张图片：正文、页眉、页脚、
 脚注、批注和图片项目符号都按键引用 `doc.images`。而包中的关系 id 只在各自部件内有效（两个页眉
-可以各自把自己的标志称为 `rId1`），因此 `Io.read` 会为本地 id 已被另一张图片占用的图片分配新键，
+可以各自把自己的标志称为 `rId1`），因此 `Document.read` 会为本地 id 已被另一张图片占用的图片分配新键，
 写出器也会为每个显示该图片的部件单独登记关系。`Transform.merge` 会重命名追加文档中与基础文档
 冲突的键，无论它们在何处被引用。
 
 `Document.create()` 创建的文档带有 `deriveEastAsianDefaults: true`：写出、排版或转换时，
-若未显式指定，会根据文本推导东亚校对语言与字体。`Io.read()` 读取的文档不带该字段，因此
+若未显式指定，会根据文本推导东亚校对语言与字体。`Document.read()` 读取的文档不带该字段，因此
 往返读写不会凭空获得作者未选择的语言。它是普通字段——副本会保留它，也可以在任何文档上设置或清除。
 
 同一字段还会在未指定处补上当前 Word 新建文档的默认值——Aptos 12 磅、`en-US`、段后 8 磅、
@@ -168,12 +184,12 @@ const results = Query.searchText(doc, /pattern/g);
 Word 会从用户的 Normal 模板取这类文件的默认值。
 
 ```typescript
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
-const doc = await Io.read(fileBuffer);
+const doc = await Document.read(fileBuffer);
 Document.addParagraph(doc, "追加的段落");
 Document.addFootnote(doc, "新的脚注");
-const bytes = await Io.toBuffer(doc);
+const bytes = await Document.toBuffer(doc);
 ```
 
 #### 谁修改什么
@@ -186,31 +202,32 @@ const bytes = await Io.toBuffer(doc);
   `Document.setCompatibilityMode`。
 - **其他命名空间中返回 `DocxDocument` 的函数都不修改输入**——`Template.fill` / `fillFromSource`、
   `Transform.*`、`Security.*`、`Ole.add`、`Vba.add` / `remove`、`Font.addEmbedded`。
-  结果可能与输入共享未改动的节点（无需改动时甚至就是输入本身），因此若仍要使用输入，
-  在原地编辑结果之前先调用 `Document.clone(...)`。
+  结果可能与输入共享未改动的节点（无需改动时甚至就是输入本身）。`Document.*` 在修改前会先复制两份文档
+  共享的部分，因此原地编辑任何一方都不会影响另一方——无需克隆。需要快照、或要直接手改节点时再用
+  `Document.clone(...)`。
 
 `Query.*` 只读。
 
 ```typescript
-import { Document, Io, Template } from "documonster/word";
+import { Document, Template } from "documonster/word";
 
-const template = await Io.read(templateBytes);
+const template = await Document.read(templateBytes);
 for (const row of rows) {
-  // `fill` 不修改 `template`，但结果共享它未改动的节点——原地编辑前先克隆。
-  const letter = Document.clone(Template.fill(template, row));
+  // `fill` 不修改 `template`，编辑结果也不会影响它。
+  const letter = Template.fill(template, row);
   Document.replaceText(letter, "DRAFT", "FINAL");
-  await Io.writeFile(letter, `out/${row.id}.docx`);
+  await Document.writeFile(letter, `out/${row.id}.docx`);
 }
 ```
 
 ### 修改文档
 
 ```typescript
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
-const doc = await Io.read(buffer);
+const doc = await Document.read(buffer);
 const count = Document.replaceText(doc, "OLD_TEXT", "NEW_TEXT"); // 原地修改 `doc`，返回替换次数
-const output = await Io.toBuffer(doc);
+const output = await Document.toBuffer(doc);
 ```
 
 ## 高级功能
@@ -409,7 +426,7 @@ const valid = await Security.verifyPassword(protectedDoc, "secret"); // true
 哈希算法在这里和 `WordCrypto.encrypt` 中都写作 `"SHA-256"`（与 `Security.getState` 报告的一致）；两者也接受加密格式自己的写法 `"SHA256"`。
 
 文档保护只限制在 Word 中编辑，并不加密文件。要写出带密码的文件，请给
-`Io.toBuffer` 传入 `password`（见[加密与签名](#加密与签名)）。
+`Document.toBuffer` 传入 `password`（见[加密与签名](#加密与签名)）。
 
 ### 校验
 
@@ -425,7 +442,7 @@ if (!result.valid) {
 读入的文档可能给某个字段写了它不接受的取值，例如 `<w:jc w:val="bogus"/>`。这时字段读作没有，原文保留下来，只要字段仍是空的，
 写出时就原样写回；`Validation.validate` 会以警告报告它，规则为 `"unrecognized-value"`，并给出字段路径（如 `body[3].properties.alignment`）。
 设置字段后以设置的值为准；但把字段再清空，保留的原文又会生效，所以要去掉这些值，请调用 `Document.discardUnrecognizedValues(doc)`；传 `{ filter }` 可以按路径和原文只去掉其中一部分。
-`Document.listUnrecognizedValues(doc)` 列出当前仍保留的值，每项是 `UnrecognizedValue`（`{ path, value }`），与 `filter` 收到的对象相同。
+`Document.listUnrecognizedValues(doc)` 列出当前仍保留的值，每项是 `DocxUnrecognizedValue`（`{ path, value }`），与 `filter` 收到的对象相同。
 
 ### HTML/Markdown 转换
 
@@ -465,37 +482,37 @@ const htmlDoc = WordHtml.toDocx("<h1>Hello</h1><ul><li>World</li></ul>");
 ### Flat OPC 格式
 
 ```typescript
-import { Convert, Io } from "documonster/word";
+import { Convert, Document } from "documonster/word";
 
 // DOCX 的单一 XML 表示形式
-const flatXml = await Io.toFlatOpc(doc);
-const again = await Io.read(flatXml); // Io.read 也能读取 Flat OPC 文本（或字节）
+const flatXml = await Document.toFlatOpc(doc);
+const again = await Document.read(flatXml); // Document.read 也能读取 Flat OPC 文本（或字节）
 const parts = Convert.flatOpcToParts(flatXml); // Map<partPath, bytes>
 
-// Io.toBase64 写出的 base64
-const fromBase64 = await Io.read(await Io.toBase64(doc), { base64: true });
+// Document.toBase64 写出的 base64
+const fromBase64 = await Document.read(await Document.toBase64(doc), { base64: true });
 ```
 
 ### 加密与签名
 
 受密码保护的 DOCX——OLE 复合文件中的 Agile 加密，即 Word「用密码进行加密」写出的文件——用 `{ password }` 读取
-（`Io.read`、`Io.readFile`、`Package` 系列函数、`new Stream.DocumentReader`），也用它写出（`Io.toBuffer`、`Io.toBase64`、
-`Io.writeFile`）；`encryption` 用于调整参数（Office 默认值：AES-256、SHA-512、100,000 次迭代）。Excel 的
+（`Document.read`、`Document.readFile`、`Package` 系列函数、`new Stream.DocumentReader`），也用它写出（`Document.toBuffer`、`Document.toBase64`、
+`Document.writeFile`）；`encryption` 用于调整参数（Office 默认值：AES-256、SHA-512、100,000 次迭代）。Excel 的
 `Workbook.read` / `toBuffer` 接受相同的选项，两个模块共用一份实现。只有提供密码时才加载加密代码。未提供密码时，
 加密文件报告为 `DocxEncryptedError`；密码错误时为 `DocxDecryptionError`，其 `reason` 为 `"password"`。只实现了
 Agile 加密：Word 2007 的标准加密会以 `reason: "unsupported"` 拒绝。
 
 ```typescript
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 
-const encrypted = await Io.toBuffer(doc, { password: "password" });
-const reread = await Io.read(encrypted, { password: "password" });
+const encrypted = await Document.toBuffer(doc, { password: "password" });
+const reread = await Document.read(encrypted, { password: "password" });
 ```
 
 更底层的工具位于 `documonster/word/crypto` 子路径，因此不会被打进只读写普通 DOCX 的 bundle。
 
 ```typescript
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 import { WordCrypto } from "documonster/word/crypto";
 
 // 把受密码保护的 DOCX 解密为数据包（Agile Encryption）
@@ -504,7 +521,7 @@ if (WordCrypto.isEncrypted(bytes)) {
 }
 
 // 加密已有的数据包字节
-const encrypted = await WordCrypto.encrypt(await Io.toBuffer(doc), "password");
+const encrypted = await WordCrypto.encrypt(await Document.toBuffer(doc), "password");
 
 // 不解密数据包，仅校验密码
 const ok = await WordCrypto.verifyPassword(bytes, "password");
@@ -544,11 +561,11 @@ const zip = await WordCrypto.Agile.decryptPackage(
 
 ```typescript
 import { WordExcel } from "documonster/word/excel";
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 
 // Workbook → DocxDocument（所有可见工作表，保留格式）
 const doc = WordExcel.toDocx(workbook);
-const docxBytes = await Io.toBuffer(doc);
+const docxBytes = await Document.toBuffer(doc);
 
 // 带选项：标题页、只取部分工作表、限制行列数。
 // 请用名称指定工作表：数字位置已弃用（1.0 移除）——它在这里从 0 开始，
@@ -585,10 +602,10 @@ const extracted = WordExcel.extractTables(doc);
 与 SVG 路径完全一致。
 
 ```typescript
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 import { Pdf } from "documonster/pdf";
 
-const doc = await Io.read(docxBytes);
+const doc = await Document.read(docxBytes);
 const pdfBytes = await Pdf.fromDocx(doc);
 
 // 覆盖页面几何（单位：磅）。省略的字段会回退到

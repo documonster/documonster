@@ -35,7 +35,12 @@ export {
   InvalidValueTypeError,
   WorksheetNameError
 } from "@excel/errors";
-export type { ExcelFileErrorOptions, InvalidValueTypeErrorOptions } from "@excel/errors";
+export type {
+  ExcelFileErrorOptions,
+  ExcelInvalidValueTypeErrorOptions,
+  // Deprecated pre-prefix name; removed in 1.0.
+  InvalidValueTypeErrorOptions
+} from "@excel/errors";
 export { MarkdownError, MarkdownParseError, isMarkdownError } from "@markdown/errors";
 export type { BaseErrorOptions } from "@utils/errors";
 

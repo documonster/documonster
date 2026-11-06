@@ -11,6 +11,7 @@
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
 import { ConditionalFormatting, Row, Workbook, Worksheet } from "@excel";
+import { getSheetModel } from "@excel/core/worksheet";
 import { iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { recordSpec } from "@excel/xlsb/spec/records";
 import { Formula } from "@formula";
@@ -124,7 +125,8 @@ function workbookWith(ref: string, rule: Rule) {
 function workbookWithUnchecked(ref: string, rule: Rule) {
   const handle = workbookWith(ref, { type: "expression", formulae: ["A1"] });
   const sheet = Workbook.getWorksheet(handle, "S")!;
-  Worksheet.getModel(sheet).conditionalFormattings![0]!.rules[0] = {
+  // The sheet's own model: `Worksheet.getModel` hands out a copy, which is what the public API must do.
+  getSheetModel(sheet).conditionalFormattings![0]!.rules[0] = {
     ...styled(rule),
     priority: 1
   } as never;

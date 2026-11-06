@@ -45,6 +45,40 @@ describe("Chart.place", () => {
   });
 
   it.each([
+    [
+      "an image's extent in pixels",
+      { tl: { col: 3, row: 0 }, ext: { width: 300, height: 200 } },
+      /range\.ext\.cx/
+    ],
+    ["a position without an extent", { pos: { x: 0, y: 0 } }, /range\.ext/],
+    ["a position missing a coordinate", { pos: { x: 0 }, ext: { cx: 1, cy: 1 } }, /range\.pos\.y/],
+    [
+      "a corner with neither a second corner nor an extent",
+      { tl: { col: 3, row: 0 } },
+      /range\.ext/
+    ]
+  ])("refuses %s, which was written as an anchor Excel cannot open", (_label, range, field) => {
+    const { ws } = sheet();
+    expect(() => Chart.place(ws, range as never, { type: "line", series })).toThrow(field);
+    expect(Chart.list(ws)).toEqual([]);
+  });
+
+  it("still takes a one-cell and an absolute anchor in EMU", () => {
+    const { ws } = sheet();
+    Chart.place(
+      ws,
+      { tl: { col: 3, row: 0 }, ext: { cx: 3000000, cy: 2000000 } },
+      { type: "line", series }
+    );
+    Chart.place(
+      ws,
+      { pos: { x: 0, y: 0 }, ext: { cx: 3000000, cy: 2000000 } },
+      { type: "line", series }
+    );
+    expect(Chart.list(ws)).toHaveLength(2);
+  });
+
+  it.each([
     ["addColumn", { type: "bar", barDir: "col" }],
     ["addBar", { type: "bar", barDir: "bar" }],
     ["addLine", { type: "line" }],

@@ -1445,7 +1445,7 @@ export interface PdfColor {
 /**
  * A rectangular region in PDF coordinate space (origin = bottom-left).
  */
-export interface PdfRect {
+export interface PdfLayoutRect {
   x: number;
   y: number;
   width: number;
@@ -1459,7 +1459,7 @@ export interface LayoutCell {
   /** Cell text content */
   text: string;
   /** Rectangle in page coordinates (PDF points, origin bottom-left) */
-  rect: PdfRect;
+  rect: PdfLayoutRect;
   /** Font family resolved for this cell */
   fontFamily: string;
   /** Font size in points */
@@ -1607,7 +1607,7 @@ export interface LayoutPage {
  */
 export interface LayoutCommentBox {
   /** Box outline in page coordinates. */
-  rect: PdfRect;
+  rect: PdfLayoutRect;
   /** Comment body, already prefixed with the author when one is known. */
   text: string;
   /** Font size in points. */
@@ -1641,7 +1641,7 @@ export interface LayoutImage {
   /** Image format */
   format: "jpeg" | "png";
   /** Rectangle in page coordinates (PDF points, origin bottom-left) */
-  rect: PdfRect;
+  rect: PdfLayoutRect;
 }
 
 /**
@@ -1653,7 +1653,7 @@ export interface LayoutImage {
  */
 export interface LayoutChart {
   /** Rectangle in page coordinates (PDF points, origin bottom-left) */
-  rect: PdfRect;
+  rect: PdfLayoutRect;
   /** Vector rendering callback, if the chart can be drawn as PDF geometry. */
   drawVector?: (
     surface: PdfChartDrawingSurface,

@@ -15,17 +15,19 @@
  */
 
 import { glyphComponents, parseTtf } from "@utils/font-ttf";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import {
-  checkBoolean,
   checkBytes,
   checkHandle,
-  checkInteger,
   checkNodeArray,
   checkOneOf,
   checkRecord,
   checkString,
   invalidArgument
 } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import { obfuscateFont, generateFontKey } from "@word/font/font-obfuscation";
 import type { DocxDocument, FontDef, EmbeddedFont } from "@word/types";
 
@@ -464,24 +466,29 @@ const FONT_PITCHES: ReadonlySet<string> = new Set<NonNullable<EmbedFontOptions["
 ]);
 
 /** The options every variant of an embedded font shares. */
-function checkSharedEmbedOptions(
-  options: Omit<EmbedFontOptions, "name" | "data" | "style"> | undefined,
-  where: string
-): void {
-  checkRecord(options, "options", where, { optional: true });
-  checkBoolean(options?.obfuscate, "options.obfuscate", where, { optional: true });
-  checkOneOf(options?.family, FONT_FAMILIES, "options.family", where, { optional: true });
-  checkOneOf(options?.pitch, FONT_PITCHES, "options.pitch", where, { optional: true });
+const sharedEmbedShape = {
+  obfuscate: w.boolean().optional(),
+  family: s.member<NonNullable<EmbedFontOptions["family"]>>(FONT_FAMILIES).optional(),
+  pitch: s.member<NonNullable<EmbedFontOptions["pitch"]>>(FONT_PITCHES).optional(),
   // `w:panose1` is ten bytes in hex.
-  if (
-    options?.panose1 !== undefined &&
-    !(typeof options.panose1 === "string" && /^[0-9A-Fa-f]{20}$/.test(options.panose1))
-  ) {
-    invalidArgument(where, "options.panose1", "20 hex digits", options.panose1);
-  }
-  checkInteger(options?.charset, "options.charset", where, { optional: true, min: 0, max: 255 });
-  checkString(options?.usedCharacters, "options.usedCharacters", where, { optional: true });
-}
+  panose1: s
+    .custom<string>(v => typeof v === "string" && /^[0-9A-Fa-f]{20}$/.test(v), "20 hex digits")
+    .optional(),
+  charset: w.integer({ min: 0, max: 255 }).optional(),
+  usedCharacters: w.string().optional()
+};
+
+const sharedEmbedOptionsSchema = w.record(sharedEmbedShape).optional();
+
+/** `data` is a font, which {@link checkFontData} checks once the rest is known to be right. */
+const embedFontOptionsSchema = w.record({
+  name: w.string().refine(v => v !== "", "a non-empty string"),
+  data: s.unknown<Uint8Array>(),
+  style: s.member<FontEmbedStyle>(FONT_STYLES).optional(),
+  ...sharedEmbedShape
+});
+const _embedFontOptionsMatch: SchemaMatches<typeof embedFontOptionsSchema, EmbedFontOptions> = true;
+void _embedFontOptionsMatch;
 
 /** `w:charset` is one byte in hex (`ST_UcharHexNumber`): 0 is `"00"`, 128 is `"80"`. */
 function charsetHex(charset: number): string {
@@ -516,14 +523,8 @@ function charsetHex(charset: number): string {
  */
 export function embedFont(options: EmbedFontOptions): EmbedFontResult {
   const where = "Font.embed";
-  checkRecord(options, "options", where);
-  checkString(options.name, "options.name", where);
-  if (options.name === "") {
-    invalidArgument(where, "options.name", "a non-empty string", options.name);
-  }
+  checkSchema(embedFontOptionsSchema, options, where);
   options = { ...options, data: checkFontData(options.data, "options.data", where) };
-  checkOneOf(options.style, FONT_STYLES, "options.style", where, { optional: true });
-  checkSharedEmbedOptions(options, where);
   const style = options.style ?? "regular";
   const shouldObfuscate = options.obfuscate !== false;
 
@@ -616,7 +617,7 @@ export function embedFontFamily(
         : data;
   }
   variants = checked;
-  checkSharedEmbedOptions(options, where);
+  checkSchema(sharedEmbedOptionsSchema, options, where);
   const results: EmbedFontResult[] = [];
 
   for (const [style, data] of Object.entries(variants) as [FontEmbedStyle, Uint8Array][]) {
@@ -648,8 +649,8 @@ export function embedFontFamily(
  * Add embedded fonts to an existing document model.
  * Merges new fonts with existing font definitions.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The existing document.
  * @param results - Embed results from `embedFont` or `embedFontFamily`.
@@ -687,11 +688,14 @@ export function addEmbeddedFonts(
     existingEmbedded.push(result.embeddedFont);
   }
 
-  return {
-    ...doc,
-    fonts: existingFonts,
-    embeddedFonts: existingEmbedded
-  };
+  return markDerived(
+    {
+      ...doc,
+      fonts: existingFonts,
+      embeddedFonts: existingEmbedded
+    },
+    doc
+  );
 }
 
 // =============================================================================

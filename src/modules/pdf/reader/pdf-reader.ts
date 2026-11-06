@@ -48,14 +48,8 @@
  * ```
  */
 
-import {
-  checkOptionalInteger,
-  checkOptionalObject,
-  checkOptionalString,
-  isBlob,
-  pdfBytesOrBlob
-} from "@pdf/core/arguments";
-import { PdfArgumentError, PdfPasswordError } from "@pdf/errors";
+import { at, isBlob, pdfBytesOrBlob } from "@pdf/core/arguments";
+import { PdfPasswordError } from "@pdf/errors";
 import { extractAnnotationsFromPage } from "@pdf/reader/annotation-extractor";
 import type { PdfAnnotation } from "@pdf/reader/annotation-extractor";
 import { extractBookmarks } from "@pdf/reader/bookmark-extractor";
@@ -75,6 +69,8 @@ import { extractTables } from "@pdf/reader/table-extractor";
 import type { PdfTable } from "@pdf/reader/table-extractor";
 import { reconstructText, reconstructTextLines } from "@pdf/reader/text-reconstruction";
 import type { TextLine } from "@pdf/reader/text-reconstruction";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { createYieldBudget } from "@utils/yield";
 
 // =============================================================================
@@ -315,51 +311,32 @@ function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
  * counted from 0, quietly extracted nothing.
  * `maxDecodedBytes` threw a `RangeError` from `PdfDocument`, naming no field.
  */
+const flag = () => s.boolean().optional();
+
+const readPdfOptionsSchema = s.object(
+  {
+    password: s.string().optional(),
+    pages: s
+      .readonlyArray(s.number({ integer: true, min: 1 }).orUndefined(), {
+        expected: "an array of 1-based page numbers"
+      })
+      .optional(),
+    extractText: flag(),
+    extractImages: flag(),
+    extractMetadata: flag(),
+    extractAnnotations: flag(),
+    extractFormFields: flag(),
+    extractBookmarks: flag(),
+    extractTables: flag(),
+    maxDecodedBytes: s.number({ min: 0, expected: "a number >= 0 or Infinity" }).optional()
+  },
+  { expected: "an options object" }
+);
+const _readPdfOptionsMatch: SchemaMatches<typeof readPdfOptionsSchema, ReadPdfOptions> = true;
+void _readPdfOptionsMatch;
+
 function checkReadPdfArguments(options: ReadPdfOptions | undefined): void {
-  const where = "Pdf.extract";
-  checkOptionalObject(where, "options", options);
-  checkOptionalString(where, "options.password", options?.password);
-  for (const field of [
-    "extractText",
-    "extractImages",
-    "extractMetadata",
-    "extractAnnotations",
-    "extractFormFields",
-    "extractBookmarks",
-    "extractTables"
-  ] as const) {
-    const value = options?.[field];
-    if (value !== undefined && typeof value !== "boolean") {
-      throw new PdfArgumentError(
-        `options.${field}`,
-        `${where}: options.${field} must be a boolean, got ${typeof value}`
-      );
-    }
-  }
-  const pages = options?.pages;
-  if (pages !== undefined) {
-    if (!Array.isArray(pages)) {
-      throw new PdfArgumentError(
-        "options.pages",
-        `${where}: options.pages must be an array of 1-based page numbers`
-      );
-    }
-    pages.forEach((page: unknown, i) =>
-      checkOptionalInteger(where, `options.pages[${i}]`, page, 1)
-    );
-  }
-  const maxDecodedBytes: unknown = options?.maxDecodedBytes;
-  if (
-    maxDecodedBytes !== undefined &&
-    (typeof maxDecodedBytes !== "number" || Number.isNaN(maxDecodedBytes) || maxDecodedBytes < 0)
-  ) {
-    throw new PdfArgumentError(
-      "options.maxDecodedBytes",
-      `${where}: options.maxDecodedBytes must be a number >= 0 or Infinity, got ${
-        typeof maxDecodedBytes === "number" ? String(maxDecodedBytes) : typeof maxDecodedBytes
-      }`
-    );
-  }
+  check(readPdfOptionsSchema.optional(), options, at("Pdf.extract", "options"));
 }
 
 /**
@@ -517,13 +494,9 @@ function createEmptyMetadata(): PdfMetadata {
     keywords: "",
     creator: "",
     producer: "",
-    creationDate: null,
-    modDate: null,
     pdfVersion: "",
     pageCount: 0,
     encrypted: false,
-    pageSize: null,
-    xmpXml: null,
     custom: {}
   };
 }

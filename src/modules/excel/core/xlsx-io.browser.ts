@@ -82,6 +82,8 @@ export async function toBuffer(
 ): Promise<Uint8Array> {
   checkWorkbook(wb);
   checkIoOptions("Workbook.toBuffer", options, "write");
+  // `null` is taken as no options, as the check documents.
+  options ??= undefined;
   return packageBytes(wb, options);
 }
 
@@ -150,7 +152,7 @@ async function readInto(
   const raw = normalizeBytes(data, options?.base64);
   // An encrypted workbook is decrypted with `options.password` first, so its package's format is the one detected.
   const bytes = raw && (await openWorkbookPackage(raw, workbookDecryption(options)));
-  const format = resolveReadFormat(bytes, options?.format);
+  const format = resolveReadFormat(bytes, options?.format, options?.zip);
   if (format === "xlsb" && bytes) {
     return readXlsbInto(wb, bytes, undefined, options);
   }
@@ -290,6 +292,8 @@ export async function writeStream(
 ): Promise<void> {
   checkWorkbook(wb);
   checkIoOptions("Workbook.writeStream", options, "write");
+  // `null` is taken as no options, as the check documents.
+  options ??= undefined;
   // A Web `WritableStream` is driven as the Node-style writable the serializers expect; anything else is refused here.
   // A Node-style writable is checked and used in this tick, so a sink that fails straight away is observed; only a
   // Web stream waits for the adapter to load.
@@ -350,7 +354,7 @@ export function toStream(
   options?: XlsxStreamOptions & WorkbookWriteOptions
 ): XlsxReadable {
   checkWorkbook(wb);
-  checkIoOptions("Workbook.toStream", options, "write");
+  checkIoOptions("Workbook.toStream", options, "stream");
   if (options?.password !== undefined) {
     // An encrypted package is assembled and encrypted before its first byte can be handed out.
     return createXlsxByteStream(

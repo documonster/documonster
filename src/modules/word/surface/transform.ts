@@ -5,9 +5,9 @@
  *
  * Every `Transform` function leaves the document it is given unchanged and
  * returns a new one. The result may share unchanged nodes with the input (or
- * be the input itself when there is nothing to change), so before editing a
- * result in place with `Document.*` while you still use the input, take
- * `Document.clone(result)`.
+ * be the input itself when there is nothing to change); `Document.*` copies
+ * what it edits, so editing a result in place never reaches the input, nor
+ * the other way round — unless the result is the input itself.
  *
  * `import { Transform } from "documonster/word"` →
  *   `Transform.merge([a, b])`, `Transform.split(doc)`,

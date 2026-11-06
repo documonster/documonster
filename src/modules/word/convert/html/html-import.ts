@@ -10,7 +10,7 @@
  * @example
  * ```ts
  * import { WordHtml } from "documonster/word/html";
- * import { Document, Io } from "documonster/word";
+ * import { Document } from "documonster/word";
  *
  * const { body } = WordHtml.toDocxBody("<h1>Hello</h1><p>World</p>");
  * const h = Document.create();
@@ -18,14 +18,17 @@
  * for (const block of body) {
  *   Document.addContent(h, block);
  * }
- * const buffer = await Io.toBuffer(h);
+ * const buffer = await Document.toBuffer(h);
  * ```
  */
 
 import { isEastAsianTypeface } from "@utils/cjk-typefaces";
+import type { SchemaMatches } from "@utils/schema";
+import { s } from "@utils/schema";
 import { base64ToUint8Array } from "@utils/utils";
-import { checkInteger, checkRecord, checkString } from "@word/core/argument-checks";
+import { checkString } from "@word/core/argument-checks";
 import { sanitizeUrl } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import type {
   BodyContent,
   Hyperlink,
@@ -72,6 +75,16 @@ export interface HtmlImportOptions {
   readonly classStyles?: Record<string, string>;
 }
 
+const htmlImportOptionsSchema = w.record({
+  // A run size, half-points.
+  defaultFontSize: w.integer({ min: 0 }).optional(),
+  defaultFont: w.string().optional(),
+  classStyles: s.record(w.string(), { record: "argument" }).optional()
+});
+const _htmlImportOptionsMatch: SchemaMatches<typeof htmlImportOptionsSchema, HtmlImportOptions> =
+  true;
+void _htmlImportOptionsMatch;
+
 /**
  * Convert an HTML string into an array of DOCX body content blocks.
  *
@@ -92,17 +105,7 @@ export interface HtmlImportOptions {
 /** Check what an HTML import is given, in the name of `where`. */
 export function checkHtmlImport(html: unknown, options: unknown, where: string): void {
   checkString(html, "html", where);
-  checkRecord(options, "options", where, { optional: true });
-  const o = options as HtmlImportOptions | undefined;
-  // A run size, half-points.
-  checkInteger(o?.defaultFontSize, "options.defaultFontSize", where, { optional: true, min: 0 });
-  checkString(o?.defaultFont, "options.defaultFont", where, { optional: true });
-  if (o?.classStyles !== undefined) {
-    checkRecord(o.classStyles, "options.classStyles", where);
-    for (const [name, css] of Object.entries(o.classStyles)) {
-      checkString(css, `options.classStyles.${name}`, where);
-    }
-  }
+  checkSchema(htmlImportOptionsSchema.optional(), options, where);
 }
 
 export function htmlToDocxBody(html: string, options?: HtmlImportOptions): BodyContent[] {

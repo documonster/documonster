@@ -128,7 +128,10 @@ export type {
 export type {
   DateTimeFieldOptions,
   FieldOptions,
+  MathAccentOptions,
   MathBarOptions,
+  MathFractionOptions,
+  MathLimitOptions,
   MathNaryOptions
 } from "@word/builder/run-builders";
 

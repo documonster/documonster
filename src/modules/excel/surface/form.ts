@@ -42,9 +42,14 @@ import {
   getStyle as getVmlStyleImpl
 } from "@excel/surface/form-vml";
 import type { ArgumentChecks } from "@excel/utils/arguments";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
-/** The sheet's checkboxes, in the order they were added — a copy of the list. */
+/**
+ * The sheet's checkboxes, in the order they were added. The array is new; its entries are the controls themselves,
+ * which {@link remove} takes.
+ */
 export function list(ws: WorksheetData): FormCheckboxData[] {
   checkWorksheet(ws);
   return listFormCheckboxes(ws);
@@ -166,6 +171,19 @@ function checkLink(check: ArgumentChecks, field: string, link: unknown): void {
   }
 }
 
+const checkboxOptionsSchema = s.object({
+  // Its reference is checked by `checkLink`.
+  link: s.string().optional(),
+  checked: s.boolean().optional(),
+  text: s.string().optional(),
+  noThreeD: s.boolean().optional(),
+  print: s.boolean().optional(),
+  editAs: s.literal("oneCell", "twoCell", "absolute").optional()
+});
+const _checkboxOptionsMatch: SchemaMatches<typeof checkboxOptionsSchema, FormCheckboxOptions> =
+  true;
+void _checkboxOptionsMatch;
+
 /**
  * Add a legacy form checkbox over `range` — a cell (`"B2"`, sized to about two columns), a range (`"B2:D3"`), a
  * `{ tl, br }` pair or 0-based `{ startCol, startRow, endCol, endRow }` — and return it.
@@ -181,14 +199,8 @@ export function addCheckbox(
   checkWorksheet(ws);
   const check = argumentChecks("Form.addCheckbox");
   checkRange(check, range);
-  if (check.record("options", options)) {
-    checkLink(check, "options.link", options.link);
-    check.string("options.text", options.text);
-    check.boolean("options.checked", options.checked);
-    check.boolean("options.noThreeD", options.noThreeD);
-    check.boolean("options.print", options.print);
-    check.oneOf("options.editAs", options.editAs, ["oneCell", "twoCell", "absolute"]);
-  }
+  checkSchema("Form.addCheckbox", "options", checkboxOptionsSchema.optional(), options);
+  checkLink(check, "options.link", options?.link);
   return addFormCheckbox(ws, range, options);
 }
 

@@ -74,7 +74,7 @@ describe("R4-E2 Column.splice writes every inserted value", () => {
     const { wb, ws } = book();
     Row.add(ws, ["x"]);
     Column.splice(ws, 2, 0, [10, 20, 30]);
-    expect([1, 2, 3].map(r => Cell.getValue(ws, r, 2))).toEqual([10, 20, 30]);
+    expect([1, 2, 3].map(r => Cell.getValue(ws, { row: r, col: 2 }))).toEqual([10, 20, 30]);
 
     const empty = Workbook.addWorksheet(wb, "Empty");
     Column.splice(empty, 1, 0, [1, 2]);
@@ -266,7 +266,7 @@ describe("R4-C5 Watermark.get checks its handle and returns a copy", () => {
 
   it("answers null for none, and a copy whose edits change nothing", () => {
     const { wb, ws } = book();
-    expect(Watermark.get(ws)).toBeNull();
+    expect(Watermark.get(ws)).toBeUndefined();
     const imageId = Image.add(wb, { buffer: PNG, extension: "png" });
     Watermark.set(ws, { imageId, mode: "overlay", opacity: 0.3 });
     const got = Watermark.get(ws)!;

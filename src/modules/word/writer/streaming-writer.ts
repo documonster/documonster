@@ -36,6 +36,7 @@
 import { Zip, ZipDeflate } from "@archive/zip/stream";
 import type { AnySink } from "@stream/core/sink-adapter";
 import { SinkAdapter } from "@stream/core/sink-adapter";
+import type { SchemaMatches } from "@utils/schema";
 import { withStatedDefaults } from "@word/builder/document-finalize";
 import {
   ContentType,
@@ -50,10 +51,8 @@ import {
   checkBlock,
   checkCoreProperties,
   checkDocumentSettings,
-  checkInteger,
   checkNodeArray,
-  checkOneOf,
-  checkPackageOptions,
+  packageOptionsShape,
   checkParagraphProperties,
   checkRecord,
   checkRunProperties,
@@ -69,6 +68,7 @@ import { assertWritableImage, imagePartOverride } from "@word/core/image-media";
 import { sanitizeUrl, utf8Encoder } from "@word/core/internal-utils";
 import { atNode, checkWritableBlock, within } from "@word/core/node-path";
 import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
+import { checkSchema, model, w } from "@word/core/option-schema";
 import { isRangeMarker, isRun } from "@word/core/text-utils";
 import type { DocxVisitor } from "@word/core/walker";
 import { walkBlocks } from "@word/core/walker";
@@ -123,7 +123,8 @@ import { uniqueSanitizedName } from "@word/writer/docx-packager";
 import {
   renderHeader,
   renderFooter,
-  renderWatermarkHeader
+  renderWatermarkHeader,
+  sizeWatermark
 } from "@word/writer/header-footer-writer";
 import type { HeaderWatermark } from "@word/writer/header-footer-writer";
 import { assertUniqueReferencedIds } from "@word/writer/id-uniqueness";
@@ -723,8 +724,10 @@ export class DocumentWriter {
     // Add all auxiliary parts (styles, settings, etc.). They are rendered
     // synchronously before the method first awaits, which is where the scope
     // takes the writer's revision map out of effect again.
+    // Anything those parts need loaded or measured is awaited first, outside the synchronous section.
+    const watermark = this._options.watermark && (await sizeWatermark(this._options.watermark));
     await withRevisionScope(() =>
-      this._addAuxiliaryParts(enterRevisionIds(this._renderCtx.revisionIds))
+      this._addAuxiliaryParts(enterRevisionIds(this._renderCtx.revisionIds), watermark)
     );
 
     // Finalize the ZIP archive. Any compression errors during the trailing
@@ -1507,8 +1510,14 @@ export class DocumentWriter {
     return modTime ?? coreProperties?.modified ?? coreProperties?.created;
   }
 
-  /** @param previousRevisionIds - What `enterRevisionIds` returned for this write. */
-  private async _addAuxiliaryParts(previousRevisionIds: RevisionIdMap | undefined): Promise<void> {
+  /**
+   * @param previousRevisionIds - What `enterRevisionIds` returned for this write.
+   * @param watermark - The document's watermark, sized with `sizeWatermark`.
+   */
+  private async _addAuxiliaryParts(
+    previousRevisionIds: RevisionIdMap | undefined,
+    watermark: Watermark | undefined
+  ): Promise<void> {
     const level = this._options.compressionLevel ?? 6;
     const modTime = this._entryModTime();
 
@@ -1684,7 +1693,6 @@ export class DocumentWriter {
     // `_allocateHeaderFooterRIds` so that section properties and header
     // parts agree.
     let nextHeaderIdx = 1;
-    const watermark = this._options.watermark;
     if (this._options.headers) {
       for (const [headerKey, headerDef] of this._options.headers) {
         const headerIdx = nextHeaderIdx++;
@@ -2163,17 +2171,54 @@ export class DocumentWriter {
 }
 
 /**
+ * The writer's own settings. The document content it is given (`sectionProperties`, `styles`,
+ * the parts) is model, checked by the same functions the `Document.*` setters use.
+ */
+const streamingOptionsSchema = w.record({
+  ...packageOptionsShape,
+  chunkSize: w.integer({ min: 1 }).optional(),
+  sectionProperties: model<SectionProperties>(),
+  bodyRangeMarkersAfter: model<readonly RangeMarker[]>(),
+  styles: model<readonly StyleDef[]>(),
+  docDefaults: model<DocDefaults>(),
+  abstractNumberings: model<readonly AbstractNumbering[]>(),
+  numberingInstances: model<readonly NumberingInstance[]>(),
+  headers: model<ReadonlyMap<string, HeaderDef>>(),
+  footers: model<ReadonlyMap<string, FooterDef>>(),
+  footnotes: model<readonly FootnoteDef[]>(),
+  endnotes: model<readonly EndnoteDef[]>(),
+  images: model<readonly ImageDef[]>(),
+  fonts: model<readonly FontDef[]>(),
+  settings: model<DocumentSettings>(),
+  coreProperties: model<CoreProperties>(),
+  appProperties: model<AppProperties>(),
+  comments: model<readonly CommentDef[]>(),
+  background: model<DocumentBackground>(),
+  customProperties: model<readonly CustomProperty[]>(),
+  watermark: model<Watermark>(),
+  theme: model<DocumentTheme>(),
+  customXmlParts: model<readonly CustomXmlPart[]>(),
+  embeddedFonts: model<readonly EmbeddedFont[]>(),
+  opaqueParts: model<readonly OpaquePart[]>(),
+  missingImagePolicy: w.oneOf(["throw", "warn"]).optional(),
+  securityPolicy: model<DocxSecurityPolicy>(),
+  sink: model<AnySink>()
+});
+const _streamingOptionsMatch: SchemaMatches<typeof streamingOptionsSchema, StreamingDocxOptions> =
+  true;
+void _streamingOptionsMatch;
+
+/**
  * The writer's options, each checked as the `Document.*` setter for the same
  * field checks it — so a bad value is refused when the writer is created, not
  * at `finalize()` after every element has streamed.
  */
 function checkStreamingOptions(options: unknown, where: string): void {
-  checkPackageOptions(options, "options", where);
+  checkSchema(streamingOptionsSchema.optional(), options, where);
   const o = options as StreamingDocxOptions | undefined;
   if (o === undefined) {
     return;
   }
-  checkInteger(o.chunkSize, "options.chunkSize", where, { optional: true, min: 1 });
   if (o.sectionProperties !== undefined) {
     checkSectionProperties(o.sectionProperties, "options.sectionProperties", where);
   }
@@ -2233,12 +2278,7 @@ function checkStreamingOptions(options: unknown, where: string): void {
     checkNodeArray(o[key], `options.${key}`, where, { optional: true });
   }
   checkRecord(o.background, "options.background", where, { optional: true });
-  checkOneOf(o.missingImagePolicy, MISSING_IMAGE_POLICIES, "options.missingImagePolicy", where, {
-    optional: true
-  });
 }
-
-const MISSING_IMAGE_POLICIES: ReadonlySet<string> = new Set(["throw", "warn"]);
 
 /**
  * `options` with the switches a first-page or even-page header needs to be

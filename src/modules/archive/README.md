@@ -298,14 +298,13 @@ entry.discard(); // Skip without reading
 | `onProgress`   | `(p: UnzipProgress) => void` | -         | Progress callback                         |
 
 **Limits.** Every reader takes the same two limits: `maxEntrySize` (the largest entry read into
-memory, `ArchiveFileTooLargeError`) and, for ZIP, `maxEntries` (`ArchiveLimitError`) — `unpackZip`,
+memory) and, for ZIP, `maxEntries` — `unpackZip`,
 `openZip`, `RemoteZipReader` and `ArchiveFile` alike; the TAR readers take `maxEntrySize` too
 (100 MiB by default; `maxFileSize` is its deprecated name). Set them when reading archives you
 did not write. Every reader checks them when called: a limit that is not a whole number from 0 (or
 `Infinity`) is an `ArchiveArgumentError` naming `options.<limit>`. A limit that is hit is an
-`ArchiveLimitError` whose `limit` names the option and `allowed` its value — except `maxEntrySize`,
-which is a `ArchiveFileTooLargeError` carrying the same `limit` (`"maxEntrySize"`) and `allowed` fields,
-plus the entry's `path`.
+`ArchiveLimitExceededError` whose `limit` names the option and `allowed` its value; for `maxEntrySize` it is
+the subclass `ArchiveFileTooLargeError`, which also carries the entry's `path`.
 
 **Strings.** A string given to a reader is the archive's content, encoded as UTF-8 — never a file
 path or URL. Read a file's bytes first, or open it with `ArchiveFile.fromFile` in Node; a ZIP's
@@ -503,21 +502,15 @@ const checksum = Archive.crc32Finalize(state);
 ### PNG encoding
 
 A PNG is a DEFLATE stream plus CRC-32-checked chunks — the two primitives above — so the
-encoder lives here rather than in a module that merely happens to need pictures. It exists
-because the drawing engine deliberately stops at pixels: `Draw.toRgba` from
-`documonster/draw` hands back RGBA, and encoding needs DEFLATE, which sits a layer above
-`draw`.
+encoder lives here rather than in a module that merely happens to need pictures. A display
+list does not need it directly — `Draw.toPng` and `Mermaid.toPng` call it for you — so
+reach for it when you already have pixels:
 
 ```typescript
 import { Archive } from "documonster/archive";
-import { Draw } from "documonster/draw";
 
-// From any display list — a chart, a Mermaid diagram, your own producer
-const image = Draw.toRgba(list, { scale: 2 });
-const png = Archive.encodePng(image.data, image.width, image.height, { dpi: 192 });
-
-// Or from pixels you already have (8-bit RGBA, row-major)
-const bytes = Archive.encodePng(rgba, width, height);
+// 8-bit RGBA, row-major
+const bytes = Archive.encodePng(rgba, width, height, { dpi: 192 });
 ```
 
 8-bit RGBA in, filter 0, one `IDAT`. `dpi` writes a `pHYs` chunk; omit it and none is
@@ -715,10 +708,17 @@ await Fs.ensureDir("./out");
 
 ## Encryption
 
-ZIP Traditional (legacy) and AES-256 encryption support.
+ZIP Traditional (legacy) and WinZip AES (128, 192 or 256-bit) encryption support.
 
 ```typescript
 import { Archive } from "documonster/archive";
+
+// Write: every entry is encrypted. AES needs the asynchronous builders (Web Crypto);
+// "zipcrypto" is also written by packZipSync / toBufferSync.
+const encryptedZip = await Archive.packZip([["secret.txt", "classified"]], {
+  encryptionMethod: "aes-256",
+  password: "secret"
+});
 
 // Encrypted entries (handled automatically during read)
 const reader = Archive.openZip(encryptedZip, { password: "secret" });
@@ -753,7 +753,7 @@ import {
   ZipCrc32MismatchError,
   ArchiveRangeNotSupportedError,
   ArchiveHttpRangeError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError,
   ArchiveWorkerUnsupportedError, // a Compression.Workers call on Node; `.operation` names it
   ArchiveFileError, // ArchiveFile.fromFile / writeFile refused by the file system; `.cause` is its error
@@ -830,22 +830,22 @@ try {
 
 ### Compression
 
-| Function                                                             | Description                    |
-| -------------------------------------------------------------------- | ------------------------------ |
-| `Compression.deflate` / `deflateSync`                                | DEFLATE-RAW compress           |
-| `Compression.inflate` / `inflateSync`                                | DEFLATE-RAW decompress         |
-| `Compression.gzip` / `gzipSync`                                      | GZIP compress                  |
-| `Compression.gunzip` / `gunzipSync`                                  | GZIP decompress                |
-| `Compression.zlib` / `zlibSync`                                      | Zlib compress                  |
-| `Compression.unzlib` / `unzlibSync`                                  | Zlib decompress                |
-| `Compression.decompressAuto`                                         | Auto-detect and decompress     |
-| `Compression.createDeflateStream`                                    | Streaming DEFLATE compressor   |
-| `Compression.createInflateStream`                                    | Streaming DEFLATE decompressor |
-| `Compression.createGzipStream`                                       | Streaming GZIP compressor      |
-| `Compression.createGunzipStream`                                     | Streaming GZIP decompressor    |
-| `Archive.crc32`                                                      | CRC32 checksum                 |
-| `Archive.encodePng`                                                  | RGBA pixels to PNG bytes       |
-| `Compression.Workers.deflate` / `inflate` (+ `…Batch`, `WorkerPool`) | Web Worker pool (browser)      |
+| Function                                                       | Description                    |
+| -------------------------------------------------------------- | ------------------------------ |
+| `Compression.deflate` / `deflateSync`                          | DEFLATE-RAW compress           |
+| `Compression.inflate` / `inflateSync`                          | DEFLATE-RAW decompress         |
+| `Compression.gzip` / `gzipSync`                                | GZIP compress                  |
+| `Compression.gunzip` / `gunzipSync`                            | GZIP decompress                |
+| `Compression.zlib` / `zlibSync`                                | Zlib compress                  |
+| `Compression.unzlib` / `unzlibSync`                            | Zlib decompress                |
+| `Compression.decompressAuto`                                   | Auto-detect and decompress     |
+| `Compression.createDeflateStream`                              | Streaming DEFLATE compressor   |
+| `Compression.createInflateStream`                              | Streaming DEFLATE decompressor |
+| `Compression.createGzipStream`                                 | Streaming GZIP compressor      |
+| `Compression.createGunzipStream`                               | Streaming GZIP decompressor    |
+| `Archive.crc32`                                                | CRC32 checksum                 |
+| `Archive.encodePng`                                            | RGBA pixels to PNG bytes       |
+| `Compression.Workers.deflate` / `inflate` (+ `…Batch`, `Pool`) | Web Worker pool (browser)      |
 
 Low-level ZipCrypto / AES primitives and their constants (`encryptZipCrypto`, `decryptAes`,
 `AES_KEY_LENGTH`, …) live under `Archive.Crypto`; ordinary encrypted reading and writing only

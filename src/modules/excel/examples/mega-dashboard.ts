@@ -967,8 +967,8 @@ async function main(): Promise<void> {
 
   PRODUCTS.forEach((product, pIdx) => {
     const row = 3 + pIdx;
-    Cell.setValue(kpiSheet, row, 1, product);
-    Cell.setStyle(kpiSheet, row, 1, { font: { bold: true } });
+    Cell.setValue(kpiSheet, { row, col: 1 }, product);
+    Cell.setStyle(kpiSheet, { row, col: 1 }, { font: { bold: true } });
     let col = 2;
     for (const year of [2023, 2024, 2025]) {
       for (const q of QUARTERS) {
@@ -1030,7 +1030,7 @@ async function main(): Promise<void> {
     }
     const deltas = quarters.slice(1).map((v, i) => Math.sign(v - quarters[i]));
     deltas.forEach((d, i) => {
-      Cell.setValue(deltaSheet, pIdx + 2, i + 1, d);
+      Cell.setValue(deltaSheet, { row: pIdx + 2, col: i + 1 }, d);
     });
   });
 
@@ -1139,7 +1139,7 @@ async function main(): Promise<void> {
 
   // Protect this sheet — locked everywhere EXCEPT column B (input zone)
   for (let r = 2; r <= 7; r++) {
-    Cell.setStyle(forecast, r, 2, { protection: { locked: false } });
+    Cell.setStyle(forecast, { row: r, col: 2 }, { protection: { locked: false } });
   }
   await Worksheet.protect(forecast, {
     password: "forecast-password",
@@ -1221,20 +1221,28 @@ async function main(): Promise<void> {
       tooltip: `Jump to ${link.sheet}`
     });
     Cell.setFont(index, cellAddr, { color: { argb: "FF0563C1" }, underline: true, size: 12 });
-    Cell.setValue(index, row, 3, link.desc);
-    Cell.setStyle(index, row, 3, { font: { size: 11, color: { argb: "FF595959" } } });
+    Cell.setValue(index, { row, col: 3 }, link.desc);
+    Cell.setStyle(index, { row, col: 3 }, { font: { size: 11, color: { argb: "FF595959" } } });
   });
 
   // External hyperlink
   const row = 3 + links.length + 1;
-  Cell.setValue(index, row, 2, {
-    text: "📖 Documentation",
-    hyperlink: "https://opencode.ai/docs"
-  });
-  Cell.setStyle(index, row, 2, {
-    font: { color: { argb: "FF0563C1" }, underline: true, size: 12 }
-  });
-  Cell.setValue(index, row, 3, "External link example");
+  Cell.setValue(
+    index,
+    { row, col: 2 },
+    {
+      text: "📖 Documentation",
+      hyperlink: "https://opencode.ai/docs"
+    }
+  );
+  Cell.setStyle(
+    index,
+    { row, col: 2 },
+    {
+      font: { color: { argb: "FF0563C1" }, underline: true, size: 12 }
+    }
+  );
+  Cell.setValue(index, { row, col: 3 }, "External link example");
 
   // Add a legacy note to the title
   Cell.setNote(index, "B1", {

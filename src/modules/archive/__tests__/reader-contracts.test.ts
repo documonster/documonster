@@ -13,7 +13,8 @@ import {
 import { describe, expect, it } from "vitest";
 
 const decoder = new TextDecoder();
-const text = (bytes: Uint8Array | null): string | null => (bytes ? decoder.decode(bytes) : null);
+const text = (bytes: Uint8Array | undefined): string | undefined =>
+  bytes ? decoder.decode(bytes) : undefined;
 
 const streamOf = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
   new ReadableStream({
@@ -116,7 +117,7 @@ describe("a one-shot source is read once", () => {
 
   it("after a list / get over a one-shot source, entries() can be iterated again and again", async () => {
     for (const reader of [Archive.openZip(streamOf(zip)), Archive.openTar(streamOf(tar))]) {
-      expect(await reader.get("a.txt")).not.toBeNull();
+      expect(await reader.get("a.txt")).toBeDefined();
       expect(await paths(reader.entries())).toEqual(["a.txt", "b.txt"]);
       expect(await paths(reader.entries())).toEqual(["a.txt", "b.txt"]);
     }

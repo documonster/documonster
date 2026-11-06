@@ -5,8 +5,8 @@
  * so each entry point builds them with its own.
  */
 
+import { byteArraySchema, checkStreamArgument } from "@stream/arguments";
 import { BufferedStream } from "@stream/buffered-stream";
-import { isAsyncIterable } from "@stream/core/type-guards";
 import { StreamArgumentError } from "@stream/errors";
 import { PullStream } from "@stream/pull-stream";
 import type {
@@ -25,6 +25,7 @@ import type {
   WriteCallback
 } from "@stream/types";
 import { stringToUint8Array } from "@utils/binary";
+import { s } from "@utils/schema";
 
 type Ctor = new (options?: any) => any;
 
@@ -241,22 +242,19 @@ export function makeCreateReadable(
   return options => new Readable(options);
 }
 
+const asyncIterableSchema = s.iterable({ strings: true, expected: "an async iterable" });
+
 export function makeCreateReadableFromAsyncIterable(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromAsyncIterable"] {
   return (iterable, options) => {
     // What `Readable.from` takes: an async or a plain iterable.
-    if (
-      !isAsyncIterable(iterable) &&
-      typeof (iterable as { [Symbol.iterator]?: unknown } | null)?.[Symbol.iterator] !==
-        "function" &&
-      typeof iterable !== "string"
-    ) {
-      throw new StreamArgumentError("an async iterable", describeValue(iterable), {
-        field: "iterable",
-        where: "Streams.createReadableFromAsyncIterable"
-      });
-    }
+    checkStreamArgument(
+      asyncIterableSchema,
+      iterable,
+      "Streams.createReadableFromAsyncIterable",
+      "iterable"
+    );
     return Readable.from(iterable, { ...options, objectMode: options?.objectMode ?? true });
   };
 }
@@ -266,16 +264,13 @@ export function makeCreateReadableFromAsyncIterable(
  * push, so there is no in-band way to carry an undefined chunk, while `0`, `""`
  * and `false` are ordinary values that must survive.
  */
+const arrayDataSchema = s.custom<unknown[]>(Array.isArray, "an array");
+
 export function makeCreateReadableFromArray(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromArray"] {
   return <T>(data: T[], options?: ReadableStreamOptions): IReadable<T> => {
-    if (!Array.isArray(data)) {
-      throw new StreamArgumentError("an array", typeof data, {
-        field: "data",
-        where: "Streams.createReadableFromArray"
-      });
-    }
+    checkStreamArgument(arrayDataSchema, data, "Streams.createReadableFromArray", "data");
     // A pushed null ends a stream, so it cannot be carried as a chunk: refused here rather
     // than ending the stream there and dropping everything after it.
     const nullAt = data.indexOf(null as T);
@@ -315,16 +310,13 @@ export function makeCreateReadableFromGenerator(
   };
 }
 
+const thenableSchema = s.thenable();
+
 export function makeCreateReadableFromPromise(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromPromise"] {
   return <T>(promise: Promise<T>, options?: ReadableStreamOptions): IReadable<T> => {
-    if (typeof (promise as { then?: unknown } | null)?.then !== "function") {
-      throw new StreamArgumentError("a promise or thenable", describeValue(promise), {
-        field: "promise",
-        where: "Streams.createReadableFromPromise"
-      });
-    }
+    checkStreamArgument(thenableSchema, promise, "Streams.createReadableFromPromise", "promise");
     const readable = new Readable({
       ...options,
       objectMode: options?.objectMode ?? true,
@@ -410,30 +402,15 @@ function describeValue(value: unknown): string {
   return value === null ? "null" : typeof value;
 }
 
-function checkFunction(where: string, field: string, value: unknown): void {
-  if (typeof value !== "function") {
-    throw new StreamArgumentError("a function", describeValue(value), {
-      field,
-      where: `Streams.${where}`
-    });
-  }
-}
+const functionSchema = s.function();
 
-/** A byte array, recognised structurally so one from another realm is accepted too. */
-function isByteArray(value: unknown): value is Uint8Array {
-  return (
-    ArrayBuffer.isView(value) && (value as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
-  );
+function checkFunction(where: string, field: string, value: unknown): void {
+  checkStreamArgument(functionSchema, value, `Streams.${where}`, field);
 }
 
 export function makeFromBytes(Readable: StreamClasses["Readable"]): StreamFactories["fromBytes"] {
   return data => {
-    if (!isByteArray(data)) {
-      throw new StreamArgumentError("a Uint8Array", data === null ? "null" : typeof data, {
-        field: "data",
-        where: "Streams.fromBytes"
-      });
-    }
+    checkStreamArgument(byteArraySchema, data, "Streams.fromBytes", "data");
     return new Readable({
       read(this: { push(chunk: unknown): boolean }) {
         this.push(data);
@@ -443,15 +420,12 @@ export function makeFromBytes(Readable: StreamClasses["Readable"]): StreamFactor
   };
 }
 
+const stringSchema = s.string();
+
 export function makeFromString(Readable: StreamClasses["Readable"]): StreamFactories["fromString"] {
   const fromBytes = makeFromBytes(Readable);
   return str => {
-    if (typeof str !== "string") {
-      throw new StreamArgumentError("a string", str === null ? "null" : typeof str, {
-        field: "str",
-        where: "Streams.fromString"
-      });
-    }
+    checkStreamArgument(stringSchema, str, "Streams.fromString", "str");
     return fromBytes(stringToUint8Array(str));
   };
 }

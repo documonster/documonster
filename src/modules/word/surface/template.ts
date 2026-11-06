@@ -4,8 +4,8 @@
  *
  * `Template.fill`, `Template.fillFromSource` and `Template.bindChartData`
  * leave the document they are given unchanged and return a new one, which may
- * share unchanged nodes with it — take `Document.clone(result)` before editing
- * the result in place while you still use the template. (The deprecated
+ * share unchanged nodes with it. `Document.*` copies what it edits, so editing
+ * the result in place never reaches the template, nor the other way round. (The deprecated
  * `fillTemplate` and `fillTemplateFromSource` fill `doc` in place instead.)
  *
  * Placeholder patching — exact replacement of named placeholders with text,

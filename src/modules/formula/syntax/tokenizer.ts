@@ -7,10 +7,11 @@
  * numbers, strings, booleans, and error literals.
  */
 
-import { FormulaArgumentError, FormulaParseError } from "@formula/errors";
+import { formulaArgument } from "@formula/arguments";
+import { FormulaParseError } from "@formula/errors";
 import type { Token } from "@formula/syntax/token-types";
 import { isSpillOperator, SPILL_OPERATOR, TokenType } from "@formula/syntax/token-types";
-import { describeValue } from "@utils/describe-value";
+import { check, s } from "@utils/schema";
 
 // ============================================================================
 // Character Helpers
@@ -440,12 +441,7 @@ function readEscapedItem(formula: string, pos: number): { value: string; close: 
  * the tokeniser rather than at each call site is what stops the next consumer from rediscovering it.
  */
 export function tokenize(formula: string): Token[] {
-  if (typeof formula !== "string") {
-    throw new FormulaArgumentError(
-      "formula",
-      `Formula.tokenize: formula must be a string, got ${describeValue(formula)}`
-    );
-  }
+  check(s.string(), formula, formulaArgument("Formula.tokenize", "formula"));
   return tokenizeInto(formula, undefined);
 }
 

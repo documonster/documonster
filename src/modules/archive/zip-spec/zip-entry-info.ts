@@ -4,7 +4,7 @@
  * This is intentionally platform-agnostic and does not depend on Node.js streams.
  */
 
-import type { AesKeyStrength } from "@archive/crypto/aes";
+import type { AesKeyStrength } from "@archive/crypto/aes-format";
 
 /**
  * Encryption method used for a ZIP entry.

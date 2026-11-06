@@ -14,12 +14,7 @@ import type {
 } from "@excel/chart/core/chart-data-snapshot";
 import { chartSnapshotCellKey } from "@excel/chart/core/chart-data-snapshot";
 import type { ChartExModel } from "@excel/chart/model/chart-ex-types";
-import type {
-  ChartModel,
-  MultiLevelStringReference,
-  NumberReference,
-  StringReference
-} from "@excel/chart/model/types";
+import type { ChartModel, NumberReference, StringReference } from "@excel/chart/model/types";
 import { cellGetValue } from "@excel/core/cell";
 import { definedNamesGetAllEntries } from "@excel/core/defined-names";
 import { tableDisplayName, tableModel, tableName } from "@excel/core/table";
@@ -187,19 +182,6 @@ export function fillStrRef(
   applyChartCachePlan(
     buildChartCachePlanForReferences(
       { string: ref },
-      captureChartDataSnapshot(workbook, contextWorksheet, ref.formula ? [ref.formula] : [])
-    )
-  );
-}
-
-export function fillMultiLvlStrRef(
-  ref: MultiLevelStringReference,
-  workbook: WorkbookData,
-  contextWorksheet?: WorksheetData
-): void {
-  applyChartCachePlan(
-    buildChartCachePlanForReferences(
-      { multiLevelString: ref },
       captureChartDataSnapshot(workbook, contextWorksheet, ref.formula ? [ref.formula] : [])
     )
   );

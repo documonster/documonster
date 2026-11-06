@@ -52,6 +52,18 @@ const FORMULA_ENGINE_MODULES = [
  * consumer that legitimately needs raw DEFLATE/CRC32 — the PNG encoder does —
  * must still not drag in a container format.
  */
+/**
+ * The PNG encoder and what it stands on: the DEFLATE/CRC-32 primitives, the defaults they read and the typed errors
+ * and argument checks they throw with. What `Chart.toPng`, `Draw.toPng` and `Mermaid.toPng` may bring in.
+ */
+const PNG_ENCODER_MODULES = [
+  "modules/archive/compression/",
+  "modules/archive/core/arguments.",
+  "modules/archive/core/defaults.",
+  "modules/archive/core/errors.",
+  "modules/archive/png."
+];
+
 const ARCHIVE_CONTAINERS = [
   "modules/archive/zip/",
   "modules/archive/unzip/",
@@ -214,14 +226,10 @@ function chartNs(platform?: "browser" | "node"): Scenario {
     // `archive/core/defaults` is where `compression/compress` reads DEFAULT_DEFLATE_LEVEL from, so it
     // travels with the primitives. Named as precisely as they are.
     // `archive/core/errors` is the typed error those primitives and the encoder throw for a bad
-    // argument or a failed codec (`ArchiveError`, `ArchiveLimitError`) — an error a public function
-    // throws travels with it.
-    allowModules: [
-      "modules/archive/compression/",
-      "modules/archive/core/defaults.",
-      "modules/archive/core/errors.",
-      "modules/archive/png."
-    ],
+    // argument or a failed codec (`ArchiveError`, `ArchiveLimitExceededError`) — an error a public function
+    // throws travels with it, and so does `archive/core/arguments`, the schema-backed check that
+    // decides when to throw it.
+    allowModules: PNG_ENCODER_MODULES,
     platform,
     lazySplit: true
   };
@@ -242,7 +250,8 @@ function chartNs(platform?: "browser" | "node"): Scenario {
  * So the *engine* is what must stay out, not the syntax — which is why this allows
  * `formula/syntax/` precisely rather than widening `mustNotInclude` to let the whole tree
  * through, exactly as {@link chartNs} does for `archive/`. `formula/errors` comes with the
- * parser: it is what a malformed formula throws.
+ * parser: it is what a malformed formula throws; `formula/arguments` is the parser's own argument
+ * check.
  *
  * This was asserted for both platforms and passed on node only because rolldown put those
  * modules in a sibling chunk the entry chunk statically imports rather than in the entry chunk
@@ -255,7 +264,11 @@ function streamNs(platform?: "browser" | "node"): Scenario {
     importFrom: `${PKG_NAME}/excel`,
     imports: ["Stream"],
     mustNotInclude: exclude("excel", ["modules/archive/", "modules/xml/", "modules/stream/"]),
-    allowModules: ["modules/formula/syntax/", "modules/formula/errors."],
+    allowModules: [
+      "modules/formula/syntax/",
+      "modules/formula/errors.",
+      "modules/formula/arguments."
+    ],
     platform,
     lazySplit: true
   };
@@ -274,13 +287,32 @@ const OFFICE_ENCRYPTION = [
 ];
 
 /**
+ * What packaging or reading an unencrypted ZIP — every workbook and document — must not load eagerly. A bundler
+ * splits chunks by module, so each of these used to ride along because a module on that path shared a file with it:
+ *
+ * - the WinZip AES cipher, which an entry with `encryptionMethod: "aes"` loads (`crypto/aes.js`); the extra field's
+ *   format, which every ZIP writer and reader needs, is `crypto/aes-format.js`;
+ * - the hash and block-cipher library (`utils/crypto`), which only that cipher and the XLSB passthrough hash use —
+ *   `randomBytes` is `utils/random-bytes.js`;
+ * - the compression worker pool and its script, which `useWorker` or the auto-worker threshold loads;
+ * - TAR, which the deprecated format-matrix `zip()` / `unzip()` reached and `createZip` does not.
+ */
+const PLAIN_ZIP_FORBIDDEN = [
+  "modules/archive/crypto/aes.js",
+  "utils/crypto.",
+  "modules/archive/compression/worker-pool/pool.browser.js",
+  "modules/archive/compression/worker-pool/worker-script.js",
+  "modules/archive/tar/"
+];
+
+/**
  * What a write-only XLSX export must not load eagerly (issue #241). Each is behind an `import()` that only
  * the code needing it reaches, or belongs to the reader alone:
  *
  * - the XLSX reader, behind `core/xlsx-io`'s `import()`; the XLSB reader and writer, behind
- *   `core/workbook-format`'s. Not the whole `xlsb/` tree: `workbook-format` imports `detect` and
- *   `model-hash` statically on purpose, so an unchanged XLSB round trip can return its source bytes
- *   without loading the writer;
+ *   `core/workbook-format`'s, and the model hash an unchanged XLSB round trip compares before it returns its
+ *   source bytes — loaded only for a workbook read from XLSB, and still without the writer. Not the whole
+ *   `xlsb/` tree: `workbook-format` imports `detect` statically;
  * - the chart writer, behind `writeXlsxPackage`'s `import()`, and with it the chart builders, the
  *   renderers and the drawing engine they paint through;
  * - the streaming workbook reader and writer, which are `Stream` and `Workbook.createStream*`, not
@@ -317,11 +349,39 @@ const WRITE_ONLY_FORBIDDEN = [
   "modules/excel/chart/chart-handle.js",
   "modules/excel/core/form-control.js",
   "modules/formula/",
+  "modules/excel/xlsb/model-hash.js",
   // The encryption a `{ password }` write loads.
-  ...OFFICE_ENCRYPTION
+  ...OFFICE_ENCRYPTION,
+  ...PLAIN_ZIP_FORBIDDEN
 ];
 
-/** Reading and writing workbooks and documents without a password loads no encryption code. */
+/**
+ * What writing a Word document must not load eagerly: what only some documents need — the chart part's
+ * serialiser, the glyph tables a sized text watermark is measured with — besides what no unencrypted package
+ * needs.
+ */
+const WORD_WRITE_FORBIDDEN = [
+  "modules/word/writer/chart-writer.js",
+  "utils/font-metrics.js",
+  ...OFFICE_ENCRYPTION,
+  ...PLAIN_ZIP_FORBIDDEN
+];
+
+function wordWriteOnlyScenarios(): Scenario[] {
+  return (["node", "browser"] as const).map((platform): Scenario => ({
+    name: `${platform === "browser" ? "browser " : ""}/word: Document.toBuffer (no chart writer, font metrics, cipher, TAR or worker pool)`,
+    importFrom: `${PKG_NAME}/word`,
+    imports: ["Document"],
+    useExpr:
+      'const doc = Document.create(); Document.addParagraph(doc, "x"); Document.toBuffer(doc).then(b => console.log(b.length));',
+    mustNotInclude: WORD_WRITE_FORBIDDEN,
+    platform,
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  }));
+}
+
+/** Reading and writing workbooks and documents without a password loads no encryption code — Office's or ZIP's. */
 function officeEncryptionScenarios(): Scenario[] {
   const entries = [
     {
@@ -343,10 +403,10 @@ function officeEncryptionScenarios(): Scenario[] {
       use: "console.log(Stream.WorkbookReader)"
     },
     {
-      label: "word: Io.read + Io.toBuffer",
+      label: "word: Document.read + Document.toBuffer",
       from: "word",
-      imports: ["Io"],
-      use: "console.log(Io.read, Io.toBuffer)"
+      imports: ["Document"],
+      use: "console.log(Document.read, Document.toBuffer)"
     },
     {
       label: "word: Stream",
@@ -359,11 +419,11 @@ function officeEncryptionScenarios(): Scenario[] {
     // File-path IO is Node-only, so it has no browser scenario.
     (label.includes("readFile") ? (["node"] as const) : (["node", "browser"] as const)).map(
       (platform): Scenario => ({
-        name: `${platform === "browser" ? "browser " : ""}/${label} (no Office encryption until a password is given)`,
+        name: `${platform === "browser" ? "browser " : ""}/${label} (no encryption code until a password is given)`,
         importFrom: `${PKG_NAME}/${from}`,
         imports,
         useExpr: use,
-        mustNotInclude: OFFICE_ENCRYPTION,
+        mustNotInclude: [...OFFICE_ENCRYPTION, ...PLAIN_ZIP_FORBIDDEN],
         platform,
         lazySplit: true,
         // A single-file bundle inlines what `import()` loads.
@@ -380,8 +440,8 @@ const ws = Workbook.addWorksheet(wb, "Sheet");
 Worksheet.addRow(ws, ["a"]);
 Row.setHeight(ws, 1, 24);
 Row.setFont(ws, 1, { bold: true });
-Cell.setFill(ws, 1, 1, { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } });
-Cell.setBorder(ws, 1, 1, { top: { style: "thin" } });
+Cell.setFill(ws, { row: 1, col: 1 }, { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } });
+Cell.setBorder(ws, { row: 1, col: 1 }, { top: { style: "thin" } });
 Column.setWidth(ws, 1, 15);
 Worksheet.setAutoFilter(ws, { from: { row: 1, col: 1 }, to: { row: 1, col: 1 } });
 const id = Image.add(wb, { base64: "iVBORw0KGgo=", extension: "png" });
@@ -459,7 +519,10 @@ const scenarios: Scenario[] = [
   ns("word", "Build", ["modules/xml/"]), // xml/encode for content XML
   ns("word", "Convert", ["modules/archive/", "modules/xml/", "modules/stream/"]), // ODT/docx IO
   ns("word", "Diff", []),
-  ns("word", "Document", []),
+  // `Document` now carries docx read/write (`read`, `toBuffer`, …), so it shares `Io`'s allowance.
+  ns("word", "Document", ["modules/archive/", "modules/xml/", "modules/stream/"], undefined, [
+    "esbuild"
+  ]),
   ns("word", "Font", []),
   ns("word", "Glossary", []),
   // esbuild is excluded here and on `Pdf` below: both namespaces keep another module tree behind
@@ -651,6 +714,7 @@ const scenarios: Scenario[] = [
   // re-exported namespace object.
   // ===========================================================================
   ...writeOnlyScenarios(),
+  ...wordWriteOnlyScenarios(),
   ...officeEncryptionScenarios(),
 
   // ===========================================================================
@@ -715,7 +779,9 @@ const scenarios: Scenario[] = [
   ns("word", "Build", ["modules/xml/"], "browser"),
   ns("word", "Convert", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
   ns("word", "Diff", [], "browser"),
-  ns("word", "Document", [], "browser"),
+  ns("word", "Document", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser", [
+    "esbuild"
+  ]),
   ns("word", "Font", [], "browser"),
   ns("word", "Glossary", [], "browser"),
   ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser", ["esbuild"]),
@@ -778,16 +844,16 @@ const scenarios: Scenario[] = [
   // ===========================================================================
   // The drawing engine and its first external producer.
   //
-  // `draw` is Layer 1: it may reach `utils` and NOTHING else. That is the whole
-  // basis of the "one walker, many surfaces" claim — a backend added beside it
-  // must not need excel, word or pdf — so it is worth asserting rather than
-  // assuming. The imports named here are the three consumers a producer
-  // actually uses (walk, serialise, rasterise), i.e. the widest eager reach the
-  // module has.
+  // `draw` may reach `utils` and NOTHING else — except `Draw.toPng`, which reaches the
+  // PNG encoder and the DEFLATE/CRC-32 primitives under it. That is the whole basis of
+  // the "one walker, many surfaces" claim — a backend added beside it must not need
+  // excel, word or pdf — so it is worth asserting rather than assuming. The imports
+  // named here are the three consumers a producer actually uses (walk, serialise,
+  // rasterise), i.e. the widest eager reach the module has without a PNG.
   //
-  // `mermaid` is Layer 2 and may reach `draw` only. It implements no backend,
-  // so anything else appearing here means the module grew a dependency the
-  // layer diagram forbids.
+  // `mermaid` may reach `draw` only, and the PNG primitives through `Mermaid.toPng`. It
+  // implements no backend, so anything else appearing here means the module grew a
+  // dependency the layer diagram forbids.
   //
   // The other half of the value is the reverse direction: `modules/mermaid/`
   // now sits in `ALL_MODULE_TREES`, so all 100 other scenarios assert that 21
@@ -809,6 +875,55 @@ const scenarios: Scenario[] = [
     platform: "browser",
     lazySplit: true
   },
+  ...(["node", "browser"] as const).flatMap(platform => {
+    const tag = platform === "browser" ? "browser " : "";
+    return [
+      {
+        name: `${tag}/draw: Draw.toSvg + Draw.toRgba (isolated — no PNG encoder)`,
+        importFrom: `${PKG_NAME}/draw`,
+        imports: ["Draw"],
+        useExpr: "console.log(Draw.toSvg, Draw.toRgba, Draw.render)",
+        mustNotInclude: exclude("draw", []),
+        platform,
+        lazySplit: true,
+        // Member-level: a namespace sheds its unused members on rolldown and rspack only (see the
+        // namespace re-exports); esbuild keeps every member a namespace object names.
+        excludeBundlers: ["esbuild"]
+      },
+      {
+        name: `${tag}/draw: Draw.toPng (allows archive/compression+png)`,
+        importFrom: `${PKG_NAME}/draw`,
+        imports: ["Draw"],
+        useExpr: "console.log(Draw.toPng)",
+        mustNotInclude: [...exclude("draw", []), ...ARCHIVE_CONTAINERS],
+        allowModules: PNG_ENCODER_MODULES,
+        platform,
+        lazySplit: true
+      },
+      {
+        name: `${tag}/mermaid: Mermaid.toSvg (allows draw — no PNG encoder)`,
+        importFrom: `${PKG_NAME}/mermaid`,
+        imports: ["Mermaid"],
+        useExpr: "console.log(Mermaid.toSvg, Mermaid.toDrawList)",
+        mustNotInclude: exclude("mermaid", ["modules/draw/"]),
+        platform,
+        lazySplit: true,
+        // Member-level: a namespace sheds its unused members on rolldown and rspack only (see the
+        // namespace re-exports); esbuild keeps every member a namespace object names.
+        excludeBundlers: ["esbuild"]
+      },
+      {
+        name: `${tag}/mermaid: Mermaid.toPng (allows draw, archive/compression+png)`,
+        importFrom: `${PKG_NAME}/mermaid`,
+        imports: ["Mermaid"],
+        useExpr: "console.log(Mermaid.toPng)",
+        mustNotInclude: [...exclude("mermaid", ["modules/draw/"]), ...ARCHIVE_CONTAINERS],
+        allowModules: PNG_ENCODER_MODULES,
+        platform,
+        lazySplit: true
+      }
+    ] satisfies Scenario[];
+  }),
   {
     name: "/mermaid: mermaidToSvg + mermaidToDrawList (allows draw)",
     importFrom: `${PKG_NAME}/mermaid`,
@@ -845,7 +960,7 @@ const scenarios: Scenario[] = [
     [
       ["pdf", "Pdf"],
       ["excel", "Workbook"],
-      ["word", "Io"],
+      ["word", "Document"],
       ["draw", "renderDrawList"]
     ] as const
   ).map(([mod, name]) => ({

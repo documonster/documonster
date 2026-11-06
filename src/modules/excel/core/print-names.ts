@@ -27,13 +27,6 @@ export interface PrintSetup {
   printTitlesColumn?: string;
 }
 
-/** A defined name in the shape both writers emit. */
-export interface PrintDefinedName {
-  readonly name: string;
-  readonly ranges: readonly string[];
-  readonly localSheetId: number;
-}
-
 /**
  * Split a print-area string on the commas that actually delimit ranges.
  *

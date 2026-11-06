@@ -1,4 +1,5 @@
 import { ExcelLimitExceededError } from "@excel/errors";
+import type { ExcelLimit } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
@@ -30,6 +31,8 @@ interface ListXformOptions {
   // child xform be supplied without forcing every caller to thread the generic.
   childXform: ListChildXform<any>;
   maxItems?: number;
+  /** The read option `maxItems` came from, which a refusal names. */
+  limit?: ExcelLimit;
 }
 
 class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
@@ -41,6 +44,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
   declare public $?: XmlAttributes;
   declare protected childXform: ListChildXform<TChild>;
   declare protected maxItems?: number;
+  declare protected limit?: ExcelLimit;
   declare public parser?: ListChildXform<TChild>;
   /** Depth inside an element the child parser declined, whose subtree is skipped. */
   private skipping = 0;
@@ -56,6 +60,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
     this.$ = options.$;
     this.childXform = options.childXform as ListChildXform<TChild>;
     this.maxItems = options.maxItems;
+    this.limit = options.limit;
   }
 
   prepare(model: TChild[], options: unknown): void {
@@ -129,7 +134,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
           // The concrete child may declare `tag` as a private member; probe it
           // structurally for the diagnostic message.
           const childTag = (this.childXform as unknown as { tag?: string }).tag ?? "";
-          throw new ExcelLimitExceededError(childTag, this.maxItems);
+          throw new ExcelLimitExceededError(childTag, this.maxItems, { limit: this.limit });
         }
       }
       return true;

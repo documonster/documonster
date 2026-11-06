@@ -4,8 +4,12 @@
  * Shared implementation for waiting on multiple streams to finish.
  */
 
+import { checkStreamArgument } from "@stream/arguments";
 import { StreamArgumentError } from "@stream/errors";
 import type { PipelineStreamLike } from "@stream/types";
+import { s } from "@utils/schema";
+
+const streamArraySchema = s.custom<readonly unknown[]>(Array.isArray, "an array of streams");
 
 /**
  * Create a `finishedAll` function bound to a platform-specific `finished`.
@@ -14,16 +18,7 @@ export function createFinishedAll(
   finished: (stream: PipelineStreamLike) => Promise<void>
 ): (streams: ReadonlyArray<PipelineStreamLike>) => Promise<void> {
   return async function finishedAll(streams: ReadonlyArray<PipelineStreamLike>): Promise<void> {
-    if (!Array.isArray(streams)) {
-      throw new StreamArgumentError(
-        "an array of streams",
-        streams === null ? "null" : typeof streams,
-        {
-          field: "streams",
-          where: "Streams.waitForFinished"
-        }
-      );
-    }
+    checkStreamArgument(streamArraySchema, streams, "Streams.waitForFinished", "streams");
     for (let i = 0; i < streams.length; i++) {
       const stream = streams[i] as {
         on?: unknown;

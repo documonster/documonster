@@ -766,7 +766,7 @@ describe("Worksheet", () => {
         // 3x3 merge B2:D4
         for (let r = 2; r <= 4; r++) {
           for (let c = 2; c <= 4; c++) {
-            Cell.setStyle(ws, r, c, { border: { ...thinBorder } });
+            Cell.setStyle(ws, { row: r, col: c }, { border: { ...thinBorder } });
           }
         }
 
@@ -1052,7 +1052,7 @@ describe("Worksheet", () => {
           if (col === 12) {
             border.right = { style: "thin" };
           }
-          Cell.setStyle(ws, 21, col, { border: border });
+          Cell.setStyle(ws, { row: 21, col }, { border: border });
         }
 
         Worksheet.merge(ws, "C21:L21");
@@ -1071,7 +1071,7 @@ describe("Worksheet", () => {
         });
         // Interior cells (D21-K21) should only have top+bottom
         for (let col = 4; col <= 11; col++) {
-          expect(Cell.getStyle(ws, 21, col).border).toEqual({
+          expect(Cell.getStyle(ws, { row: 21, col }).border).toEqual({
             top: { style: "thin" },
             bottom: { style: "thin" }
           });

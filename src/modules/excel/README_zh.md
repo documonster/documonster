@@ -89,7 +89,7 @@ Row.each(worksheet, rowNumber => {
 设置了打开密码的工作簿——即 Excel「用密码进行加密」写出的文件（OLE 复合文件中的 Agile 加密），XLSX 与 XLSB 皆可——
 用其 `password` 读取，每个读取器都支持：`Workbook.read`、`readFile`、`readStream`、`readWithDiagnostics` 与
 `Stream.WorkbookReader`。每个写入器也可用密码加密：`toBuffer`、`writeFile`、`writeStream`、`toStream`，两种格式都支持；
-`encryption` 用于调整参数（Office 默认值：AES-256、SHA-512、100,000 次迭代）。这与 Word 的 `Io.read` / `Io.toBuffer`
+`encryption` 用于调整参数（Office 默认值：AES-256、SHA-512、100,000 次迭代）。这与 Word 的 `Document.read` / `Document.toBuffer`
 是同一个选项、同一份实现。
 
 ```javascript
@@ -124,8 +124,29 @@ try {
 - **XLSB 读写**：只在 `{ format: "xlsb" }` 或输入是二进制格式时加载。
 - **批注、表单控件、绘图、表格、数据透视表和图表工作表**：只在工作表包含它们时加载。
 - **OOXML 自检**：只在运行时加载，即传入 `{ validate: true }`，或在 Node 的非 production 环境下默认运行。浏览器中默认关闭。
+- **ZIP 层加密与压缩 worker 池**：AES 加密代码只在有加密条目时加载，worker 池只在压缩交给 worker 时加载。普通工作簿两者都不需要。
+- **XLSB 原样回写哈希**：只在写回一个从 XLSB 读入的工作簿时加载。
 
 请开启代码分割，让这些 chunk 保持独立；不开启时它们会被内联进同一个文件。能按成员删除命名空间中未使用部分的打包器（Rollup、rolldown、Vite、webpack、rspack）还会去掉只有你没调用的成员才需要的代码。**esbuild 会保留导入的命名空间（如 `Workbook`）的全部成员**，所以使用 esbuild 时，即使没调用，这些成员静态依赖的代码也会被打包进来；上面列出的按需加载部分仍然不会进入初始 chunk。
+
+### 写入区域
+
+`Range.setValues` 从区域左上角起按行优先写入矩阵，区域样式设置器把同一样式应用到区域内每个单元格：
+
+```typescript
+import { Range } from "documonster/excel";
+
+Range.setValues(worksheet, "A1:C3", [
+  ["Name", "Qty", "Price"],
+  ["Apple", 3, 1.5],
+  ["Pear", 5, 2]
+]);
+Range.setFont(worksheet, "A1:C1", { bold: true });
+Range.setNumFmt(worksheet, "C2:C3", "0.00");
+Range.setStyle(worksheet, "A1:C3", { alignment: { vertical: "middle" } });
+```
+
+行可以比区域短——没写到的单元格保持原样——但比区域大的矩阵会被拒绝。所有值在写入任何单元格之前就已校验，抛错的调用不会改动任何内容。样式设置器的含义与对应的 `Cell` 函数完全一致，只是作用于每个单元格：`Range.setStyle` 合并，facet 设置器替换该 facet、传 `undefined` 清除。因此 `Range.setBorder` 给每个单元格加边框，而不是给区域加外框。
 
 ### 读取区域
 
@@ -149,7 +170,7 @@ const values = Range.getValues(worksheet, "G7:H19");
 Range.getValues(worksheet, Range.create(7, 7, 19, 8)); // 等价于 "G7:H19"
 ```
 
-整列（`"A:A"`）和整行（`"1:5"`）引用会被拒绝 —— 它们没有可读的边界，未设置的区域同理。要读取整张表，可以传 `Worksheet.getDimensions(worksheet)`（没有单元格的表返回 `undefined`，与 `Row.getLast` 一致），或者用 `Worksheet.getValues(worksheet)` —— 注意后者按行**号**索引，`result[1]` 是第 1 行，`result[0]` 为空。`{ base: 0 }` 按 `Row.getValues` 和 `Column.getValues` 的方式索引（第 1 行和 A 列都在 `0`），`{ base: 1 }` 则明确要求按编号索引。
+整列（`"A:A"`）和整行（`"1:5"`）引用会被拒绝 —— 它们没有可读的边界，未设置的区域同理。要读取整张表，可以传 `Worksheet.getDimensions(worksheet)`（没有单元格的表返回 `undefined`，与 `Row.getLast` 一致），或者用 `Worksheet.getValues(worksheet, { base })`。`{ base: 0 }` 按 `Row.getValues` 和 `Column.getValues` 的方式索引（第 1 行和 A 列都在 `0`）；`{ base: 1 }` 按行号和列号索引，`result[1]` 是第 1 行，`result[0]` 为空。不传 `options` 的调用已弃用：它返回按编号索引的结果，与 `Row`、`Column` 的默认不同，所以现在必须写明 base。
 
 ### 设置单元格样式
 
@@ -371,7 +392,7 @@ Image.place(worksheet, fileId, "F2:H6");
 （按句柄或按它在列表中的下标），并返回是否确有移除。图片仍注册在工作簿中，在下次保存前其 id 可再次放置；
 写出文件时，被你移除了最后一处使用、且没有其他内容引用的图片不会写入文件；
 从未放置的图片，或读入的文件中本就未被引用的图片，仍照旧写出。
-`Watermark.get(ws)` 返回工作表水印的副本，没有时返回 `null`；要替换水印请用 `Watermark.set`。
+`Watermark.get(ws)` 返回工作表水印的副本，没有时返回 `undefined`；要替换水印请用 `Watermark.set`。
 
 每个 `remove` 接受 `list` 返回的那一项，或它在列表中的位置（整数）；没有这一项时返回 `false`。其他值——名称、引用字符串、
 `1.5`——什么也不指，会以 `ExcelArgumentError` 拒绝。`ConditionalFormatting.remove` 还接受规则块的 `ref`（`"A1:B9"`，与
@@ -594,6 +615,12 @@ Cell.setNote(worksheet, "C1", {
   width: 200,
   height: 120
 });
+
+// 作者放在选项里；读取不会创建任何东西
+Cell.setNote(worksheet, "D1", "Reviewed", { author: "Alice" });
+Cell.getNote(worksheet, "D1"); // "Reviewed"
+Cell.getNoteAuthor(worksheet, "D1"); // "Alice"
+Cell.removeNote(worksheet, "D1"); // true
 ```
 
 ### 自动适应列宽
@@ -2396,7 +2423,7 @@ for await (const worksheet of reader) {
 逐行写入大型 XLSX 文件：
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
 const workbook = new Stream.WorkbookWriter({
   filename: "output.xlsx",
@@ -2404,7 +2431,7 @@ const workbook = new Stream.WorkbookWriter({
   useStyles: true
 });
 
-const sheet = workbook.addWorksheet("Data");
+const sheet = Workbook.addWorksheet(workbook, "Data");
 for (let i = 0; i < 1000000; i++) {
   Stream.commitRow(sheet.addRow([`Row ${i}`, i, new Date()]));
 }
@@ -2416,7 +2443,7 @@ await workbook.commit();
 在写入器上注册的命名单元格样式用 `Stream.applyCellStyle` 应用，它像 `Cell.applyStyle` 一样检查名称：
 
 ```typescript
-workbook.addCellStyle("Totals", { font: { bold: true } });
+Workbook.addCellStyle(workbook, "Totals", { font: { bold: true } });
 Stream.applyCellStyle(Stream.getRowCell(row, 3), "Totals"); // 名称未定义时抛出
 ```
 
@@ -2431,15 +2458,69 @@ Stream.applyCellStyle(Stream.getRowCell(row, 3), "Totals"); // 名称未定义�
 
 ```typescript
 const writer = new Stream.WorkbookWriter();
-const rows = writer.addWorksheet("Data");
+const rows = Workbook.addWorksheet(writer, "Data");
 Stream.commitRow(rows.addRow([1, 2, 3]));
 const bytes = await writer.toBuffer();
+```
+
+流式写入器接受与内存工作簿相同的 namespace 函数，只要该操作对写入器有意义——`Workbook.addWorksheet` / `getWorksheet` /
+`protect` / `addCellStyle`、`Worksheet.merge` / `protect`、`Column.setDefinitions` / `setWidth` / `setKey`、
+`Image.add` / `place` / `setBackground`、`Watermark.set`（overlay 模式）、`ConditionalFormatting.add` 和
+`DataValidation.add`。写入器自己的检查照常生效：工作表（或合并涉及的行）一旦提交，编辑以 `ExcelStreamStateError`
+拒绝；列定义随第一行一起写出，因此第一行提交后修改列同样被拒绝。需要单元格或整个内存工作簿的操作——
+`Worksheet.unmerge`、`Column.getValues` / `autoFit`、形状、`Workbook.removeWorksheet`、图表工作表、`Workbook.toBuffer`
+——抛出 `ExcelUnsupportedFeatureError`；写入器用它自己的 `commit()` 或 `toBuffer()` 结束。
+
+流式工作表的单元格、行和区域与任何工作表一样按位置寻址——`Cell.setValue(sheet, "B2", 1)`、
+`Row.setHeight(sheet, 2, 30)`、`Range.setValues(sheet, "A1:C2", rows)`——前提是这些行仍在写入器中。写入器已写出的行，
+编辑或读取都会以 `ExcelStreamStateError` 拒绝（区域写入整体拒绝，不改任何单元格）；需要移动或遍历已写出行的操作
+（`Row.insert`、`Row.splice`、`Row.each` 等）抛出 `ExcelUnsupportedFeatureError`。`Stream.setCell*` / `Stream.setRow*`
+通过 `addRow` 返回的句柄做同样的事，适用于刚添加、尚未按位置寻址的那一行：
+
+```typescript
+const row = sheet.addRow(["合计", 0]);
+Stream.setRowFont(row, { bold: true }); // 通过 addRow 返回的句柄
+Cell.setNumFmt(sheet, { row: row.number, col: 2 }, "0.00"); // 或按位置
+Stream.commitRow(row);
+```
+
+```typescript
+import {
+  Column,
+  ConditionalFormatting,
+  Image,
+  Stream,
+  Workbook,
+  Worksheet
+} from "documonster/excel";
+
+const writer = new Stream.WorkbookWriter({ filename: "report.xlsx" });
+const logo = Image.add(writer, { filename: "logo.png", extension: "png" });
+const sheet = Workbook.addWorksheet(writer, "Report");
+Column.setWidth(sheet, "A", 30);
+Image.place(sheet, logo, "E1:G4");
+sheet.addRow(["季度报告"]);
+Worksheet.merge(sheet, "A1:C1");
+ConditionalFormatting.add(sheet, {
+  ref: "B2:B100",
+  rules: [
+    {
+      type: "cellIs",
+      operator: "greaterThan",
+      formulae: [90],
+      style: { font: { bold: true } },
+      priority: 1
+    }
+  ]
+});
+await Worksheet.protect(sheet, { password: "pw" });
+await writer.commit();
 ```
 
 ### Web Streams（Node.js 22+ 和浏览器）
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
 // 写入 Web WritableStream
 const chunks: Uint8Array[] = [];
@@ -2450,7 +2531,7 @@ const writable = new WritableStream({
 });
 
 const writer = new Stream.WorkbookWriter({ stream: writable });
-const sheet = writer.addWorksheet("Sheet1");
+const sheet = Workbook.addWorksheet(writer, "Sheet1");
 Stream.commitRow(sheet.addRow(["Name", "Score"]));
 Stream.commitRow(sheet.addRow(["Alice", 98]));
 sheet.commit();
@@ -2531,20 +2612,20 @@ excel 模块有自己的 IIFE 产物，挂在 `Documonster.Excel` 下——命�
 
 ### 单元格寻址
 
-每个 `Cell` 函数只接受两种形式——`"A1"` 地址，或 1-based 的 `(row, col)`：
+每个 `Cell` 函数用一个参数指定单元格：`"A1"` 地址，或 1-based 的 `{ row, col }` 位置（`CellPosition`）：
 
 ```typescript
 Cell.setValue(ws, "B3", 42);
-Cell.setValue(ws, 3, 2, 42);
-Cell.setFont(ws, 3, 2, { bold: true }); // facet 设置器同样支持两种形式
+Cell.setValue(ws, { row: 3, col: 2 }, 42);
+Cell.setFont(ws, { row: 3, col: 2 }, { bold: true }); // facet 设置器同样支持两种形式
 ```
 
-混用会直接编译报错，而不是静默读错单元格：`Cell.getValue(ws, "A1", 99)` 以前能编译，
-实际读的是 `"CUA1"`；`Cell.getValue(ws, 5)` 以前能编译，运行时抛异常。两者现在都被拒绝。
+`Cell.getFullAddress` 的返回值本身就是位置，可以直接传回。地址之后的参数无论哪种形式都是值，
+少传参数会编译报错，而不是把列号当成值。
 
 超出网格的位置——第 0 行、第 16 385 列、`"ZZ0"`——无论 getter 还是 setter，都会在改动任何内容之前以
 `ExcelRowOutOfBoundsError`、`ExcelColumnOutOfBoundsError` 或 `ExcelInvalidAddressError` 拒绝。三者都是 `ExcelArgumentError`，其 `field`
-给出参数名（`row`、`col`、`addr`），因此为错误输入写的一个 `catch` 就能捕获它们。读取时，*文件*中出现的同样位置则报告为读取器的解析错误——
+给出参数名（`addr`，位置形式为 `addr.row` / `addr.col`），因此为错误输入写的一个 `catch` 就能捕获它们。读取时，*文件*中出现的同样位置则报告为读取器的解析错误——
 `XlsxParseError`（XLSB 为 `XlsbParseError`，CSV 和 Markdown 为指明行号的 `ExcelFileError`），消息中给出部件，位置错误作为 `cause`——
 因为格式错误的文件不是错误的参数。
 
@@ -2607,13 +2688,13 @@ Cell.getTemporal(ws, "A2"); // Temporal.PlainTime 09:30:00
 ### 按 key 定位列
 
 `Column.*` 接受 key、列字母或 1-based 列号。`Column.getNumber` 把 key 桥接到
-`(row, col)` 形式，`Column.getDefinitions` 则是 `Column.setDefinitions` 的反函数：
+`{ row, col }` 位置，`Column.getDefinitions` 则是 `Column.setDefinitions` 的反函数：
 
 ```typescript
 Column.setDefinitions(ws, [{ header: "Total", key: "total", width: 12 }]);
 
 const col = Column.getNumber(ws, "total"); // 1
-Cell.setValue(ws, 2, col, 99);
+Cell.setValue(ws, { row: 2, col }, 99);
 
 // 追加一列并保留既有定义——不需要手抄字段。
 Column.setDefinitions(ws, [...Column.getDefinitions(ws), { header: "Error", key: "error" }]);
@@ -2731,10 +2812,15 @@ Cell.getValue(ws, "A1000"); // null
 Row.getCount(ws); // 不变
 ```
 
-样式读取函数 —— `getStyle`、`getFont`、`getAlignment`、`getBorder`、`getFill`、
-`getProtection` —— 以及 `getModel` **会**创建单元格，因为它们返回的
-是可以就地修改的活对象（`Cell.getStyle(ws, "B2").font = { bold: true }`），单元格不存在
-就没有东西可改。要判断单元格是否存在，用 `Cell.has`。要读取整个区域，用 `Range.getValues` /
+**读取函数返回的东西归你所有。** `Cell.getValue`、各个取值函数（`Row`、`Column`、`Range`、
+`Worksheet.getValues`、`toAoa`、`toJson`）、`getResult`、`getNote`、样式分面读取函数（`getFont`、
+`getAlignment`、`getBorder`、`getFill`、`getProtection`）、`findStyle` 以及 `getModel`（`Cell`、
+`Worksheet` 与 `Row`、`Table`、`Image` 一样）返回的都是副本：修改它不会改动工作簿，要改请用对应的
+setter。传给 setter 的值同样会被复制，事后修改你自己的对象不会影响单元格。
+
+唯一的例外是 `Cell.getStyle`，这是有意的：它返回单元格的**活**样式，用于就地修改
+（`Cell.getStyle(ws, "B2").font = { bold: true }`），因此会创建单元格——单元格不存在就没有东西可改。
+要判断单元格是否存在，用 `Cell.has`。要读取整个区域，用 `Range.getValues` /
 `Worksheet.toAoa`；只读一列则用 `Column.getValues`。
 
 如果要概览整张工作表（表头行、首行数据、合计行、公式位置），参见
@@ -2800,11 +2886,11 @@ const save = (wb: Workbook.Handle) => {
 流式 API 的类型挂在 `Stream` 命名空间上，与流式类放在一起：
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
 const options: Stream.WorkbookWriterOptions = { filename: "big.xlsx", useSharedStrings: true };
 const writer = new Stream.WorkbookWriter(options);
-const sheet: Stream.WorksheetWriter = writer.addWorksheet("Data");
+const sheet: Stream.WorksheetWriter = Workbook.addWorksheet(writer, "Data");
 ```
 
 单元格值类型、公式类型、Excel 错误字符串以及常用纸张尺寸都是既可当值又可当类型的常量

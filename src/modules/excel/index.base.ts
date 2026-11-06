@@ -37,6 +37,11 @@ export * as Form from "@excel/surface/form";
 export * as Chartsheet from "@excel/surface/chartsheet";
 export * as DataValidation from "@excel/surface/data-validation";
 export * as DefinedNames from "@excel/surface/defined-names";
+/**
+ * @deprecated A cell's note is read and written through `Cell` — `Cell.setNote(ws, addr, note, { author })`,
+ * `Cell.getNote`, `Cell.getNoteAuthor`, `Cell.removeNote`; a note record is needed only by the deprecated
+ * `Cell.setComment`. Removed in 1.0.
+ */
 export * as Note from "@excel/surface/note";
 export * as Address from "@excel/surface/address";
 export * as Anchor from "@excel/surface/anchor";
@@ -169,7 +174,7 @@ export type { ColumnData } from "@excel/core/column";
 export type { ColumnView } from "@excel/core/column";
 
 // Addresses and ranges.
-export type { DecodedAddress } from "@excel/types";
+export type { CellPosition, DecodedAddress } from "@excel/types";
 export type { CellAddress, Origin, SheetRange } from "@excel/utils/address";
 export type { DecodedRange } from "@excel/utils/col-cache";
 export type { RangeInput } from "@excel/core/range";
@@ -337,7 +342,7 @@ export type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 // Format-aware IO. `WorkbookFormat` is the choice; the option bags are what carry it.
 export type { WorkbookFormat } from "@excel/core/workbook-format";
 export type {
-  // The `encryption` write option: the same type Word's `Io.toBuffer` and `WordCrypto.encrypt` take (`DocxEncryptOptions`).
+  // The `encryption` write option: the same type Word's `Document.toBuffer` and `WordCrypto.encrypt` take (`DocxEncryptOptions`).
   // `Workbook`-prefixed like the option bag carrying it, because it applies to XLSX and XLSB alike.
   WorkbookEncryptOptions,
   UnrecognizedValue,
@@ -430,6 +435,11 @@ export {
 export type { BaseErrorOptions } from "@utils/errors";
 export type {
   ExcelFileErrorOptions,
+  ExcelInvalidValueTypeErrorOptions,
+  ExcelLimit,
+  ExcelLimitExceededErrorOptions,
+  ExcelPositionErrorOptions,
+  // Deprecated pre-prefix names; removed in 1.0.
   InvalidValueTypeErrorOptions,
   PositionErrorOptions
 } from "@excel/errors";

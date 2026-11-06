@@ -14,17 +14,25 @@
  * @module
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import type { BiDiDirection, ScriptType, ShapedCluster, ShapingOptions } from "@utils/text-shaping";
 import {
   detectDirection as detectDirectionImpl,
   detectScript as detectScriptImpl,
   shapeText as shapeTextImpl
 } from "@utils/text-shaping";
-import { checkBoolean, checkOneOf, checkRecord, checkString } from "@word/core/argument-checks";
+import { checkString } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
 
 export type { BiDiDirection, ScriptType, ShapedCluster, ShapingOptions };
 
-const DIRECTIONS: ReadonlySet<string> = new Set<BiDiDirection>(["ltr", "rtl"]);
+const shapingOptionsSchema = w.record({
+  direction: w.oneOf(["ltr", "rtl"]).optional(),
+  arabicJoining: w.boolean().optional(),
+  bidiReorder: w.boolean().optional()
+});
+const _shapingOptionsMatch: SchemaMatches<typeof shapingOptionsSchema, ShapingOptions> = true;
+void _shapingOptionsMatch;
 
 /**
  * Shape a text string for complex script rendering.
@@ -37,10 +45,7 @@ const DIRECTIONS: ReadonlySet<string> = new Set<BiDiDirection>(["ltr", "rtl"]);
 export function shapeText(text: string, options?: ShapingOptions): ShapedCluster[] {
   const where = "Font.shapeText";
   checkString(text, "text", where);
-  checkRecord(options, "options", where, { optional: true });
-  checkOneOf(options?.direction, DIRECTIONS, "options.direction", where, { optional: true });
-  checkBoolean(options?.arabicJoining, "options.arabicJoining", where, { optional: true });
-  checkBoolean(options?.bidiReorder, "options.bidiReorder", where, { optional: true });
+  checkSchema(shapingOptionsSchema.optional(), options, where);
   return shapeTextImpl(text, options);
 }
 

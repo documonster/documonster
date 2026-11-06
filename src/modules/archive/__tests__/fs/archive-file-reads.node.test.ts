@@ -17,7 +17,7 @@ describe("ArchiveFile lookups", () => {
     expect(file.has("missing")).toBe(false);
     expect(file.getEntry("a.txt")).toMatchObject({ path: "a.txt", size: 7, isDirectory: false });
     expect(file.getEntry("d/")?.isDirectory).toBe(true);
-    expect(file.getEntry("missing")).toBeNull();
+    expect(file.getEntry("missing")).toBeUndefined();
   });
 
   it.each([42, undefined, ""])("refuses %j as a name in every read", bad => {

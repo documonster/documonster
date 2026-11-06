@@ -82,16 +82,13 @@ function loadXlsxReader() {
 /**
  * Serialize a workbook to xlsx bytes.
  *
- * Returns a `Buffer` on Node — the same nominal type `fs.writeFile`, `res.end`,
- * and SDK upload bodies ask for — so callers do not need the defensive
- * `Buffer.from(bytes)` that a `Uint8Array` declaration invites, and which really
- * does copy the whole package.
+ * Resolves to a `Uint8Array` on every platform, as every other `toBuffer` in this package does. `fs.writeFile`,
+ * `res.end` and SDK upload bodies take one as they take a `Buffer`, and a caller who wants Buffer methods wraps it
+ * without a copy: `Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)`.
  *
- * The guarantee is structural, not a re-label: `StreamBuf.read()` already hands
- * back a `Buffer` view on Node, so the common path returns that value untouched,
- * and the fallback wraps the existing memory (`Buffer.from(buffer, byteOffset,
- * byteLength)` is a view, never a copy). Either way no bytes are duplicated, and
- * the declared type cannot silently drift from the runtime one.
+ * It is a plain `Uint8Array` at runtime too, not a `Buffer` typed as one: the two disagree on `slice` (a `Buffer`'s
+ * is a view, a `Uint8Array`'s a copy), so handing out a subclass under the base class's name would let the same
+ * call behave differently by platform. The view shares the package's memory; nothing is copied.
  *
  * **Timing this?** Measure with `NODE_ENV=production`. Outside production (and outside
  * vitest) every write runs the OOXML self-check, which re-parses the package it just
@@ -103,13 +100,18 @@ function loadXlsxReader() {
  * With `{ password }` the package is encrypted — Agile Encryption in an OLE compound file, what Excel writes for
  * "Encrypt with Password" — and `Workbook.read(bytes, { password })` reads it back; `encryption` tunes it.
  */
-export async function toBuffer(wb: WorkbookData, options?: WorkbookWriteOptions): Promise<Buffer> {
+export async function toBuffer(
+  wb: WorkbookData,
+  options?: WorkbookWriteOptions
+): Promise<Uint8Array> {
   checkWorkbook(wb);
   checkIoOptions("Workbook.toBuffer", options, "write");
+  // `null` is taken as no options, as the check documents.
+  options ??= undefined;
   const bytes = await packageBytes(wb, options);
-  return Buffer.isBuffer(bytes)
+  return Object.getPrototypeOf(bytes) === Uint8Array.prototype
     ? bytes
-    : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
 /**
@@ -131,7 +133,7 @@ async function packageBytes(
  * Read a workbook from its bytes — or from base64 text with `{ base64: true }` — and return it.
  *
  * The format is detected from the package contents unless `options.format` says otherwise. An encrypted workbook is
- * read with `options.password`, as Word's `Io.read` reads an encrypted document.
+ * read with `options.password`, as Word's `Document.read` reads an encrypted document.
  * Detection reads the ZIP central directory; a base64 string is decoded once and the bytes
  * are reused by whichever loader runs, so an XLSX read pays for one directory scan and not
  * for a second decode.
@@ -184,7 +186,7 @@ async function readInto(
   const raw = normalizeBytes(data, options?.base64);
   // An encrypted workbook is decrypted with `options.password` first, so its package's format is the one detected.
   const bytes = raw && (await openWorkbookPackage(raw, workbookDecryption(options)));
-  const format = resolveReadFormat(bytes, options?.format);
+  const format = resolveReadFormat(bytes, options?.format, options?.zip);
   if (format === "xlsb") {
     if (!bytes) {
       // Only reachable when a caller forces `format: "xlsb"` on a string without `base64`.
@@ -328,6 +330,8 @@ export async function writeStream(
 ): Promise<void> {
   checkWorkbook(wb);
   checkIoOptions("Workbook.writeStream", options, "write");
+  // `null` is taken as no options, as the check documents.
+  options ??= undefined;
   // A Web `WritableStream` is driven as the Node-style writable the serializers expect; anything else is refused here.
   // A Node-style writable is checked and used in this tick, so a sink that fails straight away is observed; only a
   // Web stream waits for the adapter to load.
@@ -434,7 +438,7 @@ export function toStream(
   options?: XlsxStreamOptions & WorkbookWriteOptions
 ): XlsxReadable & Readable {
   checkWorkbook(wb);
-  checkIoOptions("Workbook.toStream", options, "write");
+  checkIoOptions("Workbook.toStream", options, "stream");
   if (options?.password !== undefined) {
     // An encrypted package is assembled and encrypted before its first byte can be handed out.
     return createXlsxByteStream(
@@ -540,7 +544,7 @@ async function readFileInto(
     }
     const opened = await openWorkbookPackage(bytes, workbookDecryption(options, filename));
     // An encrypted file's package is read as the format it is, whatever the file is called.
-    if (opened !== bytes && resolveReadFormat(opened, options?.format) === "xlsx") {
+    if (opened !== bytes && resolveReadFormat(opened, options?.format, options?.zip) === "xlsx") {
       const workbook = await (await loadXlsxReader()).readXlsxInto(wb, opened, options);
       workbook.sourceFilePath = filename;
       return workbook;
@@ -578,6 +582,8 @@ export async function writeFile(
   checkWorkbook(wb);
   checkFilePath("Workbook.writeFile", filename);
   checkIoOptions("Workbook.writeFile", options, "write");
+  // `null` is taken as no options, as the check documents.
+  options ??= undefined;
   const format = options?.format ?? formatFromPath(filename);
   if (format === "xlsb" || options?.password !== undefined) {
     // XLSB is written whole, and so is an encrypted package of either format.

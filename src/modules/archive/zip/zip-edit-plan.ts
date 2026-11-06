@@ -1,9 +1,16 @@
-import { checkArchiveSource, checkString, checkZipEntryOptions } from "@archive/core/entry-checks";
-import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
+import { checkArchiveArgument } from "@archive/core/arguments";
+import {
+  archiveSourceSchema,
+  checkArchiveSource,
+  checkString,
+  checkZipEntryOptions
+} from "@archive/core/entry-checks";
+import { ArchiveArgumentError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { resolveArchiveSourceToBuffer } from "@archive/io/archive-source";
 import type { ZipEntryOptions } from "@archive/zip";
 import { describeValue } from "@utils/describe-value";
+import { s } from "@utils/schema";
 
 /**
  * Serializable operation types for ZipEditPlan
@@ -73,48 +80,28 @@ export interface SerializedZipEditPlan {
   ops: SerializedZipEditOp[];
 }
 
-const EDIT_OP_FIELDS: Record<ZipEditOp["type"], readonly string[]> = {
-  set: ["name"],
-  delete: ["name"],
-  deleteDirectory: ["prefix"],
-  rename: ["from", "to"],
-  comment: []
-};
+const editOpSchema = s.variant(
+  "type",
+  {
+    set: s.object({ name: s.string(), source: archiveSourceSchema }),
+    delete: s.object({ name: s.string() }),
+    deleteDirectory: s.object({ prefix: s.string() }),
+    rename: s.object({ from: s.string(), to: s.string() }),
+    comment: s.object({ comment: s.string().optional() })
+  },
+  {
+    expected: 'an operation with type "set", "delete", "deleteDirectory", "rename", "comment"'
+  }
+);
 
 /** Refuse a list of operations a plan could not apply; `field` names the list in the caller's signature. */
 function checkEditOps(where: string, field: string, ops: unknown): void {
-  if (!Array.isArray(ops)) {
-    throw new ArchiveArgumentError(
-      field,
-      `${where}: ${field} must be an array of operations, got ${describeValue(ops)}`
-    );
-  }
-  ops.forEach((op: unknown, index) => {
-    const at = `${field}[${index}]`;
-    const type = (op as { type?: unknown } | null)?.type;
-    if (
-      typeof op !== "object" ||
-      op === null ||
-      typeof type !== "string" ||
-      !Object.hasOwn(EDIT_OP_FIELDS, type)
-    ) {
-      throw new ArchiveArgumentError(
-        at,
-        `${where}: ${at} must be an operation with type ${Object.keys(EDIT_OP_FIELDS)
-          .map(name => JSON.stringify(name))
-          .join(", ")}, got ${describeValue(op)}`
-      );
-    }
-    const record = op as Record<string, unknown>;
-    for (const name of EDIT_OP_FIELDS[type as ZipEditOp["type"]]) {
-      checkString(where, `${at}.${name}`, record[name]);
-    }
-    if (type === "set") {
-      checkArchiveSource(where, `${at}.source`, record.source);
-    } else if (type === "comment") {
-      checkString(where, `${at}.comment`, record.comment, true);
-    }
-  });
+  checkArchiveArgument(
+    s.array(editOpSchema, { expected: "an array of operations" }),
+    ops,
+    where,
+    field
+  );
 }
 
 /**
@@ -307,7 +294,10 @@ export class ZipEditPlan {
       );
     }
     if (data.version !== 1) {
-      throw new ArchiveError(`Unsupported ZipEditPlan version: ${data.version}`);
+      throw new ArchiveArgumentError(
+        "data.version",
+        `Archive.ZipEditPlan.deserialize: data.version must be 1, got ${describeValue(data.version)}`
+      );
     }
 
     if (!Array.isArray(data.ops)) {

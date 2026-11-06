@@ -207,7 +207,7 @@ export function formatField(
     } else {
       throw new CsvArgumentError(
         "options.typeTransform",
-        `${where}: typeTransform must return a string, Csv.forceQuote(…), Csv.preventQuote(…), null or undefined, got ${describeValue(transformed)} for column ${header ?? index}`
+        `${where}: options.typeTransform must return a string, Csv.forceQuote(…), Csv.preventQuote(…), null or undefined, got ${describeValue(transformed)} for column ${header ?? index}`
       );
     }
   } else {

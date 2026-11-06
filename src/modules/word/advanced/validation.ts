@@ -11,10 +11,12 @@
  * - Practical interoperability constraints from Word/LibreOffice
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import { findUnrecognizedValues } from "@utils/unrecognized-values";
-import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { checkHandle } from "@word/core/argument-checks";
 import { indexImagesByKey } from "@word/core/image-keys";
 import { EXTENSION_MEDIA_TYPE_MAP, KNOWN_IMAGE_MEDIA_TYPES } from "@word/core/image-media";
+import { checkSchema, w } from "@word/core/option-schema";
 import { isRangeMarker } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import type {
@@ -86,6 +88,18 @@ export interface ValidationOptions {
   readonly strict?: boolean;
 }
 
+const validationOptionsSchema = w.record({
+  maxSeverity: w.oneOf(["error", "warning", "info"]).optional(),
+  maxErrors: w.limit().optional(),
+  compatibilityMode: w
+    .oneOf(["word2007", "word2010", "word2013", "word2016", "word2019"])
+    .optional(),
+  strict: w.boolean().optional()
+});
+const _validationOptionsMatch: SchemaMatches<typeof validationOptionsSchema, ValidationOptions> =
+  true;
+void _validationOptionsMatch;
+
 // =============================================================================
 // Validation Engine
 // =============================================================================
@@ -102,7 +116,7 @@ export function validateDocument(
   options: ValidationOptions = {}
 ): ValidationResult {
   checkHandle(doc, "document", "doc", "Validation.validate");
-  checkRecord(options, "options", "Validation.validate");
+  checkSchema(validationOptionsSchema, options, "Validation.validate");
   const issues: ValidationIssue[] = [];
   const maxErrors = options.maxErrors ?? Infinity;
 

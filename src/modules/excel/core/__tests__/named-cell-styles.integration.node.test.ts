@@ -407,11 +407,11 @@ describe("named cell styles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Workbook.addCellStyle(wb, "H", { font: { bold: true } });
-    Cell.setValue(ws, 2, 3, "x"); // C2
-    Cell.applyStyle(ws, 2, 3, "H");
+    Cell.setValue(ws, { row: 2, col: 3 }, "x"); // C2
+    Cell.applyStyle(ws, { row: 2, col: 3 }, "H");
     expect(Cell.getStyle(ws, "C2").styleName).toBe("H");
     // Undefined name via the same overload must still throw.
-    expect(() => Cell.applyStyle(ws, 2, 3, "Missing")).toThrow(/not defined/);
+    expect(() => Cell.applyStyle(ws, { row: 2, col: 3 }, "Missing")).toThrow(/not defined/);
     await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
   });
 

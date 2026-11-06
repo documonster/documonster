@@ -43,16 +43,18 @@ const FORMULAS: [string, string][] = [
 describe.each(["xlsx", "xlsb"] as const)("@ through %s", format => {
   it("round-trips cell formulas", async () => {
     const { wb, ws } = book();
-    FORMULAS.forEach(([formula], i) => Cell.setValue(ws, 2, 3 + i * 2, { formula }));
+    FORMULAS.forEach(([formula], i) => Cell.setValue(ws, { row: 2, col: 3 + i * 2 }, { formula }));
     calculateFormulas(wb);
-    const before = FORMULAS.map((_, i) => Cell.getResult(ws, 2, 3 + i * 2));
+    const before = FORMULAS.map((_, i) => Cell.getResult(ws, { row: 2, col: 3 + i * 2 }));
     const read = await Workbook.read(await Workbook.toBuffer(wb, { format }));
     const back = Workbook.getWorksheet(read, "S")!;
-    expect(FORMULAS.map((_, i) => Cell.getFormula(back, 2, 3 + i * 2))).toEqual(
+    expect(FORMULAS.map((_, i) => Cell.getFormula(back, { row: 2, col: 3 + i * 2 }))).toEqual(
       FORMULAS.map(([formula, xlsb]) => (format === "xlsx" ? formula : xlsb))
     );
     calculateFormulas(read);
-    expect(FORMULAS.map((_, i) => Cell.getResult(back, 2, 3 + i * 2))).toEqual(before);
+    expect(FORMULAS.map((_, i) => Cell.getResult(back, { row: 2, col: 3 + i * 2 }))).toEqual(
+      before
+    );
   });
 
   it("round-trips a defined name, a conditional format and a validation", async () => {

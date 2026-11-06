@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Build, Diff, Document, Io, Transform } from "../index";
+import { Build, Diff, Document, Transform } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -50,13 +50,13 @@ const ch3 = makeChapter("Chapter 3 — Resolution", ["The hero prevails.", "Curt
 // 1. Merge
 // ---------------------------------------------------------------------------
 const merged = Transform.merge([ch1, ch2, ch3], { sectionBreak: "nextPage" });
-const mergedBuf = await Io.toBuffer(merged);
+const mergedBuf = await Document.toBuffer(merged);
 fs.writeFileSync(path.join(outDir, "01-merged.docx"), mergedBuf);
 console.log(`  → 01-merged.docx (${mergedBuf.length} bytes)`);
 
 // Edge: merge a single document
 const oneMerged = Transform.merge([ch1]);
-fs.writeFileSync(path.join(outDir, "01-single-merged.docx"), await Io.toBuffer(oneMerged));
+fs.writeFileSync(path.join(outDir, "01-single-merged.docx"), await Document.toBuffer(oneMerged));
 
 // Edge: empty merge — invalid, requires at least one doc; we guard:
 try {
@@ -71,7 +71,7 @@ try {
 const splits = Transform.split(merged, { by: "section" });
 console.log(`  Transform.split(by:"section") produced ${splits.length} parts`);
 for (const [i, part] of splits.entries()) {
-  const buf = await Io.toBuffer(part);
+  const buf = await Document.toBuffer(part);
   fs.writeFileSync(path.join(outDir, `02-split-${i + 1}.docx`), buf);
 }
 
@@ -86,7 +86,7 @@ Document.addParagraph(pageDoc, "Page C content.");
 const pageSplits = Transform.split(pageDoc, { by: "pageBreak" });
 console.log(`  Transform.split(by:"pageBreak") produced ${pageSplits.length} parts`);
 for (const [i, part] of pageSplits.entries()) {
-  const buf = await Io.toBuffer(part);
+  const buf = await Document.toBuffer(part);
   fs.writeFileSync(path.join(outDir, `03-pages-${i + 1}.docx`), buf);
 }
 
@@ -105,7 +105,7 @@ const headingSplits = Transform.split(headingDoc, {
 });
 console.log(`  Transform.split(by:"heading", level:1) produced ${headingSplits.length} parts`);
 for (const [i, part] of headingSplits.entries()) {
-  const buf = await Io.toBuffer(part);
+  const buf = await Document.toBuffer(part);
   fs.writeFileSync(path.join(outDir, `04-heading-${i + 1}.docx`), buf);
 }
 
@@ -172,7 +172,7 @@ for (const change of diff.entries) {
     Build.paragraph([Build.bold(`[${change.type}] `), Build.text(JSON.stringify(change))])
   );
 }
-fs.writeFileSync(path.join(outDir, "05-diff-summary.docx"), await Io.toBuffer(redline));
+fs.writeFileSync(path.join(outDir, "05-diff-summary.docx"), await Document.toBuffer(redline));
 console.log(`  → 05-diff-summary.docx`);
 
 // Quiet linter

@@ -147,7 +147,7 @@ function autoFilterRef(filter: AutoFilter | undefined): string | undefined {
  * - a merged cell as its master's value, which is what `Cell.getValue` reads for it.
  */
 export function plainValue(ws: Worksheet.Handle, r: number, c: number): PlainValue {
-  const value = Cell.getValue(ws, r, c);
+  const value = Cell.getValue(ws, { row: r, col: c });
   if (value === null || typeof value !== "object" || value instanceof Date) {
     return value ?? null;
   }
@@ -161,7 +161,7 @@ export function plainValue(ws: Worksheet.Handle, r: number, c: number): PlainVal
     return value.checkbox;
   }
   if ("richText" in value || "text" in value) {
-    return Cell.getText(ws, r, c);
+    return Cell.getText(ws, { row: r, col: c });
   }
   return null;
 }
@@ -203,7 +203,7 @@ function formulaOf(
 ): ColumnInfo["firstFormula"] {
   if (value !== null && typeof value === "object" && !isArrayAnchor(value)) {
     if ("sharedFormula" in value) {
-      return { address, kind: "shared", text: Cell.getFormula(ws, r, c) ?? "" };
+      return { address, kind: "shared", text: Cell.getFormula(ws, { row: r, col: c }) ?? "" };
     }
     if ("formula" in value) {
       return { address, kind: "own", text: value.formula };
@@ -291,7 +291,7 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
         header: "",
         // One known address, read directly: nothing is created if the cell is empty.
         firstDataValue: own ? plainValue(ws, first, c) : null,
-        firstDataText: own ? Cell.getDisplayText(ws, first, c) : "",
+        firstDataText: own ? Cell.getDisplayText(ws, { row: first, col: c }) : "",
         sample: "",
         formulas: { own: 0, shared: 0, array: 0 }
       };
@@ -320,11 +320,11 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
         return;
       }
       if (r === region.totalsRow) {
-        info.total = Cell.getDisplayText(ws, r, c);
+        info.total = Cell.getDisplayText(ws, { row: r, col: c });
         return;
       }
       region.hasData = true;
-      info.sample ||= Cell.getDisplayText(ws, r, c);
+      info.sample ||= Cell.getDisplayText(ws, { row: r, col: c });
 
       const formula = formulaOf(ws, Cell.getView(ws, address)!.value, address, arrays, r, c);
       if (formula) {

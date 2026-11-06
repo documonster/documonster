@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Package, Template, Units } from "../index";
+import { Document, Build, Package, Template, Units } from "../index";
 import type { ChartBinding } from "../index";
 
 const outDir = path.resolve(
@@ -33,7 +33,7 @@ function buildTemplateBytes(): Promise<Uint8Array> {
   Document.addHeading(d, "Invoice {{invoiceNo}}", 1);
   Document.addParagraph(d, "Customer: {{customer}}");
   Document.addParagraph(d, "Total: {{total}}");
-  return Io.toBuffer(d);
+  return Document.toBuffer(d);
 }
 const templateBytes = await buildTemplateBytes();
 fs.writeFileSync(path.join(outDir, "00-template.docx"), templateBytes);
@@ -90,7 +90,7 @@ console.log(`  composite.getData() keys: ${Object.keys(composite.getData()).join
 const compositeFilled = Template.fillFromSource(compiled._doc, composite, {
   strict: false
 });
-const compositeBytes = await Io.toBuffer(compositeFilled);
+const compositeBytes = await Document.toBuffer(compositeFilled);
 fs.writeFileSync(path.join(outDir, "03-composite.docx"), compositeBytes);
 console.log(`  → 03-composite.docx (${compositeBytes.length} bytes)`);
 
@@ -134,7 +134,7 @@ const bindings: ChartBinding[] = [
   }
 ];
 const boundDoc = Template.bindChartData(chartTemplate, bindings);
-fs.writeFileSync(path.join(outDir, "04-chart-bound.docx"), await Io.toBuffer(boundDoc));
+fs.writeFileSync(path.join(outDir, "04-chart-bound.docx"), await Document.toBuffer(boundDoc));
 console.log(`  → 04-chart-bound.docx`);
 
 // ---------------------------------------------------------------------------

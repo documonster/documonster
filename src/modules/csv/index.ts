@@ -187,7 +187,8 @@ export type DecimalSeparator = CsvNumber.DecimalSeparator;
 // Errors
 // =============================================================================
 
-export { CsvError, CsvArgumentError, isCsvError } from "@csv/errors";
+export { CsvError, CsvArgumentError, CsvLimitExceededError, isCsvError } from "@csv/errors";
+export type { CsvLimit } from "@csv/errors";
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";

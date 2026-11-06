@@ -100,11 +100,11 @@ async function main(): Promise<void> {
   };
 
   const applyYearHeader = (ws: Worksheet.Handle, row: number): void => {
-    Cell.setValue(ws, row, 1, "Line item");
+    Cell.setValue(ws, { row, col: 1 }, "Line item");
     YEARS.forEach((y, i) => {
-      Cell.setValue(ws, row, 2 + i, y);
+      Cell.setValue(ws, { row, col: 2 + i }, y);
     });
-    Cell.setValue(ws, row, 2 + YEARS.length, "YoY %");
+    Cell.setValue(ws, { row, col: 2 + YEARS.length }, "YoY %");
     Row.setFont(ws, row, { bold: true, color: { argb: "FFFFFFFF" } });
     Row.setFill(ws, row, {
       type: "pattern",
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
     });
     Row.setAlignment(ws, row, { horizontal: "center" });
     Row.setHeight(ws, row, 20);
-    Cell.setStyle(ws, row, 1, { alignment: { horizontal: "left", indent: 1 } });
+    Cell.setStyle(ws, { row, col: 1 }, { alignment: { horizontal: "left", indent: 1 } });
   };
 
   // ---------------------------------------------------------------------------
@@ -165,12 +165,16 @@ async function main(): Promise<void> {
   ];
   execLines.forEach((line, i) => {
     const r = 7 + i;
-    Cell.setValue(cover, r, 2, line[0] as string);
-    Cell.setValue(cover, r, 3, line[1] as number);
-    Cell.setStyle(cover, r, 3, { numFmt: line[2] as string });
-    Cell.setStyle(cover, r, 3, { font: { bold: true, color: { argb: "FF1F3864" } } });
-    Cell.setValue(cover, r, 4, line[3] as string);
-    Cell.setStyle(cover, r, 4, { font: { italic: true, color: { argb: "FF7F7F7F" } } });
+    Cell.setValue(cover, { row: r, col: 2 }, line[0] as string);
+    Cell.setValue(cover, { row: r, col: 3 }, line[1] as number);
+    Cell.setStyle(cover, { row: r, col: 3 }, { numFmt: line[2] as string });
+    Cell.setStyle(cover, { row: r, col: 3 }, { font: { bold: true, color: { argb: "FF1F3864" } } });
+    Cell.setValue(cover, { row: r, col: 4 }, line[3] as string);
+    Cell.setStyle(
+      cover,
+      { row: r, col: 4 },
+      { font: { italic: true, color: { argb: "FF7F7F7F" } } }
+    );
   });
 
   // Signature block
@@ -541,11 +545,15 @@ async function main(): Promise<void> {
     }
     // YoY column
     if (def.formula) {
-      Cell.setValue(balance, row, 5, {
-        formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
-        result: 0
-      });
-      Cell.setStyle(balance, row, 5, { numFmt: PERCENT });
+      Cell.setValue(
+        balance,
+        { row, col: 5 },
+        {
+          formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
+          result: 0
+        }
+      );
+      Cell.setStyle(balance, { row, col: 5 }, { numFmt: PERCENT });
     }
   });
 
@@ -553,11 +561,15 @@ async function main(): Promise<void> {
   Cell.setValue(balance, "A28", "Debt ratio (total liabilities ÷ total assets)");
   Cell.setStyle(balance, "A28", { font: { italic: true } });
   ["B", "C", "D"].forEach((col, i) => {
-    Cell.setValue(balance, 28, 2 + i, {
-      formula: `=${col}19/${col}12`,
-      result: 0
-    });
-    Cell.setStyle(balance, 28, 2 + i, { numFmt: PERCENT });
+    Cell.setValue(
+      balance,
+      { row: 28, col: 2 + i },
+      {
+        formula: `=${col}19/${col}12`,
+        result: 0
+      }
+    );
+    Cell.setStyle(balance, { row: 28, col: 2 + i }, { numFmt: PERCENT });
   });
 
   DefinedNames.add(Workbook.getDefinedNames(wb), "'Balance Sheet'!$D$28", "CurrentDebtRatio");
@@ -779,13 +791,17 @@ async function main(): Promise<void> {
 
   assumptions.forEach((a, i) => {
     const row = 5 + i;
-    Cell.setValue(forecast, row, 1, a.label);
-    Cell.setValue(forecast, row, 2, a.actual);
-    Cell.setValue(forecast, row, 3, a.plan1);
-    Cell.setValue(forecast, row, 4, a.plan2);
-    Cell.setValue(forecast, row, 5, a.notes);
-    Cell.setStyle(forecast, row, 5, { font: { italic: true, color: { argb: "FF595959" } } });
-    [2, 3, 4].forEach(c => Cell.setStyle(forecast, row, c, { numFmt: a.fmt }));
+    Cell.setValue(forecast, { row, col: 1 }, a.label);
+    Cell.setValue(forecast, { row, col: 2 }, a.actual);
+    Cell.setValue(forecast, { row, col: 3 }, a.plan1);
+    Cell.setValue(forecast, { row, col: 4 }, a.plan2);
+    Cell.setValue(forecast, { row, col: 5 }, a.notes);
+    Cell.setStyle(
+      forecast,
+      { row, col: 5 },
+      { font: { italic: true, color: { argb: "FF595959" } } }
+    );
+    [2, 3, 4].forEach(c => Cell.setStyle(forecast, { row, col: c }, { numFmt: a.fmt }));
 
     // Data validation on the FY26/FY27 plan cells
     [3, 4].forEach(c => {
@@ -797,7 +813,7 @@ async function main(): Promise<void> {
         error: "Plan values must be between -50% and +100%",
         showErrorMessage: true
       });
-      Cell.setStyle(forecast, row, c, { protection: { locked: false } });
+      Cell.setStyle(forecast, { row, col: c }, { protection: { locked: false } });
     });
   });
 

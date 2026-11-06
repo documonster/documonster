@@ -168,7 +168,7 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
     width: pixelWidth,
     height: pixelHeight,
     data: samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples),
-    uncoveredCodePoints: [...canvas.uncoveredCodePoints].sort((a, b) => a - b),
+    uncoveredCodePoints: canvas.getUncoveredCodePoints(),
     textWarnings: canvas.getTextWarnings()
   };
 }

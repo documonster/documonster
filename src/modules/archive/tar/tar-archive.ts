@@ -6,16 +6,19 @@
  */
 
 import {
+  OPTIONS,
+  checkArchiveArgument,
+  dateSchema,
+  limitSchema,
+  streamOptionShape,
+  uintSchema
+} from "@archive/core/arguments";
+import {
   checkArchiveSource,
   checkBytes,
-  checkDate,
   checkEntryName,
   checkEntryPath,
-  checkOptionsObject,
-  checkReadOptions,
-  checkString,
-  checkUint,
-  TAR_READ_LIMITS
+  checkString
 } from "@archive/core/entry-checks";
 import {
   ArchiveArgumentError,
@@ -53,6 +56,8 @@ import type { TarParseOptions } from "@archive/tar/tar-parser";
 import { entrySizeLimit, parseTar, readTarStream } from "@archive/tar/tar-parser";
 import { isWritableStream } from "@stream/core/type-guards";
 import { concatUint8Arrays, textEncoder } from "@utils/binary";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // ============================================================================
 // Types
@@ -76,20 +81,24 @@ export interface TarArchiveOptions {
 const TAR_OCTAL_7_MAX = 0o7777777;
 
 /**
- * A TAR mtime: any valid `Date`. One outside the octal field's 1970–2242 is written in GNU
- * base-256, which GNU tar, bsdtar and libarchive read.
+ * The options of a TAR builder. A TAR mtime is any valid `Date`: one outside the octal field's
+ * 1970–2242 is written in GNU base-256, which GNU tar, bsdtar and libarchive read.
  */
-function checkTarDate(where: string, field: string, value: Date | undefined): void {
-  checkDate(where, field, value);
-}
+export const tarArchiveOptionShape = {
+  modTime: dateSchema.optional(),
+  ...streamOptionShape<TarArchiveProgress>()
+};
+const tarArchiveOptionsSchema = s.object(tarArchiveOptionShape, OPTIONS);
+const _tarArchiveOptionsMatch: SchemaMatches<typeof tarArchiveOptionsSchema, TarArchiveOptions> =
+  true;
+void _tarArchiveOptionsMatch;
 
-/** The options of a TAR builder (`createTar`, `packTar`, and the tar.gz forms). */
+/** The options of a TAR builder (`createTar`, `packTar`). */
 export function checkTarArchiveOptions(
   where: string,
   options: TarArchiveOptions | undefined
 ): void {
-  checkOptionsObject(where, options);
-  checkTarDate(where, "options.modTime", options?.modTime);
+  checkArchiveArgument(tarArchiveOptionsSchema.optional(), options, where, "options");
 }
 
 /** The entry types a caller may give: everything but the GNU and PAX metadata records. */
@@ -108,12 +117,9 @@ const TAR_ENTRY_TYPES: readonly string[] = [
 /** A ustar `uname` / `gname` field: 32 bytes with a terminating NUL. */
 const TAR_NAME_FIELD_MAX_BYTES = 31;
 
-function checkTarNameField(where: string, field: string, value: unknown): void {
+function checkTarNameField(where: string, field: string, value: string | undefined): void {
   if (value === undefined) {
     return;
-  }
-  if (typeof value !== "string") {
-    throw new ArchiveArgumentError(field, `${where}: ${field} must be a string`);
   }
   if (textEncoder.encode(value).length > TAR_NAME_FIELD_MAX_BYTES) {
     throw new ArchiveArgumentError(
@@ -123,35 +129,34 @@ function checkTarNameField(where: string, field: string, value: unknown): void {
   }
 }
 
+const tarEntryOptionsSchema = s.object(
+  {
+    mode: uintSchema(TAR_OCTAL_7_MAX).optional(),
+    // Past 2097151 an id is written in GNU base-256, which holds every safe integer.
+    uid: uintSchema(Number.MAX_SAFE_INTEGER).optional(),
+    gid: uintSchema(Number.MAX_SAFE_INTEGER).optional(),
+    uname: s.string().optional(),
+    gname: s.string().optional(),
+    modTime: dateSchema.optional(),
+    mtime: dateSchema.optional(),
+    type: s.oneOf(TAR_ENTRY_TYPES as readonly TarType[]).optional(),
+    linkname: s.string().optional()
+  },
+  OPTIONS
+);
+const _tarEntryOptionsMatch: SchemaMatches<typeof tarEntryOptionsSchema, TarArchiveEntryOptions> =
+  true;
+void _tarEntryOptionsMatch;
+
 function checkTarEntry(
   where: string,
   name: string,
   options: TarArchiveEntryOptions | undefined
 ): void {
   checkEntryName(where, name);
-  if (options === undefined) {
-    return;
-  }
-  checkUint(where, "options.mode", options.mode, TAR_OCTAL_7_MAX);
-  // Past 2097151 an id is written in GNU base-256, which holds every safe integer.
-  checkUint(where, "options.uid", options.uid, Number.MAX_SAFE_INTEGER);
-  checkUint(where, "options.gid", options.gid, Number.MAX_SAFE_INTEGER);
-  checkTarDate(where, "options.modTime", options.modTime);
-  checkTarDate(where, "options.mtime", options.mtime);
-  checkTarNameField(where, "options.uname", options.uname);
-  checkTarNameField(where, "options.gname", options.gname);
-  if (options.type !== undefined && !TAR_ENTRY_TYPES.includes(options.type)) {
-    throw new ArchiveArgumentError(
-      "options.type",
-      `${where}: options.type must be one of ${TAR_ENTRY_TYPES.map(t => JSON.stringify(t)).join(", ")}, got ${JSON.stringify(options.type)}`
-    );
-  }
-  if (options.linkname !== undefined && typeof options.linkname !== "string") {
-    throw new ArchiveArgumentError(
-      "options.linkname",
-      `${where}: options.linkname must be a string`
-    );
-  }
+  checkArchiveArgument(tarEntryOptionsSchema.optional(), options, where, "options");
+  checkTarNameField(where, "options.uname", options?.uname);
+  checkTarNameField(where, "options.gname", options?.gname);
 }
 
 export interface TarArchiveEntryOptions {
@@ -875,13 +880,13 @@ export class TarReader {
   }
 
   /**
-   * Get a specific entry by path (matches `ZipReader.get`); `null` when the archive has no such
+   * Get a specific entry by path (matches `ZipReader.get`); `undefined` when the archive has no such
    * entry. Of two members with one name the later is returned, as `tar -x` and `unpackTar` keep
    * it. Parses (and caches) the whole archive on first call — which is what lets a one-shot
    * source be read again by later calls; after an iteration has spent it, throws an
    * `ArchiveError` (see {@link TarReader}).
    */
-  async get(path: string): Promise<TarReaderEntry | null> {
+  async get(path: string): Promise<TarReaderEntry | undefined> {
     checkEntryPath("Archive.TarReader#get", path);
     return this._get(path, "get");
   }
@@ -895,18 +900,18 @@ export class TarReader {
   }
 
   /**
-   * Read one entry's bytes (matches `ZipReader.bytes`); `null` when the archive has no such
+   * Read one entry's bytes (matches `ZipReader.bytes`); `undefined` when the archive has no such
    * entry. Parses and caches the archive as {@link TarReader.get} does.
    */
-  async bytes(path: string): Promise<Uint8Array | null> {
+  async bytes(path: string): Promise<Uint8Array | undefined> {
     checkEntryPath("Archive.TarReader#bytes", path);
     // Through `get`, so a subclass that overrides it is honoured
     const entry = await this.get(path);
-    return entry ? entry.bytes() : null;
+    return entry ? entry.bytes() : undefined;
   }
 
-  private async _get(path: string, where: string): Promise<TarReaderEntry | null> {
-    return (await this._ensureParsed(where)).findLast(e => e.path === path) ?? null;
+  private async _get(path: string, where: string): Promise<TarReaderEntry | undefined> {
+    return (await this._ensureParsed(where)).findLast(e => e.path === path);
   }
 
   /**
@@ -989,6 +994,17 @@ export function openTarReader(
   return new TarReader(source, options);
 }
 
+const tarReaderOptionsSchema = s.object(
+  {
+    maxEntrySize: limitSchema.optional(),
+    maxFileSize: limitSchema.optional(),
+    ...streamOptionShape<TarReaderProgress>()
+  },
+  OPTIONS
+);
+const _tarReaderOptionsMatch: SchemaMatches<typeof tarReaderOptionsSchema, TarReaderOptions> = true;
+void _tarReaderOptionsMatch;
+
 /** What `openTar` / `openTarGz` are given, checked when the reader is opened. */
 export function checkTarReaderArguments(
   where: string,
@@ -996,7 +1012,7 @@ export function checkTarReaderArguments(
   options: TarReaderOptions | undefined
 ): void {
   checkSourceArgument(where, source);
-  checkReadOptions(where, options, TAR_READ_LIMITS);
+  checkArchiveArgument(tarReaderOptionsSchema.optional(), options, where, "options");
 }
 
 // ============================================================================

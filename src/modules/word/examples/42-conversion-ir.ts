@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Convert, Io, Units } from "../index";
+import { Document, Build, Convert, Units } from "../index";
 import type { SemanticBlock, SemanticInline } from "../index";
 
 const outDir = path.resolve(
@@ -68,11 +68,16 @@ Document.addTable(
   ],
   { headerRow: true, borders: true }
 );
-Document.addImage(d, tinyPng, "png", Units.cmToEmu(2), Units.cmToEmu(2), { altText: "tiny dot" });
+Document.addImage(d, tinyPng, {
+  type: "png",
+  width: Units.cmToEmu(2),
+  height: Units.cmToEmu(2),
+  altText: "tiny dot"
+});
 Document.addFootnote(d, "Footnote at the end of section A.");
 Document.addParagraph(d, "End of section A.");
 
-fs.writeFileSync(path.join(outDir, "00-source.docx"), await Io.toBuffer(d));
+fs.writeFileSync(path.join(outDir, "00-source.docx"), await Document.toBuffer(d));
 
 // ---------------------------------------------------------------------------
 // 1. Convert.createConversionContext + Convert.toSemantic

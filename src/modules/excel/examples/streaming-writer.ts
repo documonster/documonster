@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { streamBothFormats } from "@excel/examples/utils/stream-both";
-import { Stream } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -29,14 +29,14 @@ const style = {
 };
 
 await streamBothFormats(filename, { useStyles: true }, writer => {
-  const ws = writer.addWorksheet("blort");
-  ws.columns = [
+  const ws = Workbook.addWorksheet(writer, "blort");
+  Column.setDefinitions(ws, [
     { header: "A1", width: 10 },
     { header: "B1", width: 20, style },
     { header: "C1", width: 30 }
-  ];
+  ]);
 
-  Stream.setRowFont(ws.getRow(2), {
+  Row.setFont(ws, 2, {
     name: "Broadway",
     color: { argb: "FFFF0000" },
     outline: true,
@@ -45,7 +45,7 @@ await streamBothFormats(filename, { useStyles: true }, writer => {
 
   for (const row of [2, 3]) {
     for (const column of ["A", "B", "C"]) {
-      Stream.setCellValue(ws.getCell(`${column}${row}`), `${column}${row}`);
+      Cell.setValue(ws, `${column}${row}`, `${column}${row}`);
     }
   }
   // Committing the sheet is the caller's job: it is what says "no more rows", and it is when the trailing records

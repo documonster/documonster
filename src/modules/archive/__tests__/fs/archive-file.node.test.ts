@@ -24,7 +24,7 @@ describe("ArchiveFile opening", () => {
       expect(archive.getEntryNames()).toEqual(["a.txt"]);
     }
     expect(fromPath.sourcePath).toBe(path.resolve(file));
-    expect(fromBytes.sourcePath).toBeNull();
+    expect(fromBytes.sourcePath).toBeUndefined();
   });
 
   it("opens TAR, gunzipping a .tgz path", async () => {
@@ -33,25 +33,25 @@ describe("ArchiveFile opening", () => {
 
     const archive = await Archive.ArchiveFile.fromFile(file, { format: "tar" });
     expect(await archive.readAsText("t.txt")).toBe("tango");
-    expect(await archive.readEntry("missing")).toBeNull();
+    expect(await archive.readEntry("missing")).toBeUndefined();
   });
 });
 
 describe("ArchiveFile lookups", () => {
-  it("return null for a missing entry", async () => {
+  it("return undefined for a missing entry", async () => {
     const zip = new Archive.ArchiveFile({ password: "pw", encryptionMethod: "aes-256" });
     zip.addText("secret", "s.txt", { comment: "c" });
     const bytes = await zip.bytes();
     expect(zip.bytesSync().length).toBeGreaterThan(0);
     const archive = Archive.ArchiveFile.fromBuffer(bytes);
 
-    expect(archive.sourcePath).toBeNull();
-    expect(archive.getEntry("missing")).toBeNull();
-    expect(await archive.readEntry("missing")).toBeNull();
-    expect(archive.readEntrySync("missing")).toBeNull();
-    expect(await archive.readAsText("missing")).toBeNull();
-    expect(archive.readAsTextSync("missing")).toBeNull();
-    expect(archive.getZipEntryComment("missing")).toBeNull();
+    expect(archive.sourcePath).toBeUndefined();
+    expect(archive.getEntry("missing")).toBeUndefined();
+    expect(await archive.readEntry("missing")).toBeUndefined();
+    expect(archive.readEntrySync("missing")).toBeUndefined();
+    expect(await archive.readAsText("missing")).toBeUndefined();
+    expect(archive.readAsTextSync("missing")).toBeUndefined();
+    expect(archive.getZipEntryComment("missing")).toBeUndefined();
     expect(archive.getEntry("s.txt")?.comment).toBe("c");
     expect(archive.getZipEntryComment("s.txt")).toBe("c");
     const opened = Archive.ArchiveFile.fromBuffer(bytes, { password: "pw" });
@@ -62,7 +62,7 @@ describe("ArchiveFile lookups", () => {
     const zip = new Archive.ArchiveFile({ password: "pw", encryptionMethod: "aes-256" });
     zip.addText("secret", "s.txt");
     const archive = Archive.ArchiveFile.fromBuffer(await zip.toBuffer());
-    const decode = (data: Uint8Array | null) => new TextDecoder().decode(data!);
+    const decode = (data: Uint8Array | undefined) => new TextDecoder().decode(data!);
 
     expect(decode(await archive.readEntry("s.txt", { password: "pw" }))).toBe("secret");
     expect(await archive.readAsText("s.txt", { password: "pw", encoding: "utf-8" })).toBe("secret");

@@ -680,7 +680,7 @@ describe("ArchiveFile", () => {
     it("answers has() and getEntry() for TAR as for ZIP (read-only)", () => {
       const archive = new ArchiveFile({ format: "tar" });
       expect(archive.has("test.txt")).toBe(false);
-      expect(archive.getEntry("test.txt")).toBeNull();
+      expect(archive.getEntry("test.txt")).toBeUndefined();
       archive.addText("one", "test.txt").addText("two", "test.txt");
       expect(archive.has("test.txt")).toBe(true);
       expect(archive.getEntry("test.txt")).toMatchObject({ path: "test.txt", size: 3 });

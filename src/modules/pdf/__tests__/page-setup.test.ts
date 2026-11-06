@@ -81,7 +81,7 @@ function markerSheet(cols: number, rows: number, width = 12) {
   for (let c = 1; c <= cols; c++) {
     Column.setWidth(ws, c, width);
     for (let r = 1; r <= rows; r++) {
-      Cell.setValue(ws, r, c, `C${c}R${r}`);
+      Cell.setValue(ws, { row: r, col: c }, `C${c}R${r}`);
     }
   }
   return { wb, ws };
@@ -374,7 +374,7 @@ describe("pageSetup scaling", () => {
     // ~300pt unscaled against a 451pt content area: fits at 1.0, overflows at 2.0.
     for (let c = 1; c <= 5; c++) {
       Column.setWidth(ws, c, 10);
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     expect(pageCount(await excelToPdf(wb))).toBe(1);
     // fitToPage means "shrink to one page wide"; `scale` must not break it.
@@ -386,7 +386,7 @@ describe("pageSetup scaling", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let c = 1; c <= 30; c++) {
       Column.setWidth(ws, c, 12);
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     const rightEdge = (b: Uint8Array) => {
       const doc = new PdfDocument(b);
@@ -426,7 +426,7 @@ describe("pageSetup scaling", () => {
     const ws = Workbook.addWorksheet(wb, "Wide");
     for (let c = 1; c <= 3; c++) {
       Column.setWidth(ws, c, 48);
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     expect(pageCount(await excelToPdf(wb, { fitToPage: false }))).toBe(3);
     expect(pageCount(await excelToPdf(wb, { fitToWidth: 2 }))).toBeLessThanOrEqual(2);
@@ -441,7 +441,7 @@ describe("pageSetup scaling", () => {
       Column.setWidth(ws, c, 20);
     }
     for (let c = 1; c <= 9; c++) {
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     ws.pageSetup.printTitlesColumn = "A";
     expect(pageCount(await excelToPdf(wb, { fitToWidth: 2 }))).toBeLessThanOrEqual(2);
@@ -481,7 +481,7 @@ describe("pageSetup scaling", () => {
     Column.setWidth(ws, 1, 18);
     const long = "The quick brown fox jumps over the lazy dog and keeps running far away";
     for (let r = 1; r <= 60; r++) {
-      Cell.setValue(ws, r, 1, `${r} ${long}`);
+      Cell.setValue(ws, { row: r, col: 1 }, `${r} ${long}`);
       Cell.setAlignment(ws, `A${r}`, { wrapText: true });
     }
 
@@ -985,7 +985,7 @@ describe("merged cells with print titles", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let c = 1; c <= cols; c++) {
       Column.setWidth(ws, c, 10);
-      Cell.setValue(ws, 1, c, `H${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `H${c}`);
     }
     return { wb, ws };
   }
@@ -1002,7 +1002,7 @@ describe("merged cells with print titles", () => {
     // ([A, B, E, F, G]). The merge must still start at B and cover only the
     // columns that are actually printed.
     const { wb, ws } = gridSheet();
-    Cell.setValue(ws, 2, 2, "MERGED");
+    Cell.setValue(ws, { row: 2, col: 2 }, "MERGED");
     Worksheet.merge(ws, "B2:F2");
     ws.pageSetup.printArea = "E1:G3";
     ws.pageSetup.printTitlesColumn = "A:B";
@@ -1019,7 +1019,7 @@ describe("merged cells with print titles", () => {
     // Excel stores the value on the master only, so a master outside the
     // printed range prints nothing — the follower cells are genuinely empty.
     const { wb, ws } = gridSheet();
-    Cell.setValue(ws, 2, 3, "MERGED");
+    Cell.setValue(ws, { row: 2, col: 3 }, "MERGED");
     Worksheet.merge(ws, "C2:F2");
     ws.pageSetup.printArea = "E1:G3";
     ws.pageSetup.printTitlesColumn = "A:B";
@@ -1045,7 +1045,7 @@ describe("merged cells with print titles", () => {
 
   it("should repeat a merge that lives inside the title band", async () => {
     const { wb, ws } = gridSheet(20);
-    Cell.setValue(ws, 2, 1, "TITLE-MERGE");
+    Cell.setValue(ws, { row: 2, col: 1 }, "TITLE-MERGE");
     Worksheet.merge(ws, "A2:B2");
     ws.pageSetup.printTitlesColumn = "A:B";
 
@@ -1118,7 +1118,7 @@ describe("pageSetup.cellComments", () => {
       const ws = Workbook.addWorksheet(wb, "S");
       for (let r = 1; r <= 12; r++) {
         for (let c = 1; c <= 6; c++) {
-          Cell.setValue(ws, r, c, `r${r}c${c}`);
+          Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
         }
       }
       Cell.setNote(ws, "B6", "Look here");
@@ -1141,7 +1141,7 @@ describe("pageSetup.cellComments", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let r = 1; r <= 12; r++) {
       for (let c = 1; c <= 6; c++) {
-        Cell.setValue(ws, r, c, `r${r}c${c}`);
+        Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
       }
     }
     Cell.setNote(ws, "B6", "Look here");
@@ -1168,7 +1168,7 @@ describe("pageSetup.cellComments", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let row = 1; row <= 8; row++) {
       for (let col = 1; col <= 4; col++) {
-        Cell.setValue(ws, row, col, `${row}:${col}`);
+        Cell.setValue(ws, { row, col }, `${row}:${col}`);
       }
     }
     Cell.setNote(ws, "B6", "Comment text");
@@ -1189,7 +1189,7 @@ describe("pageSetup.cellComments", () => {
       const ws = Workbook.addWorksheet(wb, "S");
       for (let r = 1; r <= 12; r++) {
         for (let c = 1; c <= 6; c++) {
-          Cell.setValue(ws, r, c, `r${r}c${c}`);
+          Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
         }
       }
       const note = anchor

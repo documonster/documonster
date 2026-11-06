@@ -20,7 +20,7 @@
  */
 import type { Color } from "@excel/types";
 import { encodeWideString, readWideString, XlsbReader } from "@excel/xlsb/binary";
-import { COLOR_SIZE, automaticColor, encodeColor, readColor } from "@excel/xlsb/color";
+import { automaticColor, encodeColor, readColor } from "@excel/xlsb/color";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /**
@@ -122,6 +122,3 @@ export function encodeSheetProperties(properties: SheetProperties | undefined): 
     encodeWideString(properties?.codeName ?? "")
   ]);
 }
-
-/** Bytes a `BrtColor` occupies here, so a test can assert the header arithmetic. */
-export const TAB_COLOR_SIZE = COLOR_SIZE;

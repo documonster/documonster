@@ -44,6 +44,16 @@ export class PdfPasswordError extends PdfStructureError {
 }
 
 /**
+ * Error thrown when a file uses something the PDF reader recognises but does not implement — an
+ * encryption filter, revision or crypt-filter method it has no handler for. A
+ * {@link PdfStructureError}, the class these were reported as before, so existing `catch` blocks
+ * are unaffected; its own class tells "not supported" apart from "damaged".
+ */
+export class PdfUnsupportedFeatureError extends PdfStructureError {
+  override name = "PdfUnsupportedFeatureError";
+}
+
+/**
  * Error thrown when a resource limit is hit while reading: object nesting
  * depth, decoded stream size (`maxDecodedBytes`) or filter-chain length.
  *

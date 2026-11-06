@@ -7,7 +7,8 @@
  * author would have no way to tell the two apart.
  */
 
-import { MermaidArgumentError, MermaidParseError } from "@mermaid/errors";
+import { checkSource } from "@mermaid/arguments";
+import { MermaidParseError } from "@mermaid/errors";
 import { parseArchitecture, parseKanban, parsePacket, parseRadar } from "@mermaid/parse/beta";
 import { parseQuadrant, parseSankey, parseXy } from "@mermaid/parse/chart";
 import { parseClass } from "@mermaid/parse/class";
@@ -28,12 +29,7 @@ import type { MermaidDiagram } from "@mermaid/types";
  * @throws {MermaidParseError} when the first statement names no supported diagram.
  */
 export function parseMermaid(source: string): MermaidDiagram {
-  if (typeof source !== "string") {
-    throw new MermaidArgumentError(
-      "source",
-      `Mermaid.parse: source must be Mermaid text; got ${source === null ? "null" : typeof source}.`
-    );
-  }
+  checkSource(source);
   const first = splitStatementsAt(source)[0];
   const header = first?.text ?? "";
 

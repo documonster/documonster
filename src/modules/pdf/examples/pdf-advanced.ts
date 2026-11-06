@@ -119,12 +119,12 @@ const ws3 = Workbook.addWorksheet(wb3, "Wide Data");
 // 20 columns × 30 rows — will need horizontal page splits
 for (let c = 1; c <= 20; c++) {
   Column.setWidth(ws3, c, 12);
-  Cell.setValue(ws3, 1, c, `Col ${c}`);
-  Cell.setStyle(ws3, 1, c, { font: { bold: true } });
+  Cell.setValue(ws3, { row: 1, col: c }, `Col ${c}`);
+  Cell.setStyle(ws3, { row: 1, col: c }, { font: { bold: true } });
 }
 for (let r = 2; r <= 30; r++) {
   for (let c = 1; c <= 20; c++) {
-    Cell.setValue(ws3, r, c, (r - 1) * c);
+    Cell.setValue(ws3, { row: r, col: c }, (r - 1) * c);
   }
 }
 
@@ -292,7 +292,7 @@ const wb9 = Workbook.create();
 const ws9 = Workbook.addWorksheet(wb9, "GridColors");
 for (let r = 1; r <= 5; r++) {
   for (let c = 1; c <= 5; c++) {
-    Cell.setValue(ws9, r, c, `${r},${c}`);
+    Cell.setValue(ws9, { row: r, col: c }, `${r},${c}`);
   }
 }
 

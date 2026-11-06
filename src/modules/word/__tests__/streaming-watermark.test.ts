@@ -108,3 +108,26 @@ describe("streaming writer watermark", () => {
     expect(defaults[0]!.watermarks).toBe(1);
   });
 });
+
+describe("a text watermark sized by its fontSize", () => {
+  // Its width is the text measured in its font, which both writers do before rendering.
+  const sized: Case = {
+    name: "sized",
+    watermark: { type: "text", text: "CONFIDENTIAL", fontSize: 96, font: "Arial" }
+  };
+  const box = (parts: Map<string, Uint8Array>): string[] =>
+    [...parts.keys()]
+      .filter(path => /^word\/header\d+\.xml$/.test(path))
+      .flatMap(path => [...partText(parts, path).matchAll(/width:([\d.]+)pt;height:([\d.]+)pt/g)])
+      .map(([, width, height]) => `${width}x${height}`);
+
+  it("is measured the same by the buffered and the streaming writer", async () => {
+    const fromBuffer = box(await packageParts(await Io.toBuffer(buffered(sized))));
+    const fromStream = box(await packageParts(await streamed(sized)));
+    expect(fromBuffer).toHaveLength(1);
+    // 48pt text: the height is the size, the width the measured text — not Word's 468pt default box.
+    expect(fromBuffer[0]).toMatch(/^[\d.]+x48$/);
+    expect(fromBuffer[0]).not.toBe("468x48");
+    expect(fromStream).toEqual(fromBuffer);
+  });
+});

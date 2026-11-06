@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "@csv/constants";
-import { CsvArgumentError, CsvError } from "@csv/errors";
+import { CsvArgumentError, CsvLimitExceededError } from "@csv/errors";
 // Import shared core functionality from parse/
 import type { ParseConfig } from "@csv/parse/config";
 import { createParseConfig, toScannerConfig } from "@csv/parse/config";
@@ -36,19 +36,20 @@ import type {
   CsvRecordError
 } from "@csv/types";
 import { isSyncTransform, isSyncValidate } from "@csv/types";
-import { checkParseOptions, createCsvTextDecoder } from "@csv/utils/check-options";
+import { argumentError, checkParseOptions, createCsvTextDecoder } from "@csv/utils/check-options";
 import { applyFirstChunkPreprocessing } from "@csv/utils/detect";
 import { applyDynamicTypingToArrayRow, typeRecord } from "@csv/utils/dynamic-typing";
 import { Transform } from "@stream";
+import { check, s } from "@utils/schema";
 import { scheduleMacrotask } from "@utils/yield";
 
 /**
- * Check what {@link CsvParserStream} is given, naming `where` — the public call. `Csv.parseRows`
+ * Check what {@link CsvParserStream} is given, naming `where` — the public call. `Csv.parseStream`
  * runs on a parser stream and checks with its own name first.
  */
 export function checkParserStreamOptions(options: CsvParseOptions, where: string): void {
   // `objname` keys the whole result by a column, a map that only exists once every row has
-  // been read. A stream cannot produce it: it ignored the option, and `Csv.parseRows`
+  // been read. A stream cannot produce it: it ignored the option, and `Csv.parseStream`
   // buffered the input and yielded the map's values, losing the rows a later key replaced.
   if (
     typeof options === "object" &&
@@ -57,7 +58,7 @@ export function checkParserStreamOptions(options: CsvParseOptions, where: string
   ) {
     throw new CsvArgumentError(
       "options.objname",
-      `${where}: objname is only supported by Csv.parse and Csv.parseAsync, which return the keyed map`
+      `${where}: options.objname is only supported by Csv.parse and Csv.parseAsync, which return the keyed map`
     );
   }
   checkParseOptions(options, where);
@@ -233,9 +234,11 @@ export class CsvParserStream extends Transform {
   transform<I extends Row = Row, O extends Row = Row>(
     transformFunction: RowTransformFunction<I, O>
   ): this {
-    if (typeof transformFunction !== "function") {
-      throw new TypeError("The transform should be a function");
-    }
+    check(s.function(), transformFunction, {
+      where: "Csv.ParserStream#transform",
+      field: "transformFunction",
+      error: argumentError
+    });
 
     if (isSyncTransform(transformFunction)) {
       this._rowTransform = (row: Row, cb: RowTransformCallback<Row>): void => {
@@ -257,9 +260,11 @@ export class CsvParserStream extends Transform {
    * Invalid rows emit 'data-invalid' event
    */
   validate<T extends Row = Row>(validateFunction: RowValidateFunction<T>): this {
-    if (typeof validateFunction !== "function") {
-      throw new TypeError("The validate should be a function");
-    }
+    check(s.function(), validateFunction, {
+      where: "Csv.ParserStream#validate",
+      field: "validateFunction",
+      error: argumentError
+    });
 
     if (isSyncValidate(validateFunction)) {
       this._rowValidator = (row: Row, cb: RowValidateCallback): void => {
@@ -600,12 +605,12 @@ export class CsvParserStream extends Transform {
    * large without measuring it — reading `.length` does not flatten the appended rope. Two
    * code units of slack cover a line ending that has only partly arrived.
    */
-  private pendingRowLimitError(pendingLength: number): CsvError | null {
+  private pendingRowLimitError(pendingLength: number): CsvLimitExceededError | undefined {
     const limit = this.parseConfig.maxRowBytes;
     if (limit === undefined || pendingLength <= limit + 2) {
-      return null;
+      return undefined;
     }
-    return new CsvError(`Row exceeds the maximum size of ${limit} bytes`);
+    return new CsvLimitExceededError("maxRowBytes", limit);
   }
 
   /**
@@ -1163,9 +1168,7 @@ export class CsvParserStream extends Transform {
     if (raw !== undefined && this.parseConfig.maxRowBytes !== undefined) {
       const rawBytes = getUtf8ByteLength(raw);
       if (rawBytes > this.parseConfig.maxRowBytes) {
-        callback(
-          new CsvError(`Row exceeds the maximum size of ${this.parseConfig.maxRowBytes} bytes`)
-        );
+        callback(new CsvLimitExceededError("maxRowBytes", this.parseConfig.maxRowBytes));
         return "error";
       }
     }

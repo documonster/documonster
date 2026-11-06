@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 import { WordCrypto } from "../crypto";
 import type { CfbEntry } from "../crypto";
-import { Document, Io } from "../index";
+import { Document } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -75,7 +75,7 @@ for (const e of decoded) {
 //    stream inside the CFB envelope; we synthesise one with WordCrypto.encrypt then
 //    locate its EncryptionInfo stream and parse it.
 // ---------------------------------------------------------------------------
-const plain = await Io.toBuffer(
+const plain = await Document.toBuffer(
   (() => {
     const dd = Document.create();
     Document.useDefaultStyles(dd);

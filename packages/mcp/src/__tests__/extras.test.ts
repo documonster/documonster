@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Chart, Row, Workbook, Worksheet } from "documonster/excel";
-import { Build, Convert, Document, Io, Query } from "documonster/word";
+import { Build, Convert, Document, Query } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
@@ -308,7 +308,7 @@ describe("doc_convert — ODT", () => {
     const doc = Document.create();
     Document.addHeading(doc, "Policy", 1);
     Document.addParagraph(doc, "Body text here.");
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -332,7 +332,9 @@ describe("doc_convert — ODT", () => {
     await run(docConvertTool, fx, { from: source, to: "round.odt" });
 
     await run(docConvertTool, fx, { from: "round.odt", to: "back.docx" });
-    expect(Query.getText(await Io.readFile(path.join(fx.root, "back.docx")))).toContain("Policy");
+    expect(Query.getText(await Document.readFile(path.join(fx.root, "back.docx")))).toContain(
+      "Policy"
+    );
 
     await run(docConvertTool, fx, { from: "round.odt", to: "back.md" });
     expect(await readFile(path.join(fx.root, "back.md"), "utf8")).toContain("# Policy");
@@ -361,7 +363,7 @@ describe("doc_review — comparing two versions", () => {
     for (const paragraph of paragraphs) {
       Document.addParagraph(doc, paragraph);
     }
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -431,7 +433,7 @@ describe("doc_review — tracked changes", () => {
         Build.text(" days.")
       ]
     });
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -462,7 +464,7 @@ describe("doc_review — tracked changes", () => {
     const report = await run(docReviewTool, fx, { path: file, apply: "accept-all" });
 
     expect(report).toContain("Accepted");
-    const doc = await Io.readFile(path.join(fx.root, file));
+    const doc = await Document.readFile(path.join(fx.root, file));
     expect(Query.getText(doc)).toContain("Payment due in 14 days.");
     expect(Query.listRevisions(doc)).toEqual([]);
     await expect(stat(path.join(fx.root, `${file}.bak`))).resolves.toBeDefined();
@@ -473,7 +475,7 @@ describe("doc_review — tracked changes", () => {
     const file = await makeTracked(fx);
     await run(docReviewTool, fx, { path: file, apply: "reject-all", out: "out/rejected.docx" });
 
-    const doc = await Io.readFile(path.join(fx.root, "out/rejected.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "out/rejected.docx"));
     expect(Query.getText(doc)).toContain("Payment due in 30 days.");
     // The original was untouched, so no backup was taken.
     await expect(stat(path.join(fx.root, `${file}.bak`))).rejects.toThrow();
@@ -483,7 +485,7 @@ describe("doc_review — tracked changes", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Clean document.");
-    await Io.writeFile(doc, path.join(fx.root, "clean.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "clean.docx"));
 
     const text = await run(docReviewTool, fx, { path: "clean.docx" });
     expect(text).toContain("no tracked changes");

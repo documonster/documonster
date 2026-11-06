@@ -5,6 +5,7 @@
 import {
   Cell,
   DefinedNames,
+  Image,
   ExcelArgumentError,
   Table,
   Workbook,
@@ -187,5 +188,49 @@ describe("Workbook.setModel", () => {
     Workbook.setModel(other, Workbook.getModel(wb));
     expect(Cell.getValue(Workbook.getWorksheet(other, "Data")!, "A5")).toBe(1);
     await expect(Workbook.toBuffer(other)).resolves.toBeDefined();
+  });
+});
+
+describe("setModel copies what it is given", () => {
+  const PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("Cell.setModel", () => {
+    const { ws } = sheet();
+    const model = { address: "D1", type: 8, value: { richText: [{ text: "a" }] } };
+    Cell.setModel(ws, "D1", model as never);
+    model.value.richText[0].text = "changed";
+    expect(Cell.getValue(ws, "D1")).toEqual({ richText: [{ text: "a" }] });
+  });
+
+  it("Worksheet.setModel", () => {
+    const { wb, ws } = sheet();
+    const target = Workbook.addWorksheet(wb, "Target");
+    const model = { ...Worksheet.getModel(ws), name: "Target" };
+    Worksheet.setModel(target, model);
+    model.pageSetup.orientation = "landscape";
+    expect(Worksheet.getModel(target).pageSetup.orientation).not.toBe("landscape");
+  });
+
+  it("Image.setModel", () => {
+    const { wb, ws } = sheet();
+    const id = Image.add(wb, { base64: PNG, extension: "png" });
+    const image = Image.place(ws, id, { tl: { col: 1, row: 1 }, ext: { width: 10, height: 20 } });
+    const model = Image.getModel(image);
+    if (model.type !== "image") {
+      throw new Error("expected a picture");
+    }
+    Image.setModel(image, model);
+    model.range.ext!.width = 5;
+    expect(Image.getModel(image)).toMatchObject({ range: { ext: { width: 10 } } });
+  });
+
+  it("Workbook.setModel", () => {
+    const { wb } = sheet();
+    const model = Workbook.getModel(wb);
+    const other = Workbook.create();
+    Workbook.setModel(other, model);
+    model.properties.date1904 = true;
+    expect(Workbook.getModel(other).properties.date1904).not.toBe(true);
   });
 });

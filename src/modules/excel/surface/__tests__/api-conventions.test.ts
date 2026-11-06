@@ -156,10 +156,10 @@ describe("Cell — existence and merges by position", () => {
   it("has creates nothing; getMergeMasterAddress answers an address", () => {
     const { ws } = sheet();
     expect(Cell.has(ws, "A1")).toBe(false);
-    expect(Cell.has(ws, 1, 1)).toBe(false);
+    expect(Cell.has(ws, { row: 1, col: 1 })).toBe(false);
     Worksheet.merge(ws, "B2:C3");
     expect(Cell.getMergeMasterAddress(ws, "C3")).toBe("B2");
-    expect(Cell.getMergeMasterAddress(ws, 3, 3)).toBe("B2");
+    expect(Cell.getMergeMasterAddress(ws, { row: 3, col: 3 })).toBe("B2");
     expect(Cell.getMergeMasterAddress(ws, "E5")).toBe("E5");
     expect(Cell.has(ws, "E5")).toBe(false);
   });
@@ -171,7 +171,7 @@ describe("collections", () => {
     expect(Table.remove(ws, "Nope")).toBe(false);
     expect(Table.get(ws, "Nope")).toBeUndefined();
     expect(Watermark.remove(ws)).toBe(false);
-    expect(Watermark.get(ws)).toBeNull();
+    expect(Watermark.get(ws)).toBeUndefined();
     expect(Workbook.removeWorksheet(wb, "Nope")).toBe(false);
     expect(Workbook.removeWorksheet(wb, "S")).toBe(true);
     const dv = DataValidation.create();

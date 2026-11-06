@@ -35,17 +35,13 @@ import {
   releaseWorkerBlobUrl
 } from "@archive/compression/worker-pool/worker-script";
 import {
+  ArchiveArgumentError,
   ArchiveError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError
 } from "@archive/core/errors";
 
 export { ArchiveWorkerStreamStartError };
-
-/** Whether `error` means a stream never reached its worker (see {@link ArchiveWorkerStreamStartError}). */
-export function isWorkerStreamStartError(error: unknown): error is ArchiveWorkerStreamStartError {
-  return error instanceof ArchiveWorkerStreamStartError;
-}
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };
 export { hasWorkerSupport };
@@ -686,7 +682,7 @@ export class WorkerPool {
           // hit travels as the bound and is rebuilt as the archive's own error.
           task.reject(
             message.limit !== undefined
-              ? new ArchiveLimitError("maxOutputLength", message.limit)
+              ? new ArchiveLimitExceededError("maxOutputLength", message.limit)
               : new Error(message.error ?? "Unknown worker error")
           );
         }
@@ -1171,6 +1167,26 @@ export function getDefaultWorkerPool(options?: WorkerPoolOptions): WorkerPool {
     _defaultPool = new WorkerPool(options);
   }
   return _defaultPool;
+}
+
+/**
+ * The shared pool `Compression.Workers.deflate` and its siblings run on, created on first use.
+ * `options` configure it when this call creates it; given while the pool already exists they are
+ * refused rather than ignored — call `terminateDefaultPool()` first, or build a dedicated
+ * `new Compression.Workers.Pool(options)`.
+ *
+ * @throws {ArchiveArgumentError} `options` given while the default pool already exists.
+ */
+export function getDefaultPool(options?: WorkerPoolOptions): WorkerPool {
+  if (options !== undefined && _defaultPool && !_defaultPool.isTerminated()) {
+    throw new ArchiveArgumentError(
+      "options",
+      "Compression.Workers.getDefaultPool: options configure the default pool only when it is created, " +
+        "and it already exists; call Compression.Workers.terminateDefaultPool() first, or build a dedicated " +
+        "new Compression.Workers.Pool(options)"
+    );
+  }
+  return getDefaultWorkerPool(options);
 }
 
 /**

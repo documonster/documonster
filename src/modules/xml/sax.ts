@@ -15,8 +15,9 @@
  */
 
 import { toError } from "@utils/errors";
-import { checkBooleanOptions, checkOptionsObject, checkParserLimits } from "@xml/arguments";
-import { XmlArgumentError, XmlParseError } from "@xml/errors";
+import { check, s } from "@utils/schema";
+import { checkSaxOptions, xmlArgument } from "@xml/arguments";
+import { XmlArgumentError, XmlLimitExceededError, XmlParseError } from "@xml/errors";
 import type { XmlParseLimit } from "@xml/errors";
 import type {
   XmlInvalidCharHandling,
@@ -328,16 +329,7 @@ class SaxParser {
   prefixedAttributes = 0;
 
   constructor(options?: XmlSaxOptions) {
-    checkOptionsObject("Xml.SaxParser", options);
-    checkBooleanOptions("Xml.SaxParser", options as Record<string, unknown> | undefined, [
-      "position",
-      "fragment",
-      "xmlns"
-    ]);
-    checkParserLimits("Xml.SaxParser", options as Record<string, unknown> | undefined);
-    if (options?.fileName !== undefined && typeof options.fileName !== "string") {
-      throw new XmlArgumentError("options.fileName", "Xml.SaxParser: fileName must be a string");
-    }
+    checkSaxOptions("Xml.SaxParser", options);
     this.trackPosition = options?.position !== false;
     this.fileName = options?.fileName;
     this.fragment = options?.fragment ?? false;
@@ -438,12 +430,16 @@ class SaxParser {
   // ===========================================================================
 
   private makeError(message: string, limit?: XmlParseLimit): XmlParseError {
-    return new XmlParseError(message, {
+    const context = {
       line: this.trackPosition ? this.line : undefined,
       column: this.trackPosition ? this.column : undefined,
-      fileName: this.fileName,
-      limit
-    });
+      fileName: this.fileName
+    };
+    if (limit !== undefined) {
+      const allowed = limit === "depth" ? this.maxDepth : this.maxEntityExpansions;
+      return new XmlLimitExceededError(message, limit, allowed, context);
+    }
+    return new XmlParseError(message, context);
   }
 
   /**
@@ -2306,18 +2302,29 @@ function decodeUtf8(decoder: TextDecoder, chunk: Uint8Array | undefined, stream:
  *
  * @example
  * ```ts
- * for await (const events of Xml.parseSax(stream)) {
+ * for await (const events of Xml.parseSaxStream(stream)) {
  *   for (const event of events) {
  *     if (event.eventType === "opentag") console.log(event.value.name);
  *   }
  * }
  * ```
  */
-async function* parseSax(
+function parseSax(
   iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
   options?: XmlSaxOptions
 ): AsyncGenerator<XmlSaxEvent[], void, undefined> {
-  checkChunkSource("Xml.parseSax", iterable);
+  // Checked when called, not on the first `next()` a generator body would wait for, and under
+  // the call the caller made rather than the `Xml.SaxParser` it builds.
+  checkChunkSource("Xml.parseSaxStream", iterable);
+  checkSaxOptions("Xml.parseSaxStream", options);
+  return saxEvents(iterable, options);
+}
+
+/** {@link parseSax} once its arguments are checked. */
+async function* saxEvents(
+  iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
+  options?: XmlSaxOptions
+): AsyncGenerator<XmlSaxEvent[], void, undefined> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new SaxParser(options);
 
@@ -2367,6 +2374,8 @@ async function* parseSax(
 // Direct SAX Stream - saxStream
 // =============================================================================
 
+const saxParserSchema = s.custom(v => v instanceof SaxParser, "an Xml.SaxParser");
+
 /**
  * High-performance direct SAX streaming: feed an async-iterable to a
  * pre-configured SaxParser **without** creating intermediate event objects.
@@ -2392,9 +2401,7 @@ async function saxStream(
   parser: SaxParser,
   iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>
 ): Promise<void> {
-  if (!(parser instanceof SaxParser)) {
-    throw new XmlArgumentError("parser", "Xml.feedSax: parser must be an Xml.SaxParser");
-  }
+  check(saxParserSchema, parser, xmlArgument("Xml.feedSax", "parser"));
   checkChunkSource("Xml.feedSax", iterable);
   const decoder = new TextDecoder("utf-8", { fatal: true });
 

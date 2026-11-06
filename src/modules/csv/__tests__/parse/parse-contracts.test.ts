@@ -34,11 +34,11 @@ describe("text after a closing quote is a record error", () => {
     ]);
   });
 
-  it("reaches onSkip, also from Csv.parseRows and the stream", async () => {
+  it("reaches onSkip, also from Csv.parseStream and the stream", async () => {
     const skipped: string[] = [];
     const onSkip = (e: { code: string }) => skipped.push(e.code);
     Csv.parse('"a" b,c\nx,y', { onSkip });
-    const rows = await collect(Csv.parseRows('"a" b,c\nx,y', { onSkip }));
+    const rows = await collect(Csv.parseStream('"a" b,c\nx,y', { onSkip }));
     expect(rows).toEqual([["x", "y"]]);
     expect(skipped).toEqual(["ParseError", "ParseError"]);
   });
@@ -77,8 +77,8 @@ describe("every header keeps its column", () => {
     expect(Object.getPrototypeOf(row)).toBeNull();
   });
 
-  it("in Csv.parseRows", async () => {
-    const [row] = await collect(Csv.parseRows(src, { headers: true }));
+  it("in Csv.parseStream", async () => {
+    const [row] = await collect(Csv.parseStream(src, { headers: true }));
     expect(Object.keys(row as object)).toEqual(expected);
   });
 
@@ -159,10 +159,10 @@ describe("chunk is refused where it would never be called", () => {
     await expect(Csv.parseAsync("a\nb", { chunk: () => undefined })).rejects.toThrow(CsvError);
   });
 
-  it("but still works in Csv.parseRows", async () => {
+  it("but still works in Csv.parseStream", async () => {
     const chunks: unknown[] = [];
     await collect(
-      Csv.parseRows("a\nb\nc", { chunkSize: 2, chunk: rows => void chunks.push(rows) })
+      Csv.parseStream("a\nb\nc", { chunkSize: 2, chunk: rows => void chunks.push(rows) })
     );
     expect(chunks).toEqual([[["a"], ["b"]], [["c"]]]);
   });
@@ -179,10 +179,10 @@ describe("a record left out because of an error always reaches onSkip", () => {
     expect(skipped).toEqual([["TooFewFields", ["1"]]]);
   });
 
-  it("in Csv.parseRows, whose only report it is", async () => {
+  it("in Csv.parseStream, whose only report it is", async () => {
     const skipped: unknown[] = [];
     const rows = await collect(
-      Csv.parseRows("a,b\n1\n3,4", { headers: true, onSkip: (e, r) => skipped.push([e.code, r]) })
+      Csv.parseStream("a,b\n1\n3,4", { headers: true, onSkip: (e, r) => skipped.push([e.code, r]) })
     );
     expect(rows).toEqual([{ a: "3", b: "4" }]);
     expect(skipped).toEqual([["TooFewFields", ["1"]]]);
@@ -195,8 +195,8 @@ describe("inputs are checked with CsvError", () => {
     await expect(Csv.parseAsync(input as never)).rejects.toThrow(CsvError);
   });
 
-  it.each([42, null])("Csv.parseRows(%s)", async input => {
-    await expect(collect(Csv.parseRows(input as never))).rejects.toThrow(CsvError);
+  it.each([42, null])("Csv.parseStream(%s)", async input => {
+    await expect(collect(Csv.parseStream(input as never))).rejects.toThrow(CsvError);
   });
 
   it("onProgress that is not a function", async () => {
@@ -259,7 +259,7 @@ describe("dynamic typing", () => {
   it("applies decimalSeparator in the streaming parser and per column", async () => {
     expect(
       await collect(
-        Csv.parseRows("a;b\n1,5;2,5", {
+        Csv.parseStream("a;b\n1,5;2,5", {
           delimiter: ";",
           headers: true,
           decimalSeparator: ",",
@@ -295,9 +295,9 @@ describe("r3: dynamicTyping reads only its own entries (TX-B1)", () => {
 });
 
 describe("r3: objname is refused where it cannot be honoured (TX-B6)", () => {
-  it("by Csv.parseRows and the parser stream", async () => {
+  it("by Csv.parseStream and the parser stream", async () => {
     await expect(
-      collect(Csv.parseRows("id,v\nx,1\nx,2", { headers: true, objname: "id" }))
+      collect(Csv.parseStream("id,v\nx,1\nx,2", { headers: true, objname: "id" }))
     ).rejects.toThrow(CsvError);
     expect(() => new Csv.ParserStream({ headers: true, objname: "id" })).toThrow(CsvError);
   });
@@ -322,8 +322,8 @@ describe("r3: a record error never vanishes (TX-C1)", () => {
     expect(result.errors?.map(e => e.code)).toEqual(["MissingQuotes"]);
   });
 
-  it("is thrown by Csv.parseRows without onSkip", async () => {
-    await expect(collect(Csv.parseRows("a,b\n1\n3,4", { headers: true }))).rejects.toThrow(
+  it("is thrown by Csv.parseStream without onSkip", async () => {
+    await expect(collect(Csv.parseStream("a,b\n1\n3,4", { headers: true }))).rejects.toThrow(
       CsvError
     );
   });

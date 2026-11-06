@@ -9,14 +9,16 @@
  * This is intended for small-to-medium XML where tree access is convenient.
  */
 
+import { check, s } from "@utils/schema";
 import {
-  checkBooleanOptions,
   checkElement,
-  checkOptionsObject,
-  checkParserLimits,
-  checkXmlInput
+  checkFunctionArgument,
+  checkParseOptions,
+  checkStringArgument,
+  checkXmlInput,
+  xmlArgument
 } from "@xml/arguments";
-import { XmlArgumentError, XmlParseError } from "@xml/errors";
+import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
 import type {
@@ -103,15 +105,7 @@ function appendText(parent: XmlElement, text: string): void {
  */
 function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
   checkXmlInput("Xml.parse", xml);
-  checkOptionsObject("Xml.parse", options);
-  checkBooleanOptions("Xml.parse", options as Record<string, unknown> | undefined, [
-    "comments",
-    "processingInstructions",
-    "cdataAsNodes",
-    "fragment",
-    "xmlns"
-  ]);
-  checkParserLimits("Xml.parse", options as Record<string, unknown> | undefined);
+  checkParseOptions("Xml.parse", options);
   const includeComments = options?.comments ?? false;
   const includePI = options?.processingInstructions ?? false;
   const cdataAsNodes = options?.cdataAsNodes ?? false;
@@ -400,9 +394,7 @@ export { parseXml, findChild, findChildren, textContent, attr, walk, toPlainObje
 // =============================================================================
 
 function checkName(where: string, name: unknown): void {
-  if (typeof name !== "string") {
-    throw new XmlArgumentError("name", `${where}: name must be a string, got ${typeof name}`);
-  }
+  checkStringArgument(where, "name", name);
 }
 
 /** `Xml.findChild`: {@link findChild}, refusing what is not an element and a name. */
@@ -419,14 +411,14 @@ function listChildrenOf(element: XmlElement, name: string): XmlElement[] {
   return findChildren(element, name);
 }
 
+const xmlNodeSchema = s.custom(
+  v => typeof v === "object" && v !== null && typeof (v as { type?: unknown }).type === "string",
+  "an XmlNode (pass doc.root for a document)"
+);
+
 /** `Xml.getText`: {@link textContent}, refusing what is not a node. */
 function getTextOf(node: XmlNode): string {
-  if (typeof node !== "object" || node === null || typeof node.type !== "string") {
-    throw new XmlArgumentError(
-      "node",
-      "Xml.getText: node must be an XmlNode (pass doc.root for a document)"
-    );
-  }
+  check(xmlNodeSchema, node, xmlArgument("Xml.getText", "node"));
   return textContent(node);
 }
 
@@ -440,9 +432,7 @@ function getAttrOf(element: XmlElement, name: string): string | undefined {
 /** `Xml.eachElement`: {@link walk}, refusing what is not an element and a function. */
 function eachElementOf(element: XmlElement, visitor: (el: XmlElement) => void): void {
   checkElement("Xml.eachElement", element);
-  if (typeof visitor !== "function") {
-    throw new XmlArgumentError("visitor", "Xml.eachElement: visitor must be a function");
-  }
+  checkFunctionArgument("Xml.eachElement", "visitor", visitor);
   walk(element, visitor);
 }
 

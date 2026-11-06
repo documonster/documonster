@@ -469,7 +469,7 @@ describe("TAR Module", () => {
       const reader = new TarReader(bytes);
 
       const entry = await reader.get("nonexistent.txt");
-      expect(entry).toBeNull();
+      expect(entry).toBeUndefined();
     });
 
     it("should list all paths", async () => {

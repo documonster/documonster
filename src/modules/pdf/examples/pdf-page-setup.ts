@@ -96,9 +96,9 @@ function issue203Workbook() {
   const wide = Workbook.addWorksheet(wb, "Wide");
   for (let c = 1; c <= 12; c++) {
     Column.setWidth(wide, c, 12);
-    Cell.setValue(wide, 1, c, `Header ${c}`);
+    Cell.setValue(wide, { row: 1, col: c }, `Header ${c}`);
     for (let r = 2; r <= 8; r++) {
-      Cell.setValue(wide, r, c, r * c);
+      Cell.setValue(wide, { row: r, col: c }, r * c);
     }
   }
 
@@ -106,11 +106,11 @@ function issue203Workbook() {
   const narrow = Workbook.addWorksheet(wb, "Narrow");
   Column.setWidth(narrow, 1, 14);
   Column.setWidth(narrow, 2, 12);
-  Cell.setValue(narrow, 1, 1, "Key");
-  Cell.setValue(narrow, 1, 2, "Value");
+  Cell.setValue(narrow, { row: 1, col: 1 }, "Key");
+  Cell.setValue(narrow, { row: 1, col: 2 }, "Value");
   for (let r = 2; r <= 6; r++) {
-    Cell.setValue(narrow, r, 1, `Item ${r - 1}`);
-    Cell.setValue(narrow, r, 2, r * 100);
+    Cell.setValue(narrow, { row: r, col: 1 }, `Item ${r - 1}`);
+    Cell.setValue(narrow, { row: r, col: 2 }, r * 100);
   }
   return wb;
 }
@@ -171,7 +171,7 @@ function gridWorkbook(cols: number, rows: number, width = 12) {
   for (let c = 1; c <= cols; c++) {
     Column.setWidth(ws, c, width);
     for (let r = 1; r <= rows; r++) {
-      Cell.setValue(ws, r, c, `C${c}R${r}`);
+      Cell.setValue(ws, { row: r, col: c }, `C${c}R${r}`);
     }
   }
   return { wb, ws };
@@ -195,7 +195,7 @@ const chunky = Workbook.create();
 const chunkyWs = Workbook.addWorksheet(chunky, "Chunky");
 for (let c = 1; c <= 3; c++) {
   Column.setWidth(chunkyWs, c, 48);
-  Cell.setValue(chunkyWs, 1, c, `Wide ${c}`);
+  Cell.setValue(chunkyWs, { row: 1, col: c }, `Wide ${c}`);
 }
 const chunkyFit = await Pdf.fromExcel(chunky, { fitToWidth: 2 });
 await emit("scaling-indivisible-columns.pdf", chunkyFit);
@@ -232,7 +232,7 @@ const wrapWs = Workbook.addWorksheet(wrapWb, "Wrapped");
 Column.setWidth(wrapWs, 1, 18);
 const long = "The quick brown fox jumps over the lazy dog and keeps running far away";
 for (let r = 1; r <= 60; r++) {
-  Cell.setValue(wrapWs, r, 1, `${r} ${long}`);
+  Cell.setValue(wrapWs, { row: r, col: 1 }, `${r} ${long}`);
   Cell.setAlignment(wrapWs, `A${r}`, { wrapText: true });
 }
 const wrapPlain = await Pdf.fromExcel(wrapWb);
@@ -485,7 +485,7 @@ function commentWorkbook() {
   const ws = Workbook.addWorksheet(wb, "Comments");
   for (let r = 1; r <= 12; r++) {
     for (let c = 1; c <= 6; c++) {
-      Cell.setValue(ws, r, c, `r${r}c${c}`);
+      Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
     }
   }
   Cell.setNote(ws, "B6", "Check this number");
@@ -546,9 +546,9 @@ const mergeWb = Workbook.create();
 const mergeWs = Workbook.addWorksheet(mergeWb, "Merged");
 for (let c = 1; c <= 8; c++) {
   Column.setWidth(mergeWs, c, 10);
-  Cell.setValue(mergeWs, 1, c, `H${c}`);
+  Cell.setValue(mergeWs, { row: 1, col: c }, `H${c}`);
 }
-Cell.setValue(mergeWs, 2, 2, "MERGED B..F");
+Cell.setValue(mergeWs, { row: 2, col: 2 }, "MERGED B..F");
 Worksheet.merge(mergeWs, "B2:F2");
 mergeWs.pageSetup.printArea = "E1:G3";
 mergeWs.pageSetup.printTitlesColumn = "A:B";
@@ -575,9 +575,9 @@ const comboWb = Workbook.create();
 const comboWs = Workbook.addWorksheet(comboWb, "Report");
 for (let c = 1; c <= 10; c++) {
   Column.setWidth(comboWs, c, 11);
-  Cell.setValue(comboWs, 1, c, `Col ${c}`);
+  Cell.setValue(comboWs, { row: 1, col: c }, `Col ${c}`);
   for (let r = 2; r <= 45; r++) {
-    Cell.setValue(comboWs, r, c, r * c);
+    Cell.setValue(comboWs, { row: r, col: c }, r * c);
   }
 }
 Cell.setFill(comboWs, "A1", {

@@ -33,7 +33,7 @@ import {
   DEFAULT_CHART_EX_HEIGHT_EMU,
   DEFAULT_CHART_WIDTH_EMU
 } from "@word/units";
-import { checkWritableChart } from "@word/writer/chart-writer";
+import { checkWritableChart } from "@word/writer/chart-checks";
 import { renderCheckBox } from "@word/writer/checkbox-writer";
 import { closeDrawingFrame, frameModel, openDrawingFrame } from "@word/writer/drawing-frame";
 import { renderFloatingImage, renderFloatingImageRun } from "@word/writer/image-writer";

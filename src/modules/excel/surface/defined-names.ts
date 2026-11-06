@@ -145,8 +145,8 @@ function attached(
  * Define `name` as a formula (`"0.2"`, `"Sheet1!$A$1*2"`) — in the workbook scope, or the sheet scope
  * `options.localSheetId`, as {@link add} does. Returns the name as {@link get} reports it then.
  *
- * @throws {ExcelDefinedNameError} when `name` is not a name Excel accepts, or `expression` is not a string.
- * @throws {ExcelArgumentError} when `options.localSheetId` is not a whole number from 0.
+ * @throws {ExcelDefinedNameError} when `name` is not a name Excel accepts, or `expression` is empty.
+ * @throws {ExcelArgumentError} when `expression` is not a string, or `options.localSheetId` is not a whole number from 0.
  */
 export function addFormula(
   dn: DefinedNamesData,
@@ -156,12 +156,15 @@ export function addFormula(
 ): DefinedNameModel {
   checkDefinedNames(dn);
   definedNamesCheckName(dn, "DefinedNames.addFormula", name);
-  if (typeof expression !== "string" || expression.length === 0) {
+  const check = argumentChecks("DefinedNames.addFormula");
+  check.required("expression", expression);
+  check.string("expression", expression);
+  if (expression.length === 0) {
     throw new ExcelDefinedNameError(
       `DefinedNames.addFormula: the expression for "${name}" must be a non-empty string.`
     );
   }
-  const localSheetId = checkScope(argumentChecks("DefinedNames.addFormula"), options);
+  const localSheetId = checkScope(check, options);
   definedNamesAddFormula(dn, name, expression, localSheetId);
   return attached(dn, name, localSheetId);
 }

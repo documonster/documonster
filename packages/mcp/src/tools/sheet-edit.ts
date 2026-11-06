@@ -345,7 +345,7 @@ function applyOp(
           if (targetRow > window.bottom || targetCol > window.right) {
             continue;
           }
-          Cell.setValue(ws, targetRow, targetCol, value);
+          Cell.setValue(ws, { row: targetRow, col: targetCol }, value);
           written += 1;
         }
       }
@@ -374,7 +374,7 @@ function applyOp(
       let count = 0;
       for (let row = window.top; row <= window.bottom; row += 1) {
         for (let column = window.left; column <= window.right; column += 1) {
-          Cell.setValue(ws, row, column, null);
+          Cell.setValue(ws, { row, col: column }, null);
           count += 1;
         }
       }
@@ -398,22 +398,30 @@ function applyOp(
       for (let row = window.top; row <= window.bottom; row += 1) {
         for (let column = window.left; column <= window.right; column += 1) {
           if (op.bold !== undefined || op.italic !== undefined || op.fontColor !== undefined) {
-            Cell.setFont(ws, row, column, {
-              ...(Cell.getFont(ws, row, column) ?? {}),
-              ...(op.bold === undefined ? {} : { bold: op.bold }),
-              ...(op.italic === undefined ? {} : { italic: op.italic }),
-              ...(op.fontColor === undefined ? {} : { color: { argb: toArgb(op.fontColor) } })
-            });
+            Cell.setFont(
+              ws,
+              { row, col: column },
+              {
+                ...(Cell.getFont(ws, { row, col: column }) ?? {}),
+                ...(op.bold === undefined ? {} : { bold: op.bold }),
+                ...(op.italic === undefined ? {} : { italic: op.italic }),
+                ...(op.fontColor === undefined ? {} : { color: { argb: toArgb(op.fontColor) } })
+              }
+            );
           }
           if (op.fillColor !== undefined) {
-            Cell.setFill(ws, row, column, {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: toArgb(op.fillColor) }
-            });
+            Cell.setFill(
+              ws,
+              { row, col: column },
+              {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: toArgb(op.fillColor) }
+              }
+            );
           }
           if (op.numFmt !== undefined) {
-            Cell.setNumFmt(ws, row, column, op.numFmt);
+            Cell.setNumFmt(ws, { row, col: column }, op.numFmt);
           }
         }
       }
@@ -431,7 +439,7 @@ function applyOp(
       if (op.rows !== undefined && op.rows.length > 0) {
         for (const [rowOffset, row] of op.rows.entries()) {
           for (const [columnOffset, value] of row.entries()) {
-            Cell.setValue(added, rowOffset + 1, columnOffset + 1, value);
+            Cell.setValue(added, { row: rowOffset + 1, col: columnOffset + 1 }, value);
           }
         }
       }

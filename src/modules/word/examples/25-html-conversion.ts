@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WordHtml } from "../html";
-import { Document, Io } from "../index";
+import { Document } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -132,14 +132,14 @@ const finalDoc = {
   abstractNumberings: [...(doc.abstractNumberings ?? []), ...fragment.abstractNumberings],
   numberingInstances: [...(doc.numberingInstances ?? []), ...fragment.numberingInstances]
 };
-const docxBytes = await Io.toBuffer(finalDoc);
+const docxBytes = await Document.toBuffer(finalDoc);
 fs.writeFileSync(path.join(outDir, "25-html-imported.docx"), docxBytes);
 console.log(`  → 25-html-imported.docx (${docxBytes.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // 2. DOCX → HTML (round-trip)
 // ---------------------------------------------------------------------------
-const reread = await Io.read(docxBytes);
+const reread = await Document.read(docxBytes);
 const htmlOut = WordHtml.fromDocx(reread, {
   fullDocument: true,
   includeStyles: true,
@@ -188,7 +188,7 @@ for (const img of reread.images ?? []) {
 // ---------------------------------------------------------------------------
 {
   const wholeDoc = WordHtml.toDocx(inputHtml, { defaultFont: "Calibri" });
-  const bytes = await Io.toBuffer(wholeDoc);
+  const bytes = await Document.toBuffer(wholeDoc);
   fs.writeFileSync(path.join(outDir, "25-html-to-document.docx"), bytes);
   console.log(`  WordHtml.toDocx → 25-html-to-document.docx (${bytes.length} bytes)`);
 }

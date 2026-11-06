@@ -6,6 +6,7 @@
 
 import { checkHandle, checkInteger } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
+import { ownTree } from "@word/core/ownership";
 import { arrangeParagraphChildren, spellOutRangeMarkers } from "@word/core/range-markers";
 import { hyperlinkContent, withHyperlinkContent } from "@word/core/text-utils";
 import type {
@@ -162,6 +163,7 @@ function replaceTableRows(
  */
 export function acceptAllRevisions(doc: DocxDocument): number {
   checkHandle(doc, "document", "doc", "Document.acceptAllRevisions");
+  ownTree(doc);
   let count = 0;
   const processBody = (body: BodyContent[]): void => {
     count += dropBodyMoveRanges(body);
@@ -288,6 +290,7 @@ export function acceptAllRevisions(doc: DocxDocument): number {
  */
 export function rejectAllRevisions(doc: DocxDocument): number {
   checkHandle(doc, "document", "doc", "Document.rejectAllRevisions");
+  ownTree(doc);
   let count = 0;
   const processBody = (body: BodyContent[]): void => {
     count += dropBodyMoveRanges(body);
@@ -861,6 +864,7 @@ function processSingleRevision(
   revisionId: number,
   mode: "accept" | "reject"
 ): boolean {
+  ownTree(doc);
   let found = false;
 
   const processParagraph = (para: Paragraph): void => {

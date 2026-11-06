@@ -31,7 +31,7 @@ import {
   type SparklineColor
 } from "@excel/core/sparkline";
 import type { Color } from "@excel/types";
-import { decodeCell, decodeRange, encodeCell } from "@excel/utils/address";
+import { decodeCell, encodeCell } from "@excel/utils/address";
 import {
   encodeRange,
   readSheetRange,
@@ -394,18 +394,6 @@ function axisFlag(
     return 1 << individualBit;
   }
   return type === "group" ? 1 << groupBit : 0;
-}
-
-/** Whether a reference decodes, so a group with a broken one can be reported rather than written. */
-export function isUsableSparkline(sparkline: SheetSparkline): boolean {
-  const { cellRef: cell, dataRef: data } = sparkline;
-  try {
-    decodeCell(cell);
-    decodeRange(data.includes("!") ? (data.split("!")[1] ?? data) : data);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**

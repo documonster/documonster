@@ -94,19 +94,15 @@ import type {
   Color as ExcelColor
 } from "@excel/types";
 import { sheetNameKey } from "@utils/name-key";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { CELL_THEME_PALETTE } from "@utils/theme-colors";
 import {
   CHART_TYPES,
-  checkArray,
-  checkBoolean,
   checkChartSeries as checkWordChartSeries,
-  checkFinite,
   checkHandle,
-  checkHeadingLevel,
-  checkInteger,
   checkOneOf,
   checkRecord,
-  checkString,
   invalidArgument
 } from "@word/core/argument-checks";
 import {
@@ -117,6 +113,7 @@ import {
   seriesKeys
 } from "@word/core/chart-kept";
 import type { Mutable } from "@word/core/internal-utils";
+import { checkSchema, model, w } from "@word/core/option-schema";
 import { extractParagraphText } from "@word/core/text-utils";
 import { DocxArgumentError } from "@word/errors";
 import type {
@@ -178,30 +175,30 @@ export interface ExcelToDocxOptions {
   readonly includeBorders?: boolean;
 }
 
-function checkExcelToDocxOptions(options: ExcelToDocxOptions | undefined, where: string): void {
-  checkRecord(options, "options", where, { optional: true });
-  if (options?.sheets !== undefined) {
-    checkArray(options.sheets, "options.sheets", where);
-    options.sheets.forEach((sheet, i) => {
-      if (typeof sheet !== "string") {
-        checkInteger(sheet, `options.sheets[${i}]`, where, { min: 0 });
-      }
-    });
-  }
+const excelToDocxOptionsSchema = w.record({
+  sheets: w
+    .array(
+      s.custom<string | number>(
+        v => typeof v === "string" || (Number.isInteger(v) && (v as number) >= 0),
+        "an integer ≥ 0"
+      )
+    )
+    .optional(),
+  includeSheetHeadings: w.boolean().optional(),
   // Written as the `HeadingN` style of the sheet titles.
-  if (options?.sheetHeadingLevel !== undefined) {
-    checkHeadingLevel(options.sheetHeadingLevel, "options.sheetHeadingLevel", where);
-  }
-  checkInteger(options?.maxColumns, "options.maxColumns", where, { optional: true, min: 0 });
-  checkInteger(options?.maxRows, "options.maxRows", where, { optional: true, min: 0 });
-  for (const key of [
-    "includeSheetHeadings",
-    "includeTitlePage",
-    "preserveFormatting",
-    "includeBorders"
-  ] as const) {
-    checkBoolean(options?.[key], `options.${key}`, where, { optional: true });
-  }
+  sheetHeadingLevel: w.integer({ min: 1, max: 9 }).optional(),
+  includeTitlePage: w.boolean().optional(),
+  maxColumns: w.integer({ min: 0 }).optional(),
+  maxRows: w.integer({ min: 0 }).optional(),
+  preserveFormatting: w.boolean().optional(),
+  includeBorders: w.boolean().optional()
+});
+const _excelToDocxOptionsMatch: SchemaMatches<typeof excelToDocxOptionsSchema, ExcelToDocxOptions> =
+  true;
+void _excelToDocxOptionsMatch;
+
+function checkExcelToDocxOptions(options: ExcelToDocxOptions | undefined, where: string): void {
+  checkSchema(excelToDocxOptionsSchema.optional(), options, where);
 }
 
 /**
@@ -758,39 +755,31 @@ export interface DocxChartExOptions {
   readonly legendPosition?: "b" | "l" | "r" | "t" | "tr";
 }
 
-const CHART_EX_TYPES: ReadonlySet<string> = new Set<ChartExType>([
-  "sunburst",
-  "treemap",
-  "waterfall",
-  "funnel",
-  "histogram",
-  "pareto",
-  "boxWhisker",
-  "regionMap"
-]);
-
-const CHART_EX_LEGEND_POSITIONS: ReadonlySet<string> = new Set<
-  NonNullable<DocxChartExOptions["legendPosition"]>
->(["b", "l", "r", "t", "tr"]);
-
-/** Chart series as the Word chart helpers take them: a name, categories and finite values. */
-function checkChartSeries(series: unknown, field: string, where: string): void {
-  checkArray(series, field, where);
-  (series as unknown[]).forEach((s, i) => {
-    const at = `${field}[${i}]`;
-    checkRecord(s, at, where);
-    const v = s as { name?: unknown; categories?: unknown; values?: unknown };
-    checkString(v.name, `${at}.name`, where);
-    if (v.categories !== undefined) {
-      checkArray(v.categories, `${at}.categories`, where);
-      (v.categories as unknown[]).forEach((c, j) =>
-        checkString(c, `${at}.categories[${j}]`, where)
-      );
-    }
-    checkArray(v.values, `${at}.values`, where);
-    (v.values as unknown[]).forEach((n, j) => checkFinite(n, `${at}.values[${j}]`, where));
-  });
-}
+const chartExOptionsSchema = w.record({
+  type: w.oneOf([
+    "sunburst",
+    "treemap",
+    "waterfall",
+    "funnel",
+    "histogram",
+    "pareto",
+    "boxWhisker",
+    "regionMap"
+  ]),
+  // Chart series as the Word chart helpers take them: a name, categories and finite values.
+  series: w.array(
+    w.record({
+      name: w.string(),
+      categories: w.array(w.string()).optional(),
+      values: w.array(w.finite())
+    })
+  ),
+  title: w.string().nullable().optional(),
+  showLegend: w.boolean().optional(),
+  legendPosition: w.oneOf(["b", "l", "r", "t", "tr"]).optional()
+});
+const _chartExOptionsMatch: SchemaMatches<typeof chartExOptionsSchema, DocxChartExOptions> = true;
+void _chartExOptionsMatch;
 
 /**
  * Build a ChartEx XML part for embedding in a Word document.
@@ -803,16 +792,7 @@ function checkChartSeries(series: unknown, field: string, where: string): void {
  */
 export function buildWordChartExXml(options: DocxChartExOptions): string {
   const where = "WordExcel.toChartExXml";
-  checkRecord(options, "options", where);
-  checkOneOf(options.type, CHART_EX_TYPES, "options.type", where);
-  checkChartSeries(options.series, "options.series", where);
-  if (options.title !== undefined && options.title !== null) {
-    checkString(options.title, "options.title", where);
-  }
-  checkBoolean(options.showLegend, "options.showLegend", where, { optional: true });
-  checkOneOf(options.legendPosition, CHART_EX_LEGEND_POSITIONS, "options.legendPosition", where, {
-    optional: true
-  });
+  checkSchema(chartExOptionsSchema, options, where);
   // Convert Word-friendly options to Excel's AddChartExOptions format
   const excelOptions: AddChartExOptions = {
     type: options.type,
@@ -853,6 +833,12 @@ export interface DocxChartSvgOptions {
   readonly themeColors?: ChartThemeColors;
 }
 
+/** `themeColors` is checked by the chart engine's own check, `checkChartRenderOptions`. */
+const chartSvgOptionsSchema = w.record({ themeColors: model<ChartThemeColors>() });
+const _chartSvgOptionsMatch: SchemaMatches<typeof chartSvgOptionsSchema, DocxChartSvgOptions> =
+  true;
+void _chartSvgOptionsMatch;
+
 /**
  * Render a Word Chart to SVG string for HTML embedding.
  *
@@ -868,7 +854,7 @@ export interface DocxChartSvgOptions {
 export function renderWordChartSvg(chart: Chart, options?: DocxChartSvgOptions): string {
   const where = "WordExcel.toChartSvg";
   checkWordChart(chart, where);
-  checkRecord(options, "options", where, { optional: true });
+  checkSchema(chartSvgOptionsSchema.optional(), options, where);
   const themeColors = options?.themeColors;
   try {
     checkChartRenderOptions(where, { themeColors });

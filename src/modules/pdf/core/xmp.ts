@@ -18,7 +18,7 @@
  * original metadata stream untouched rather than writing a guess.
  */
 
-import { isLegalXmlChar, xmlEncode, xmlEncodeAttr } from "@utils/xml-encode";
+import { xmlEncode, xmlEncodeAttr } from "@utils/xml-encode";
 import { parseXml } from "@xml/dom";
 import type { XmlDocument, XmlElement, XmlNode } from "@xml/types";
 
@@ -63,20 +63,6 @@ const PROPERTIES: ReadonlyArray<{
   { field: "creationDate", ns: "xmp", name: "CreateDate", shape: "text" },
   { field: "modDate", ns: "xmp", name: "ModifyDate", shape: "text" }
 ];
-
-/**
- * The first character of `text` that XML 1.0 cannot carry (a C0 control other than tab,
- * newline and carriage return, a lone surrogate, U+FFFE/U+FFFF), or `undefined`.
- */
-export function firstIllegalXmlChar(text: string): number | undefined {
-  for (const ch of text) {
-    const code = ch.codePointAt(0)!;
-    if (!isLegalXmlChar(code)) {
-      return code;
-    }
-  }
-  return undefined;
-}
 
 // =============================================================================
 // Encoding

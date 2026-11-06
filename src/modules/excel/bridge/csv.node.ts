@@ -39,7 +39,12 @@ export {
   InvalidValueTypeError,
   WorksheetNameError
 } from "@excel/errors";
-export type { ExcelFileErrorOptions, InvalidValueTypeErrorOptions } from "@excel/errors";
+export type {
+  ExcelFileErrorOptions,
+  ExcelInvalidValueTypeErrorOptions,
+  // Deprecated pre-prefix name; removed in 1.0.
+  InvalidValueTypeErrorOptions
+} from "@excel/errors";
 export { CsvError, isCsvError } from "@csv/errors";
 export type { BaseErrorOptions } from "@utils/errors";
 // Prefixed with the namespace they belong to, so they cannot be read as `documonster/csv`'s own options.

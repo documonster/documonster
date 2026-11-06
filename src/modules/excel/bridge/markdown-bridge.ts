@@ -26,7 +26,7 @@ import type { Worksheet } from "@excel/core/worksheet";
 import { eachRow } from "@excel/core/worksheet";
 import { ExcelArgumentError, ExcelWorksheetNameError } from "@excel/errors";
 import type { CellValue, CellValueInput } from "@excel/types";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentFailure, checkSchema } from "@excel/utils/arguments";
 import { checkFormatArguments } from "@markdown/arguments";
 import { MarkdownArgumentError } from "@markdown/errors";
 import { formatMarkdown } from "@markdown/format/index";
@@ -39,8 +39,9 @@ import type {
   MarkdownParseResult
 } from "@markdown/types";
 import { createDateFormatter, createIsoDateFormatter } from "@utils/datetime";
-import { describeValue } from "@utils/describe-value";
 import { sheetNameKey } from "@utils/name-key";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // =============================================================================
 // Stringify
@@ -168,10 +169,7 @@ export interface ExcelMarkdownWriteOptions extends MarkdownFormatOptions {
 
 /** The bridge's argument error: `where` is the function called (`"ExcelMarkdown.read"`), `field` the argument. */
 function fail(where: string, field: string, expected: string, value: unknown): never {
-  throw new ExcelArgumentError(
-    field,
-    `${where}: ${field} must be ${expected}, got ${describeValue(value)}.`
-  );
+  throw argumentFailure(where, field, expected, value);
 }
 
 /**
@@ -192,15 +190,30 @@ function asBridgeError<T>(where: string, run: () => T): T {
   }
 }
 
-/** Refuse an options argument that is not an object — `42` used to be read as "no options". */
-function checkMarkdownOptions(where: string, options: unknown): void {
-  if (
-    options !== undefined &&
-    (options === null || typeof options !== "object" || Array.isArray(options))
-  ) {
-    fail(where, "options", "an object", options);
-  }
-}
+// The bridge's own options. Those it hands to the Markdown parser or formatter are checked there (`asBridgeError`).
+const readOptionsSchema = s.object({
+  sheetName: s.string().optional(),
+  map: s.function<(text: string, column: number) => CellValueInput>().optional(),
+  tables: s.literal("first", "all").optional()
+});
+const _readOptionsMatch: SchemaMatches<
+  typeof readOptionsSchema,
+  Omit<ExcelMarkdownReadOptions, keyof MarkdownParseOptions>
+> = true;
+void _readOptionsMatch;
+
+const writeOptionsSchema = s.object({
+  sheetName: s.string().optional(),
+  sheetId: s.number({ integer: true }).optional(),
+  dateFormat: s.string().optional(),
+  dateUTC: s.boolean().optional(),
+  includeEmptyRows: s.boolean().optional()
+});
+const _writeOptionsMatch: SchemaMatches<
+  typeof writeOptionsSchema,
+  Omit<ExcelMarkdownWriteOptions, keyof MarkdownFormatOptions>
+> = true;
+void _writeOptionsMatch;
 
 /**
  * The Markdown text of `input` — the text itself, or its bytes decoded as UTF-8, a byte-order mark dropped. Anything
@@ -233,9 +246,6 @@ function checkTables(
   if (tables === undefined) {
     return;
   }
-  if (tables !== "first" && tables !== "all") {
-    fail(where, "options.tables", '"first" or "all"', tables);
-  }
   if (only !== undefined && tables !== only) {
     throw new ExcelArgumentError(
       "options.tables",
@@ -259,14 +269,8 @@ function readSettings(
   options: ExcelMarkdownReadOptions | MarkdownOptions | undefined,
   typed: boolean
 ): { parse: MarkdownParseOptions; map?: (text: string, column: number) => CellValueInput } {
-  checkMarkdownOptions(where, options);
+  checkSchema(where, "options", readOptionsSchema.optional(), options);
   checkTables(where, options);
-  if (options?.map !== undefined && typeof options.map !== "function") {
-    fail(where, "options.map", "a function", options.map);
-  }
-  if (options?.sheetName !== undefined && typeof options.sheetName !== "string") {
-    fail(where, "options.sheetName", "a string", options.sheetName);
-  }
   const parse: MarkdownParseOptions = {
     trim: options?.trim,
     unescape: options?.unescape,
@@ -378,7 +382,7 @@ export function addMarkdownWorksheet(
   input: ExcelMarkdownInput,
   options?: ExcelMarkdownReadOptions
 ): Worksheet {
-  checkMarkdownOptions("ExcelMarkdown.addWorksheet", options);
+  checkSchema("ExcelMarkdown.addWorksheet", "options", readOptionsSchema.optional(), options);
   checkTables("ExcelMarkdown.addWorksheet", options, "first");
   return readMarkdownInto(workbook, input, options, true);
 }
@@ -389,7 +393,7 @@ export function addMarkdownWorksheets(
   input: ExcelMarkdownInput,
   options?: ExcelMarkdownReadOptions
 ): Worksheet[] {
-  checkMarkdownOptions("ExcelMarkdown.addWorksheets", options);
+  checkSchema("ExcelMarkdown.addWorksheets", "options", readOptionsSchema.optional(), options);
   checkTables("ExcelMarkdown.addWorksheets", options, "all");
   return readMarkdownAllInto(workbook, input, options, true);
 }
@@ -505,15 +509,9 @@ export function formatWorksheet(
   if (!isReadTarget(workbook)) {
     fail(where, "workbook", "a workbook", workbook);
   }
-  checkMarkdownOptions(where, options);
+  checkSchema(where, "options", writeOptionsSchema.optional(), options);
   const sheetName = options?.sheetName;
   const sheetId = options?.sheetId;
-  const check = argumentChecks(where);
-  check.string("options.sheetName", sheetName);
-  check.number("options.sheetId", sheetId, { integer: true });
-  check.string("options.dateFormat", options?.dateFormat);
-  check.boolean("options.dateUTC", options?.dateUTC);
-  check.boolean("options.includeEmptyRows", options?.includeEmptyRows);
   // The formatter's own checks of its options, run before the sheet is read so an empty sheet is checked too.
   const formatOptions = {
     columns: options?.columns,

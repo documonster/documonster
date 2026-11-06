@@ -99,6 +99,7 @@ export interface HttpRangeReaderStats {
  * Error thrown when the server doesn't support Range requests.
  */
 export { ArchiveRangeNotSupportedError, ArchiveHttpRangeError } from "@archive/core/errors";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import {
   ArchiveArgumentError,
   ArchiveRangeNotSupportedError,
@@ -110,6 +111,7 @@ import {
   isArchiveBytes,
   type ArchiveBytes
 } from "@archive/io/archive-source";
+import { s } from "@utils/schema";
 
 /**
  * Parse total file size from Content-Range header.
@@ -194,15 +196,12 @@ export class HttpRangeReader implements RandomAccessReader {
    * @throws {ArchiveHttpRangeError} If the HTTP request fails
    */
   static async open(url: string, options: HttpRangeReaderOptions = {}): Promise<HttpRangeReader> {
-    if (
-      typeof url !== "string" &&
-      !(typeof URL !== "undefined" && (url as unknown) instanceof URL)
-    ) {
-      throw new ArchiveArgumentError(
-        "url",
-        `Archive.HttpRangeReader.open: url must be a string, got ${String(url)}`
-      );
-    }
+    checkArchiveArgument(
+      s.union([s.string(), s.builtin<URL>("URL")], { expected: "a string" }),
+      url,
+      "Archive.HttpRangeReader.open",
+      "url"
+    );
     const fetchFn = options.fetch ?? globalThis.fetch;
     const headers = options.headers ?? {};
     const credentials = options.credentials ?? "same-origin";
@@ -472,12 +471,12 @@ function checkRange(where: string, start: number, end: number, size: number): vo
  * @throws {ArchiveArgumentError} If `data` is not an `ArrayBufferView` or `ArrayBuffer`
  */
 export function createBufferReader(data: ArchiveBytes): RandomAccessReader {
-  if (!isArchiveBytes(data)) {
-    throw new ArchiveArgumentError(
-      "data",
-      "Archive.createBufferReader: data must be bytes (an ArrayBufferView or ArrayBuffer)"
-    );
-  }
+  checkArchiveArgument(
+    s.custom(isArchiveBytes, "bytes (an ArrayBufferView or ArrayBuffer)"),
+    data,
+    "Archive.createBufferReader",
+    "data"
+  );
   const bytes = archiveBytesToUint8Array(data);
   return {
     get size(): number {

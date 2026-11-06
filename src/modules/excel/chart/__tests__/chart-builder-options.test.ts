@@ -1536,10 +1536,10 @@ describe("anchor types and chart management", () => {
     Cell.setValue(ws, "B1", 1);
     addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
     const original = getCharts(ws)[0];
-    const clonedNumber = Chart.copyTo(original, original.worksheet);
+    const cloned = Chart.copyTo(original, original.worksheet);
     expect(getCharts(ws)).toHaveLength(2);
-    expect(clonedNumber).not.toBe(original.chartNumber);
-    const cloned = getCharts(ws)[1];
+    expect(cloned).toBe(getCharts(ws)[1]);
+    expect(cloned.chartNumber).not.toBe(original.chartNumber);
     expect(Chart.getTitle(cloned)).toBe("Original");
     // Mutate the clone — original should be unchanged
     Chart.setTitle(cloned, "Modified");

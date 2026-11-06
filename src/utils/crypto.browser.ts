@@ -796,15 +796,7 @@ export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
 // Random bytes
 // =============================================================================
 
-/**
- * Generate cryptographically secure random bytes.
- * Uses crypto.getRandomValues (available in all modern browsers).
- */
-export function randomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytes;
-}
+export { randomBytes } from "./random-bytes";
 
 // =============================================================================
 // Generic hash (async in browser — Web Crypto API)

@@ -39,7 +39,7 @@ Works in Node.js 22+ and modern browsers.
 ## Quick Start
 
 ```typescript
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
 // Create a document
 const doc = Document.create();
@@ -50,11 +50,11 @@ Document.addTable(doc, [
   ["1", "2"]
 ]);
 
-const buffer = await Io.toBuffer(doc);
+const buffer = await Document.toBuffer(doc);
 // Write to file, send as response, etc.
 
 // Read a document
-const parsed = await Io.read(buffer);
+const parsed = await Document.read(buffer);
 console.log(parsed.body.length, "elements");
 ```
 
@@ -63,7 +63,7 @@ console.log(parsed.body.length, "elements");
 ### Document Builder
 
 ```typescript
-import { Document, Build, Io } from "documonster/word";
+import { Document, Build, PageSizes, Units } from "documonster/word";
 
 const doc = Document.create();
 
@@ -82,12 +82,23 @@ Document.addTable(
     ["Header1", "Header2"],
     ["cell1", "cell2"]
   ],
-  { headerRow: true }
+  // headerRow repeats the row on every page; headerRunProperties makes it look like a header
+  { headerRow: true, headerRunProperties: { bold: true } }
 );
 
 // Images
-Document.addImage(doc, pngBytes, "png", width, height);
-Document.addFloatingImage(doc, jpgBytes, "jpeg", width, height, { wrap: { style: "square" } });
+// width / height are EMU — convert with Units
+Document.addImage(doc, pngBytes, {
+  type: "png",
+  width: Units.cmToEmu(5),
+  height: Units.cmToEmu(3)
+});
+Document.addFloatingImage(doc, jpgBytes, {
+  type: "jpeg",
+  width: Units.cmToEmu(4),
+  height: Units.cmToEmu(4),
+  wrap: { style: "square" }
+});
 
 // Lists
 Document.addBulletList(doc, ["Item 1", "Item 2", "Item 3"]);
@@ -95,23 +106,28 @@ Document.addNumberedList(doc, ["First", "Second", "Third"]);
 
 // Page layout
 Document.setSectionProperties(doc, {
-  pageSize: { width: 11906, height: 16838 }, // A4
-  margins: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
+  pageSize: PageSizes.A4,
+  margins: {
+    top: Units.cmToTwips(2.5),
+    bottom: Units.cmToTwips(2.5),
+    left: Units.cmToTwips(2),
+    right: Units.cmToTwips(2)
+  }
 });
 
 // Headers/Footers
 Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
 
 // Build & export
-const bytes = await Io.toBuffer(doc);
+const bytes = await Document.toBuffer(doc);
 ```
 
 ### Reading Documents
 
 ```typescript
-import { Io, Query } from "documonster/word";
+import { Document, Query } from "documonster/word";
 
-const doc = await Io.read(fileBuffer);
+const doc = await Document.read(fileBuffer);
 
 // Extract text content
 const text = Query.getText(doc);
@@ -120,16 +136,16 @@ const text = Query.getText(doc);
 const results = Query.searchText(doc, /pattern/g);
 ```
 
-On Node, `Io.readFile(path)` and `Io.writeFile(doc, path)` read and write a file
+On Node, `Document.readFile(path)` and `Document.writeFile(doc, path)` read and write a file
 directly; the browser build publishes neither — read the bytes yourself and pass
-them to `Io.read`. A file the system will not read or write is a `DocxFileError`
+them to `Document.read`. A file the system will not read or write is a `DocxFileError`
 (`path`, `operation`) whose `cause` is the system's error (`error.cause.code` is
 `ENOENT`, `EACCES`, …), as Excel's `ExcelFileError` is; a file that was read but is
 not a valid document is a `DocxParseError`.
 
 ### One Document Object
 
-`Document.create()` and `Io.read()` return the same thing — a
+`Document.create()` and `Document.read()` return the same thing — a
 `DocxDocument`, the document's content tree — and every namespace takes it.
 `Document.*` helpers therefore work on a document you read as well as on one
 you created. Its fields are public, so you may also edit the tree directly,
@@ -148,7 +164,7 @@ a new array: an entry changed in place (`doc.footnotes[0] = …`, `splice`,
 `sort`, editing an entry object) is not seen by the next helper call. Such an
 edit never reaches the file silently, though — if it leaves two footnotes,
 endnotes, comments or numbering definitions with the same id, or two different
-images under one key, `Io.toBuffer` rejects with a `DocxDuplicateIdError` that names
+images under one key, `Document.toBuffer` rejects with a `DocxDuplicateIdError` that names
 the collection and the id, because content refers to those entries by id and
 the writer cannot tell which entry a reference meant. Bookmark and drawing ids
 are renumbered by the writer whenever they clash, so any edit is safe there.
@@ -168,7 +184,7 @@ An image's key — `ImageDef.rId`, or one of its `aliasRIds` — names the pictu
 in every part: the body, headers, footers, notes, comments and picture bullets
 all refer to `doc.images` by key. A package's relationship ids, by contrast,
 are local to each part (two headers may each call their own logo `rId1`), so
-`Io.read` gives a picture whose local id another picture already holds a fresh
+`Document.read` gives a picture whose local id another picture already holds a fresh
 key, and the writer gives every part that shows a picture a relationship of
 its own. `Transform.merge` renames the keys of an appended document that
 collide with the base's, wherever they are used.
@@ -176,7 +192,7 @@ collide with the base's, wherever they are used.
 A document from `Document.create()` carries `deriveEastAsianDefaults: true`:
 when it is written, laid out or converted, the East Asian proofing language
 and typeface are derived from its text unless you stated them. A document from
-`Io.read()` does not, so a round trip never acquires a language its author did
+`Document.read()` does not, so a round trip never acquires a language its author did
 not choose. It is an ordinary field — copies keep it, and you may set or clear
 it on any document.
 
@@ -190,12 +206,12 @@ out in Calibri 11pt, single spaced, which is a guess — Word takes such a file'
 defaults from the user's Normal template.
 
 ```typescript
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
-const doc = await Io.read(fileBuffer);
+const doc = await Document.read(fileBuffer);
 Document.addParagraph(doc, "Appended paragraph");
 Document.addFootnote(doc, "A new footnote");
-const bytes = await Io.toBuffer(doc);
+const bytes = await Document.toBuffer(doc);
 ```
 
 #### Who changes what
@@ -210,32 +226,32 @@ One rule decides whether a function edits the document you give it:
   input unchanged** — `Template.fill` / `fillFromSource`, `Transform.*`, `Security.*`, `Ole.add`,
   `Vba.add` / `remove`, `Font.addEmbedded`. The result may share unchanged
   nodes with the input (or be the input itself when there is nothing to
-  change), so before editing a result in place while you still use the input,
-  take `Document.clone(...)`.
+  change). `Document.*` copies whatever two documents share before it changes
+  it, so editing either one in place never reaches the other — no clone needed.
+  Take `Document.clone(...)` for a snapshot, or before editing nodes by hand.
 
 `Query.*` only reads.
 
 ```typescript
-import { Document, Io, Template } from "documonster/word";
+import { Document, Template } from "documonster/word";
 
-const template = await Io.read(templateBytes);
+const template = await Document.read(templateBytes);
 for (const row of rows) {
-  // `fill` leaves `template` alone, but its result shares the nodes it did not
-  // change — clone before editing the result in place.
-  const letter = Document.clone(Template.fill(template, row));
+  // `fill` leaves `template` alone, and editing the letter never reaches it.
+  const letter = Template.fill(template, row);
   Document.replaceText(letter, "DRAFT", "FINAL");
-  await Io.writeFile(letter, `out/${row.id}.docx`);
+  await Document.writeFile(letter, `out/${row.id}.docx`);
 }
 ```
 
 ### Modifying Documents
 
 ```typescript
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
-const doc = await Io.read(buffer);
+const doc = await Document.read(buffer);
 const count = Document.replaceText(doc, "OLD_TEXT", "NEW_TEXT"); // edits `doc`, returns the number replaced
-const output = await Io.toBuffer(doc);
+const output = await Document.toBuffer(doc);
 ```
 
 ## Advanced Features
@@ -450,7 +466,7 @@ A hash algorithm is written `"SHA-256"` (as `Security.getState` reports it) here
 encryption format's own spelling `"SHA256"` is accepted by both as well.
 
 Protection restricts editing in Word; it does not encrypt the file. To write a
-password-protected file, pass `password` to `Io.toBuffer` (see
+password-protected file, pass `password` to `Document.toBuffer` (see
 [Encryption & Signatures](#encryption--signatures)).
 
 ### Validation
@@ -469,7 +485,7 @@ the text is kept and written back unchanged while the field is absent, and `Vali
 warning with rule `"unrecognized-value"` and the path to the field (`body[3].properties.alignment`). A value you set
 takes over; clearing the field again brings the kept text back, so `Document.discardUnrecognizedValues(doc)` is how
 to remove them — all, or with `{ filter }` the ones you pick by path and text. `Document.listUnrecognizedValues(doc)`
-lists the ones kept now, each an `UnrecognizedValue` (`{ path, value }`), the same objects the filter is given.
+lists the ones kept now, each a `DocxUnrecognizedValue` (`{ path, value }`), the same objects the filter is given.
 
 ### HTML/Markdown Conversion
 
@@ -511,22 +527,22 @@ const htmlDoc = WordHtml.toDocx("<h1>Hello</h1><ul><li>World</li></ul>");
 ### Flat OPC Format
 
 ```typescript
-import { Convert, Io } from "documonster/word";
+import { Convert, Document } from "documonster/word";
 
 // Single-XML representation of a DOCX
-const flatXml = await Io.toFlatOpc(doc);
-const again = await Io.read(flatXml); // Io.read takes Flat OPC text (or bytes) too
+const flatXml = await Document.toFlatOpc(doc);
+const again = await Document.read(flatXml); // Document.read takes Flat OPC text (or bytes) too
 const parts = Convert.flatOpcToParts(flatXml); // Map<partPath, bytes>
 
-// Base64, as Io.toBase64 writes it
-const fromBase64 = await Io.read(await Io.toBase64(doc), { base64: true });
+// Base64, as Document.toBase64 writes it
+const fromBase64 = await Document.read(await Document.toBase64(doc), { base64: true });
 ```
 
 ### Encryption & Signatures
 
 A password-protected DOCX — Agile Encryption in an OLE compound file, what Word writes for "Encrypt with
-Password" — is read with `{ password }` (`Io.read`, `Io.readFile`, the `Package` functions,
-`new Stream.DocumentReader`) and written with it (`Io.toBuffer`, `Io.toBase64`, `Io.writeFile`); `encryption` tunes
+Password" — is read with `{ password }` (`Document.read`, `Document.readFile`, the `Package` functions,
+`new Stream.DocumentReader`) and written with it (`Document.toBuffer`, `Document.toBase64`, `Document.writeFile`); `encryption` tunes
 it (Office's defaults: AES-256, SHA-512, 100,000 iterations). Excel's `Workbook.read` / `toBuffer` take the same
 options, and both modules share one implementation. The encryption code is loaded only when a password is given.
 Without a password an encrypted file is a `DocxEncryptedError`; a wrong one is a `DocxDecryptionError` whose
@@ -534,11 +550,11 @@ Without a password an encrypted file is a `DocxEncryptedError`; a wrong one is a
 `reason: "unsupported"`.
 
 ```typescript
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 
-const encrypted = await Io.toBuffer(doc, { password: "password" });
-const reread = await Io.read(encrypted, { password: "password" });
-const tuned = await Io.toBuffer(doc, {
+const encrypted = await Document.toBuffer(doc, { password: "password" });
+const reread = await Document.read(encrypted, { password: "password" });
+const tuned = await Document.toBuffer(doc, {
   password: "password",
   encryption: { keyBits: 128, hashAlgorithm: "SHA-256", spinCount: 50_000 }
 });
@@ -548,7 +564,7 @@ Lower-level helpers live on the `documonster/word/crypto` subpath, so they stay
 out of bundles that only read/write plain DOCX.
 
 ```typescript
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 import { WordCrypto } from "documonster/word/crypto";
 
 // Decrypt a password-protected DOCX to its package (Agile Encryption)
@@ -557,7 +573,7 @@ if (WordCrypto.isEncrypted(bytes)) {
 }
 
 // Encrypt package bytes you already have
-const encrypted = await WordCrypto.encrypt(await Io.toBuffer(doc), "password");
+const encrypted = await WordCrypto.encrypt(await Document.toBuffer(doc), "password");
 
 // Check a password without decrypting the package
 const ok = await WordCrypto.verifyPassword(bytes, "password");
@@ -599,11 +615,11 @@ Hidden sheets are skipped; rows/columns can be capped.
 
 ```typescript
 import { WordExcel } from "documonster/word/excel";
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 
 // Workbook → DocxDocument (all visible sheets, formatting preserved)
 const doc = WordExcel.toDocx(workbook);
-const docxBytes = await Io.toBuffer(doc);
+const docxBytes = await Document.toBuffer(doc);
 
 // With options: a title page, only some sheets, capped dimensions.
 // Name the sheets: numeric positions are deprecated (removed in 1.0) — they
@@ -645,10 +661,10 @@ inline images, headers/footers, and floats all render identically to the
 SVG path.
 
 ```typescript
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 import { Pdf } from "documonster/pdf";
 
-const doc = await Io.read(docxBytes);
+const doc = await Document.read(docxBytes);
 const pdfBytes = await Pdf.fromDocx(doc);
 
 // Override page geometry (points). Any field omitted falls back to the

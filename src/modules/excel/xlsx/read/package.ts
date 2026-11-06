@@ -12,7 +12,7 @@ import { loadWorkbookModel } from "@excel/core/model-load";
 import { isArrayBufferLike } from "@excel/core/workbook-format";
 import type { Workbook } from "@excel/core/workbook.browser";
 import { ExcelFileError, XlsxParseError } from "@excel/errors";
-import { containerReadError } from "@excel/utils/container-errors";
+import { containerReadError, containerReadLimits } from "@excel/utils/container-errors";
 import { xlsxPartError } from "@excel/utils/file-content-errors";
 import {
   chartsheetPath,
@@ -186,19 +186,6 @@ export async function readXlsxInto(
 }
 
 /**
- * Document-level container defaults. The archive library leaves both bounds
- * unbounded because what a process can afford is host-dependent; a workbook is
- * a narrower thing. A part count of 10,000 mirrors the Word reader's
- * `maxPartCount` and is far above real workbooks (each sheet adds ~2–6 parts:
- * sheet XML, rels, drawing, comments, table), which reach the low hundreds.
- * 2 GiB total sits above what Excel itself can open — sheet XML compresses
- * ~10:1, so this admits a ~200 MB `.xlsx` — while rejecting the many-entries
- * bombs a per-entry bound alone lets through. Pass `Infinity` to lift either.
- */
-const XLSX_DEFAULT_MAX_ENTRIES = 10_000;
-const XLSX_DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024;
-
-/**
  * Internal: Load from Uint8Array buffer
  */
 export async function readXlsxBytesInto(
@@ -209,12 +196,7 @@ export async function readXlsxBytesInto(
   let parser: ZipParser;
   let filesMap: Awaited<ReturnType<ZipParser["extractAll"]>>;
   try {
-    parser = new ZipParser(buffer, {
-      ...options?.zip,
-      maxEntries: options?.zip?.maxEntries ?? XLSX_DEFAULT_MAX_ENTRIES,
-      maxTotalUncompressedSize:
-        options?.zip?.maxTotalUncompressedSize ?? XLSX_DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE
-    });
+    parser = new ZipParser(buffer, containerReadLimits(options?.zip));
     filesMap = await parser.extractAll();
   } catch (error) {
     // Bytes that are not a ZIP package, or a part the package says is damaged, are not a readable workbook: reported
@@ -511,20 +493,27 @@ export async function readXlsxEntriesInto(
     const entryName = normalizeZipPath(entry.name);
     sawBinaryWorkbook ||= entryName === "xl/workbook.bin";
     sawXmlWorkbook ||= entryName === OOXML_PATHS.xlWorkbook;
+    let failure: { error: unknown } | undefined;
     try {
       if (!(await processEntry(streamedPart(entry.stream), model, entryName, options))) {
         // Important for true streaming parsers: always consume unknown entries
         await drainEntry();
       }
-    } finally {
-      // Make sure we don't leave the entry stream partially consumed.
-      // This is critical for true streaming parsers which may otherwise abort
-      // the underlying entry stream (showing up as AbortError/ABORT_ERR).
-      try {
-        await drainEntry();
-      } catch {
-        // ignore drain errors; the primary parse error (if any) is more useful
-      }
+    } catch (error) {
+      failure = { error };
+    }
+    // Make sure we don't leave the entry stream partially consumed.
+    // This is critical for true streaming parsers which may otherwise abort
+    // the underlying entry stream (showing up as AbortError/ABORT_ERR).
+    try {
+      await drainEntry();
+    } catch (error) {
+      // After a parse error that error is the one to report; otherwise a drain that fails — a container limit the
+      // drained bytes cross, a damaged entry — is the read's failure, not something to pass over.
+      failure ??= { error };
+    }
+    if (failure) {
+      throw failure.error;
     }
   }
 

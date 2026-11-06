@@ -18,7 +18,7 @@ import { Archive } from "documonster/archive";
 import { Csv } from "documonster/csv";
 import { Image, Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
-import { Io, Layout, Query, Template } from "documonster/word";
+import { Document, Layout, Query, Template } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -331,9 +331,9 @@ async function describeWordDocument(resolved: string, config: ServerConfig): Pro
     return ["This is a Word document, but it is over the size limit, so it was not opened."];
   }
 
-  let doc: Awaited<ReturnType<typeof Io.readFile>>;
+  let doc: Awaited<ReturnType<typeof Document.readFile>>;
   try {
-    doc = await Io.readFile(resolved);
+    doc = await Document.readFile(resolved);
   } catch (cause) {
     return [
       `This looks like a Word document but could not be parsed: ${cause instanceof Error ? cause.message : String(cause)}`,

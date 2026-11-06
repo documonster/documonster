@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { UnderlineStyle, HighlightColor, RunProperties, Run } from "../index";
 
 const outDir = path.resolve(
@@ -342,6 +342,6 @@ Document.addParagraph(
   ])
 );
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "02-formatting.docx"), buf);
 console.log(`  → 02-formatting.docx (${buf.length} bytes)`);

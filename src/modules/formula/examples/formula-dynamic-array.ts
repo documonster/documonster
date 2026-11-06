@@ -32,9 +32,9 @@ const rows: [string, string, number][] = [
   ["West", "Widget", 110]
 ];
 rows.forEach((row, i) => {
-  Cell.setValue(ws, i + 2, 1, row[0]);
-  Cell.setValue(ws, i + 2, 2, row[1]);
-  Cell.setValue(ws, i + 2, 3, row[2]);
+  Cell.setValue(ws, { row: i + 2, col: 1 }, row[0]);
+  Cell.setValue(ws, { row: i + 2, col: 2 }, row[1]);
+  Cell.setValue(ws, { row: i + 2, col: 3 }, row[2]);
 });
 
 // FILTER — rows where Sales ≥ 100
@@ -95,14 +95,18 @@ for (let rn = 1; rn <= 6; rn++) {
   for (let cn = 5; cn <= 7; cn++) {
     // `Cell.has` first: it creates nothing, so probing does not manufacture the
     // very ghost cells this loop is trying to observe.
-    if (!Cell.has(ws, rn, cn)) {
+    if (!Cell.has(ws, { row: rn, col: cn })) {
       row.push(null);
       continue;
     }
     // For the source cell, the spilled value is carried in `result`;
     // ghost cells carry it in `value`. The cell is known to exist by now, so
     // addressing it again is safe.
-    row.push(rn === 1 && cn === 5 ? Cell.getResult(ws, rn, cn) : Cell.getValue(ws, rn, cn));
+    row.push(
+      rn === 1 && cn === 5
+        ? Cell.getResult(ws, { row: rn, col: cn })
+        : Cell.getValue(ws, { row: rn, col: cn })
+    );
   }
   if (row.some(v => v !== null)) {
     console.log(`  row ${rn}: ${JSON.stringify(row)}`);

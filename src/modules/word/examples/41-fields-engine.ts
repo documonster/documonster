@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Build, Document, Io, Transform } from "../index";
+import { Build, Document, Transform } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -112,21 +112,21 @@ Document.addParagraph(
 // ---------------------------------------------------------------------------
 // 2. Save raw (cachedValues are placeholders)
 // ---------------------------------------------------------------------------
-fs.writeFileSync(path.join(outDir, "01-raw.docx"), await Io.toBuffer(d));
+fs.writeFileSync(path.join(outDir, "01-raw.docx"), await Document.toBuffer(d));
 console.log(`  → 01-raw.docx`);
 
 // ---------------------------------------------------------------------------
 // 3. Transform.updateFields — compute all field cached values via a layout pass
 // ---------------------------------------------------------------------------
 const updated = Transform.updateFields(d);
-fs.writeFileSync(path.join(outDir, "02-updated.docx"), await Io.toBuffer(updated));
+fs.writeFileSync(path.join(outDir, "02-updated.docx"), await Document.toBuffer(updated));
 console.log(`  → 02-updated.docx (every field cached value computed)`);
 
 // ---------------------------------------------------------------------------
 // 4. Transform.updateTableOfContents — only refresh the TOC entries
 // ---------------------------------------------------------------------------
 const tocOnly = Transform.updateTableOfContents(d);
-fs.writeFileSync(path.join(outDir, "03-toc-refreshed.docx"), await Io.toBuffer(tocOnly));
+fs.writeFileSync(path.join(outDir, "03-toc-refreshed.docx"), await Document.toBuffer(tocOnly));
 console.log(`  → 03-toc-refreshed.docx`);
 
 // ---------------------------------------------------------------------------

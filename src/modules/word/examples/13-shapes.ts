@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -282,6 +282,6 @@ Document.addContent(
   })
 );
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "13-shapes.docx"), buf);
 console.log(`  → 13-shapes.docx (${buf.length} bytes)`);

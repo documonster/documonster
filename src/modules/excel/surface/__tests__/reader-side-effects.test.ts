@@ -4,7 +4,7 @@
  * getters and the model reader must answer for an absent cell exactly as they would
  * once it existed, while leaving the sheet — and what it saves — untouched.
  */
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Column, Image, Row, Workbook, Worksheet } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { describe, expect, it } from "vitest";
 
@@ -162,5 +162,57 @@ describe("Cell readers leave the sheet untouched", () => {
     Row.eachCell(ws, 50, { includeEmpty: true }, (_c, n) => seen.push(n));
     expect(seen).toEqual([]);
     expect(shape(ws)).toBe(before);
+  });
+});
+
+describe("model readers hand out copies all the way down", () => {
+  const PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("Image.getModel: editing the placement's extent changes nothing", () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    const id = Image.add(wb, { base64: PNG, extension: "png" });
+    const image = Image.place(ws, id, { tl: { col: 1, row: 1 }, ext: { width: 10, height: 20 } });
+    const model = Image.getModel(image);
+    if (model.type !== "image") {
+      throw new Error("expected a picture");
+    }
+    model.range.ext!.width = 999;
+    expect(Image.getModel(image)).toMatchObject({ range: { ext: { width: 10, height: 20 } } });
+  });
+
+  it("Chart.getAnchorModel: editing the extent changes nothing", () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Row.add(ws, ["a", 1]);
+    const chart = Chart.place(
+      ws,
+      { tl: { col: 3, row: 0 }, ext: { cx: 3000000, cy: 2000000 } },
+      {
+        type: "bar",
+        series: [{ values: "S!$B$1:$B$1", categories: "S!$A$1:$A$1" }]
+      }
+    );
+    Chart.getAnchorModel(chart).range.ext!.cx = 1;
+    expect(Chart.getAnchorModel(chart).range.ext).toEqual({ cx: 3000000, cy: 2000000 });
+  });
+
+  it("Workbook.getModel: editing it changes nothing, and a second workbook given it shares nothing", () => {
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "S");
+    const model = Workbook.getModel(wb);
+    model.properties.date1904 = true;
+    model.views.push({ activeTab: 3 } as never);
+    expect(Workbook.getModel(wb).properties.date1904).not.toBe(true);
+    expect(Workbook.getModel(wb).views).toHaveLength(
+      Workbook.getModel(Workbook.create()).views.length
+    );
+
+    const other = Workbook.create();
+    Workbook.setModel(other, Workbook.getModel(wb));
+    Workbook.getModel(other).properties.date1904 = true;
+    expect(Workbook.getModel(wb).properties.date1904).not.toBe(true);
+    expect("definedNamesInstance" in Workbook.getModel(wb)).toBe(false);
   });
 });

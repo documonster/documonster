@@ -17,7 +17,7 @@ import { ExcelCsv } from "documonster/excel/csv";
 import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
 import type { PdfCjkLanguage } from "documonster/pdf";
-import { Convert, Io } from "documonster/word";
+import { Convert, Document } from "documonster/word";
 import { WordHtml } from "documonster/word/html";
 import { WordMarkdown } from "documonster/word/markdown";
 import { z } from "zod";
@@ -246,7 +246,7 @@ async function convert(
       }
     );
     if (to === "docx") {
-      await replaceAtomically(target, temporary => Io.writeFile(doc, temporary));
+      await replaceAtomically(target, temporary => Document.writeFile(doc, temporary));
       return ["- OpenDocument mapped to WordprocessingML"];
     }
     if (to === "md") {
@@ -275,7 +275,7 @@ async function convert(
         : {})
     });
     if (to === "docx") {
-      await replaceAtomically(target, temporary => Io.writeFile(doc, temporary));
+      await replaceAtomically(target, temporary => Document.writeFile(doc, temporary));
       return ["- Markdown structure mapped to Word styles", ...prepared.notes];
     }
     if (to === "pdf") {
@@ -376,7 +376,7 @@ async function convert(
   if (from === "csv" && (to === "xlsx" || to === "xlsb")) {
     const wb = await ExcelCsv.readFile(source);
     const ws = requireSheet(wb, undefined);
-    Worksheet.setModel(ws, { ...Worksheet.getModel(ws), name: "Sheet1" });
+    Worksheet.setName(ws, "Sheet1");
     await replaceAtomically(target, temporary => Workbook.writeFile(wb, temporary, { format: to }));
     return [
       `- ${Row.getActualCount(ws)} row(s) imported into sheet "Sheet1"`,
@@ -388,7 +388,7 @@ async function convert(
 }
 
 async function readWord(source: string) {
-  return await Io.readFile(source).catch((cause: unknown) => {
+  return await Document.readFile(source).catch((cause: unknown) => {
     throw toolError.unsupported(
       "could not read the source as a Word document",
       "A CFB container is either a legacy .doc or an encrypted .docx; neither is supported here. Run doc_inspect.",

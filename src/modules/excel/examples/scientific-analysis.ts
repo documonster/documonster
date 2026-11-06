@@ -185,9 +185,9 @@ async function main(): Promise<void> {
     "5. Two-dimensional parameter sweep rendered as a surface chart."
   ];
   methodRows.forEach((line, i) => {
-    Cell.setValue(methods, 12 + i, 2, line);
-    Cell.setStyle(methods, 12 + i, 2, { alignment: { wrapText: true, indent: 1 } });
-    Cell.setStyle(methods, 12 + i, 2, { font: { size: 11 } });
+    Cell.setValue(methods, { row: 12 + i, col: 2 }, line);
+    Cell.setStyle(methods, { row: 12 + i, col: 2 }, { alignment: { wrapText: true, indent: 1 } });
+    Cell.setStyle(methods, { row: 12 + i, col: 2 }, { font: { size: 11 } });
   });
 
   // =========================================================================
@@ -292,69 +292,105 @@ async function main(): Promise<void> {
   // readable. Response range = Samples[Response] (SUMIFS etc).
   GROUPS.forEach((g, i) => {
     const row = 3 + i;
-    Cell.setValue(summary, row, 1, g.name);
-    Cell.setStyle(summary, row, 1, { font: { bold: true } });
+    Cell.setValue(summary, { row, col: 1 }, g.name);
+    Cell.setStyle(summary, { row, col: 1 }, { font: { bold: true } });
 
     // N
-    Cell.setValue(summary, row, 2, {
-      formula: `=COUNTIF(Samples[Group], "${g.name}")`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 2, { numFmt: "0" });
+    Cell.setValue(
+      summary,
+      { row, col: 2 },
+      {
+        formula: `=COUNTIF(Samples[Group], "${g.name}")`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 2 }, { numFmt: "0" });
 
     // Mean
-    Cell.setValue(summary, row, 3, {
-      formula: `=AVERAGEIF(Samples[Group], "${g.name}", Samples[Response])`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 3, { numFmt: "0.00" });
+    Cell.setValue(
+      summary,
+      { row, col: 3 },
+      {
+        formula: `=AVERAGEIF(Samples[Group], "${g.name}", Samples[Response])`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 3 }, { numFmt: "0.00" });
 
     // Median — needs array SUMIFS-style filter; use an array formula.
-    Cell.setValue(summary, row, 4, {
-      formula: `=MEDIAN(IF(Samples[Group]="${g.name}", Samples[Response]))`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 4, { numFmt: "0.00" });
+    Cell.setValue(
+      summary,
+      { row, col: 4 },
+      {
+        formula: `=MEDIAN(IF(Samples[Group]="${g.name}", Samples[Response]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 4 }, { numFmt: "0.00" });
 
     // StdDev
-    Cell.setValue(summary, row, 5, {
-      formula: `=STDEV(IF(Samples[Group]="${g.name}", Samples[Response]))`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 5, { numFmt: "0.00" });
+    Cell.setValue(
+      summary,
+      { row, col: 5 },
+      {
+        formula: `=STDEV(IF(Samples[Group]="${g.name}", Samples[Response]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 5 }, { numFmt: "0.00" });
 
     // Variance
-    Cell.setValue(summary, row, 6, {
-      formula: `=VAR(IF(Samples[Group]="${g.name}", Samples[Response]))`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 6, { numFmt: "0.00" });
+    Cell.setValue(
+      summary,
+      { row, col: 6 },
+      {
+        formula: `=VAR(IF(Samples[Group]="${g.name}", Samples[Response]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 6 }, { numFmt: "0.00" });
 
     // Q1 / Q3
-    Cell.setValue(summary, row, 7, {
-      formula: `=QUARTILE(IF(Samples[Group]="${g.name}", Samples[Response]), 1)`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 7, { numFmt: "0.00" });
-    Cell.setValue(summary, row, 8, {
-      formula: `=QUARTILE(IF(Samples[Group]="${g.name}", Samples[Response]), 3)`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 8, { numFmt: "0.00" });
+    Cell.setValue(
+      summary,
+      { row, col: 7 },
+      {
+        formula: `=QUARTILE(IF(Samples[Group]="${g.name}", Samples[Response]), 1)`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 7 }, { numFmt: "0.00" });
+    Cell.setValue(
+      summary,
+      { row, col: 8 },
+      {
+        formula: `=QUARTILE(IF(Samples[Group]="${g.name}", Samples[Response]), 3)`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 8 }, { numFmt: "0.00" });
 
     // 95% CI ± — t-confidence
-    Cell.setValue(summary, row, 9, {
-      formula: `=CONFIDENCE.T(0.05, E${row}, B${row})`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 9, { numFmt: "0.000" });
+    Cell.setValue(
+      summary,
+      { row, col: 9 },
+      {
+        formula: `=CONFIDENCE.T(0.05, E${row}, B${row})`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 9 }, { numFmt: "0.000" });
 
     // Correlation between dose and response within the group
-    Cell.setValue(summary, row, 10, {
-      formula: `=CORREL(IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]), IF(Samples[Group]="${g.name}", Samples[Response]))`,
-      result: 0
-    });
-    Cell.setStyle(summary, row, 10, { numFmt: "0.000" });
+    Cell.setValue(
+      summary,
+      { row, col: 10 },
+      {
+        formula: `=CORREL(IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]), IF(Samples[Group]="${g.name}", Samples[Response]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(summary, { row, col: 10 }, { numFmt: "0.000" });
   });
 
   // Data bars on the Mean column
@@ -533,22 +569,34 @@ async function main(): Promise<void> {
   Row.setFont(regr, 33, { bold: true });
   GROUPS.forEach((g, i) => {
     const row = 34 + i;
-    Cell.setValue(regr, row, 1, g.name);
-    Cell.setValue(regr, row, 2, {
-      formula: `=SLOPE(IF(Samples[Group]="${g.name}", Samples[Response]), IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]))`,
-      result: 0
-    });
-    Cell.setStyle(regr, row, 2, { numFmt: "0.0000" });
-    Cell.setValue(regr, row, 3, {
-      formula: `=INTERCEPT(IF(Samples[Group]="${g.name}", Samples[Response]), IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]))`,
-      result: 0
-    });
-    Cell.setStyle(regr, row, 3, { numFmt: "0.0000" });
-    Cell.setValue(regr, row, 4, {
-      formula: `=RSQ(IF(Samples[Group]="${g.name}", Samples[Response]), IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]))`,
-      result: 0
-    });
-    Cell.setStyle(regr, row, 4, { numFmt: "0.000" });
+    Cell.setValue(regr, { row, col: 1 }, g.name);
+    Cell.setValue(
+      regr,
+      { row, col: 2 },
+      {
+        formula: `=SLOPE(IF(Samples[Group]="${g.name}", Samples[Response]), IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(regr, { row, col: 2 }, { numFmt: "0.0000" });
+    Cell.setValue(
+      regr,
+      { row, col: 3 },
+      {
+        formula: `=INTERCEPT(IF(Samples[Group]="${g.name}", Samples[Response]), IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(regr, { row, col: 3 }, { numFmt: "0.0000" });
+    Cell.setValue(
+      regr,
+      { row, col: 4 },
+      {
+        formula: `=RSQ(IF(Samples[Group]="${g.name}", Samples[Response]), IF(Samples[Group]="${g.name}", Samples[Dose_mgkg]))`,
+        result: 0
+      }
+    );
+    Cell.setStyle(regr, { row, col: 4 }, { numFmt: "0.000" });
   });
 
   // =========================================================================
@@ -568,14 +616,14 @@ async function main(): Promise<void> {
   const metrics = ["Mean", "Median", "StdDev", "Max", "Min", "Range"];
   Cell.setValue(compSheet, "A3", "Metric");
   GROUPS.forEach((g, i) => {
-    Cell.setValue(compSheet, 3, 2 + i, g.name);
+    Cell.setValue(compSheet, { row: 3, col: 2 + i }, g.name);
   });
   Row.setFont(compSheet, 3, { bold: true });
 
   metrics.forEach((metric, mi) => {
     const row = 4 + mi;
-    Cell.setValue(compSheet, row, 1, metric);
-    Cell.setStyle(compSheet, row, 1, { font: { bold: true } });
+    Cell.setValue(compSheet, { row, col: 1 }, metric);
+    Cell.setStyle(compSheet, { row, col: 1 }, { font: { bold: true } });
     GROUPS.forEach((g, gi) => {
       const cellAddr = `${Address.encodeCol(2 + gi - 1)}${row}`;
       const group = g.name;
@@ -640,18 +688,18 @@ async function main(): Promise<void> {
 
   const doses = [0, 10, 20, 30, 40, 50];
   const times = [1, 2, 4, 8, 16, 24];
-  Cell.setValue(compSheet, 36, 1, "Time \\ Dose");
+  Cell.setValue(compSheet, { row: 36, col: 1 }, "Time \\ Dose");
   doses.forEach((d, i) => {
-    Cell.setValue(compSheet, 36, 2 + i, d);
+    Cell.setValue(compSheet, { row: 36, col: 2 + i }, d);
   });
   times.forEach((t, ti) => {
     const row = 37 + ti;
-    Cell.setValue(compSheet, row, 1, t);
+    Cell.setValue(compSheet, { row, col: 1 }, t);
     doses.forEach((d, di) => {
       // Synthetic response surface: monotonic in dose, peaks at 8h.
       const peak = Math.exp(-((t - 8) ** 2) / 30);
       const value = 100 + d * 1.2 * peak + gauss(0, 2);
-      Cell.setValue(compSheet, row, 2 + di, Math.round(value * 100) / 100);
+      Cell.setValue(compSheet, { row, col: 2 + di }, Math.round(value * 100) / 100);
     });
   });
 
@@ -701,16 +749,16 @@ async function main(): Promise<void> {
 
   GROUPS.forEach((g, gi) => {
     const row = 3 + gi;
-    Cell.setValue(trends, row, 1, g.name);
-    Cell.setStyle(trends, row, 1, { font: { bold: true } });
+    Cell.setValue(trends, { row, col: 1 }, g.name);
+    Cell.setStyle(trends, { row, col: 1 }, { font: { bold: true } });
     // Bin 10 values — split the group's samples into 10 buckets, take mean.
     const groupSamples = samples.filter(s => s.group === g.name);
     const bucketSize = Math.floor(groupSamples.length / 10);
     for (let b = 0; b < 10; b++) {
       const bucket = groupSamples.slice(b * bucketSize, (b + 1) * bucketSize);
       const mean = bucket.reduce((s, x) => s + x.response, 0) / bucket.length;
-      Cell.setValue(trends, row, 2 + b, Math.round(mean * 100) / 100);
-      Cell.setStyle(trends, row, 2 + b, { numFmt: "0.00" });
+      Cell.setValue(trends, { row, col: 2 + b }, Math.round(mean * 100) / 100);
+      Cell.setStyle(trends, { row, col: 2 + b }, { numFmt: "0.00" });
     }
   });
 

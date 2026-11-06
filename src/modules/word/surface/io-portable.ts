@@ -1,7 +1,9 @@
 /**
- * The members of the `Io` namespace both platforms publish — `Io.read(buffer)`,
- * `Io.toBuffer(doc)`, `Io.toBase64(doc)`, `Io.toFlatOpc(doc)`. `io.ts` adds the
- * Node-only file-path members to them; `io.browser.ts` publishes them alone.
+ * The members of the deprecated `Io` namespace both platforms publish. Every one
+ * is a forward: reading and writing a document live in `Document`
+ * (`Document.read`, `Document.toBuffer`, `Document.toBase64`,
+ * `Document.toFlatOpc`). `io.ts` adds the Node-only file-path members to them;
+ * `io.browser.ts` publishes them alone.
  *
  * Part-level editing of DOCX bytes lives in `Package`, byte-level template
  * filling and placeholder patching in `Package`, in-memory filling in `Template`, whole-document transforms in `Transform`.
@@ -16,7 +18,9 @@ import {
   fillTemplateFromBuffer as fillTemplateFromBufferImpl,
   patchDocument as patchDocumentImpl,
   patchTemplate as patchTemplateImpl,
-  toBuffer
+  toBase64 as toBase64Impl,
+  toBuffer as toBufferImpl,
+  toFlatOpc as toFlatOpcImpl
 } from "@word/document-io";
 import {
   editDocxIncremental as editDocxIncrementalImpl,
@@ -25,18 +29,25 @@ import {
 } from "@word/incremental-edit";
 import { mergeDocuments } from "@word/query/merge";
 import { splitDocument } from "@word/query/split";
+import { readDocx } from "@word/reader/docx-reader";
 
-export { readDocx as read } from "@word/reader/docx-reader";
-export { toBuffer, toBase64, toFlatOpc } from "@word/document-io";
+/** @deprecated Use `Document.read`. Removed in 1.0. */
+export const read = readDocx;
+/** @deprecated Use `Document.toBuffer`. Removed in 1.0. */
+export const toBuffer = toBufferImpl;
+/** @deprecated Use `Document.toBase64`. Removed in 1.0. */
+export const toBase64 = toBase64Impl;
+/** @deprecated Use `Document.toFlatOpc`. Removed in 1.0. */
+export const toFlatOpc = toFlatOpcImpl;
 
 /**
- * @deprecated Use {@link toFlatOpc}, which takes an options object
+ * @deprecated Use `Document.toFlatOpc`, which takes an options object
  * (`{ compressionLevel }`). Removed in 1.0.
  */
 export const toFlatOpcFromDoc = toFlatOpcFromDocImpl;
 
-/** @deprecated Use {@link toBuffer}. Removed in 1.0. */
-const packageDocument = toBuffer;
+/** @deprecated Use `Document.toBuffer`. Removed in 1.0. */
+const packageDocument = toBufferImpl;
 // `package` is a reserved word, so the deprecated name can only be published
 // through an export specifier.
 export { packageDocument as package };

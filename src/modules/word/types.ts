@@ -2779,11 +2779,11 @@ export interface ImageWatermark {
 }
 
 /**
- * A value `Io.read` kept because it is outside its field's vocabulary (`<w:jc w:val="bogus"/>`): the field reads as
+ * A value `Document.read` kept because it is outside its field's vocabulary (`<w:jc w:val="bogus"/>`): the field reads as
  * absent and the text is written back until something sets the field. `Document.listUnrecognizedValues` lists them,
  * `Document.discardUnrecognizedValues` drops them — the same shape as Excel's `UnrecognizedValue`, without the sheet.
  */
-export interface UnrecognizedValue {
+export interface DocxUnrecognizedValue {
   /**
    * The path to the field from the document root, as `Validation.validate` reports it:
    * `body[0].properties.alignment`, `headers["rId7"].content.children[0]…`.
@@ -2794,14 +2794,14 @@ export interface UnrecognizedValue {
 }
 
 /** Options for `Document.discardUnrecognizedValues`. */
-export interface DiscardUnrecognizedValuesOptions {
+export interface DocxDiscardUnrecognizedValuesOptions {
   /**
    * Which kept values to drop: called with each — its path, as `Validation.validate` reports it, and its text — and
    * drops those it returns `true` for. Without it, every one is dropped. It also sees a value a field has since taken
    * over from (which `Document.listUnrecognizedValues` no longer lists), so dropping that one keeps it from coming
    * back when the field is cleared.
    */
-  readonly filter?: (value: UnrecognizedValue) => boolean;
+  readonly filter?: (value: DocxUnrecognizedValue) => boolean;
 }
 
 /** Watermark (text or image). */
@@ -4091,7 +4091,7 @@ export interface GlossaryDocument {
 
 /**
  * The Word document: a transparent content tree. `Document.create()` returns
- * one, `Io.read` returns one, every namespace operates on one and `Io.toBuffer`
+ * one, `Document.read` returns one, every namespace operates on one and `Document.toBuffer`
  * writes one. Its fields are public on purpose — a Word document is a tree
  * callers assemble.
  *
@@ -4112,7 +4112,7 @@ export interface GlossaryDocument {
  * new array. Such an edit is never written silently, though. If it leaves two
  * entries of a collection content refers to by id (footnotes, endnotes,
  * comments, abstract numberings, numbering instances, or two different
- * images under one `rId` / `aliasRIds` key) with the same id, `Io.toBuffer`
+ * images under one `rId` / `aliasRIds` key) with the same id, `Document.toBuffer`
  * rejects with a `DocxDuplicateIdError` naming the collection and the id.
  *
  * Bookmark and drawing ids are referenced by nothing but their own start and
@@ -4252,7 +4252,7 @@ export interface DocxDocument {
    *
    * `Document.create()` sets it, because a document assembled from scratch
    * has no other way to get them right: `useDefaultStyles` runs before any
-   * content exists. `Io.read` never sets it, so a read → edit → write round
+   * content exists. `Document.read` never sets it, so a read → edit → write round
    * trip does not acquire a language its author never chose. It is an
    * ordinary field: a spread, `structuredClone` or JSON copy keeps it, and a
    * caller may set or clear it on any document.
@@ -4360,7 +4360,7 @@ export interface OpaqueDrawing extends BlockRangeMarkers {
  * Options for creating a DOCX file.
  *
  * @deprecated No function takes this type; use {@link DocxWriteOptions} (the
- * options of `Io.toBuffer`), which has `compressionLevel` too. Removed in 1.0.
+ * options of `Document.toBuffer`), which has `compressionLevel` too. Removed in 1.0.
  */
 export interface DocxOptions {
   /** Compression level (0-9). Default: 6. */

@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Document, Build } from "../index";
 import type { Run } from "../index";
 
 const outDir = path.resolve(
@@ -223,6 +223,6 @@ Document.addParagraph(
   Build.paragraph([Build.text("Sampled refs:"), ...sampledRefs.flatMap(r => [Build.text(" "), r])])
 );
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "11-footnotes-endnotes-comments.docx"), buf);
 console.log(`  → 11-footnotes-endnotes-comments.docx (${buf.length} bytes)`);

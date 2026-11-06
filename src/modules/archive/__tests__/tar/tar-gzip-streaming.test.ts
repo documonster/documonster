@@ -46,7 +46,7 @@ describe("tar.gz reading is incremental", () => {
     const reader = Archive.openTarGz(tgz);
     expect(await reader.list()).toEqual(["a.txt", "b.txt"]);
     expect(decoder.decode((await reader.bytes("b.txt"))!)).toBe("beta");
-    expect(await reader.get("missing")).toBeNull();
+    expect(await reader.get("missing")).toBeUndefined();
 
     const names: string[] = [];
     for (let pass = 0; pass < 2; pass++) {

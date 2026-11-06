@@ -46,13 +46,13 @@ beforeAll(async () => {
   const sheet = Workbook.addWorksheet(handle, "S");
   for (let row = 1; row <= DATA_ROWS; row++) {
     for (let column = 1; column <= COLUMNS; column++) {
-      Cell.setValue(sheet, row, column, row * column);
+      Cell.setValue(sheet, { row, col: column }, row * column);
     }
   }
   // The formatted tail. This is the shape that costs: a fill applied past the data, one record per cell.
   for (let row = DATA_ROWS + 1; row <= LAST_ROW; row++) {
     for (let column = 1; column <= COLUMNS; column++) {
-      Cell.setStyle(sheet, row, column, {
+      Cell.setStyle(sheet, { row, col: column }, {
         fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEEEEE" } }
       } as never);
     }

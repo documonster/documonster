@@ -12,7 +12,7 @@
 import { ArchiveFileTooLargeError } from "@archive/core/errors";
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
-import { ExcelArgumentError, ExcelFileError, ExcelStreamStateError } from "@excel/errors";
+import { ExcelFileError, ExcelStreamStateError } from "@excel/errors";
 import type { Hyperlink } from "@excel/stream/hyperlink-reader";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
@@ -25,7 +25,12 @@ import type {
   RichText,
   CellRichTextValue
 } from "@excel/types";
-import { compoundFileChecked, withContainerErrors } from "@excel/utils/container-errors";
+import { checkSchema } from "@excel/utils/arguments";
+import {
+  compoundFileChecked,
+  containerLimitError,
+  withContainerErrors
+} from "@excel/utils/container-errors";
 import { xlsxPartError } from "@excel/utils/file-content-errors";
 import { iterateStream as iterateRawStream } from "@excel/utils/iterate-stream";
 import type { IterableStreamLike } from "@excel/utils/iterate-stream";
@@ -37,6 +42,8 @@ import {
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
 import { createPartDecoder } from "@excel/utils/part-decoder";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /**
  * A part's (or the package's) chunks, with a damaged package — a part whose bytes do not match its CRC-32, input that
@@ -111,7 +118,6 @@ import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { Readable, Transform, Streams } from "@stream";
 import { EventEmitter } from "@utils/event-emitter";
-import { assertLimitOption } from "@utils/limits";
 import { decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser, saxStream } from "@xml/sax";
 import type { XmlSaxTag } from "@xml/types";
@@ -238,7 +244,7 @@ export interface WorkbookReaderOptions {
    * shared strings, metadata and relationship parts it caches. Worksheets are
    * streamed and not subject to it. A streamed ZIP may not declare sizes up
    * front, so the bytes are counted as they inflate and the read fails with
-   * `ArchiveFileTooLargeError` the moment a part exceeds it — the same per-part
+   * `ExcelLimitExceededError` (`limit: "maxEntrySize"`) the moment a part exceeds it — the same per-part
    * bound the buffered reader applies.
    * @default 512 MiB (536870912)
    */
@@ -273,12 +279,14 @@ function boundedPart(entry: ZipEntry, limit: number): Transform {
       seen += chunk.length;
       if (seen > limit) {
         callback(
-          new ArchiveFileTooLargeError(
-            entry.path,
-            `holds more than ${limit} bytes (maxEntrySize)`,
-            {
-              allowed: limit
-            }
+          containerLimitError(
+            new ArchiveFileTooLargeError(
+              entry.path,
+              `holds more than ${limit} bytes (maxEntrySize)`,
+              {
+                allowed: limit
+              }
+            )
           )
         );
         return;
@@ -409,13 +417,20 @@ export interface ReaderConstructor<TReader, TWorkbook> {
 // Base Class
 // ============================================================================
 
-const READER_CHOICES = {
-  worksheets: ["emit", "ignore"],
-  sharedStrings: ["cache", "emit", "ignore"],
-  hyperlinks: ["cache", "emit", "ignore"],
-  styles: ["cache", "ignore"],
-  entries: ["emit", "ignore"]
-} as const;
+const readerOptionsSchema = s.object({
+  worksheets: s.literal("emit", "ignore").optional(),
+  sharedStrings: s.literal("cache", "emit", "ignore").optional(),
+  hyperlinks: s.literal("cache", "emit", "ignore").optional(),
+  styles: s.literal("cache", "ignore").optional(),
+  entries: s.literal("emit", "ignore").optional(),
+  // A guard that `NaN` or a negative number turned off, or made refuse every part.
+  maxBufferedWorksheetBytes: s.number({ min: 0 }).optional(),
+  maxEntrySize: s.number({ min: 0 }).optional(),
+  checkCrc32: s.boolean().optional(),
+  password: s.string().optional()
+});
+const _readerOptionsMatch: SchemaMatches<typeof readerOptionsSchema, WorkbookReaderOptions> = true;
+void _readerOptionsMatch;
 
 /**
  * The reader's options with their defaults — `worksheets: "emit"`, `sharedStrings: "cache"`, and `"ignore"` for
@@ -430,28 +445,7 @@ function resolveReaderOptions(options: WorkbookReaderOptions): {
   styles: "cache" | "ignore";
   entries: "emit" | "ignore";
 } {
-  if (options === null || typeof options !== "object") {
-    throw new ExcelArgumentError(
-      "options",
-      `WorkbookReader: options must be an object, got ${String(options)}.`
-    );
-  }
-  const password = (options as Record<string, unknown>).password;
-  if (password !== undefined && typeof password !== "string") {
-    throw new ExcelArgumentError(
-      "options.password",
-      `WorkbookReader: options.password must be a string, got ${JSON.stringify(password) ?? String(password)}.`
-    );
-  }
-  for (const [key, choices] of Object.entries(READER_CHOICES)) {
-    const value = (options as Record<string, unknown>)[key];
-    if (value !== undefined && !(choices as readonly unknown[]).includes(value)) {
-      throw new ExcelArgumentError(
-        `options.${key}`,
-        `WorkbookReader: options.${key} must be one of ${choices.map(choice => JSON.stringify(choice)).join(", ")}, got ${JSON.stringify(value)}.`
-      );
-    }
-  }
+  checkSchema("WorkbookReader", "options", readerOptionsSchema, options);
   return {
     ...options,
     worksheets: options.worksheets ?? "emit",
@@ -547,7 +541,6 @@ export abstract class WorkbookReaderBase<
     // Resolved first: it is what refuses an options value that is not an object, before anything reads a field of it.
     this.options = resolveReaderOptions(options);
     this._maxBufferedBytes = options.maxBufferedWorksheetBytes ?? 256 * 1024 * 1024;
-    assertLimitOption("maxEntrySize", options.maxEntrySize);
     this._maxEntrySize = options.maxEntrySize ?? 512 * 1024 * 1024;
     this._checkCrc32 = options.checkCrc32;
 

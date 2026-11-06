@@ -271,11 +271,11 @@ describe("reads do not mutate the workbook", () => {
     it("the (row, col) form is just as inert", async () => {
       const { wb, ws } = styledSheet();
       await expectNoMutation(wb, () => {
-        expect(Cell.getValue(ws, 10, 2)).toBeNull();
-        expect(Cell.getText(ws, 3, 5)).toBe("");
-        expect(Cell.getNumFmt(ws, 10, 2)).toBe("0.00%");
-        expect(Cell.getTemporal(ws, 10, 2)).toBeUndefined();
-        expect(Cell.getFullAddress(ws, 10, 2)).toEqual({
+        expect(Cell.getValue(ws, { row: 10, col: 2 })).toBeNull();
+        expect(Cell.getText(ws, { row: 3, col: 5 })).toBe("");
+        expect(Cell.getNumFmt(ws, { row: 10, col: 2 })).toBe("0.00%");
+        expect(Cell.getTemporal(ws, { row: 10, col: 2 })).toBeUndefined();
+        expect(Cell.getFullAddress(ws, { row: 10, col: 2 })).toEqual({
           sheetName: "S",
           address: "B10",
           row: 10,
@@ -334,7 +334,7 @@ describe("reads do not mutate the workbook", () => {
     it("still read existing cells", () => {
       const { ws } = styledSheet();
       expect(Cell.getValue(ws, "C4")).toBe(4);
-      expect(Cell.getText(ws, 1, 1)).toBe("h1");
+      expect(Cell.getText(ws, { row: 1, col: 1 })).toBe("h1");
       expect(Cell.getType(ws, "A2")).toBe(ValueType.Number);
     });
 

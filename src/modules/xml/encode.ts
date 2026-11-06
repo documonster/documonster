@@ -16,6 +16,7 @@ import {
   xmlEncode,
   xmlEncodeAttr
 } from "@utils/xml-encode";
+import { checkStringArgument } from "@xml/arguments";
 import { XmlArgumentError } from "@xml/errors";
 
 export {
@@ -319,12 +320,7 @@ export const StdDocAttributes: Readonly<Record<string, string>> = {
 // =============================================================================
 
 function checkText(where: string, text: unknown): asserts text is string {
-  if (typeof text !== "string") {
-    throw new XmlArgumentError(
-      "text",
-      `${where}: text must be a string, got ${text === null ? "null" : typeof text}`
-    );
-  }
+  checkStringArgument(where, "text", text);
 }
 
 /**

@@ -11,7 +11,7 @@
  * which otherwise only refresh when a human presses F9 in Word.
  */
 
-import { Io, Layout, Query, Transform } from "documonster/word";
+import { Document, Layout, Query, Transform } from "documonster/word";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -72,7 +72,7 @@ export const docPaginateTool = defineTool({
     const resolved = await resolveInRoot(config, args.path, { mustExist: true });
     await assertReadableSize(config, resolved, args.path);
     const inputVersion = await fingerprint(resolved);
-    const doc = await Io.readFile(resolved).catch((cause: unknown) => {
+    const doc = await Document.readFile(resolved).catch((cause: unknown) => {
       throw toolError.unsupported(
         `could not read ${args.path} as a Word document`,
         "Run doc_inspect to check the real file type.",
@@ -148,10 +148,12 @@ export const docPaginateTool = defineTool({
     const backupPath = inPlace ? await backupOnce(writeTarget) : undefined;
 
     if (inPlace) {
-      await replaceAtomically(writeTarget.path, temporary => Io.writeFile(withToc, temporary));
+      await replaceAtomically(writeTarget.path, temporary =>
+        Document.writeFile(withToc, temporary)
+      );
     } else {
       await writeWithPolicy(writeTarget.path, args.overwrite === true, temporary =>
-        Io.writeFile(withToc, temporary)
+        Document.writeFile(withToc, temporary)
       );
     }
 
@@ -175,7 +177,7 @@ interface HeadingPage {
 
 /** Headings in body order, each with the page its paragraph starts on. */
 function collectHeadings(
-  doc: Awaited<ReturnType<typeof Io.readFile>>,
+  doc: Awaited<ReturnType<typeof Document.readFile>>,
   contentPages: readonly number[]
 ): HeadingPage[] {
   const found: HeadingPage[] = [];

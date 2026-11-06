@@ -8,10 +8,10 @@
  * @example
  * ```ts
  * import { WordMarkdown } from "documonster/word/markdown";
- * import { Io } from "documonster/word";
+ * import { Document } from "documonster/word";
  *
  * const doc = await WordMarkdown.toDocx("# Hello\n\nWorld **bold**");
- * const buffer = await Io.toBuffer(doc);
+ * const buffer = await Document.toBuffer(doc);
  * ```
  *
  * @stability experimental
@@ -19,17 +19,13 @@
 
 import { isSpacelessScript } from "@utils/cjk";
 import { mapToStandardFont, measureTextWidth, styledFontVariant } from "@utils/font-metrics";
+import type { SchemaMatches } from "@utils/schema";
 import { emuToPt, ptToTwips, twipsToPt } from "@utils/units";
-import {
-  checkInteger,
-  checkOneOf,
-  checkRecord,
-  checkString,
-  invalidArgument
-} from "@word/core/argument-checks";
+import { checkString } from "@word/core/argument-checks";
 import { eastAsianDefaultsFor, withEastAsianDefaults } from "@word/core/east-asian-defaults";
 import { assertImageMediaType } from "@word/core/image-media";
 import { sanitizeUrl } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import { isRun } from "@word/core/text-utils";
 import {
   DEFAULT_FONT_SIZE_HALF_PT,
@@ -121,6 +117,22 @@ export interface MarkdownImportOptions {
   ) => MarkdownImageData | undefined | Promise<MarkdownImageData | undefined>;
 }
 
+const markdownImportOptionsSchema = w.record({
+  // Run sizes, half-points; the measure, twips.
+  defaultFont: w.string().optional(),
+  defaultFontSize: w.integer({ min: 0 }).optional(),
+  codeFont: w.string().optional(),
+  codeFontSize: w.integer({ min: 0 }).optional(),
+  contentWidth: w.integer({ min: 1 }).optional(),
+  codeBlockFit: w.oneOf(["shrink", "wrap"]).optional(),
+  resolveImage: w.function<NonNullable<MarkdownImportOptions["resolveImage"]>>().optional()
+});
+const _markdownImportOptionsMatch: SchemaMatches<
+  typeof markdownImportOptionsSchema,
+  MarkdownImportOptions
+> = true;
+void _markdownImportOptionsMatch;
+
 /** Resolved image data for embedding. */
 export interface MarkdownImageData {
   readonly data: Uint8Array;
@@ -182,22 +194,9 @@ export interface MarkdownBodyResult {
   readonly docDefaults: DocDefaults;
 }
 
-const CODE_BLOCK_FITS: ReadonlySet<string> = new Set(["shrink", "wrap"]);
-
 function checkMarkdownImport(markdown: unknown, options: unknown, where: string): void {
   checkString(markdown, "markdown", where);
-  checkRecord(options, "options", where, { optional: true });
-  const o = options as MarkdownImportOptions | undefined;
-  // Run sizes, half-points; the measure, twips.
-  checkInteger(o?.defaultFontSize, "options.defaultFontSize", where, { optional: true, min: 0 });
-  checkInteger(o?.codeFontSize, "options.codeFontSize", where, { optional: true, min: 0 });
-  checkInteger(o?.contentWidth, "options.contentWidth", where, { optional: true, min: 1 });
-  checkString(o?.defaultFont, "options.defaultFont", where, { optional: true });
-  checkString(o?.codeFont, "options.codeFont", where, { optional: true });
-  checkOneOf(o?.codeBlockFit, CODE_BLOCK_FITS, "options.codeBlockFit", where, { optional: true });
-  if (o?.resolveImage !== undefined && typeof o.resolveImage !== "function") {
-    invalidArgument(where, "options.resolveImage", "a function", o.resolveImage);
-  }
+  checkSchema(markdownImportOptionsSchema.optional(), options, where);
 }
 
 /**

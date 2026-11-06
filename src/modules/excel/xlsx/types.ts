@@ -88,7 +88,7 @@ export interface XlsxReadOptions {
   zip?: XlsxZipReadLimits;
   /**
    * The password of an encrypted workbook — one Excel saved with "Encrypt with Password" (Agile Encryption in an OLE
-   * compound file), or `Workbook.toBuffer(wb, { password })` wrote. The same option Word's `Io.read` takes. Without
+   * compound file), or `Workbook.toBuffer(wb, { password })` wrote. The same option Word's `Document.read` takes. Without
    * it such a workbook is an `ExcelEncryptedError`; with a wrong one an `ExcelDecryptionError` (`reason:
    * "password"`). The decrypted package is bounded by `zip.maxTotalUncompressedSize`. An encrypted XLSX or XLSB is
    * detected as an unencrypted one is; ignored for an unencrypted workbook.
@@ -99,8 +99,8 @@ export interface XlsxReadOptions {
 /**
  * Container limits and integrity checking for {@link XlsxReadOptions.zip}.
  *
- * A package past a limit fails the read with the archive's `ArchiveLimitError` (from `documonster/archive`), which
- * says which limit to raise; a damaged package — a part that fails its CRC-32, or bytes that are not a ZIP package —
+ * A package past a limit fails the read with an `ExcelLimitExceededError` whose `limit` names the option here and whose
+ * `cause` is the archive's `ArchiveLimitExceededError`; a damaged package — a part that fails its CRC-32, or bytes that are not a ZIP package —
  * fails with an `ExcelFileError` whose `cause` is the archive's error.
  */
 export interface XlsxZipReadLimits {

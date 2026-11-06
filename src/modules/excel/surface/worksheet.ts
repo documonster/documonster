@@ -20,6 +20,7 @@ import {
   fillFormula as coreFillFormula,
   freeze as coreFreeze,
   protect as coreProtect,
+  unprotect as coreUnprotect,
   setAutoFilter as coreSetAutoFilter,
   split as coreSplit,
   unMergeCells,
@@ -90,32 +91,92 @@ import {
 import { checkAutoFilter } from "@excel/surface/argument-checks";
 import { add as addConditionalFormattingChecked } from "@excel/surface/conditional-formatting";
 import { checkWorksheetModel } from "@excel/surface/model-checks";
+import type { StreamWorksheet } from "@excel/surface/stream-targets";
+import { asStreamWorksheet, refuseStreamWorksheet } from "@excel/surface/stream-targets";
 import type { AutoFilter, CellValue, CellValueInput } from "@excel/types";
 import { decodeCell } from "@excel/utils/address";
+import type { Origin } from "@excel/utils/address";
 import type { ArgumentChecks } from "@excel/utils/arguments";
 import {
   argumentChecks,
-  checkProtectionOptions,
-  normalizeReference,
-  SHEET_PROTECTION_FLAGS
+  checkProtectCall,
+  checkSchema,
+  normalizeReference
 } from "@excel/utils/arguments";
 import { copyPlain } from "@excel/utils/copy-plain";
 import type { ValuesOptions } from "@excel/utils/numbered-values";
+import { splitPasswordOptions } from "@excel/utils/sheet-protection";
 import { sheetNameKey } from "@utils/name-key";
 import { isRecordArgument } from "@utils/object";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 export {
-  unprotect,
   verifyPassword,
   toAOA as toAoa,
   getHasMerges as hasMerges,
-  getSheetModel as getModel,
   setSheetName as setName,
   unfreeze
 } from "@excel/core/worksheet";
 
 const MAX_ROW = 1048576;
 const MAX_COL = 16384;
+
+// The options of the functions below. A reference (`range`, `origin`) is checked by hand after the schema, because a
+// malformed one is an `ExcelInvalidAddressError` rather than an argument error.
+const toJsonOptionsSchema = s.object({
+  header: s
+    .union([s.literal(1, "A"), s.array(s.string())], { expected: '1, "A" or an array of names' })
+    .optional(),
+  range: s.unknown<number | string>().optional(),
+  raw: s.boolean().optional(),
+  defaultValue: s.unknown<CellValue>().optional(),
+  blankRows: s.boolean().optional(),
+  dateFormat: s.string().optional()
+});
+const _toJsonOptionsMatch: SchemaMatches<typeof toJsonOptionsSchema, SheetToJsonOptions> = true;
+void _toJsonOptionsMatch;
+
+const fillFormulaOptionsSchema = s.object(
+  {
+    results: s.unknown<NonNullable<FillFormulaOptions["results"]>>().optional(),
+    shareType: s.literal("shared", "array").optional()
+  },
+  { readonly: true }
+);
+const _fillFormulaOptionsMatch: SchemaMatches<typeof fillFormulaOptionsSchema, FillFormulaOptions> =
+  true;
+void _fillFormulaOptionsMatch;
+
+const origin = () => s.unknown<Origin>().optional();
+const addJsonOptionsSchema = s.object({
+  header: s.array(s.string()).optional(),
+  skipHeader: s.boolean().optional(),
+  origin: origin(),
+  nullError: s.boolean().optional()
+});
+const _addJsonOptionsMatch: SchemaMatches<typeof addJsonOptionsSchema, AddJsonOptions> = true;
+void _addJsonOptionsMatch;
+
+const addAoaOptionsSchema = s.object({ origin: origin() });
+const _addAoaOptionsMatch: SchemaMatches<typeof addAoaOptionsSchema, AddAoaOptions> = true;
+void _addAoaOptionsMatch;
+
+const freezeOptionsSchema = s.object({
+  state: s.literal("frozen").optional(),
+  columns: s.number({ integer: true, min: 0, max: MAX_COL - 1 }).optional(),
+  rows: s.number({ integer: true, min: 0, max: MAX_ROW - 1 }).optional()
+});
+const _freezeOptionsMatch: SchemaMatches<typeof freezeOptionsSchema, FreezePanesOptions> = true;
+void _freezeOptionsMatch;
+
+const splitOptionsSchema = s.object({
+  state: s.literal("split").optional(),
+  x: s.number({ finite: true, min: 0 }).optional(),
+  y: s.number({ finite: true, min: 0 }).optional()
+});
+const _splitOptionsMatch: SchemaMatches<typeof splitOptionsSchema, SplitPanesOptions> = true;
+void _splitOptionsMatch;
 
 /** The sheet's name. */
 export function getName(ws: WorksheetData): string {
@@ -144,13 +205,9 @@ export function toJson(
   options?: SheetToJsonOptions
 ): CellValue[][] | Record<string, CellValue>[] {
   const check = argumentChecks("Worksheet.toJson");
-  if (check.record("options", options)) {
-    const { header, range } = options;
-    if (Array.isArray(header)) {
-      header.forEach((name, i) => check.string(`options.header[${i}]`, name));
-    } else if (header !== undefined && header !== 1 && header !== "A") {
-      check.fail("options.header", '1, "A" or an array of names', header);
-    }
+  checkSchema("Worksheet.toJson", "options", toJsonOptionsSchema.optional(), options);
+  if (options) {
+    const { range } = options;
     if (typeof range === "number") {
       check.number("options.range", range, { min: 0, max: MAX_ROW - 1, integer: true });
     } else if (range !== undefined) {
@@ -177,7 +234,11 @@ function normalizeAutoFilter(range: AutoFilter | null): AutoFilter | null {
  * The range a merge or unmerge names, checked: whole cells inside the grid, on this sheet. A `Sheet!` qualifier
  * naming another sheet used to be ignored, so `merge(ws, "Other!C1:D2")` merged C1:D2 here.
  */
-function mergeRange(where: string, ws: WorksheetData, cells: RangeInput[]): RangeData {
+function mergeRange(
+  where: string,
+  ws: WorksheetData | StreamWorksheet,
+  cells: RangeInput[]
+): RangeData {
   checkWorksheet(ws);
   const range = rangeCreate(cells);
   const bounds = [range.top, range.left, range.bottom, range.right];
@@ -217,26 +278,48 @@ function mergeRange(where: string, ws: WorksheetData, cells: RangeInput[]): Rang
  * A single cell is left as it is: there is nothing to merge, and Excel stores no such merge. It used to be recorded
  * and reported by `getMergedRegions`, then dropped when the workbook was written.
  *
+ * A streaming worksheet writer (`Stream.WorksheetWriter`) is merged too, while the range's rows are still open.
+ *
  * @throws {ExcelMergeConflictError} when the range overlaps a merge already on the sheet.
  * @throws {ExcelInvalidAddressError} when the range is outside the grid or names another sheet.
+ * @throws {ExcelStreamStateError} when a streamed sheet has been committed.
+ * @throws {ExcelRowOutOfBoundsError} when the range reaches a streamed row that has been committed.
  */
-export function merge(ws: WorksheetData, ...cells: RangeInput[]): void {
+export function merge(ws: WorksheetData | StreamWorksheet, ...cells: RangeInput[]): void {
   const range = mergeRange("Worksheet.merge", ws, cells);
-  if (range.top !== range.bottom || range.left !== range.right) {
-    mergeCells(ws, range.top, range.left, range.bottom, range.right);
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    writer._merge(range);
+  } else if (range.top !== range.bottom || range.left !== range.right) {
+    mergeCells(ws as WorksheetData, range.top, range.left, range.bottom, range.right);
   }
 }
 
 /** {@link merge}, leaving every cell's own style as it is. */
-export function mergeWithoutStyle(ws: WorksheetData, ...cells: RangeInput[]): void {
+export function mergeWithoutStyle(
+  ws: WorksheetData | StreamWorksheet,
+  ...cells: RangeInput[]
+): void {
   const range = mergeRange("Worksheet.mergeWithoutStyle", ws, cells);
-  if (range.top !== range.bottom || range.left !== range.right) {
-    mergeCellsWithoutStyle(ws, range.top, range.left, range.bottom, range.right);
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    writer._merge(range, true);
+  } else if (range.top !== range.bottom || range.left !== range.right) {
+    mergeCellsWithoutStyle(ws as WorksheetData, range.top, range.left, range.bottom, range.right);
   }
 }
 
-/** Unmerge every merged region that `cells` overlaps — an `A1:B2` range, its corners, or four numbers. */
+/**
+ * Unmerge every merged region that `cells` overlaps — an `A1:B2` range, its corners, or four numbers.
+ *
+ * @throws {ExcelUnsupportedFeatureError} for a streaming worksheet writer: a merge's cells may already be written.
+ */
 export function unmerge(ws: WorksheetData, ...cells: RangeInput[]): void {
+  refuseStreamWorksheet(
+    ws,
+    "Worksheet.unmerge",
+    "cannot unmerge: the merged cells may already have been written; merge only the ranges you mean to keep"
+  );
   const range = mergeRange("Worksheet.unmerge", ws, cells);
   unMergeCells(ws, range.top, range.left, range.bottom, range.right);
 }
@@ -278,7 +361,7 @@ export function fillFormula(
     check.string("formula", formula, { nonEmpty: true });
   }
   if (typeof resultsOrOptions !== "function" && isRecordArgument(resultsOrOptions)) {
-    check.oneOf("options.shareType", resultsOrOptions.shareType, ["shared", "array"]);
+    checkSchema("Worksheet.fillFormula", "options", fillFormulaOptionsSchema, resultsOrOptions);
   }
   coreFillFormula(
     ws,
@@ -289,8 +372,14 @@ export function fillFormula(
   );
 }
 
-/** Protect the sheet, optionally with a password: `protect(ws, { password: "pw", formatCells: true })`. */
-export function protect(ws: WorksheetData, options?: ProtectSheetOptions): Promise<void>;
+/**
+ * Protect the sheet, optionally with a password: `protect(ws, { password: "pw", formatCells: true })`. A streaming
+ * worksheet writer is protected too, until it is committed.
+ */
+export function protect(
+  ws: WorksheetData | StreamWorksheet,
+  options?: ProtectSheetOptions
+): Promise<void>;
 /**
  * @deprecated Pass the password in the options object: `protect(ws, { password, ...options })`.
  * Removed in 1.0.
@@ -301,31 +390,34 @@ export function protect(
   options?: Partial<SheetProtection>
 ): Promise<void>;
 export function protect(
-  ws: WorksheetData,
+  ws: WorksheetData | StreamWorksheet,
   passwordOrOptions?: string | ProtectSheetOptions,
   legacyOptions?: Partial<SheetProtection>
 ): Promise<void> {
+  const writer = asStreamWorksheet(ws);
   try {
     checkWorksheet(ws);
-    if (isRecordArgument(passwordOrOptions)) {
-      checkProtectionOptions(
-        "Worksheet.protect",
-        passwordOrOptions.password,
-        passwordOrOptions,
-        SHEET_PROTECTION_FLAGS
-      );
-    } else {
-      checkProtectionOptions(
-        "Worksheet.protect",
-        passwordOrOptions,
-        legacyOptions,
-        SHEET_PROTECTION_FLAGS
-      );
-    }
+    checkProtectCall("Worksheet.protect", passwordOrOptions, legacyOptions, "sheet");
+    writer?._checkOpen("protect the worksheet");
   } catch (error) {
     return Promise.reject(error);
   }
-  return coreProtect(ws, passwordOrOptions as string | undefined, legacyOptions);
+  if (writer) {
+    const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
+    return writer._protect(password, options);
+  }
+  return coreProtect(ws as WorksheetData, passwordOrOptions as string | undefined, legacyOptions);
+}
+
+/** Remove the sheet's protection, as {@link protect} set it — on a streaming worksheet writer too, until it is committed. */
+export function unprotect(ws: WorksheetData | StreamWorksheet): void {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    writer._checkOpen("unprotect the worksheet");
+    writer.sheetProtection = null;
+    return;
+  }
+  coreUnprotect(ws as WorksheetData);
 }
 
 /** Where {@link addJson} and {@link addAoa} start, checked and resolved to a 1-based row and column. */
@@ -407,16 +499,8 @@ export function addJson(
       }
     }
   });
-  if (check.record("options", options)) {
-    if (check.array("options.header", options.header)) {
-      options.header.forEach((key, i) => {
-        check.string(`options.header[${i}]`, key);
-        keys.add(key as string);
-      });
-    }
-    check.boolean("options.skipHeader", options.skipHeader);
-    check.boolean("options.nullError", options.nullError);
-  }
+  checkSchema("Worksheet.addJson", "options", addJsonOptionsSchema.optional(), options);
+  options?.header?.forEach(key => keys.add(key));
   if (data.length > 0) {
     const start = resolveOrigin("Worksheet.addJson", ws, options?.origin);
     checkExtent("Worksheet.addJson", start, data.length + (options?.skipHeader ? 0 : 1), keys.size);
@@ -445,7 +529,7 @@ export function addAoa(
     );
     columns = Math.max(columns, row.length);
   });
-  check.record("options", options);
+  checkSchema("Worksheet.addAoa", "options", addAoaOptionsSchema.optional(), options);
   if (data.length > 0) {
     checkExtent(
       "Worksheet.addAoa",
@@ -492,17 +576,7 @@ export function freeze(
 ): void {
   const check = argumentChecks("Worksheet.freeze");
   if (isRecordArgument(columnsOrOptions)) {
-    check.oneOf("options.state", columnsOrOptions.state, ["frozen"]);
-    check.number("options.columns", columnsOrOptions.columns, {
-      min: 0,
-      max: MAX_COL - 1,
-      integer: true
-    });
-    check.number("options.rows", columnsOrOptions.rows, {
-      min: 0,
-      max: MAX_ROW - 1,
-      integer: true
-    });
+    checkSchema("Worksheet.freeze", "options", freezeOptionsSchema, columnsOrOptions);
   } else {
     // The deprecated form keeps its coercion (`"2"` is 2, `true` is 1, a negative count is 0, `null` is 0) and
     // refuses only what it turned into a pane Excel repairs: no number at all, or one past the grid.
@@ -529,9 +603,7 @@ export function split(
 ): void {
   const check = argumentChecks("Worksheet.split");
   if (isRecordArgument(xOrOptions)) {
-    check.oneOf("options.state", xOrOptions.state, ["split"]);
-    check.number("options.x", xOrOptions.x, { min: 0 });
-    check.number("options.y", xOrOptions.y, { min: 0 });
+    checkSchema("Worksheet.split", "options", splitOptionsSchema, xOrOptions);
   } else {
     // As `freeze`: the deprecated form keeps its coercion and refuses only an offset that is no number at all.
     checkLegacyCount(check, "x", xOrOptions, Infinity);
@@ -560,6 +632,17 @@ export function setAutoFilter(ws: WorksheetData, range: AutoFilter | null | unde
 }
 
 /**
+ * A copy of the sheet as its round-trip model — what the writers serialise and {@link setModel} applies. Editing it
+ * changes nothing; apply a changed copy with {@link setModel}.
+ *
+ * It used to share the cells' value records, the views and the page setup with the sheet, so an edit to it changed
+ * the sheet with none of the setters' checks.
+ */
+export function getModel(ws: WorksheetData): WorksheetModel {
+  return copyPlain(getSheetModel(ws));
+}
+
+/**
  * Replace the sheet's contents with `value` — the inverse of {@link getModel}.
  *
  * The model is checked before anything changes: what the load walks must be there, every cell must be a value a
@@ -582,7 +665,7 @@ export function setModel(ws: WorksheetData, value: WorksheetModel): void {
   }
   const before = getSheetModel(ws);
   try {
-    setSheetModel(ws, { ...value, name: from });
+    setSheetModel(ws, { ...copyPlain(value), name: from });
   } catch (error) {
     setSheetModel(ws, before);
     throw error;
@@ -593,12 +676,18 @@ export function setModel(ws: WorksheetData, value: WorksheetModel): void {
 }
 
 /**
- * The sheet's values as a sparse array of rows. **Without options it is 1-based** — index `r` is row `r` and, within
- * it, index `c` is column `c`, index `0` unused: the shape the `Cell` namespace's `(row, col)` form takes, as it has
- * always been. `{ base: 0 }` gives plain JavaScript indexing — row 1 at `0`, column A at `0`, each row what
- * `Row.getValues` returns — and `{ base: 1 }` the 1-based form, as `Row` and `Column` take `base`. For a dense
- * 0-based array use {@link toAoa}. Creates nothing.
+ * @deprecated Without `base` the result is 1-based, while `Row.getValues` and `Column.getValues` default to 0 — so
+ * state it: `{ base: 1 }` keeps this result, `{ base: 0 }` indexes as `Row` and `Column` do. Calling without
+ * `options` is removed in 1.0.
  */
+export function getValues(ws: WorksheetData): CellValue[][];
+/**
+ * The sheet's values as a sparse array of rows, indexed as `options.base` says: `{ base: 0 }` gives plain JavaScript
+ * indexing — row 1 at `0`, column A at `0`, each row what `Row.getValues` returns — and `{ base: 1 }` the numbered
+ * form, index `r` being row `r` and, within it, index `c` column `c`, index `0` unused. For a dense 0-based array use
+ * {@link toAoa}. Creates nothing.
+ */
+export function getValues(ws: WorksheetData, options: ValuesOptions): CellValue[][];
 export function getValues(ws: WorksheetData, options?: ValuesOptions): CellValue[][] {
   const check = argumentChecks("Worksheet.getValues");
   if (check.record("options", options) && options.base !== 0 && options.base !== 1) {

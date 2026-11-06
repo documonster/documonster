@@ -188,7 +188,7 @@ const zeroFormats: [string, string][] = [
 ];
 for (const [fmt, desc] of zeroFormats) {
   const row = Row.add(wsZero, [`${fmt}  →  ${desc}`, 0]);
-  Cell.setNumFmt(wsZero, row, 2, fmt);
+  Cell.setNumFmt(wsZero, { row, col: 2 }, fmt);
 }
 
 // =============================================================================
@@ -250,9 +250,9 @@ const wbFit = Workbook.create();
 const wsFit = Workbook.addWorksheet(wbFit, "20 Columns");
 for (let c = 1; c <= 20; c++) {
   Column.setWidth(wsFit, c, 12);
-  Cell.setValue(wsFit, 1, c, `Col ${c}`);
-  Cell.setStyle(wsFit, 1, c, { font: { bold: true } });
-  Cell.setValue(wsFit, 2, c, c * 100);
+  Cell.setValue(wsFit, { row: 1, col: c }, `Col ${c}`);
+  Cell.setStyle(wsFit, { row: 1, col: c }, { font: { bold: true } });
+  Cell.setValue(wsFit, { row: 2, col: c }, c * 100);
 }
 const fitPdf = await Pdf.fromExcel(wbFit, {
   showGridLines: true,

@@ -32,6 +32,7 @@ import {
 import type { CatalogIndex, ThreadPlan } from "@pdf/builder/catalog-rewrite";
 import {
   PdfPageBuilder,
+  checkPageOptions,
   checkSignatureOptions,
   checkUniqueFieldNames,
   snapshotPage,
@@ -69,15 +70,14 @@ import {
 } from "@pdf/builder/resource-merger";
 import type { PdfResourceDict } from "@pdf/builder/resource-merger";
 import {
+  at,
+  checkFontOptionNames,
   checkMetadataUpdate,
-  readFontSourceArgument,
-  checkFontOptions,
-  checkOptionalEnum,
-  pdfBytes,
-  checkOptionalObject,
   checkOptionalString,
-  checkPageOptions,
-  checkString
+  checkString,
+  fontOptionsShape,
+  pdfBytes,
+  readFontSourceArgument
 } from "@pdf/core/arguments";
 import {
   PdfDict,
@@ -117,6 +117,8 @@ import { alphaGsName } from "@pdf/render/page-renderer";
 import type { CjkLanguage } from "@utils/cjk";
 import { describeValue } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // =============================================================================
 // Types
@@ -771,9 +773,8 @@ export class PdfEditor {
   ): PdfEditor {
     const where = "Pdf.Editor.read";
     const bytes = pdfBytes(where, "data", data);
-    checkOptionalObject(where, "options", options);
-    checkOptionalString(where, "options.password", options?.password);
-    checkFontOptions(where, "options.", options);
+    check(editorReadOptionsSchema.optional(), options, at(where, "options"));
+    checkFontOptionNames(where, "options.", options);
     return new PdfEditor(bytes, options ?? {});
   }
 
@@ -1325,10 +1326,11 @@ export class PdfEditor {
    * @throws {PdfArgumentError} as for {@link setFormField}, for any entry.
    */
   setFormFields(fields: Record<string, string>): this {
-    checkOptionalObject("Pdf.Editor#setFormFields", "fields", fields ?? null);
-    for (const [name, value] of Object.entries(fields)) {
-      checkString("Pdf.Editor#setFormFields", `fields[${JSON.stringify(name)}]`, value);
-    }
+    check(
+      s.record(s.string(), { expected: "an object of field names to values" }),
+      fields,
+      at("Pdf.Editor#setFormFields", "fields")
+    );
     for (const [name, value] of Object.entries(fields)) {
       this._checkFieldValue(
         "Pdf.Editor#setFormFields",
@@ -2218,13 +2220,13 @@ export class PdfEditor {
     const overlays =
       pages.kind === "only" ? keptPages.map(i => this._edits.overlays[i]) : this._edits.overlays;
     for (const page of overlays) {
-      page._stream.preflight();
+      page._stream.runPreflight();
     }
     for (const appended of this._edits.appendedPages) {
       if (appended.kind === "new") {
-        appended.page._stream.preflight();
+        appended.page._stream.runPreflight();
       } else {
-        appended.overlay?._stream.preflight();
+        appended.overlay?._stream.runPreflight();
       }
     }
     discoverDrawnTextFonts(this._fontManager, this._fontSettings);
@@ -2807,7 +2809,7 @@ export class PdfEditor {
 
     if (hasOverlays) {
       for (const page of this._edits.overlays) {
-        page._stream.preflight();
+        page._stream.runPreflight();
       }
       discoverDrawnTextFonts(this._fontManager, this._fontSettings);
       // Write font resources via the writer (to serialize font objects)
@@ -4650,18 +4652,30 @@ type PageSelection =
   | { readonly kind: "removed"; readonly removed: ReadonlySet<number> }
   | { readonly kind: "only"; readonly index: number | null };
 
-/** A page index as an error message shows it: a number as itself, anything else with its type. */
+const editorReadOptionsSchema = s.object(
+  { password: s.string().optional(), ...fontOptionsShape },
+  { expected: "an options object" }
+);
+const _editorReadOptionsMatch: SchemaMatches<
+  typeof editorReadOptionsSchema,
+  { -readonly [K in keyof EditorReadOptions]: EditorReadOptions[K] }
+> = true;
+void _editorReadOptionsMatch;
+
+const editorWriteOptionsSchema = s.object(
+  {
+    invalidateSignatures: s.boolean().optional(),
+    encryption: s.oneOf(["keep", "remove"] as const).optional()
+  },
+  { expected: "an options object" }
+);
+const _editorWriteOptionsMatch: SchemaMatches<typeof editorWriteOptionsSchema, EditorWriteOptions> =
+  true;
+void _editorWriteOptionsMatch;
+
 /** @internal - The options every editor write shares. */
 function checkWriteOptions(where: string, options: EditorWriteOptions | undefined): void {
-  checkOptionalObject(where, "options", options);
-  checkOptionalEnum(where, "options.encryption", options?.encryption, ["keep", "remove"]);
-  const invalidate: unknown = options?.invalidateSignatures;
-  if (invalidate !== undefined && typeof invalidate !== "boolean") {
-    throw new PdfArgumentError(
-      "options.invalidateSignatures",
-      `${where}: options.invalidateSignatures must be a boolean, got ${describeIndex(invalidate)}`
-    );
-  }
+  check(editorWriteOptionsSchema.optional(), options, at(where, "options"));
 }
 
 /**
@@ -4678,6 +4692,7 @@ function checkNotPagesKey(where: string, options: object): void {
   }
 }
 
+/** A page index as an error message shows it: a number as itself, anything else with its type. */
 function describeIndex(value: unknown): string {
   if (typeof value === "number" || value === null || value === undefined) {
     return String(value);

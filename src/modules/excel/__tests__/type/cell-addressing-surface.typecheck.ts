@@ -31,6 +31,11 @@ declare const ws: Worksheet.Handle;
 // ---------------------------------------------------------------------------
 
 const byAddress: CellValue = Cell.getValue(ws, "A1");
+const byPosition: CellValue = Cell.getValue(ws, { row: 1, col: 1 });
+Cell.setFont(ws, { row: 1, col: 1 }, { bold: true });
+// @ts-expect-error a position takes no column argument
+Cell.getValue(ws, { row: 1, col: 1 }, 2);
+// The `(row, col)` form below is deprecated but still compiles.
 const byRowCol: CellValue = Cell.getValue(ws, 1, 1);
 
 Cell.setValue(ws, "A1", 42);
@@ -164,6 +169,7 @@ Cell.setStyle(ws, "B1", { ...Cell.getStyle(ws, "A1") });
 
 void byAddress;
 void byRowCol;
+void byPosition;
 void fontByAddress;
 void fontByRowCol;
 void totalLetter;

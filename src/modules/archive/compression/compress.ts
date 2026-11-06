@@ -11,7 +11,7 @@ import { promisify } from "util";
 import * as nodeZlib from "zlib";
 
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
-import { ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveLimitExceededError } from "@archive/core/errors";
 import { uint8ArrayToNodeBufferView } from "@utils/binary";
 
 // Re-export shared types and utilities
@@ -150,12 +150,12 @@ function inflateBounded(inflate: () => Buffer, maxOutputLength: number | undefin
       maxOutputLength !== undefined &&
       (err as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE"
     ) {
-      throw new ArchiveLimitError("maxOutputLength", maxOutputLength, { cause: err });
+      throw new ArchiveLimitExceededError("maxOutputLength", maxOutputLength, { cause: err });
     }
     throw err;
   }
   if (maxOutputLength !== undefined && out.byteLength > maxOutputLength) {
-    throw new ArchiveLimitError("maxOutputLength", maxOutputLength);
+    throw new ArchiveLimitExceededError("maxOutputLength", maxOutputLength);
   }
   return bufferToUint8Array(out);
 }
@@ -179,7 +179,7 @@ async function inflateBoundedAsync(
  *
  * @param data - Compressed data (deflate-raw format)
  * @param options - `maxOutputLength` bounds the output; inflation stops early
- *   with an `ArchiveLimitError` when it is exceeded
+ *   with an `ArchiveLimitExceededError` when it is exceeded
  * @returns Decompressed data
  */
 export async function decompress(

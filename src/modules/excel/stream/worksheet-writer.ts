@@ -1,6 +1,6 @@
 import { anchorCreate, anchorModel } from "@excel/core/anchor";
 import type { CellData } from "@excel/core/cell";
-import { cellMerge, checkCellValue } from "@excel/core/cell";
+import { cellMerge, checkRowList, checkRowValues } from "@excel/core/cell";
 import type { ColumnData, ColumnDefn } from "@excel/core/column";
 import { columnToModel } from "@excel/core/column";
 import type { DataValidationsData } from "@excel/core/data-validations";
@@ -20,7 +20,6 @@ import {
 } from "@excel/core/worksheet";
 import { checkColumnNumber } from "@excel/core/worksheet-core";
 import {
-  ExcelArgumentError,
   ExcelStreamStateError,
   ExcelImageError,
   ExcelInvalidAddressError,
@@ -37,12 +36,7 @@ import {
   type StreamedXlsbTables,
   xlsbSheetOptionsFromModel
 } from "@excel/stream/xlsb-writer";
-import {
-  argumentChecks,
-  checkProtectCall,
-  normalizeReference,
-  SHEET_PROTECTION_FLAGS
-} from "@excel/utils/arguments";
+import { argumentChecks, checkProtectCall, normalizeReference } from "@excel/utils/arguments";
 import { needsArrayEvaluation, unwritableFormulaReason } from "@excel/utils/array-evaluation";
 import { overlappingArrayReason, type ArrayRange } from "@excel/utils/array-ranges";
 import { colCache } from "@excel/utils/col-cache";
@@ -785,6 +779,11 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
     });
   }
 
+  // The column-key registry. `Column.setKey(ws, col, key)` and `Column.getKey(ws, col)` set and read a column's key by
+  // position, and every `Column` function takes a key where it takes a column; these four address the registry itself —
+  // a column handle by key, a key without a column's own `key`, removal, iteration — which `Column` has no form of.
+
+  /** The column handle registered under `key`, or `undefined`. */
   getColumnKey(key: string): ColumnData | undefined {
     return this._keys[key];
   }
@@ -906,7 +905,8 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
    * Refuse an edit once the sheet is committed: its part is closed, so whatever the call added was lost — a row with a
    * raw `TypeError`, a merge, a format or a picture with no error at all.
    */
-  private _checkOpen(operation: string): void {
+  /** @internal What every edit checks first — the namespaces that accept this writer call it too. */
+  _checkOpen(operation: string): void {
     if (this.committed || this._rows === null) {
       throw new ExcelStreamStateError(
         operation,
@@ -922,7 +922,7 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
       this._workbook.getImage(Number(imageId)) === undefined
     ) {
       throw new ExcelImageError(
-        `${where}: the workbook has no image ${JSON.stringify(imageId)}; add it with WorkbookWriter.addImage first.`
+        `${where}: the workbook has no image ${JSON.stringify(imageId)}; add it with Image.add first.`
       );
     }
   }
@@ -982,20 +982,20 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
 
   addRow(value: RowValues): RowData {
     this._checkOpen("add a row");
-    checkStreamRow("WorksheetWriter.addRow", "value", value);
+    checkRowValues("WorksheetWriter.addRow", value, "value");
     return this._addCheckedRow(value);
   }
 
   addRows(values: RowValues[]): RowData[] {
     this._checkOpen("add a row");
-    if (!Array.isArray(values)) {
-      throw new ExcelArgumentError(
-        "values",
-        `WorksheetWriter.addRows: values must be an array of rows; got ${typeof values}.`
-      );
-    }
     // Every row is checked before the first is added, so a refused value adds nothing.
-    values.forEach((value, i) => checkStreamRow("WorksheetWriter.addRows", `values[${i}]`, value));
+    checkRowList("WorksheetWriter.addRows", values);
+    return values.map(value => this._addCheckedRow(value));
+  }
+
+  /** @internal `Row.add` / `Row.addMany`, which have checked `values` with the same rules under their own name. */
+  _appendCheckedRows(values: readonly RowValues[]): RowData[] {
+    this._checkOpen("add a row");
     return values.map(value => this._addCheckedRow(value));
   }
 
@@ -1030,9 +1030,18 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
     return rowGetCellEx(row, address);
   }
 
+  /** @deprecated Use {@link Worksheet.merge}: `Worksheet.merge(ws, "A1:B2")`. Removed in 1.0. */
   mergeCells(...cells: (string | number)[]): void {
     this._checkOpen("merge cells");
-    const dimensions = this._mergeRange(cells);
+    this._merge(this._mergeRange(cells));
+  }
+
+  /**
+   * @internal Merge a range already checked — what `Worksheet.merge` and `Worksheet.mergeWithoutStyle` do to this
+   * writer. `ignoreStyle` leaves every cell's own style as it is.
+   */
+  _merge(dimensions: RangeData, ignoreStyle = false): void {
+    this._checkOpen("merge cells");
     // A single cell is left as it is, as `Worksheet.merge` leaves it: Excel stores no such merge.
     if (dimensions.top === dimensions.bottom && dimensions.left === dimensions.right) {
       return;
@@ -1048,14 +1057,16 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
     const { top, left, bottom, right } = dimensions;
 
     // Collect perimeter borders BEFORE merge overwrites slave styles
-    const collected = collectMergeBorders(top, left, bottom, right, (r, c) => this.findCell(r, c));
+    const collected = ignoreStyle
+      ? undefined
+      : collectMergeBorders(top, left, bottom, right, (r, c) => this.findCell(r, c));
 
     // Apply merge
     const master = this.getCell(top, left);
     for (let i = top; i <= bottom; i++) {
       for (let j = left; j <= right; j++) {
         if (i > top || j > left) {
-          cellMerge(this.getCell(i, j), master);
+          cellMerge(this.getCell(i, j), master, ignoreStyle);
         }
       }
     }
@@ -1104,14 +1115,28 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
   /**
    * Add a block of conditional-formatting rules, checked as `ConditionalFormatting.add` checks them; a copy is kept.
    * A rule Excel cannot use was silently left out of the written sheet.
+   *
+   * @deprecated Use {@link ConditionalFormatting.add}: `ConditionalFormatting.add(ws, cf)`. Removed in 1.0.
    */
   addConditionalFormatting(cf: ConditionalFormattingOptions): void {
     this._checkOpen("add conditional formatting");
     checkConditionalFormatting("WorksheetWriter.addConditionalFormatting", cf);
-    // Stored canonical, as `ConditionalFormatting.add` stores it: `a1:b2` is `A1:B2` in the file.
-    this.conditionalFormatting.push({ ...structuredClone(cf), ref: normalizeReference(cf.ref) });
+    this._addConditionalFormatting(cf);
   }
 
+  /** @internal Add a block of rules already checked, and return the block the sheet holds. */
+  _addConditionalFormatting(cf: ConditionalFormattingOptions): ConditionalFormattingOptions {
+    this._checkOpen("add conditional formatting");
+    // Stored canonical, as `ConditionalFormatting.add` stores it: `a1:b2` is `A1:B2` in the file.
+    const stored = { ...structuredClone(cf), ref: normalizeReference(cf.ref) };
+    this.conditionalFormatting.push(stored);
+    return stored;
+  }
+
+  /**
+   * @deprecated Use {@link ConditionalFormatting.remove} (one block) or {@link ConditionalFormatting.clear} (all).
+   * Removed in 1.0.
+   */
   removeConditionalFormatting(
     filter?: number | ((cf: ConditionalFormattingOptions) => boolean)
   ): void {
@@ -1127,10 +1152,19 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
 
   // =========================================================================
 
-  /** Use the workbook image `imageId` as the sheet's background. @throws {ExcelImageError} when there is no such image. */
+  /**
+   * Use the workbook image `imageId` as the sheet's background. @throws {ExcelImageError} when there is no such image.
+   *
+   * @deprecated Use {@link Image.setBackground}: `Image.setBackground(ws, imageId)`. Removed in 1.0.
+   */
   addBackgroundImage(imageId: string | number): void {
+    this._setBackground("WorksheetWriter.addBackgroundImage", imageId);
+  }
+
+  /** @internal What `Image.setBackground` does to this writer; `where` names the public call in an error. */
+  _setBackground(where: string, imageId: string | number): void {
     this._checkOpen("add a background image");
-    this._checkImage("WorksheetWriter.addBackgroundImage", imageId);
+    this._checkImage(where, imageId);
     const bookImage = this._workbook.getImage(Number(imageId));
     if (bookImage && isExternalImage(bookImage)) {
       throw new ExcelImageError(
@@ -1144,8 +1178,20 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
     };
   }
 
+  /**
+   * @deprecated Use {@link Image.getBackground}, which answers with the id as a string (`"0"`), as it does for a
+   * document-model sheet. Removed in 1.0.
+   */
   getBackgroundImageId(): number | undefined {
     return this._background && this._background.imageId;
+  }
+
+  /** @internal What `Image.removeBackground` does to this writer. Returns `true` if the sheet had a background. */
+  _removeBackground(): boolean {
+    this._checkOpen("remove a background image");
+    const had = this._background !== undefined;
+    this._background = undefined;
+    return had;
   }
 
   // =========================================================================
@@ -1154,20 +1200,53 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
   /**
    * Using the image id from `WorkbookWriter.addImage`,
    * embed an image within the worksheet to cover a range.
+   *
+   * @deprecated Use {@link Image.place}: `Image.place(ws, imageId, range)`. Removed in 1.0.
    */
   addImage(imageId: string | number, range: AddImageRange): void {
+    this._placeImage("WorksheetWriter.addImage", imageId, range);
+  }
+
+  /** @internal What `Image.place` does to this writer, returning the placed image; `where` names the public call. */
+  _placeImage(where: string, imageId: string | number, range: AddImageRange): WriterImageModel {
     this._checkOpen("add an image");
-    this._checkImage("WorksheetWriter.addImage", imageId);
+    this._checkImage(where, imageId);
     const model = this._parseImageRange(String(imageId), range);
     this._media.push(model);
+    return model;
   }
 
   /**
    * Return the images that have been added to this worksheet.
    * Each entry contains imageId and the normalised range (with native anchors).
+   *
+   * @deprecated Use {@link Image.list}, which lists the placed pictures without the entry an overlay watermark adds.
+   * Removed in 1.0.
    */
   getImages(): ReadonlyArray<WriterImageModel> {
     return this._media;
+  }
+
+  /** @internal The placed pictures, as `Image.list` lists them: an overlay watermark's own entry is not one. */
+  _listImages(): WriterImageModel[] {
+    return this._media.filter(m => m._watermarkTag !== true);
+  }
+
+  /** @internal What `Image.remove` does to this writer: a picture {@link _listImages} listed, or its index there. */
+  _removeImage(image: WriterImageModel | number): boolean {
+    this._checkOpen("remove an image");
+    const images = this._listImages();
+    const target =
+      typeof image === "number"
+        ? Number.isInteger(image) && image >= 0
+          ? images[image]
+          : undefined
+        : images.find(m => m === image);
+    if (target === undefined) {
+      return false;
+    }
+    this._media.splice(this._media.indexOf(target), 1);
+    return true;
   }
 
   // =========================================================================
@@ -1182,8 +1261,15 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
    * with `mode: "header"` throws an `ExcelImageError`.
    *
    * @throws {ExcelImageError} If `mode: "header"` is used with an external (linked) image.
+   *
+   * @deprecated Use {@link Watermark.set}: `Watermark.set(ws, options)`. Removed in 1.0.
    */
   addWatermark(options: WatermarkOptions): void {
+    this._setWatermark("WorksheetWriter.addWatermark", options);
+  }
+
+  /** @internal What `Watermark.set` does to this writer; `where` names the public call in an error. */
+  _setWatermark(where: string, options: WatermarkOptions): void {
     this._checkOpen("add a watermark");
     const mode = options.mode ?? "overlay";
 
@@ -1205,7 +1291,7 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
       );
     }
 
-    this._checkImage("WorksheetWriter.addWatermark", options.imageId);
+    this._checkImage(where, options.imageId);
 
     // Remove existing watermark entries (both stored type tags)
     this._media = this._media.filter(m => m._watermarkTag !== true);
@@ -1243,6 +1329,8 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
 
   /**
    * Get the current watermark configuration, or `null` when the sheet has none.
+   *
+   * @deprecated Use {@link Watermark.get}, which answers with a copy. Removed in 1.0.
    */
   getWatermark(): WatermarkOptions | null {
     return this._watermark;
@@ -1250,6 +1338,8 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
 
   /**
    * Remove the watermark from the worksheet. Returns `true` if it had one, as `Watermark.remove` does.
+   *
+   * @deprecated Use {@link Watermark.remove}. Removed in 1.0.
    */
   removeWatermark(): boolean {
     const had = this._watermark !== null;
@@ -1322,10 +1412,12 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
   /**
    * Protect the sheet, optionally with a password — the same options object
    * `Worksheet.protect(ws, { password, ...flags })` takes.
+   *
+   * @deprecated Use {@link Worksheet.protect}: `Worksheet.protect(ws, { password, ...flags })`. Removed in 1.0.
    */
   protect(options?: ProtectSheetOptions): Promise<void>;
   /**
-   * @deprecated Pass the password in the options object: `protect({ password, ...options })`.
+   * @deprecated Use {@link Worksheet.protect}: `Worksheet.protect(ws, { password, ...options })`.
    * Removed in 1.0.
    */
   protect(password: string | undefined, options?: Partial<WorksheetProtection>): Promise<void>;
@@ -1334,19 +1426,23 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
     legacyOptions?: Partial<WorksheetProtection>
   ): Promise<void> {
     // Checked as `Worksheet.protect` checks it: `{ password: 42 }` used to be hashed as the text "42".
-    checkProtectCall(
-      "WorksheetWriter.protect",
-      passwordOrOptions,
-      legacyOptions,
-      SHEET_PROTECTION_FLAGS
-    );
+    checkProtectCall("WorksheetWriter.protect", passwordOrOptions, legacyOptions, "sheet");
     const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
+    await this._protect(password, options);
+  }
+
+  /** @internal What `Worksheet.protect` does to this writer, once it has checked the options. */
+  async _protect(
+    password: string | undefined,
+    options?: Partial<WorksheetProtection>
+  ): Promise<void> {
     // Synchronous pre-set so callers that don't await still see sheetProtection
     // before commit() (the original code was synchronous on the no-password path).
     this.sheetProtection = { sheet: true };
     this.sheetProtection = await buildSheetProtection(password, options);
   }
 
+  /** @deprecated Use {@link Worksheet.unprotect}. Removed in 1.0. */
   unprotect(): void {
     this.sheetProtection = null;
   }
@@ -1864,26 +1960,3 @@ class WorksheetWriter<TWorkbook = WorkbookWriterLike> {
 
 export { WorksheetWriter };
 export type { WriterImageModel };
-
-/**
- * A streamed row is a list (by column), an object (by column key), or nothing — as `Row.add` takes it — and each value
- * is one a cell can hold. Checked before the row exists: a bare number or string used to add an empty row and lose the
- * value, and a refused value used to leave a half-written row behind.
- */
-function checkStreamRow(where: string, argument: string, value: unknown): void {
-  if (value === null || value === undefined) {
-    return;
-  }
-  if (typeof value !== "object" || value instanceof Date) {
-    throw new ExcelArgumentError(
-      argument,
-      `${where}: ${argument} must be an array of cell values, an object keyed by column key, or nothing; got ${typeof value}.`
-    );
-  }
-  for (const [key, cell] of Object.entries(value)) {
-    checkCellValue(cell, {
-      where,
-      field: Array.isArray(value) ? `${argument}[${key}]` : `${argument}.${key}`
-    });
-  }
-}

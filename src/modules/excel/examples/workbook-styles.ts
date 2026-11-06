@@ -282,8 +282,8 @@ Row.setHeight(ws, 11, 40);
 alignments.forEach((alignment, index) => {
   const rowNumber = 11;
   const colNumber = index + 1;
-  Cell.setValue(ws, rowNumber, colNumber, alignment.text);
-  Cell.setStyle(ws, rowNumber, colNumber, { alignment: alignment.alignment });
+  Cell.setValue(ws, { row: rowNumber, col: colNumber }, alignment.text);
+  Cell.setStyle(ws, { row: rowNumber, col: colNumber }, { alignment: alignment.alignment });
 });
 
 Row.setHeight(ws, 12, 40);

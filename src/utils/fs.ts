@@ -487,24 +487,24 @@ export function ensureDirSync(dirPath: string): void {
 }
 
 /**
- * Get file stats, or null if file doesn't exist.
+ * Get file stats, or `undefined` if the file doesn't exist.
  */
-export async function safeStats(filePath: string): Promise<nodeFs.Stats | null> {
+export async function safeStats(filePath: string): Promise<nodeFs.Stats | undefined> {
   try {
     return await _fsp.stat(filePath);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
 /**
- * Synchronously get file stats, or null if file doesn't exist.
+ * Synchronously get file stats, or `undefined` if the file doesn't exist.
  */
-export function safeStatsSync(filePath: string): nodeFs.Stats | null {
+export function safeStatsSync(filePath: string): nodeFs.Stats | undefined {
   try {
     return _fs.statSync(filePath);
   } catch {
-    return null;
+    return undefined;
   }
 }
 

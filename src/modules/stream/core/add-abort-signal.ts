@@ -6,10 +6,12 @@
  * browser uses `addEmitterListener`/`removeEmitterListener`).
  */
 
+import { checkStreamArgument } from "@stream/arguments";
 import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
 import { StreamArgumentError } from "@stream/errors";
 import type { EventEmitterLike, ReadableLike, WritableLike } from "@stream/types";
 import { createAbortError } from "@utils/errors";
+import { s } from "@utils/schema";
 
 // =============================================================================
 // Types
@@ -31,17 +33,7 @@ export function createAddAbortSignal(ops: ListenerOps) {
   return function addAbortSignal<
     T extends (ReadableLike | WritableLike) & { destroy(error?: Error): any }
   >(signal: AbortSignal, stream: T): T {
-    if (
-      typeof signal !== "object" ||
-      signal === null ||
-      typeof signal.addEventListener !== "function" ||
-      typeof signal.aborted !== "boolean"
-    ) {
-      throw new StreamArgumentError("an AbortSignal", signal === null ? "null" : typeof signal, {
-        field: "signal",
-        where: "addAbortSignal"
-      });
-    }
+    checkStreamArgument(s.abortSignal(), signal, "addAbortSignal", "signal");
     // A Web stream has no `destroy`: aborting cancels a ReadableStream and aborts a
     // WritableStream, the nearest a caller can come to Node's erroring it.
     if (isReadableStream(stream) || isWritableStream(stream)) {

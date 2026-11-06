@@ -52,7 +52,8 @@ const list: DrawList = {
 };
 
 const svg = Draw.toSvg(list); // markup
-const image = Draw.toRgba(list, { scale: 2 }); // { width, height, data }
+const { png } = Draw.toPng(list, { scale: 2 }); // a PNG file
+const image = Draw.toRgba(list, { scale: 2 }); // { width, height, data } — raw pixels
 ```
 
 The same list on a PDF page — the third backend, which lives with the module that owns pages:
@@ -146,31 +147,29 @@ Note the unit: `Draw.measureText` returns user units for a point size, applying 
 
 ## Backends
 
-| Surface    | Where                                       | Output                              |
-| ---------- | ------------------------------------------- | ----------------------------------- |
-| SVG        | `documonster/draw` (`Draw.toSvg`)           | Markup                              |
-| Raster     | `documonster/draw` (`Draw.toRgba`)          | RGBA pixels via `BasicRasterCanvas` |
-| PDF vector | `documonster/pdf` (`Pdf.createDrawSurface`) | Page operators; owns the Y flip     |
+| Surface    | Where                                            | Output                                             |
+| ---------- | ------------------------------------------------ | -------------------------------------------------- |
+| SVG        | `documonster/draw` (`Draw.toSvg`)                | Markup                                             |
+| Raster     | `documonster/draw` (`Draw.toPng`, `Draw.toRgba`) | A PNG file, or RGBA pixels via `BasicRasterCanvas` |
+| PDF vector | `documonster/pdf` (`Pdf.createDrawSurface`)      | Page operators; owns the Y flip                    |
 
 A surface lives with the engine when it needs nothing but the display list, and next to its target when it draws onto something the engine cannot know about — which is why the PDF one is in the PDF module.
 
 Writing another backend means implementing `DrawSurface`. The walker owns transform composition, stroke and dash scaling, and text rotation, so a surface only puts marks down. `pushClip` / `popClip` are optional; omitting them draws unclipped rather than dropping content.
 
-### Pixels, not a PNG
+### A PNG, or the pixels
 
-`Draw.toRgba` returns an `DrawRgbaImage` — `{ width, height, data }`, with `width * height * 4` bytes of straight-alpha RGBA — not an encoded file. Encoding a PNG needs DEFLATE, which lives a layer above this module, and pulling a compression library down here would make every consumer of the drawing engine pay for it.
-
-The seam is therefore at the image, and the pairing is two lines. `documonster/archive` owns DEFLATE and CRC-32, which is all a PNG is:
+`Draw.toPng` returns the PNG file together with the rasteriser's report — `uncoveredCodePoints` and `textWarnings`, exactly as `Draw.toRgba` gives them, because a PNG with holes where a script's glyphs should be looks no different from a correct one:
 
 ```typescript
 import { Draw } from "documonster/draw";
-import { Archive } from "documonster/archive";
 
-const image = Draw.toRgba(list, { scale: 2 });
-const png = Archive.encodePng(image.data, image.width, image.height, { dpi: 192 });
+const { png, uncoveredCodePoints } = Draw.toPng(list, { scale: 2, dpi: 192 });
 ```
 
-In a browser you may prefer the platform's own encoder — put the pixels into a canvas with `putImageData` and call `toBlob`. Either way the drawing engine stays out of it.
+`Draw.toRgba` returns an `DrawRgbaImage` — `{ width, height, data }`, with `width * height * 4` bytes of straight-alpha RGBA — for any other encoder. In a browser you may prefer the platform's own: put the pixels into a canvas with `putImageData` and call `toBlob`.
+
+With rolldown or rspack, only `Draw.toPng` brings DEFLATE into a bundle; `Draw.toSvg` and `Draw.toRgba` do not. esbuild keeps every member of a namespace you import, so there the `Draw` namespace carries the encoder whichever member you call.
 
 ### Fonts, and how CJK gets drawn
 

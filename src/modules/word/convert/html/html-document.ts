@@ -32,7 +32,7 @@ import type {
 } from "@word/types";
 
 /**
- * Convert an HTML string into a complete document, ready for `Io.toBuffer`.
+ * Convert an HTML string into a complete document, ready for `Document.toBuffer`.
  *
  * The result carries the default style set (including the heading styles the
  * converted `<h1>…<h6>` refer to), bullet and numbered list definitions, and
@@ -49,10 +49,10 @@ import type {
  * @example
  * ```ts
  * import { WordHtml } from "documonster/word/html";
- * import { Io } from "documonster/word";
+ * import { Document } from "documonster/word";
  *
  * const doc = WordHtml.toDocx("<h1>Title</h1><ul><li>One</li></ul>");
- * const bytes = await Io.toBuffer(doc);
+ * const bytes = await Document.toBuffer(doc);
  * ```
  */
 export function htmlToDocument(html: string, options?: HtmlImportOptions): DocxDocument {

@@ -322,26 +322,26 @@ describe("fs utilities", () => {
     describe("safeStats", () => {
       it("should return stats for existing file", async () => {
         const stats = await safeStats(path.join(tempDir, "file.txt"));
-        expect(stats).not.toBeNull();
+        expect(stats).toBeDefined();
         expect(stats!.isFile()).toBe(true);
       });
 
-      it("should return null for non-existing file", async () => {
+      it("should return undefined for non-existing file", async () => {
         const stats = await safeStats(path.join(tempDir, "not-exists.txt"));
-        expect(stats).toBeNull();
+        expect(stats).toBeUndefined();
       });
     });
 
     describe("safeStatsSync", () => {
       it("should return stats synchronously", () => {
         const stats = safeStatsSync(path.join(tempDir, "file.txt"));
-        expect(stats).not.toBeNull();
+        expect(stats).toBeDefined();
         expect(stats!.isFile()).toBe(true);
       });
 
-      it("should return null for non-existing file", () => {
+      it("should return undefined for non-existing file", () => {
         const stats = safeStatsSync(path.join(tempDir, "not-exists.txt"));
-        expect(stats).toBeNull();
+        expect(stats).toBeUndefined();
       });
     });
   });

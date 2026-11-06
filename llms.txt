@@ -1,0 +1,139 @@
+# documonster
+
+> Zero-dependency TypeScript toolkit for Excel (XLSX/XLSB), Word (DOCX), PDF, CSV, Markdown, XML, ZIP/TAR and
+> Mermaid diagrams. ESM-only, Node.js >= 22.13, Bun and modern browsers. Every module is its own subpath:
+> `documonster/excel`, `documonster/word`, `documonster/pdf`, `documonster/csv`, `documonster/xml`,
+> `documonster/archive`, `documonster/markdown`, `documonster/mermaid`, `documonster/draw`, `documonster/formula`,
+> `documonster/stream`, `documonster/chart`; and the bridges `documonster/excel/csv`, `documonster/excel/markdown`,
+> `documonster/excel/formula`, `documonster/word/html`, `documonster/word/markdown`, `documonster/word/excel`,
+> `documonster/word/crypto`.
+
+This file is for code generators. Read "Rules" before writing any call: most wrong code comes from carrying over
+the exceljs API, which this package does not have.
+
+## Rules
+
+1. **No methods on documents.** Each module publishes namespaces of plain functions. The document is the first
+   argument: `Cell.setValue(ws, "A1", 42)`, never `ws.getCell("A1").value = 42`. Only incremental builders,
+   streaming readers and writers are classes (`new Pdf.Builder()`, `new Stream.WorkbookWriter()`).
+2. **One verb, one meaning, in every module.** `create` / `read` / `readFile` in; `toBuffer` (async bytes) /
+   `writeFile` / `toStream` out; `getX` / `setX` / `isX` / `hasX`; collections use `add` / `get` / `list` /
+   `remove` / `clear` / `each`. `with*` returns a changed copy.
+3. **A read returns a new object.** `const wb = await Workbook.read(bytes)`. Nothing reads *into* a handle you made.
+4. **A cell is one argument:** `"A1"` or `{ row, col }` (1-based). A batch of cells is a range
+   (`Range.setValues`), not a loop.
+5. **Settings go in a trailing options object.** No positional booleans.
+6. **Absence is `undefined`** (`Workbook.getWorksheet(wb, "Missing")`).
+7. **Errors are typed and prefixed by module** (`ExcelArgumentError`, `DocxParseError`, `PdfFontError`). An argument
+   error names the call and the parameter: `Csv.parse: options.delimiter must be …, got …` — read it and fix that
+   argument.
+8. **`toBuffer` resolves to a `Uint8Array`** everywhere. `fs.writeFile` and `res.end` take it as is.
+
+## Excel
+
+```ts
+import { Cell, Column, Range, Row, Workbook, Worksheet } from "documonster/excel";
+
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Sales");
+
+Row.add(ws, ["Region", "Q1", "Q2"]);
+Row.add(ws, ["North", 120, 135]);
+Cell.setValue(ws, "D1", "Total");
+Cell.setValue(ws, "D2", { formula: "SUM(B2:C2)" });
+Cell.setStyle(ws, "A1", { font: { bold: true } });
+Range.setValues(ws, "A3:C3", [["South", 98, 110]]);
+Column.setWidth(ws, "A", 18);
+Worksheet.merge(ws, "F1:H1");
+Worksheet.freeze(ws, { rows: 1 });
+
+const bytes = await Workbook.toBuffer(wb); // Uint8Array
+await Workbook.writeFile(wb, "sales.xlsx"); // Node only
+
+const again = await Workbook.read(bytes);
+const sheet = Workbook.getWorksheet(again, "Sales");
+if (sheet) {
+  console.log(Cell.getValue(sheet, "B2"), Row.getValues(sheet, 2));
+}
+```
+
+Large files: write with `new Stream.WorkbookWriter({ filename })`, add rows with `sheet.addRow([...])`, finish each
+with `Stream.commitRow(row)`, then `await writer.commit()`. Most namespace functions (`Cell.*`, `Row.*`,
+`Workbook.addWorksheet`, …) accept the writer too; ones that need the whole document are compile errors on it.
+
+### exceljs → documonster
+
+| exceljs                                     | documonster                                       |
+| ------------------------------------------- | ------------------------------------------------- |
+| `new ExcelJS.Workbook()`                    | `Workbook.create()`                               |
+| `wb.addWorksheet("S")`                      | `Workbook.addWorksheet(wb, "S")`                  |
+| `wb.getWorksheet("S")`                      | `Workbook.getWorksheet(wb, "S")`                  |
+| `ws.getCell("A1").value = v`                | `Cell.setValue(ws, "A1", v)`                      |
+| `ws.getCell("A1").value`                    | `Cell.getValue(ws, "A1")`                         |
+| `ws.getCell("A1").font = f`                 | `Cell.setFont(ws, "A1", f)`                       |
+| `ws.addRow([...])`                          | `Row.add(ws, [...])`                              |
+| `ws.getRow(2).values`                       | `Row.getValues(ws, 2)`                            |
+| `ws.getColumn("A").width = 18`              | `Column.setWidth(ws, "A", 18)`                    |
+| `ws.columns = [...]`                        | `Column.setDefinitions(ws, [...])`                |
+| `ws.mergeCells("A1:C1")`                    | `Worksheet.merge(ws, "A1:C1")`                    |
+| `ws.eachRow(cb)`                            | `Row.each(ws, cb)`                                |
+| `wb.addImage({...})` + `ws.addImage(id, r)` | `Image.add(wb, {...})` + `Image.place(ws, id, r)` |
+| `ws.addTable({...})`                        | `Table.add(ws, {...})`                            |
+| `await wb.xlsx.writeBuffer()`               | `await Workbook.toBuffer(wb)`                     |
+| `await wb.xlsx.writeFile(path)`             | `await Workbook.writeFile(wb, path)`              |
+| `await wb.xlsx.load(buffer)`                | `const wb = await Workbook.read(buffer)`          |
+| `await wb.xlsx.readFile(path)`              | `const wb = await Workbook.readFile(path)`        |
+| `await wb.csv.writeBuffer()`                | `await ExcelCsv.toBuffer(wb)` (`documonster/excel/csv`) |
+| `new ExcelJS.stream.xlsx.WorkbookWriter()`  | `new Stream.WorkbookWriter()`                     |
+
+Charts are added with `Chart.place(ws, range, { type: "bar", series: [...] })`, which returns the chart's handle.
+
+## Word
+
+```ts
+import { Document } from "documonster/word";
+
+const doc = Document.create();
+Document.addParagraph(doc, "Hello");
+const docx = await Document.toBuffer(doc);
+const parsed = await Document.read(docx);
+console.log(parsed.body.length);
+```
+
+`Document.*` edits a document in place. Everything else that returns a document (`Template.fill`, `Transform.*`,
+`Security.protect`) leaves its input unchanged.
+
+## PDF
+
+```ts
+import { Pdf } from "documonster/pdf";
+import { Workbook } from "documonster/excel";
+
+const pdf = await Pdf.fromExcel(Workbook.create());
+const { text, pages } = await Pdf.extract(pdf);
+console.log(text, pages.length);
+```
+
+`Pdf.fromDocx(doc)` converts a Word document; `new Pdf.Builder()` draws one from scratch.
+
+## CSV and XML
+
+```ts
+import { Csv } from "documonster/csv";
+import { Xml } from "documonster/xml";
+
+const rows = Csv.parse("a,b\n1,2");
+const csv = Csv.format(rows);
+const tree = Xml.parse("<root><item/></root>");
+console.log(csv, tree);
+```
+
+Incremental readers end in `Stream`: `Csv.parseStream(source)` yields rows, `Xml.parseSaxStream(source)` yields SAX
+event batches, `Workbook.readStream(stream)` reads a workbook as it arrives.
+
+## More
+
+- [README.md](README.md) — every module, with links to its own README
+- [MIGRATION.md](MIGRATION.md) — breaking changes by release
+- [MIGRATION_EXCELTS_TO_DOCUMONSTER.md](MIGRATION_EXCELTS_TO_DOCUMONSTER.md) — the full class-member mapping
+- `@documonster/mcp` — a Model Context Protocol server exposing these modules as tools

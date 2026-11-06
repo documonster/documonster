@@ -54,8 +54,8 @@ import {
 import type { ZipStringEncoding } from "@archive/core/text";
 import { decodeEntryText } from "@archive/core/text";
 import type { ArchiveFormat } from "@archive/core/types";
-import type { AesKeyStrength } from "@archive/crypto/aes";
-import { aesEncryptedSize } from "@archive/crypto/aes";
+import type { AesKeyStrength } from "@archive/crypto/aes-format";
+import { aesEncryptedSize } from "@archive/crypto/aes-format";
 import { ZIP_CRYPTO_HEADER_SIZE } from "@archive/crypto/zip-crypto";
 import type {
   AddFileOptions,
@@ -646,7 +646,7 @@ function shouldExtractCore(
   entryMtime: Date,
   strategy: OverwriteStrategy,
   targetPath: string,
-  getStats: () => { mtime: Date } | null
+  getStats: () => { mtime: Date } | undefined
 ): boolean {
   if (!exists) {
     return true;
@@ -688,7 +688,7 @@ async function shouldExtract(
     const stats = await safeStats(targetPath);
     return shouldExtractCore(exists, entryMtime, strategy, targetPath, () => stats);
   }
-  return shouldExtractCore(exists, entryMtime, strategy, targetPath, () => null);
+  return shouldExtractCore(exists, entryMtime, strategy, targetPath, () => undefined);
 }
 
 /**
@@ -1853,7 +1853,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
   private _tarFileOptions(
     op: Extract<TarNamedPendingEntry, { type: "file" }>,
-    stats: { mode?: number; mtime?: Date } | null
+    stats: { mode?: number; mtime?: Date } | undefined
   ): TarArchiveEntryOptions {
     return buildTarAddOptions(op.options, { mode: stats?.mode, mtime: stats?.mtime ?? op.stamp });
   }
@@ -2131,11 +2131,11 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   /**
    * Get the source file path if the archive was loaded from disk.
    */
-  get sourcePath(): string | null {
+  get sourcePath(): string | undefined {
     if (this._format === "zip") {
-      return this._zipSourcePath as string | null;
+      return (this._zipSourcePath as string | null) ?? undefined;
     }
-    return null; // TAR doesn't track source path
+    return undefined; // TAR doesn't track source path
   }
 
   /**
@@ -2365,7 +2365,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     if (this._format === "zip") {
       return this._zipViewSync().has(this._zipKey(entryPath));
     }
-    return this._tarEntryInfo(entryPath) !== null;
+    return this._tarEntryInfo(entryPath) !== undefined;
   }
 
   /**
@@ -2754,29 +2754,27 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   }
 
   /**
-   * One entry's info as a write records it; `null` when the archive a write would produce has
+   * One entry's info as a write records it; `undefined` when the archive a write would produce has
    * no such entry. See {@link getEntries}. Of two TAR members with one name the later is
    * returned, as {@link readEntry} reads it.
    */
-  getEntry(entryPath: string): (F extends "tar" ? ArchiveEntryInfo : ZipEntryInfo) | null {
+  getEntry(entryPath: string): (F extends "tar" ? ArchiveEntryInfo : ZipEntryInfo) | undefined {
     checkEntryPath("Archive.ArchiveFile#getEntry", entryPath, "entryPath");
     if (this._format === "tar") {
       return this._tarEntryInfo(entryPath) as
         | (F extends "tar" ? ArchiveEntryInfo : ZipEntryInfo)
-        | null;
+        | undefined;
     }
     const v = this._zipViewSync().get(this._zipKey(entryPath));
-    return (v ? mapZipEntryToInfo(this._zipRecordSync(v)) : null) as
+    return (v ? mapZipEntryToInfo(this._zipRecordSync(v)) : undefined) as
       | (F extends "tar" ? ArchiveEntryInfo : ZipEntryInfo)
-      | null;
+      | undefined;
   }
 
-  /** A TAR entry's info, the last of that name, or `null`. */
-  private _tarEntryInfo(entryPath: string): ArchiveEntryInfo | null {
+  /** A TAR entry's info, the last of that name, or `undefined`. */
+  private _tarEntryInfo(entryPath: string): ArchiveEntryInfo | undefined {
     const normalized = normalizeTarPath(entryPath);
-    return (
-      this.getEntriesSync().findLast(e => e.path === entryPath || e.path === normalized) ?? null
-    );
+    return this.getEntriesSync().findLast(e => e.path === entryPath || e.path === normalized);
   }
 
   /** The TAR view entry for a name, or `undefined`. */
@@ -2788,29 +2786,29 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   }
 
   /**
-   * Read an entry as bytes; `null` when the archive a write would produce has no such entry.
+   * Read an entry as bytes; `undefined` when the archive a write would produce has no such entry.
    * A pending entry's data is read from where it is pending: memory, the file on disk, or —
    * buffered in memory the first time — the stream.
    *
    * @param options.password - Overrides the password the archive was opened with (ZIP)
    */
-  readEntry(entryPath: string, options?: ArchiveFileReadOptions): Promise<Uint8Array | null>;
+  readEntry(entryPath: string, options?: ArchiveFileReadOptions): Promise<Uint8Array | undefined>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  readEntry(entryPath: string, password: string | Uint8Array): Promise<Uint8Array | null>;
+  readEntry(entryPath: string, password: string | Uint8Array): Promise<Uint8Array | undefined>;
   async readEntry(
     entryPath: string,
     options?: ArchiveFileReadOptions | string | Uint8Array
-  ): Promise<Uint8Array | null> {
+  ): Promise<Uint8Array | undefined> {
     checkEntryPath("Archive.ArchiveFile#readEntry", entryPath, "entryPath");
     if (this._format === "zip") {
       const v = (await this._zipViewAsync()).get(this._zipKey(entryPath));
-      return v ? this._zipDataOf(v, toReadOptions(options).password) : null;
+      return v ? this._zipDataOf(v, toReadOptions(options).password) : undefined;
     }
     if (this._tar_pending.length === 0) {
-      return this._tarReader ? (this._tarReader as TarReader).bytes(entryPath) : null;
+      return this._tarReader ? (this._tarReader as TarReader).bytes(entryPath) : undefined;
     }
     const v = this._tarViewEntry(await this._tarViewAsync(), entryPath);
-    return v ? (await this._tarEntryOf(v)).data : null;
+    return v ? (await this._tarEntryOf(v)).data : undefined;
   }
 
   /**
@@ -2819,39 +2817,39 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    *
    * @param options.password - Overrides the password the archive was opened with (ZIP)
    */
-  readEntrySync(entryPath: string, options?: ArchiveFileReadOptions): Uint8Array | null;
+  readEntrySync(entryPath: string, options?: ArchiveFileReadOptions): Uint8Array | undefined;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  readEntrySync(entryPath: string, password: string | Uint8Array): Uint8Array | null;
+  readEntrySync(entryPath: string, password: string | Uint8Array): Uint8Array | undefined;
   readEntrySync(
     entryPath: string,
     options?: ArchiveFileReadOptions | string | Uint8Array
-  ): Uint8Array | null {
+  ): Uint8Array | undefined {
     checkEntryPath("Archive.ArchiveFile#readEntrySync", entryPath, "entryPath");
     if (this._format === "zip") {
       const v = this._zipViewSync().get(this._zipKey(entryPath));
-      return v ? this._zipDataOfSync(v, toReadOptions(options).password) : null;
+      return v ? this._zipDataOfSync(v, toReadOptions(options).password) : undefined;
     }
     const v = this._tarViewEntry(this._tarViewSync(), entryPath);
-    return v ? this._tarEntryOfSync(v).data : null;
+    return v ? this._tarEntryOfSync(v).data : undefined;
   }
 
   /**
-   * Read an entry as text; `null` when the archive a write would produce has no such entry.
+   * Read an entry as text; `undefined` when the archive a write would produce has no such entry.
    *
    * @param options.encoding - Text encoding (default `"utf-8"`)
    * @param options.password - Overrides the password the archive was opened with (ZIP)
    */
-  readAsText(entryPath: string, options?: ArchiveFileReadTextOptions): Promise<string | null>;
+  readAsText(entryPath: string, options?: ArchiveFileReadTextOptions): Promise<string | undefined>;
   /** @deprecated Pass the encoding as `{ encoding }`. Removed in 1.0. */
-  readAsText(entryPath: string, encoding: string): Promise<string | null>;
+  readAsText(entryPath: string, encoding: string): Promise<string | undefined>;
   async readAsText(
     entryPath: string,
     options?: ArchiveFileReadTextOptions | string
-  ): Promise<string | null> {
+  ): Promise<string | undefined> {
     const { encoding = "utf-8", password } = toReadTextOptions(options);
     const data = await this.readEntry(entryPath, password === undefined ? undefined : { password });
     if (!data) {
-      return null;
+      return undefined;
     }
     return decodeEntryText(data, encoding, "whatwg");
   }
@@ -2862,14 +2860,17 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    * @param options.encoding - Text encoding (default `"utf-8"`)
    * @param options.password - Overrides the password the archive was opened with (ZIP)
    */
-  readAsTextSync(entryPath: string, options?: ArchiveFileReadTextOptions): string | null;
+  readAsTextSync(entryPath: string, options?: ArchiveFileReadTextOptions): string | undefined;
   /** @deprecated Pass the encoding as `{ encoding }`. Removed in 1.0. */
-  readAsTextSync(entryPath: string, encoding: string): string | null;
-  readAsTextSync(entryPath: string, options?: ArchiveFileReadTextOptions | string): string | null {
+  readAsTextSync(entryPath: string, encoding: string): string | undefined;
+  readAsTextSync(
+    entryPath: string,
+    options?: ArchiveFileReadTextOptions | string
+  ): string | undefined {
     const { encoding = "utf-8", password } = toReadTextOptions(options);
     const data = this.readEntrySync(entryPath, password === undefined ? undefined : { password });
     if (!data) {
-      return null;
+      return undefined;
     }
     return decodeEntryText(data, encoding, "whatwg");
   }
@@ -3065,11 +3066,11 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   /**
    * Get the comment for a specific entry (ZIP only).
    */
-  getZipEntryComment(entryPath: string): string | null {
+  getZipEntryComment(entryPath: string): string | undefined {
     assertZipFormat(this._format, "getZipEntryComment()");
     checkEntryPath("Archive.ArchiveFile#getZipEntryComment", entryPath, "entryPath");
-    const entry = this.getEntry(entryPath) as ZipEntryInfo | null;
-    return entry?.comment ?? null;
+    const entry = this.getEntry(entryPath) as ZipEntryInfo | undefined;
+    return entry?.comment;
   }
 
   /**

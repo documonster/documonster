@@ -137,7 +137,7 @@ interface CsvParseResult<T> {
 
 Async parser supporting strings, bytes (`Uint8Array` or any `ArrayBufferView`, `ArrayBuffer`),
 a `Blob` / `File`, `AsyncIterable<string | Uint8Array>`, and `ReadableStream`. Bytes are decoded as
-the same bytes streamed would be (`encoding`, BOM). `Csv.parseRows` takes the same inputs.
+the same bytes streamed would be (`encoding`, BOM). `Csv.parseStream` takes the same inputs.
 
 ```typescript
 import { Csv } from "documonster/csv";
@@ -156,14 +156,14 @@ const result = await Csv.parseAsync(asyncChunks, { headers: true });
 const result = await Csv.parseAsync(fileInput.files[0], { headers: true });
 ```
 
-### `Csv.parseRows(input, options?)`
+### `Csv.parseStream(input, options?)`
 
 True streaming async generator -- yields rows one at a time. Memory-efficient for large files.
 
 ```typescript
 import { Csv } from "documonster/csv";
 
-for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
+for await (const row of Csv.parseStream(hugeFile, { headers: true })) {
   console.log(row); // { name: "...", age: "..." }
 }
 ```
@@ -432,7 +432,7 @@ try {
 | --------------------------------------- | -------------------------------------------------------------- |
 | `Csv.parse(input, options?)`            | Synchronous CSV parser                                         |
 | `Csv.parseAsync(input, options?)`       | Async parser (strings, bytes, Blobs, streams, async iterables) |
-| `Csv.parseRows(input, options?)`        | Async generator yielding rows one at a time                    |
+| `Csv.parseStream(input, options?)`      | Async generator yielding rows one at a time                    |
 | `Csv.parseAsync(input, { onProgress })` | Parser with progress reporting                                 |
 | `Csv.format(data, options?)`            | Batch CSV formatter                                            |
 

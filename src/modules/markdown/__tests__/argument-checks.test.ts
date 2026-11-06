@@ -85,3 +85,18 @@ describe("Markdown.parse argument checks", () => {
     expect(Markdown.parse(table, { maxRows: 0 }).rows).toEqual([]);
   });
 });
+
+describe("Markdown.format column checks declared as a schema", () => {
+  it("refuses an array as a column config at the column, not at its header", () => {
+    let caught: { field?: string; message?: string } = {};
+    try {
+      Markdown.format(["a"], [["1"]], { columns: [[] as never] });
+    } catch (err) {
+      caught = err as typeof caught;
+    }
+    expect(caught.field).toBe("options.columns[0]");
+    expect(caught.message).toBe(
+      "Markdown.format: options.columns[0] must be a header string or { header, alignment?, minWidth? }, got an array"
+    );
+  });
+});

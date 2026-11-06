@@ -11,7 +11,7 @@
  *   - DEFAULT_SECURITY_POLICY / STRICT_SECURITY_POLICY constants
  *   - Security.resolvePolicy — fill missing fields with defaults
  *   - A partial policy — unspecified fields fall back to the defaults
- *   - Io.read(bytes, { securityPolicy }) — enforced limits during read
+ *   - Document.read(bytes, { securityPolicy }) — enforced limits during read
  *   - RenderContext.createIds / RenderContext.create — used when writing
  *     auxiliary parts manually (not common, but the public surface is
  *     here for advanced consumers)
@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, isDocxError, Io, RenderContext, Security } from "../index";
+import { Document, isDocxError, RenderContext, Security } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -62,26 +62,26 @@ log(
 const d = Document.create();
 Document.useDefaultStyles(d);
 Document.addParagraph(d, "Tiny doc");
-const bytes = await Io.toBuffer(d);
+const bytes = await Document.toBuffer(d);
 fs.writeFileSync(path.join(outDir, "46-policy.docx"), bytes);
 
 // Default policy: succeeds
-const defaultRead = await Io.read(bytes, { securityPolicy: Security.DEFAULT_POLICY });
-log(`\n  Io.read(DEFAULT) body length: ${defaultRead.body.length}`);
+const defaultRead = await Document.read(bytes, { securityPolicy: Security.DEFAULT_POLICY });
+log(`\n  Document.read(DEFAULT) body length: ${defaultRead.body.length}`);
 
 // Strict policy: still succeeds for this benign file
-const strictRead = await Io.read(bytes, { securityPolicy: Security.STRICT_POLICY });
-log(`  Io.read(STRICT)  body length: ${strictRead.body.length}`);
+const strictRead = await Document.read(bytes, { securityPolicy: Security.STRICT_POLICY });
+log(`  Document.read(STRICT)  body length: ${strictRead.body.length}`);
 
 // A partial policy with a comically tight cap forces a rejection; every field
 // it leaves out keeps its default.
 const tightPolicy = { maxPackageSize: 100 };
 try {
-  await Io.read(bytes, { securityPolicy: tightPolicy });
+  await Document.read(bytes, { securityPolicy: tightPolicy });
   log(`  ERROR: expected size-cap to throw`);
 } catch (err) {
   if (isDocxError(err)) {
-    log(`  Io.read({maxPackageSize:100}) → ${err.constructor.name}: "${err.message}"`);
+    log(`  Document.read({maxPackageSize:100}) → ${err.constructor.name}: "${err.message}"`);
   } else {
     throw err;
   }

@@ -8,7 +8,7 @@
  */
 
 import { buildWordChartExXml } from "@word/bridge/excel-bridge";
-import { Document, Build, Io, Layout } from "@word/index";
+import { Document, Build, Layout } from "@word/index";
 import type { DocxDocument, DocxPageContent } from "@word/index";
 import { describe, it, expect } from "vitest";
 
@@ -20,9 +20,9 @@ describe("docxToPdf — layout-driven smoke test", () => {
   it("produces a valid PDF for a paragraph-only document", async () => {
     const h = Document.create();
     Document.addParagraph(h, Build.paragraph([Build.text("hello world")]));
-    const docBytes = await Io.toBuffer(h);
+    const docBytes = await Document.toBuffer(h);
 
-    const doc = await Io.read(docBytes);
+    const doc = await Document.read(docBytes);
 
     const pdfBytes = await docxToPdf(doc);
     expect(pdfBytes.length).toBeGreaterThan(100);
@@ -151,9 +151,9 @@ describe("docxToPdf — layout-driven smoke test", () => {
       [2500, 2500]
     );
     Document.addTable(h, t);
-    const docBytes = await Io.toBuffer(h);
+    const docBytes = await Document.toBuffer(h);
 
-    const doc = await Io.read(docBytes);
+    const doc = await Document.read(docBytes);
 
     const pdfBytes = await docxToPdf(doc);
     expect(pdfBytes.length).toBeGreaterThan(200);
@@ -164,8 +164,8 @@ describe("docxToPdf — option fidelity", () => {
   async function buildSimpleDoc(): Promise<{ doc: DocxDocument }> {
     const h = Document.create();
     Document.addParagraph(h, Build.paragraph([Build.text("page geometry probe")]));
-    const docBytes = await Io.toBuffer(h);
-    return { doc: await Io.read(docBytes) };
+    const docBytes = await Document.toBuffer(h);
+    return { doc: await Document.read(docBytes) };
   }
 
   it("forwards pageWidth / pageHeight overrides into the layout engine", async () => {
@@ -309,9 +309,9 @@ describe("docxToPdf — chart rendering fallback", () => {
       chart: { type: "bar" as const, title: "Quarterly Revenue", series: [] }
     };
     Document.addContent(h, chartItem);
-    const docBytes = await Io.toBuffer(h);
+    const docBytes = await Document.toBuffer(h);
 
-    const doc = await Io.read(docBytes);
+    const doc = await Document.read(docBytes);
 
     let invoked = 0;
     let rectSeen: { x: number; y: number; width: number; height: number } | null = null;
@@ -332,7 +332,7 @@ describe("docxToPdf — chart rendering fallback", () => {
     // ...and after the decline the PDF still came back with a real
     // body. Compare against an empty document to assert the chart
     // slot didn't simply disappear into a smaller-than-empty file.
-    const empty = await docxToPdf(await Io.read(await Io.toBuffer(Document.create())));
+    const empty = await docxToPdf(await Document.read(await Document.toBuffer(Document.create())));
     expect(declined.length).toBeGreaterThan(empty.length);
   });
 
@@ -342,9 +342,9 @@ describe("docxToPdf — chart rendering fallback", () => {
       type: "chart" as const,
       chart: { type: "bar" as const, title: "Q1 Sales", series: [] }
     });
-    const docBytes = await Io.toBuffer(h);
+    const docBytes = await Document.toBuffer(h);
 
-    const doc = await Io.read(docBytes);
+    const doc = await Document.read(docBytes);
 
     let invoked = 0;
     await docxToPdf(doc, {

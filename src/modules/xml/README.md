@@ -149,7 +149,7 @@ src/modules/xml/
 ├── encode.ts             # Xml.encode, Xml.decode, Xml.validateName, Xml.encodeCData, etc.
 ├── writer.ts             # Xml.Writer (buffered, with rollback support)
 ├── stream-writer.ts      # Xml.StreamWriter (streaming, writes to XmlWritableTarget)
-├── sax.ts                # Xml.SaxParser (event-driven) + Xml.parseSax (async generator)
+├── sax.ts                # Xml.SaxParser (event-driven) + Xml.parseSaxStream (async generator)
 ├── dom.ts                # Xml.parse + DOM query helpers + Xml.toPlainObject
 ├── to-object.ts          # Xml.parseToObject (SAX-direct, single-pass)
 ├── to-object-shared.ts   # Shared conversion logic (internal)
@@ -189,7 +189,7 @@ Xml.SaxParser  — Event-driven streaming parser
 │                      ~1.6x faster than Xml.parse + Xml.toPlainObject
 │                      Best for: XML string → plain object → JSON.stringify
 │
-└── Xml.parseSax     — Async generator wrapping Xml.SaxParser for stream iteration
+└── Xml.parseSaxStream     — Async generator wrapping Xml.SaxParser for stream iteration
                        Best for: async pipelines (e.g. reading from zip streams)
 ```
 
@@ -260,10 +260,10 @@ declaration only at the very start of a document. `Xml.parse` is lenient here an
 | `invalidCharHandling` | `"error"` | How to handle invalid XML characters (see below)  |
 | `fileName`            | —         | File name for error messages                      |
 
-### Xml.parseSax (Async Generator)
+### Xml.parseSaxStream (Async Generator)
 
 ```text
-Xml.parseSax(
+Xml.parseSaxStream(
   iterable: AsyncIterable<string | Uint8Array | ArrayBuffer>,
   options?: XmlSaxOptions
 ): AsyncGenerator<XmlSaxEventAny[]>

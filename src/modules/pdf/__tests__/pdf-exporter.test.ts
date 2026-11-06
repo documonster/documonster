@@ -886,7 +886,7 @@ describe("excelToPdf", () => {
       // Create a very wide sheet
       for (let i = 1; i <= 20; i++) {
         Column.setWidth(ws, i, 15);
-        Cell.setValue(ws, 1, i, `Col${i}`);
+        Cell.setValue(ws, { row: 1, col: i }, `Col${i}`);
       }
 
       const pdf = await excelToPdf(wb, { fitToPage: true });
@@ -1323,8 +1323,8 @@ describe("excelToPdf", () => {
       const wide = Workbook.addWorksheet(wb, "Wide");
       for (let c = 1; c <= 12; c++) {
         Column.setWidth(wide, c, 12);
-        Cell.setValue(wide, 1, c, `Header ${c}`);
-        Cell.setValue(wide, 2, c, c * 10);
+        Cell.setValue(wide, { row: 1, col: c }, `Header ${c}`);
+        Cell.setValue(wide, { row: 2, col: c }, c * 10);
       }
       const narrow = Workbook.addWorksheet(wb, "Narrow");
       Column.setWidth(narrow, 1, 12);

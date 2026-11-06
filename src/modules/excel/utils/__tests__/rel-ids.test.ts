@@ -92,7 +92,11 @@ describe("hyperlink relationships", () => {
       const ws = Workbook.addWorksheet(wb, "S");
       const n = 300;
       for (let i = 1; i <= n; i++) {
-        Cell.setValue(ws, i, 1, { text: `l${i}`, hyperlink: `https://example.com/${i}` });
+        Cell.setValue(
+          ws,
+          { row: i, col: 1 },
+          { text: `l${i}`, hyperlink: `https://example.com/${i}` }
+        );
       }
       const entries = await extractAll(await Workbook.toBuffer(wb, { format }));
       const rels = requireEntryText(

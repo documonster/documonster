@@ -8,15 +8,25 @@
  * the classic and the Office 2016 renderers and by every public name that reaches them.
  */
 
+import type { RasterFontSource } from "@draw/raster/glyph-outline";
+import type {
+  ChartRenderOptions,
+  RegionMapDataOptions,
+  RegionMapMatchRule
+} from "@excel/chart/render/chart-renderer";
 import { checkTopology } from "@excel/chart/render/topojson";
+import type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 import { ExcelChartOptionsError } from "@excel/errors";
+import type {} from "@excel/utils/arguments";
 import { checkBackgroundWith } from "@utils/background-check";
 import { describeValue as describe } from "@utils/describe-value";
+import { check, s } from "@utils/schema";
+import type { Schema, SchemaMatches } from "@utils/schema";
 import { isNoPaintColor, parseCssColor } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
+import type { OoxmlThemeColorName } from "@utils/theme-colors";
 
-const PROJECTIONS: readonly string[] = ["mercator", "miller", "albers", "robinson"];
-const THEME_SLOTS: readonly string[] = [
+const THEME_SLOTS: readonly OoxmlThemeColorName[] = [
   "dk1",
   "lt1",
   "dk2",
@@ -45,26 +55,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function checkOptionalPositive(where: string, field: string, value: unknown): void {
   if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) {
     fail(where, field, "a finite number > 0", value);
-  }
-}
-
-function checkOptionalString(where: string, field: string, value: unknown): void {
-  if (value !== undefined && typeof value !== "string") {
-    fail(where, field, "a string", value);
-  }
-}
-
-function checkOptionalCssColor(where: string, field: string, value: unknown): void {
-  if (value === undefined) {
-    return;
-  }
-  if (typeof value !== "string" || (!isNoPaintColor(value) && parseCssColor(value) === undefined)) {
-    fail(
-      where,
-      field,
-      "a CSS colour (#rgb, #rrggbb, #rrggbbaa, rgb(), hsl(), a colour name, transparent or none)",
-      value
-    );
   }
 }
 
@@ -110,6 +100,86 @@ export function requestsFontControl(options: {
   return options.fonts !== undefined || options.useSystemFonts === false;
 }
 
+function chartOptionsError(field: string, message: string): ExcelChartOptionsError {
+  return new ExcelChartOptionsError(field, message);
+}
+
+const positive = () =>
+  s.number({ finite: true, min: Number.MIN_VALUE, expected: "a finite number > 0" }).optional();
+
+const cssColor = () =>
+  s
+    .custom<string>(
+      v => typeof v === "string" && (isNoPaintColor(v) || parseCssColor(v) !== undefined),
+      "a CSS colour (#rgb, #rrggbb, #rrggbbaa, rgb(), hsl(), a colour name, transparent or none)"
+    )
+    .optional();
+
+const themeColorsShape = Object.fromEntries(
+  THEME_SLOTS.map(slot => [
+    slot,
+    s
+      .custom<string>(
+        v => typeof v === "string" && /^[0-9A-Fa-f]{6}$/.test(v),
+        'six hex digits "RRGGBB"'
+      )
+      .optional()
+  ])
+) as Record<OoxmlThemeColorName, Schema<string, true>>;
+const themeColorsSchema = s.object(themeColorsShape, {
+  expected: 'an object of theme colours { accent1: "RRGGBB", … }',
+  unknownKeys: "reject",
+  readonly: true
+});
+const _themeColorsMatch: SchemaMatches<typeof themeColorsSchema, ChartThemeColors> = true;
+void _themeColorsMatch;
+
+const matchRule = s.custom<RegionMapMatchRule>(
+  v => typeof v === "string" && (v === "id" || /^property:.+/.test(v)),
+  '"id" or "property:<key>"'
+);
+const regionMapSchema = s.object(
+  {
+    // Checked by `checkTopology`, which names the path inside the topology.
+    topology: s.unknown(),
+    objectName: s.unknown<string>(),
+    match: s.union([matchRule, s.array(matchRule)]).optional(),
+    projection: s.literal("mercator", "miller", "albers", "robinson").optional(),
+    strokeColor: cssColor()
+  },
+  { expected: "an object { topology, objectName, … }" }
+);
+const _regionMapMatch: SchemaMatches<typeof regionMapSchema, RegionMapDataOptions> = true;
+void _regionMapMatch;
+
+const renderOptionsSchema = s.object(
+  {
+    width: positive(),
+    height: positive(),
+    title: s.string().optional(),
+    // Checked by `checkBackgroundWith`, the one background check every renderer shares.
+    background: s.unknown<string | Rgba01>().optional(),
+    backgroundColor: cssColor(),
+    fonts: s
+      .readonlyArray(
+        s.custom<RasterFontSource>(
+          v => typeof v === "object" && v !== null,
+          "font bytes, a RasterFont or { data, collectionIndex }"
+        ),
+        { expected: "an array of fonts" }
+      )
+      .optional(),
+    useSystemFonts: s.boolean().optional(),
+    themeColors: themeColorsSchema.optional(),
+    scale: positive(),
+    dpi: positive(),
+    regionMap: regionMapSchema.optional()
+  },
+  { expected: "an options object" }
+);
+const _renderOptionsMatch: SchemaMatches<typeof renderOptionsSchema, ChartRenderOptions> = true;
+void _renderOptionsMatch;
+
 /**
  * Check a renderer's options, naming `where` — the public call (`ChartClassic.toSvg`,
  * `Chart.toPng`, …) — and each field by its path from `options`.
@@ -117,101 +187,23 @@ export function requestsFontControl(options: {
  * @throws {ExcelChartOptionsError} an option has no valid reading.
  */
 export function checkChartRenderOptions(where: string, options: unknown): void {
+  check(renderOptionsSchema.optional(), options, {
+    where,
+    field: "options",
+    error: chartOptionsError
+  });
   if (options === undefined) {
     return;
   }
-  if (!isRecord(options)) {
-    fail(where, "options", "an options object", options);
-  }
-  checkOptionalPositive(where, "options.width", options.width);
-  checkOptionalPositive(where, "options.height", options.height);
-  checkOptionalPositive(where, "options.scale", options.scale);
-  checkOptionalPositive(where, "options.dpi", options.dpi);
-  checkOptionalString(where, "options.title", options.title);
   checkOptionalBackground(where, "options.background", options.background);
-  checkOptionalCssColor(where, "options.backgroundColor", options.backgroundColor);
-  const fonts = options.fonts;
-  if (fonts !== undefined) {
-    if (!Array.isArray(fonts)) {
-      fail(where, "options.fonts", "an array of fonts", fonts);
-    }
-    fonts.forEach((font: unknown, i) => {
-      if (typeof font !== "object" || font === null) {
-        fail(
-          where,
-          `options.fonts[${i}]`,
-          "font bytes, a RasterFont or { data, collectionIndex }",
-          font
-        );
-      }
+  const regionMap = options.regionMap;
+  if (regionMap !== undefined) {
+    checkTopology(regionMap.topology, regionMap.objectName, {
+      where,
+      topology: "options.regionMap.topology",
+      objectName: "options.regionMap.objectName"
     });
   }
-  if (options.useSystemFonts !== undefined && typeof options.useSystemFonts !== "boolean") {
-    fail(where, "options.useSystemFonts", "a boolean", options.useSystemFonts);
-  }
-  const themeColors = options.themeColors;
-  if (themeColors !== undefined) {
-    if (!isRecord(themeColors)) {
-      fail(
-        where,
-        "options.themeColors",
-        'an object of theme colours { accent1: "RRGGBB", … }',
-        themeColors
-      );
-    }
-    for (const [slot, value] of Object.entries(themeColors)) {
-      if (!THEME_SLOTS.includes(slot)) {
-        fail(
-          where,
-          "options.themeColors",
-          `an object whose keys are theme slots (${THEME_SLOTS.join(", ")})`,
-          slot
-        );
-      }
-      if (value !== undefined && (typeof value !== "string" || !/^[0-9A-Fa-f]{6}$/.test(value))) {
-        fail(where, `options.themeColors.${slot}`, 'six hex digits "RRGGBB"', value);
-      }
-    }
-  }
-  const regionMap = options.regionMap;
-  if (regionMap === undefined) {
-    return;
-  }
-  if (!isRecord(regionMap)) {
-    fail(where, "options.regionMap", "an object { topology, objectName, … }", regionMap);
-  }
-  checkTopology(regionMap.topology, regionMap.objectName, {
-    where,
-    topology: "options.regionMap.topology",
-    objectName: "options.regionMap.objectName"
-  });
-  const rules =
-    regionMap.match === undefined
-      ? []
-      : Array.isArray(regionMap.match)
-        ? regionMap.match
-        : [regionMap.match];
-  rules.forEach((rule: unknown, i) => {
-    if (typeof rule !== "string" || (rule !== "id" && !/^property:.+/.test(rule))) {
-      fail(
-        where,
-        Array.isArray(regionMap.match)
-          ? `options.regionMap.match[${i}]`
-          : "options.regionMap.match",
-        '"id" or "property:<key>"',
-        rule
-      );
-    }
-  });
-  if (regionMap.projection !== undefined && !PROJECTIONS.includes(regionMap.projection as string)) {
-    fail(
-      where,
-      "options.regionMap.projection",
-      `one of ${PROJECTIONS.map(p => JSON.stringify(p)).join(", ")}`,
-      regionMap.projection
-    );
-  }
-  checkOptionalCssColor(where, "options.regionMap.strokeColor", regionMap.strokeColor);
 }
 
 /**

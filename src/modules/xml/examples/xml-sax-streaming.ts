@@ -3,7 +3,7 @@
  *
  * Complements `xml-complete.ts` (which uses `new Xml.SaxParser()` directly)
  * by covering the functional / streaming SAX surface it skips:
- * - Xml.parseSax: async generator yielding batches of SAX events per chunk
+ * - Xml.parseSaxStream: async generator yielding batches of SAX events per chunk
  * - Xml.feedSax: low-overhead adapter feeding an async iterable into a
  *   pre-configured SaxParser (no per-event object allocation)
  * - Xml.validateCommentText: validate text is legal inside an XML comment
@@ -31,17 +31,17 @@ async function* chunkSource(): AsyncGenerator<string> {
 }
 
 // =============================================================================
-// 1. Xml.parseSax — async generator of SAX event batches
+// 1. Xml.parseSaxStream — async generator of SAX event batches
 // =============================================================================
 
-console.log("=== 1. Xml.parseSax (async generator) ===");
+console.log("=== 1. Xml.parseSaxStream (async generator) ===");
 
-// parseSax yields an array of events (a batch) per input chunk written.
+// Xml.parseSaxStream yields an array of events (a batch) per input chunk written.
 const openTags: string[] = [];
 const texts: string[] = [];
 let totalEvents = 0;
 
-for await (const batch of Xml.parseSax(chunkSource())) {
+for await (const batch of Xml.parseSaxStream(chunkSource())) {
   totalEvents += batch.length;
   for (const event of batch) {
     if (event.eventType === "opentag") {
@@ -59,11 +59,11 @@ console.log("Total events:", totalEvents);
 console.log("Open tags:", openTags);
 console.log("Text values:", texts);
 
-// parseSax also accepts a plain (sync) iterable and parser options.
-console.log("\n--- parseSax with sync iterable + options ---");
+// Xml.parseSaxStream also accepts a plain (sync) iterable and parser options.
+console.log("\n--- Xml.parseSaxStream with sync iterable + options ---");
 const fragmentChunks = ["<row><c>A</c>", "<c>B</c></row>"];
 const fragmentTags: string[] = [];
-for await (const batch of Xml.parseSax(fragmentChunks, { fragment: true })) {
+for await (const batch of Xml.parseSaxStream(fragmentChunks, { fragment: true })) {
   for (const event of batch) {
     if (event.eventType === "opentag") {
       fragmentTags.push(event.value.name);
@@ -72,15 +72,15 @@ for await (const batch of Xml.parseSax(fragmentChunks, { fragment: true })) {
 }
 console.log("Fragment open tags:", fragmentTags);
 
-// parseSax propagates parse errors by throwing from the generator.
-console.log("\n--- parseSax error propagation ---");
+// Xml.parseSaxStream propagates parse errors by throwing from the generator.
+console.log("\n--- Xml.parseSaxStream error propagation ---");
 try {
-  for await (const _batch of Xml.parseSax(["<root><unclosed>"])) {
+  for await (const _batch of Xml.parseSaxStream(["<root><unclosed>"])) {
     // consume
   }
   console.log("No error thrown");
 } catch (err) {
-  console.log("parseSax threw on malformed input:", (err as Error).message);
+  console.log("Xml.parseSaxStream threw on malformed input:", (err as Error).message);
 }
 
 // =============================================================================

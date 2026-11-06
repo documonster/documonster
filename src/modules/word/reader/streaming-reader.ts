@@ -43,13 +43,15 @@
  *   buffer the large one.)
  */
 
-import { zip } from "@archive/create-archive";
-import { unzip } from "@archive/read-archive";
+import { createZip } from "@archive/create-archive";
+import { unzipZip } from "@archive/read-archive";
+import type { SchemaMatches } from "@utils/schema";
 import { RelType } from "@word/constants";
 import { isFlatOpc, parseFlatOpc } from "@word/convert/flat-opc";
-import { checkBytes, checkLimit, invalidArgument } from "@word/core/argument-checks";
+import { checkBytes } from "@word/core/argument-checks";
 import { utf8Decoder } from "@word/core/internal-utils";
 import { getPartRelsPath } from "@word/core/opc-paths";
+import { checkSchema, w } from "@word/core/option-schema";
 import { withRangeMarkersBefore } from "@word/core/range-markers";
 import {
   DocxError,
@@ -65,6 +67,7 @@ import {
   withoutHeaderReferences
 } from "@word/reader/docx-reader";
 import { parseNumberingXml } from "@word/reader/numbering-parser";
+import { readOptionsShape } from "@word/reader/package-limits";
 import { parseSectionProperties } from "@word/reader/paragraph-section-parsers";
 import { attrVal, resolvePartPath, resolveRelTarget, stripWPrefix } from "@word/reader/parse-utils";
 import { parseContentPartXml, unwrapCustomXml } from "@word/reader/part-xml";
@@ -95,8 +98,8 @@ import type { XmlElement, XmlNode, XmlSaxTag } from "@xml/types";
 
 /**
  * Options for {@link DocumentReader}: those of
- * `Io.read` — an encrypted package is decrypted with `password` before its body is
- * streamed, as `Io.read` decrypts it — plus the streaming limits below.
+ * `Document.read` — an encrypted package is decrypted with `password` before its body is
+ * streamed, as `Document.read` decrypts it — plus the streaming limits below.
  */
 export interface StreamingReadOptions extends ReadDocxOptions {
   /**
@@ -117,6 +120,17 @@ export interface StreamingReadOptions extends ReadDocxOptions {
    */
   readonly onProgress?: (consumedBytes: number) => void;
 }
+
+const streamingReadOptionsSchema = w.record({
+  ...readOptionsShape,
+  maxElementBytes: w.limit().optional(),
+  onProgress: w.function<(consumedBytes: number) => void>().optional()
+});
+const _streamingReadOptionsMatch: SchemaMatches<
+  typeof streamingReadOptionsSchema,
+  StreamingReadOptions
+> = true;
+void _streamingReadOptionsMatch;
 
 /**
  * Document-level metadata loaded before body streaming begins. Exposed as
@@ -174,11 +188,8 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
   ) {
     const where = "new Stream.DocumentReader";
     const bytes = checkBytes(source, "source", where);
+    checkSchema(streamingReadOptionsSchema, options, where);
     checkReadOptions(options, where);
-    checkLimit(options.maxElementBytes, "options.maxElementBytes", where, { optional: true });
-    if (options.onProgress !== undefined && typeof options.onProgress !== "function") {
-      invalidArgument(where, "options.onProgress", "a function", options.onProgress);
-    }
     this._source = bytes;
     this._options = options;
     this._policy = resolveSecurityPolicy(options.securityPolicy);
@@ -248,7 +259,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
   }
 
   /**
-   * The body, failing as `Io.read` does: a damaged package — a ZIP
+   * The body, failing as `Document.read` does: a damaged package — a ZIP
    * that ends early, a corrupt entry, malformed XML — is a `DocxParseError`
    * with the archive's or parser's error as its `cause`, never a bare
    * `RangeError` from deep in the reader.
@@ -266,7 +277,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
   }
 
   private async *_read(): AsyncGenerator<BodyContent> {
-    // The input as given is held to the package-size limit first, as `Io.read`
+    // The input as given is held to the package-size limit first, as `Document.read`
     // holds it.
     if (this._source.length > this._policy.maxPackageSize) {
       throw new DocxLimitExceededError(
@@ -276,7 +287,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
         "compressed input larger than maxPackageSize"
       );
     }
-    // An encrypted package is decrypted first, as `Io.read` does: the source
+    // An encrypted package is decrypted first, as `Document.read` does: the source
     // is already whole in memory, so this costs one copy, and the decrypted
     // package then streams like any other.
     this._source = await decryptIfEncrypted(
@@ -285,9 +296,9 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
       this._policy.maxPackageSize
     );
     // A Flat OPC document is the same package as one XML file, read as
-    // `Io.read` reads it: as the ZIP of its parts.
+    // `Document.read` reads it: as the ZIP of its parts.
     if (isFlatOpc(this._source)) {
-      const archive = zip({ level: 0 });
+      const archive = createZip({ level: 0 });
       for (const [path, data] of parseFlatOpc(this._source)) {
         archive.add(path, data);
       }
@@ -310,7 +321,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     // section one again. Where that is depends on every section, so the
     // section breaks are read first — only when some header holds a watermark.
     if (watermarkHeaders.size > 0) {
-      for await (const entry of unzip(this._source).entries()) {
+      for await (const entry of unzipZip(this._source).entries()) {
         if (normalizePath(entry.path) === documentPartPath) {
           const sections = await scanSections(entry.stream());
           this._droppedHeaders = watermarkHeadersToDrop(
@@ -324,7 +335,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
       }
     }
 
-    const reader = unzip(this._source);
+    const reader = unzipZip(this._source);
     for await (const entry of reader.entries()) {
       const path = normalizePath(entry.path);
       if (path !== documentPartPath) {
@@ -359,7 +370,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     // First pass: grab the package rels to discover the document part path,
     // plus everything small. We do not know the document rels path until we
     // resolve the document part, so we buffer all `*.rels` and small XML parts.
-    const reader = unzip(this._source);
+    const reader = unzipZip(this._source);
     let totalUncompressed = 0;
     let entryCount = 0;
     for await (const entry of reader.entries()) {

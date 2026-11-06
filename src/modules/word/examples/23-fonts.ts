@@ -25,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Font, Io } from "../index";
+import { Document, Build, Font } from "../index";
 import type { FontDef } from "../index";
 
 const outDir = path.resolve(
@@ -89,7 +89,7 @@ function fakeTtf(size = 200): Uint8Array {
 
   // Merge into the model
   const withFonts = Font.addEmbedded(doc, [single, ...family]);
-  const buf = await Io.toBuffer(withFonts);
+  const buf = await Document.toBuffer(withFonts);
   fs.writeFileSync(path.join(outDir, "23-fonts-embedded.docx"), buf);
   console.log(`  → 23-fonts-embedded.docx (${buf.length} bytes)`);
 }
@@ -116,7 +116,7 @@ function fakeTtf(size = 200): Uint8Array {
   });
 
   const withFonts = Font.addEmbedded(doc, [single]);
-  const buf = await Io.toBuffer(withFonts);
+  const buf = await Document.toBuffer(withFonts);
   fs.writeFileSync(path.join(outDir, "23-fonts-subset.docx"), buf);
   console.log(`  → 23-fonts-subset.docx (${buf.length} bytes)`);
 }
@@ -144,7 +144,7 @@ function fakeTtf(size = 200): Uint8Array {
     Build.paragraph([Build.text("Sample monospace text.", { font: "CustomMono" })])
   );
 
-  const buf = await Io.toBuffer(doc);
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "23-fonts-reference-only.docx"), buf);
   console.log(`  → 23-fonts-reference-only.docx (${buf.length} bytes)`);
 }

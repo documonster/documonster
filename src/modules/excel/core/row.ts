@@ -2,7 +2,7 @@ import type { CellData, CellModel } from "@excel/core/cell";
 import {
   cellCol,
   cellGetModel,
-  cellGetValue,
+  cellReadValue,
   cellType,
   setFacet,
   setFacetShared
@@ -123,7 +123,7 @@ export function rowValues(r: RowData): CellValue[] {
   const values: CellValue[] = [];
   r.cells.forEach(cell => {
     if (cell && cellType(cell) !== Enums.ValueType.Null) {
-      values[cellCol(cell)] = cellGetValue(cell);
+      values[cellCol(cell)] = cellReadValue(cell);
     }
   });
   return values;
@@ -133,7 +133,7 @@ export function rowGetValues(r: RowData): CellValue[] {
   const values: CellValue[] = [];
   r.cells.forEach(cell => {
     if (cell && cellType(cell) !== Enums.ValueType.Null) {
-      values[cellCol(cell) - 1] = cellGetValue(cell);
+      values[cellCol(cell) - 1] = cellReadValue(cell);
     }
   });
   return values;

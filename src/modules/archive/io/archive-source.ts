@@ -1,8 +1,9 @@
+import { OPTIONS, checkArchiveArgument } from "@archive/core/arguments";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { ArchiveArgumentError, createAbortError, toError } from "@archive/core/errors";
 import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
 import { stringToUint8Array as encodeUtf8, concatUint8Arrays } from "@utils/binary";
-import { describeValue } from "@utils/describe-value";
+import { s } from "@utils/schema";
 
 /**
  * Anything an archive can be read from, or an entry's content taken from. A string is content,
@@ -97,49 +98,31 @@ export function isInMemoryArchiveSource(
 
 /** Refuse, where it is given, a value that is not an {@link ArchiveSource}. */
 export function checkSourceArgument(where: string, source: unknown): void {
-  if (!isArchiveSource(source)) {
-    throw new ArchiveArgumentError(
-      "source",
-      `${where}: source must be a Uint8Array, ArrayBuffer, string, Blob, ReadableStream or async iterable, got ${
-        source === null ? "null" : typeof source
-      }`
-    );
-  }
+  checkArchiveArgument(
+    s.custom(
+      isArchiveSource,
+      "a Uint8Array, ArrayBuffer, string, Blob, ReadableStream or async iterable"
+    ),
+    source,
+    where,
+    "source"
+  );
 }
+
+const sourceOptionsSchema = s.object(
+  {
+    signal: s.abortSignal().optional(),
+    onChunk: s.function<(chunk: Uint8Array) => void>().optional()
+  },
+  OPTIONS
+);
 
 /**
  * Refuse, where it is given, options that are not `{ signal?, onChunk? }`: read later, inside the
  * iteration, a `null` failed to destructure and a non-signal failed on `addEventListener`.
  */
 export function checkSourceOptions(where: string, options: unknown): void {
-  if (options === undefined) {
-    return;
-  }
-  if (typeof options !== "object" || options === null) {
-    throw new ArchiveArgumentError(
-      "options",
-      `${where}: options must be an options object, got ${describeValue(options)}`
-    );
-  }
-  const { signal, onChunk } = options as { signal?: unknown; onChunk?: unknown };
-  if (
-    signal !== undefined &&
-    (typeof signal !== "object" ||
-      signal === null ||
-      typeof (signal as AbortSignal).aborted !== "boolean" ||
-      typeof (signal as AbortSignal).addEventListener !== "function")
-  ) {
-    throw new ArchiveArgumentError(
-      "options.signal",
-      `${where}: options.signal must be an AbortSignal, got ${describeValue(signal)}`
-    );
-  }
-  if (onChunk !== undefined && typeof onChunk !== "function") {
-    throw new ArchiveArgumentError(
-      "options.onChunk",
-      `${where}: options.onChunk must be a function, got ${describeValue(onChunk)}`
-    );
-  }
+  checkArchiveArgument(sourceOptionsSchema.optional(), options, where, "options");
 }
 
 /** `true` for every value {@link toAsyncIterable} can read: the {@link ArchiveSource} union. */

@@ -281,7 +281,7 @@ describe("parseCsvRows Errors", () => {
     const skipped: number[] = [];
     const rows: Record<string, string>[] = [];
 
-    for await (const row of Csv.parseRows(csv, {
+    for await (const row of Csv.parseStream(csv, {
       headers: true,
       skipRecordsWithError: true,
       onSkip: (error, _record) => {
@@ -300,7 +300,7 @@ describe("parseCsvRows Errors", () => {
     let errorCount = 0;
     const rows: string[][] = [];
 
-    for await (const row of Csv.parseRows(csv, {
+    for await (const row of Csv.parseStream(csv, {
       skipRecordsWithError: true,
       onSkip: () => {
         errorCount++;

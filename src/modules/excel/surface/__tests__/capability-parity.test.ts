@@ -77,7 +77,7 @@ describe("Cell.getView — the position form of find + view", () => {
     expect(view.effectiveType).toBe(handle.effectiveType);
     expect(view.font?.bold).toBe(true);
     expect(view.date1904).toBe(false);
-    expect(Cell.getView(ws, 2, 2)?.value).toBe(1.5);
+    expect(Cell.getView(ws, { row: 2, col: 2 })?.value).toBe(1.5);
 
     expect(Cell.getView(ws, "Z9")).toBeUndefined();
     expect(Cell.has(ws, "Z9")).toBe(false);
@@ -217,7 +217,7 @@ describe("Column — every ColumnView field by position", () => {
 describe("Watermark.get", () => {
   it("answers null without a watermark and the settings with one", () => {
     const { wb, ws } = sheet();
-    expect(Watermark.get(ws)).toBeNull();
+    expect(Watermark.get(ws)).toBeUndefined();
     const imageId = Image.add(wb, { base64: PNG, extension: "png" });
     Watermark.set(ws, { imageId });
     expect(Watermark.get(ws)?.imageId).toBe(String(imageId));
@@ -286,7 +286,7 @@ describe("Image.remove", () => {
     Watermark.set(ws, { imageId });
     expect(Image.list(ws)).toHaveLength(0);
     expect(Image.remove(ws, 0)).toBe(false);
-    expect(Watermark.get(ws)).not.toBeNull();
+    expect(Watermark.get(ws)).toBeDefined();
   });
 });
 

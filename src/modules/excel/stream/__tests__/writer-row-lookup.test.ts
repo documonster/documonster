@@ -7,7 +7,7 @@
  * saw it.
  */
 
-import { ExcelRowOutOfBoundsError } from "@excel/errors";
+import { ExcelStreamStateError } from "@excel/errors";
 import { Cell, Row, Stream, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
@@ -36,7 +36,8 @@ describe("by-number lookups on a streaming writer", () => {
 
   it("refuses a row that has already been written out", () => {
     const { ws } = writerPast(2000);
-    expect(() => Row.setHeight(ws as never, 5, 10)).toThrow(ExcelRowOutOfBoundsError);
+    // The state error `Stream.setRowHeight` raises through the row's handle.
+    expect(() => Row.setHeight(ws, 5, 10)).toThrow(ExcelStreamStateError);
   });
 
   it("writes what was set through the namespace into the file", async () => {

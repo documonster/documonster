@@ -16,7 +16,7 @@
 
 import path from "node:path";
 
-import { Io, Template } from "documonster/word";
+import { Document, Template } from "documonster/word";
 import type { BodyContent, DocxTemplateImage } from "documonster/word";
 import { z } from "zod";
 
@@ -264,7 +264,7 @@ export const templateFillTool = defineTool({
     const dropped = pruneUnreferencedMedia(filled, media);
 
     await writeWithPolicy(target, args.overwrite === true, temporary =>
-      Io.writeFile(filled, temporary)
+      Document.writeFile(filled, temporary)
     );
 
     // Verified against the file on disk, not against the in-memory document the
@@ -730,7 +730,7 @@ async function verifyWrittenImages(
   if (media.size === 0) {
     return new Set();
   }
-  const reopened = await Io.readFile(target).catch((cause: unknown) => {
+  const reopened = await Document.readFile(target).catch((cause: unknown) => {
     throw new McpToolError(
       "internal",
       `the document was written but could not be re-opened for verification: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -836,7 +836,7 @@ function assignPath(target: Record<string, unknown>, dotted: string, value: unkn
 }
 
 async function readTemplate(resolved: string, displayPath: string) {
-  return await Io.readFile(resolved).catch((cause: unknown) => {
+  return await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${displayPath} as a Word document`,
       "Templates must be .docx. Run doc_inspect to check the real file type.",

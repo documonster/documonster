@@ -33,7 +33,7 @@ import type {
   LayoutBorder,
   LayoutRichTextRun,
   ResolvedPdfOptions,
-  PdfRect,
+  PdfLayoutRect,
   PdfTextWatermark,
   PdfImageWatermark,
   PdfWatermark,
@@ -1331,7 +1331,7 @@ function emitTextWithMatrix(
   options: TextMatrixOptions
 ): void {
   const [a, b, c, d, tx, ty] = options.matrix;
-  stream.deferred(
+  stream.addDeferred(
     () =>
       renderTextBlock(
         options.text,
@@ -1412,7 +1412,7 @@ export function emitTextBlock(
     );
     return resourceName;
   };
-  stream.deferred(
+  stream.addDeferred(
     () => renderTextBlockLayout({ ...options, type1ResourceName: resolveResource() }, fontManager),
     () => fontManager.trackText(options.text, resolveResource())
   );
@@ -1904,7 +1904,7 @@ export function alphaGsName(alpha: number, resourcePrefix = ""): string {
  */
 export function computeTextStartY(
   verticalAlign: "top" | "middle" | "bottom",
-  rect: PdfRect,
+  rect: PdfLayoutRect,
   textBlockHeight: number,
   ascent: number,
   padVTop = CELL_PADDING_V,

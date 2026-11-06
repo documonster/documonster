@@ -1,7 +1,7 @@
 /**
  * `Pdf.extract`'s limit option and inputs, held to the contracts the other modules' readers
  * follow: a bad limit is a `PdfArgumentError` naming `options.maxDecodedBytes`; a limit hit says
- * which limit fired and its value (`limit`, `allowed`, as `ArchiveLimitError` does); and the async
+ * which limit fired and its value (`limit`, `allowed`, as `ArchiveLimitExceededError` does); and the async
  * reader takes a `Blob` — a browser `File` — as the archive and CSV readers do.
  */
 import { PdfArgumentError, PdfLimitExceededError, PdfStructureError } from "@pdf/errors";

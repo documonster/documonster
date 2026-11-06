@@ -149,7 +149,7 @@ src/modules/xml/
 ├── encode.ts             # Xml.encode、Xml.decode、Xml.validateName、Xml.encodeCData 等
 ├── writer.ts             # Xml.Writer（缓冲式，支持回滚）
 ├── stream-writer.ts      # Xml.StreamWriter（流式，写入 XmlWritableTarget）
-├── sax.ts                # Xml.SaxParser（事件驱动）+ Xml.parseSax（异步生成器）
+├── sax.ts                # Xml.SaxParser（事件驱动）+ Xml.parseSaxStream（异步生成器）
 ├── dom.ts                # Xml.parse + DOM 查询辅助函数 + Xml.toPlainObject
 ├── to-object.ts          # Xml.parseToObject（SAX 直接转换，单次遍历）
 ├── to-object-shared.ts   # 共享转换逻辑（内部使用）
@@ -189,7 +189,7 @@ Xml.SaxParser  — 事件驱动的流式解析器
 │                      比 Xml.parse + Xml.toPlainObject 快约 1.6 倍
 │                      适用于：XML 字符串 → 普通对象 → JSON.stringify
 │
-└── Xml.parseSax     — 包装 Xml.SaxParser 的异步生成器，用于流式迭代
+└── Xml.parseSaxStream     — 包装 Xml.SaxParser 的异步生成器，用于流式迭代
                        适用于：异步管道（如从 zip 流中读取）
 ```
 
@@ -258,10 +258,10 @@ Xml.SaxParser  — 事件驱动的流式解析器
 | `invalidCharHandling` | `"error"` | 如何处理无效 XML 字符（见下文）  |
 | `fileName`            | —         | 用于错误信息的文件名             |
 
-### Xml.parseSax（异步生成器）
+### Xml.parseSaxStream（异步生成器）
 
 ```text
-Xml.parseSax(
+Xml.parseSaxStream(
   iterable: AsyncIterable<string | Uint8Array | ArrayBuffer>,
   options?: XmlSaxOptions
 ): AsyncGenerator<XmlSaxEventAny[]>

@@ -30,7 +30,7 @@ import type { FontMetrics } from "@utils/font-data";
 import { getFontMetrics } from "@utils/font-data";
 import { graphemeClusters } from "@utils/grapheme";
 import { createLineMeasurer, isAscii, measureTextWidthPx, resolveFont } from "@utils/text-measure";
-import { charWidthToPixel, getPixelPadding, pixelToCharWidth, pixelToPoints } from "@utils/units";
+import { pixelToCharWidth, pixelToPoints } from "@utils/units";
 
 // =============================================================================
 // Constants
@@ -413,19 +413,6 @@ export function calculateRichTextAutoFitHeight(
   const fullText = richText.map(r => r.text).join("");
 
   return calculateAutoFitHeight(fullText, maxFontForHeight, alignment, columnWidthPx);
-}
-
-/**
- * Get the content area width of a column in pixels (excluding padding).
- *
- * @param charWidth - Column width in Excel character units
- * @param mdw - Max digit width
- * @returns Content width in pixels
- */
-export function getColumnContentWidthPx(charWidth: number, mdw: number): number {
-  const totalPx = charWidthToPixel(charWidth, mdw);
-  const pp = getPixelPadding(mdw);
-  return Math.max(0, totalPx - pp);
 }
 
 // =============================================================================

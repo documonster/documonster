@@ -3,97 +3,153 @@
  * naming the call and the option, raised before anything is parsed or written: `maxDepth:
  * NaN` used to switch the nesting limit off without a word, and a `null` input surfaced as a
  * `TypeError` from deep inside the parser.
+ *
+ * The options are declared as schemas (`@utils/schema`), each pinned to its interface.
  */
 
-import { describeValue as describe } from "@utils/describe-value";
+import { check, s } from "@utils/schema";
+import type { SchemaCheckOptions, SchemaMatches } from "@utils/schema";
 import { XmlArgumentError } from "@xml/errors";
+import type {
+  XmlParseOptions,
+  XmlParseToObjectOptions,
+  XmlSaxOptions,
+  XmlToPlainObjectOptions
+} from "@xml/types";
 
-/** The argument path an option name stands for: `maxDepth` → `options.maxDepth`. */
-function fieldOf(option: string): string {
-  return option === "options" || option === "input" || option === "element"
-    ? option
-    : `options.${option}`;
+function argumentError(field: string, message: string): XmlArgumentError {
+  return new XmlArgumentError(field, message);
 }
 
-function fail(where: string, option: string, expected: string, value: unknown): never {
-  throw new XmlArgumentError(
-    fieldOf(option),
-    `${where}: ${option} must be ${expected}, got ${describe(value)}`
-  );
+/** A parameter of an `Xml` call, named in the message by its path (`options.maxDepth`). */
+export function xmlArgument(where: string, field: string): SchemaCheckOptions {
+  return { where, field, error: argumentError };
 }
 
-/** An options argument: absent, or a plain object. */
-export function checkOptionsObject(where: string, options: unknown): void {
-  if (
-    options !== undefined &&
-    (typeof options !== "object" || options === null || Array.isArray(options))
-  ) {
-    fail(where, "options", "an options object", options);
-  }
+const flag = () => s.boolean().optional();
+const limit = () =>
+  s
+    .number({ integer: true, min: 0, expected: "an integer >= 0 (0 switches the limit off)" })
+    .optional();
+const invalidCharHandling = () =>
+  s.oneOf(["error", "skip", "replace"], { expected: '"error", "skip" or "replace"' }).optional();
+const OPTIONS = { expected: "an options object" };
+
+const parseOptionsSchema = s.object(
+  {
+    comments: flag(),
+    processingInstructions: flag(),
+    cdataAsNodes: flag(),
+    fragment: flag(),
+    xmlns: flag(),
+    maxDepth: limit(),
+    maxEntityExpansions: limit(),
+    invalidCharHandling: invalidCharHandling()
+  },
+  OPTIONS
+);
+const _parseOptionsMatch: SchemaMatches<typeof parseOptionsSchema, XmlParseOptions> = true;
+void _parseOptionsMatch;
+
+const saxOptionsSchema = s.object(
+  {
+    position: flag(),
+    fileName: s.string().optional(),
+    fragment: flag(),
+    xmlns: flag(),
+    maxDepth: limit(),
+    maxEntityExpansions: limit(),
+    invalidCharHandling: invalidCharHandling()
+  },
+  OPTIONS
+);
+const _saxOptionsMatch: SchemaMatches<typeof saxOptionsSchema, XmlSaxOptions> = true;
+void _saxOptionsMatch;
+
+const plainObjectShape = {
+  ignoreAttributes: flag(),
+  attributePrefix: s.string().optional(),
+  textKey: s.string().optional(),
+  alwaysArray: flag(),
+  isArray: s.function<(name: string) => boolean>().optional(),
+  preserveCData: flag(),
+  ignoreWhitespaceText: flag()
+};
+const plainObjectOptionsSchema = s.object(plainObjectShape, OPTIONS);
+const _plainObjectOptionsMatch: SchemaMatches<
+  typeof plainObjectOptionsSchema,
+  XmlToPlainObjectOptions
+> = true;
+void _plainObjectOptionsMatch;
+
+const parseToObjectOptionsSchema = s.object(
+  {
+    ...plainObjectShape,
+    fragment: flag(),
+    maxDepth: limit(),
+    maxEntityExpansions: limit(),
+    invalidCharHandling: invalidCharHandling()
+  },
+  OPTIONS
+);
+const _parseToObjectOptionsMatch: SchemaMatches<
+  typeof parseToObjectOptionsSchema,
+  XmlParseToObjectOptions
+> = true;
+void _parseToObjectOptionsMatch;
+const optionalPlainObjectOptionsSchema = plainObjectOptionsSchema.optional();
+const optionalParseToObjectOptionsSchema = parseToObjectOptionsSchema.optional();
+const optionalParseOptionsSchema = parseOptionsSchema.optional();
+const optionalSaxOptionsSchema = saxOptionsSchema.optional();
+
+/** The options of `Xml.parse`. */
+export function checkParseOptions(where: string, options: unknown): void {
+  check(optionalParseOptionsSchema, options, xmlArgument(where, "options"));
+}
+
+/** The options of `new Xml.SaxParser`. */
+export function checkSaxOptions(where: string, options: unknown): void {
+  check(optionalSaxOptionsSchema, options, xmlArgument(where, "options"));
+}
+
+/** The options of `Xml.toPlainObject`. */
+export function checkPlainObjectOptions(where: string, options: unknown): void {
+  check(optionalPlainObjectOptionsSchema, options, xmlArgument(where, "options"));
+}
+
+/** The options of `Xml.parseToObject`. */
+export function checkParseToObjectOptions(where: string, options: unknown): void {
+  check(optionalParseToObjectOptionsSchema, options, xmlArgument(where, "options"));
+}
+
+const stringSchema = s.string();
+const functionSchema = s.function();
+
+/** A string parameter: the text a parser reads, a name, a path. */
+export function checkStringArgument(where: string, field: string, value: unknown): void {
+  check(stringSchema, value, xmlArgument(where, field));
 }
 
 /** The text a parser reads. */
 export function checkXmlInput(where: string, xml: unknown): void {
-  if (typeof xml !== "string") {
-    fail(where, "input", "a string", xml);
-  }
+  checkStringArgument(where, "input", xml);
 }
+
+const elementSchema = s.custom(
+  element =>
+    typeof element === "object" &&
+    element !== null &&
+    (element as { type?: unknown }).type === "element" &&
+    Array.isArray((element as { children?: unknown }).children),
+  "an XmlElement"
+);
 
 /** An element argument of a DOM helper. */
 export function checkElement(where: string, element: unknown): void {
-  if (
-    typeof element !== "object" ||
-    element === null ||
-    (element as { type?: unknown }).type !== "element" ||
-    !Array.isArray((element as { children?: unknown }).children)
-  ) {
-    fail(where, "element", "an XmlElement", element);
-  }
+  check(elementSchema, element, xmlArgument(where, "element"));
 }
 
-export function checkBooleanOptions(
-  where: string,
-  options: Record<string, unknown> | undefined,
-  names: readonly string[]
-): void {
-  if (!options) {
-    return;
-  }
-  for (const name of names) {
-    const value = options[name];
-    if (value !== undefined && typeof value !== "boolean") {
-      fail(where, name, "true or false", value);
-    }
-  }
-}
-
-/**
- * The parser limits and character handling every parse entry shares. A limit is an integer
- * `>= 0` (`0` switches it off, as documented); anything else would have switched it off too.
- */
-export function checkParserLimits(
-  where: string,
-  options: Record<string, unknown> | undefined
-): void {
-  if (!options) {
-    return;
-  }
-  for (const name of ["maxDepth", "maxEntityExpansions"]) {
-    const value = options[name];
-    if (
-      value !== undefined &&
-      (typeof value !== "number" || !Number.isInteger(value) || value < 0)
-    ) {
-      fail(where, name, "an integer >= 0 (0 switches the limit off)", value);
-    }
-  }
-  const handling = options.invalidCharHandling;
-  if (
-    handling !== undefined &&
-    handling !== "error" &&
-    handling !== "skip" &&
-    handling !== "replace"
-  ) {
-    fail(where, "invalidCharHandling", '"error", "skip" or "replace"', handling);
-  }
+/** A function argument. */
+export function checkFunctionArgument(where: string, field: string, value: unknown): void {
+  check(functionSchema, value, xmlArgument(where, field));
 }

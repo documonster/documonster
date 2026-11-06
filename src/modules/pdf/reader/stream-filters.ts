@@ -16,7 +16,7 @@
 
 import { unzlibSync } from "@archive/compression/compress";
 import { inflateRaw } from "@archive/compression/deflate-fallback";
-import { ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveLimitExceededError } from "@archive/core/errors";
 import { undoPngFilters } from "@pdf/core/png-filters";
 import { PdfLimitExceededError } from "@pdf/errors";
 import type { PdfDictValue } from "@pdf/reader/pdf-parser";
@@ -215,14 +215,14 @@ function decodeFlateDecode(
     // Try zlib (RFC 1950) first — has 2-byte header
     decompressed = unzlibSync(data, bounded);
   } catch (zlibErr) {
-    if (zlibErr instanceof ArchiveLimitError) {
+    if (zlibErr instanceof ArchiveLimitExceededError) {
       throw decodedTooLarge("FlateDecode", maxBytes);
     }
     try {
       // Fall back to raw deflate
       decompressed = inflateRaw(data, maxBytes);
     } catch (rawErr) {
-      if (rawErr instanceof ArchiveLimitError) {
+      if (rawErr instanceof ArchiveLimitExceededError) {
         throw decodedTooLarge("FlateDecode", maxBytes);
       }
       // Last resort: return as-is

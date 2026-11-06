@@ -160,9 +160,9 @@ export const createZlibStream = createZlibStreamImpl;
 export const createUnzlibStream = createUnzlibStreamImpl;
 /** @deprecated Use {@link Compression.hasDeflateRaw}. Removed in 1.0. */
 export const hasDeflateRaw = hasDeflateRawImpl;
-/** @deprecated Use {@link Compression.Workers.WorkerPool}. Removed in 1.0. */
+/** @deprecated Use {@link Compression.Workers.Pool}. Removed in 1.0. */
 export const WorkerPool = WorkerPoolImpl;
-/** @deprecated Use {@link Compression.Workers.WorkerPool}. Removed in 1.0. */
+/** @deprecated Use {@link Compression.Workers.Pool}. Removed in 1.0. */
 export type WorkerPool = WorkerPoolImpl;
 /** @deprecated Use {@link Compression.Workers.getDefaultPool}. Removed in 1.0. */
 export const getDefaultWorkerPool = getDefaultWorkerPoolImpl;

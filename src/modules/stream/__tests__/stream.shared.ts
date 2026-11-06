@@ -2443,7 +2443,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
           // Destroy while pull is pending
           pullStream.destroy();
 
-          await expect(pullPromise).rejects.toThrow("Stream destroyed");
+          await expect(pullPromise).rejects.toThrow("Cannot pull: the stream is destroyed");
         });
 
         it("should reject pending pullUntil() when destroy() is called", async () => {
@@ -2455,7 +2455,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
 
           pullStream.destroy();
 
-          await expect(pullPromise).rejects.toThrow("Stream destroyed");
+          await expect(pullPromise).rejects.toThrow("Cannot pull: the stream is destroyed");
         });
       });
 

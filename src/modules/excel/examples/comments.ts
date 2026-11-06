@@ -15,7 +15,7 @@ Workbook.readFile(inputFile)
     Workbook.listWorksheets(wb).forEach(sheet => {
       console.info(Cell.getModel(sheet, "A1"));
       Cell.setValue(sheet, "B2", "Zeb");
-      Cell.setComment(sheet, "B2", {
+      Cell.setNote(sheet, "B2", {
         texts: [
           {
             font: {

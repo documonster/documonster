@@ -33,7 +33,7 @@ import {
   cellAlignment,
   cellCol,
   cellComment,
-  cellGetValue,
+  cellReadValue,
   cellIsMerged,
   cellMaster,
   cellMerge,
@@ -2713,7 +2713,7 @@ export function toJSON(
     if (!cell) {
       return null;
     }
-    return cellGetValue(cell);
+    return cellReadValue(cell);
   };
   const readCell = (row: number, col: number): CellValue => {
     if (o.raw !== false) {
@@ -2941,7 +2941,7 @@ export function toAOA(ws: WorksheetData): CellValue[][] {
     const rowData: CellValue[] = [];
     for (let j = 0; j < row.cells.length; j++) {
       const cell = row.cells[j];
-      rowData[j] = cell ? cellGetValue(cell) : null;
+      rowData[j] = cell ? cellReadValue(cell) : null;
     }
     result[i] = rowData;
   }

@@ -5,15 +5,20 @@
  * plus the public Patch and Template APIs that combine read/patch/write.
  */
 
-import { unzip } from "@archive/read-archive";
+import type { EncryptOptions } from "@archive/office-crypto/agile";
+import { unzipZip } from "@archive/read-archive";
 import { readFileBytes, writeFileBytes } from "@utils/fs";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import {
   checkBytes,
   checkHandle,
   checkPackageOptions,
-  invalidArgument
+  invalidArgument,
+  packageOptionsShape
 } from "@word/core/argument-checks";
 import { bytesToBase64 } from "@word/core/internal-utils";
+import { checkSchema, model, w } from "@word/core/option-schema";
 import { DocxFileError } from "@word/errors";
 import type { PatchOperation } from "@word/patcher";
 import { applyPatchesToDocument, checkPatches } from "@word/patcher";
@@ -39,13 +44,13 @@ export type { PatchContent, PatchOperation } from "@word/patcher";
  * Package a DocxDocument model to DOCX bytes.
  *
  * With `{ password }` the package is encrypted — Agile Encryption in a compound file, what Word writes for
- * "Encrypt with Password" — and `Io.read(bytes, { password })` reads it back; `encryption` tunes it (key size,
+ * "Encrypt with Password" — and `Document.read(bytes, { password })` reads it back; `encryption` tunes it (key size,
  * hash, spin count). Without one it is written unencrypted, whatever the document was read from. The encryption
  * code is loaded only for a write that asks for it.
  *
  * ```ts
- * const encrypted = await Io.toBuffer(doc, { password: "secret" });
- * const again = await Io.read(encrypted, { password: "secret" });
+ * const encrypted = await Document.toBuffer(doc, { password: "secret" });
+ * const again = await Document.read(encrypted, { password: "secret" });
  * ```
  *
  * @throws {DocxDuplicateIdError} (as a rejection) If two footnotes, endnotes,
@@ -53,17 +58,15 @@ export type { PatchContent, PatchOperation } from "@word/patcher";
  * `DocxDocument`.
  */
 export async function toBuffer(doc: DocxDocument, options?: DocxWriteOptions): Promise<Uint8Array> {
-  checkHandle(doc, "document", "doc", "Io.toBuffer");
-  checkWriteOptions(options, "Io.toBuffer");
-  checkWriteEncryption(options, "Io.toBuffer");
+  checkHandle(doc, "document", "doc", "Document.toBuffer");
+  checkWriteOptions(options, "Document.toBuffer");
   return encryptIfRequested(await packageDocx(doc, options), options);
 }
 
 /** Package a DocxDocument model to base64 string — encrypted with `{ password }`, as {@link toBuffer}. */
 export async function toBase64(doc: DocxDocument, options?: DocxWriteOptions): Promise<string> {
-  checkHandle(doc, "document", "doc", "Io.toBase64");
-  checkWriteOptions(options, "Io.toBase64");
-  checkWriteEncryption(options, "Io.toBase64");
+  checkHandle(doc, "document", "doc", "Document.toBase64");
+  checkWriteOptions(options, "Document.toBase64");
   const bytes = await encryptIfRequested(await packageDocx(doc, options), options);
   return bytesToBase64(bytes);
 }
@@ -74,13 +77,13 @@ export async function toBase64(doc: DocxDocument, options?: DocxWriteOptions): P
 //
 // Convenience wrappers that read/write a DOCX directly from/to the filesystem,
 // mirroring the Excel module's `Workbook.readFile` / `Workbook.writeFile`. The
-// browser build of the `Io` namespace (`surface/io.browser.ts`) does not publish
+// browser build of the `Document` namespace (`surface/document.browser.ts`) does not publish
 // them, as Excel's and Archive's browser entries publish no file-path API.
 
 /**
  * Read a DOCX file from a filesystem path and parse it into a `DocxDocument`.
  *
- * Node-only. In the browser, read the bytes yourself and use `Io.read`.
+ * Node-only. In the browser, read the bytes yourself and use `Document.read`.
  *
  * @param path - Filesystem path to the `.docx` file.
  * @param options - Read options (password, security policy).
@@ -89,8 +92,8 @@ export async function toBase64(doc: DocxDocument, options?: DocxWriteOptions): P
  *   (`ENOENT`, `EACCES`, …); the system's error is its `cause`.
  */
 export async function readFile(path: string, options?: ReadDocxOptions): Promise<DocxDocument> {
-  checkPath(path, "Io.readFile");
-  checkReadOptions(options, "Io.readFile");
+  checkPath(path, "Document.readFile");
+  checkReadOptions(options, "Document.readFile");
   let bytes: Uint8Array;
   try {
     bytes = await readFileBytes(path);
@@ -117,10 +120,9 @@ export async function writeFile(
   path: string,
   options?: DocxWriteOptions
 ): Promise<void> {
-  checkHandle(doc, "document", "doc", "Io.writeFile");
-  checkPath(path, "Io.writeFile");
-  checkWriteOptions(options, "Io.writeFile");
-  checkWriteEncryption(options, "Io.writeFile");
+  checkHandle(doc, "document", "doc", "Document.writeFile");
+  checkPath(path, "Document.writeFile");
+  checkWriteOptions(options, "Document.writeFile");
   const bytes = await encryptIfRequested(await packageDocx(doc, options), options);
   try {
     await writeFileBytes(path, bytes);
@@ -137,17 +139,58 @@ function fileSystemError(path: string, operation: "read" | "write", error: unkno
   return new DocxFileError(path, operation, detail, { cause: error });
 }
 
+const patchOptionsShape = {
+  ...packageOptionsShape,
+  securityPolicy: model<DocxSecurityPolicy>()
+};
+
+const writeOptionsSchema = w.record({
+  ...patchOptionsShape,
+  // MS-OFFCRYPTO §2.3.4.10 caps a password at 255 characters, and an empty one would be the
+  // absence of one.
+  password: s
+    .custom<string>(
+      v => typeof v === "string" && v.length > 0 && v.length <= 255,
+      "a string of 1 to 255 characters"
+    )
+    .optional(),
+  encryption: model<EncryptOptions>()
+});
+const _writeOptionsMatch: SchemaMatches<typeof writeOptionsSchema, DocxWriteOptions> = true;
+void _writeOptionsMatch;
+
+const patchOptionsSchema = w.record(patchOptionsShape);
+const _patchOptionsMatch: SchemaMatches<typeof patchOptionsSchema, PatchOptions> = true;
+void _patchOptionsMatch;
+
+const toFlatOpcOptionsSchema = w.record({
+  compressionLevel: packageOptionsShape.compressionLevel
+});
+const _toFlatOpcOptionsMatch: SchemaMatches<typeof toFlatOpcOptionsSchema, ToFlatOpcOptions> = true;
+void _toFlatOpcOptionsMatch;
+
+/** The security policy of a write's options; `null` has always read as the default policy. */
+function checkWritePolicy(options: { securityPolicy?: unknown } | undefined, where: string): void {
+  if (options?.securityPolicy != null) {
+    checkSecurityPolicy(options.securityPolicy, "options.securityPolicy", where);
+  }
+}
+
 /**
- * The write options of `Io.toBuffer` and its siblings, checked in the name of
+ * The write options of `Document.toBuffer` and its siblings, checked in the name of
  * `where` — the security policy included, so a bad one is reported as
  * `options.securityPolicy.…` of the call, not by the packager.
  */
 function checkWriteOptions(options: unknown, where: string): void {
-  checkPackageOptions(options, "options", where);
-  const policy = (options as { securityPolicy?: unknown } | undefined)?.securityPolicy;
-  if (policy != null) {
-    checkSecurityPolicy(policy, "options.securityPolicy", where);
-  }
+  checkSchema(writeOptionsSchema.optional(), options, where);
+  checkWritePolicy(options, where);
+  checkWriteEncryption(options, where);
+}
+
+/** The write side of a `Package` function's options (`PatchOptions`), checked in the name of `where`. */
+function checkPatchOptions(options: unknown, where: string): void {
+  checkSchema(patchOptionsSchema.optional(), options, where);
+  checkWritePolicy(options, where);
 }
 
 /** A file path as `Workbook.readFile` takes one: a non-empty string. */
@@ -163,20 +206,26 @@ function checkPath(path: unknown, where: string): void {
 
 /**
  * Options for `Package.patch` / `Package.patchTemplate`: how the result is
- * written, as `Io.toBuffer` takes them.
+ * written, as `Document.toBuffer` takes them.
  */
 export interface PatchOptions {
   /** Compression level (0-9). Default: 6. */
   readonly compressionLevel?: number;
-  /** Timestamp for every entry of the written package, as in `Io.toBuffer`. */
+  /** Timestamp for every entry of the written package, as in `Document.toBuffer`. */
   readonly modTime?: Date;
-  /** Security policy for writing (raw-XML policy, preserved parts), as in `Io.toBuffer`. */
+  /** Security policy for writing (raw-XML policy, preserved parts), as in `Document.toBuffer`. */
   readonly securityPolicy?: DocxSecurityPolicy;
 }
 
-/** A compiled template that can be reused for multiple patch operations. */
+/**
+ * A compiled template that can be reused for multiple patch operations. Treat it as opaque: pass
+ * it to `Package.patchTemplate`.
+ */
 export interface CompiledTemplate {
-  /** The parsed document model (internal use only). */
+  /**
+   * @deprecated The parsed document, held for `Package.patchTemplate`; not part of the contract. Read
+   * the template with `Document.read` instead. Leaves the public type in 1.0.
+   */
   readonly _doc: DocxDocument;
 }
 
@@ -187,7 +236,7 @@ export interface CompiledTemplate {
  * multiple times with different data, compile it once and reuse.
  *
  * @param buffer - The source DOCX template file.
- * @param options - How to read it, as `Io.read` takes them (`password`, `securityPolicy`).
+ * @param options - How to read it, as `Document.read` takes them (`password`, `securityPolicy`).
  * @returns A compiled template handle.
  */
 export async function compileTemplate(
@@ -207,7 +256,7 @@ export async function compileTemplate(
  *
  * @param template - A compiled template from `compileTemplate`.
  * @param patches - Array of patch operations to apply.
- * @param options - How the result is written, as `Io.toBuffer` takes them.
+ * @param options - How the result is written, as `Document.toBuffer` takes them.
  * @returns New DOCX file as a Uint8Array.
  */
 export async function patchTemplate(
@@ -225,7 +274,7 @@ export async function patchTemplate(
     );
   }
   checkPatches(patches, "Package.patchTemplate");
-  checkWriteOptions(options, "Package.patchTemplate");
+  checkPatchOptions(options, "Package.patchTemplate");
   // Deep clone the document to avoid mutating the cached template
   const patched = applyPatchesToDocument(structuredClone(template._doc), patches);
   return packageDocx(patched, writeOptions(options));
@@ -245,10 +294,10 @@ export async function patchTemplate(
  *
  * @param buffer - The source DOCX file.
  * @param patches - Array of patch operations to apply.
- * @param options - How to read the file (as `Io.read`: `password`, `securityPolicy`,
- *   `checkCrc32`) and write the result (as `Io.toBuffer`). `securityPolicy` applies to both.
+ * @param options - How to read the file (as `Document.read`: `password`, `securityPolicy`,
+ *   `checkCrc32`) and write the result (as `Document.toBuffer`). `securityPolicy` applies to both.
  *   `password` is a read option here: the result of an encrypted file is not encrypted — read it with
- *   `Io.read` and write it with `Io.toBuffer(doc, { password })`, or `WordCrypto.encrypt` the result.
+ *   `Document.read` and write it with `Document.toBuffer(doc, { password })`, or `WordCrypto.encrypt` the result.
  * @returns New DOCX file as a Uint8Array.
  */
 export async function patchDocument(
@@ -258,13 +307,13 @@ export async function patchDocument(
 ): Promise<Uint8Array> {
   const where = "Package.patch";
   checkPatches(patches, where);
-  checkWriteOptions(options, where);
+  checkPatchOptions(options, where);
   const doc = await readPackage(buffer, options, where);
   const patched = applyPatchesToDocument(doc, patches);
   return packageDocx(patched, writeOptions(options));
 }
 
-/** `Io.read` under the name of the `Package` function that reads. */
+/** `Document.read` under the name of the `Package` function that reads. */
 async function readPackage(
   buffer: unknown,
   options: ReadDocxOptions | undefined,
@@ -275,7 +324,7 @@ async function readPackage(
   return readDocx(bytes, options);
 }
 
-/** The write side of a `Package` function's options, as `Io.toBuffer` takes them. */
+/** The write side of a `Package` function's options, as `Document.toBuffer` takes them. */
 function writeOptions(options: PatchOptions | undefined): DocxWriteOptions {
   return {
     compressionLevel: options?.compressionLevel,
@@ -310,14 +359,14 @@ export async function fillTemplateFromBuffer(
 }
 
 /**
- * Read a DOCX template, fill it with data and package the result — `Io.read`,
- * `Template.fill` and `Io.toBuffer` in one call, honouring every `fill` option
+ * Read a DOCX template, fill it with data and package the result — `Document.read`,
+ * `Template.fill` and `Document.toBuffer` in one call, honouring every `fill` option
  * including `richPlaceholders`.
  *
  * @param buffer - The source DOCX template file.
  * @param data - Data to fill into the template placeholders: an object or a `Map`, as `Template.fill` takes it.
- * @param options - Template options, how to read the file (as `Io.read`: `password`,
- *   `securityPolicy`, `checkCrc32`) and how to write the result (as `Io.toBuffer`).
+ * @param options - Template options, how to read the file (as `Document.read`: `password`,
+ *   `securityPolicy`, `checkCrc32`) and how to write the result (as `Document.toBuffer`).
  *   `securityPolicy` applies to both. The result of an encrypted file is not
  *   encrypted: `WordCrypto.encrypt` it again.
  * @returns The filled DOCX file.
@@ -330,7 +379,7 @@ export async function fillBuffer(
   const where = "Package.fillTemplate";
   // Checked before the file is read, so a bad argument costs no parse.
   fillData(data, where);
-  checkWriteOptions(options, where);
+  checkPatchOptions(options, where);
   const doc = await readPackage(buffer, options, where);
   return packageDocx(fillDocument(doc, data, options, where), writeOptions(options));
 }
@@ -353,7 +402,7 @@ export interface ToFlatOpcOptions {
  *
  * This packages the document to a ZIP, then re-reads the entries to wrap
  * them as Flat OPC XML. While this involves a ZIP round-trip, it ensures
- * the Flat OPC output is byte-identical to what `Io.toBuffer` would produce
+ * the Flat OPC output is byte-identical to what `Document.toBuffer` would produce
  * (same XML serialization, same relationships, same content types).
  *
  * @param doc - The document model.
@@ -361,15 +410,15 @@ export interface ToFlatOpcOptions {
  * @returns The Flat OPC XML string.
  */
 export async function toFlatOpc(doc: DocxDocument, options?: ToFlatOpcOptions): Promise<string> {
-  checkHandle(doc, "document", "doc", "Io.toFlatOpc");
-  checkPackageOptions(options, "options", "Io.toFlatOpc");
+  checkHandle(doc, "document", "doc", "Document.toFlatOpc");
+  checkSchema(toFlatOpcOptionsSchema.optional(), options, "Document.toFlatOpc");
   const zipBytes = await packageDocx(doc, { compressionLevel: options?.compressionLevel ?? 0 });
 
   // Statically imported: this file already imports `readDocx`, which imports `unzip` statically —
   // as do the ODT converter, the streaming reader and the incremental editor. A lone `await
   // import()` of a module four siblings pull eagerly saves nothing and only makes rolldown report
   // the pair as `INEFFECTIVE_DYNAMIC_IMPORT`.
-  const reader = unzip(zipBytes);
+  const reader = unzipZip(zipBytes);
   const entries = new Map<string, Uint8Array>();
   for await (const entry of reader.entries()) {
     const data = await entry.bytes();

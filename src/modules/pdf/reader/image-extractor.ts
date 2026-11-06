@@ -50,8 +50,8 @@ export interface ExtractedImage {
   format: "jpeg" | "jpx" | "raw" | "ccitt" | "jbig2";
   /** The image data */
   data: Uint8Array;
-  /** Alpha mask data (if present) — same dimensions, 1 component, 8 bits */
-  alphaMask: Uint8Array | null;
+  /** Alpha mask data — same dimensions, 1 component, 8 bits; absent when the image has none */
+  alphaMask?: Uint8Array;
   /** Filter name from the original stream */
   filter: string;
   /** XObject name (if it was a named XObject) */
@@ -163,7 +163,7 @@ function extractImage(
   }
 
   // Extract soft mask (alpha channel)
-  let alphaMask: Uint8Array | null = null;
+  let alphaMask: Uint8Array | undefined;
   const smaskRef = dict.get("SMask");
   if (smaskRef) {
     const smaskResult = doc.derefStreamWithObjNum(smaskRef);
@@ -181,7 +181,7 @@ function extractImage(
     components,
     format,
     data,
-    alphaMask,
+    ...(alphaMask === undefined ? {} : { alphaMask }),
     filter,
     name
   };

@@ -215,7 +215,7 @@ export class ZipEntrySizeMismatchError extends ArchiveError {
 // -----------------------------------------------------------------------------
 
 /**
- * Which configured bound an {@link ArchiveLimitError} reports.
+ * Which configured bound an {@link ArchiveLimitExceededError} reports.
  *
  * - `maxOutputLength`: one decompression would produce more than its bound.
  *   Decompression stops as soon as the bound is crossed, so the full (possibly
@@ -223,17 +223,23 @@ export class ZipEntrySizeMismatchError extends ArchiveError {
  * - `maxTotalUncompressedSize`: a bulk extraction would produce more in total.
  * - `maxEntries`: the central directory declares more entries than allowed;
  *   rejected before any entry record is allocated.
+ * - `maxEntrySize`: one entry is larger than allowed — reported by the subclass
+ *   {@link ArchiveFileTooLargeError}, which also names the entry.
  */
-export type ArchiveLimit = "maxOutputLength" | "maxTotalUncompressedSize" | "maxEntries";
+export type ArchiveLimit =
+  | "maxOutputLength"
+  | "maxTotalUncompressedSize"
+  | "maxEntries"
+  | "maxEntrySize";
 
 /**
  * Error thrown when decompressing or extracting would exceed a configured limit. `limit` names
  * the option that set the bound and `allowed` is its value, so a caller can tell which limit was
- * hit without reading the message. The per-entry size (`maxEntrySize`) is reported by
- * {@link ArchiveFileTooLargeError}, which carries the same `limit` / `allowed` fields.
+ * hit without reading the message. The per-entry size (`maxEntrySize`) is reported by the
+ * subclass {@link ArchiveFileTooLargeError}, so catching this class sees every limit.
  */
-export class ArchiveLimitError extends ArchiveError {
-  override name = "ArchiveLimitError";
+export class ArchiveLimitExceededError extends ArchiveError {
+  override name = "ArchiveLimitExceededError";
 
   constructor(
     public readonly limit: ArchiveLimit,
@@ -245,7 +251,9 @@ export class ArchiveLimitError extends ArchiveError {
         ? `Decompressed output exceeds maxOutputLength (${allowed} bytes)`
         : limit === "maxEntries"
           ? `Archive entry count exceeds maxEntries (${allowed})`
-          : `Archive uncompressed size exceeds maxTotalUncompressedSize (${allowed} bytes)`,
+          : limit === "maxEntrySize"
+            ? `Archive entry exceeds maxEntrySize (${allowed} bytes)`
+            : `Archive uncompressed size exceeds maxTotalUncompressedSize (${allowed} bytes)`,
       options
     );
   }
@@ -324,33 +332,32 @@ export interface ArchiveFileTooLargeErrorOptions extends BaseErrorOptions {
 }
 
 /**
- * Error thrown when an entry is too large to read into memory: the `maxEntrySize` limit. It
- * carries the same `limit` / `allowed` fields as {@link ArchiveLimitError}, read the same way,
- * plus the entry's `path`; it is not an `ArchiveLimitError`, so catch both to see every limit.
+ * Error thrown when an entry is too large to read into memory: the `maxEntrySize` limit. An
+ * {@link ArchiveLimitExceededError} with `limit: "maxEntrySize"`, plus the entry's `path`.
+ *
+ * A ZIP64 size or offset JavaScript cannot hold exactly is reported the same way, with
+ * `allowed` set to `Number.MAX_SAFE_INTEGER` — a bound of the platform, not of an option.
  */
-export class ArchiveFileTooLargeError extends ArchiveError {
+export class ArchiveFileTooLargeError extends ArchiveLimitExceededError {
   override name = "ArchiveFileTooLargeError";
 
   /** The limit that was hit: always `"maxEntrySize"`. */
-  readonly limit = "maxEntrySize" as const;
+  declare readonly limit: "maxEntrySize";
 
   /**
    * The bound the entry exceeds, in bytes: the configured `maxEntrySize`, or
    * `Number.MAX_SAFE_INTEGER` for a ZIP64 size or offset JavaScript cannot hold; `NaN` when the
    * code that threw did not say.
    */
-  readonly allowed: number;
+  declare readonly allowed: number;
 
   /** The entry that is too large. */
   readonly path: string;
 
   constructor(path: string, reason: string, options?: ArchiveFileTooLargeErrorOptions) {
     const { allowed = Number.NaN, ...errorOptions } = options ?? {};
-    super(
-      `File "${path}" is too large to extract into memory (${reason})`,
-      options && errorOptions
-    );
-    this.allowed = allowed;
+    super("maxEntrySize", allowed, options && errorOptions);
+    this.message = `File "${path}" is too large to extract into memory (${reason})`;
     this.path = path;
   }
 }
@@ -406,7 +413,7 @@ export class ZipUnsupportedCompressionError extends ArchiveError {
 // -----------------------------------------------------------------------------
 
 /**
- * A worker streaming session (`Compression.Workers.WorkerPool#openStream`) whose worker did
+ * A worker streaming session (`Compression.Workers.Pool#openStream`) whose worker did
  * not start — it timed out, failed or died first. Nothing was sent to it, so the caller can
  * run the same stream elsewhere. The library's own streams fall back on their own and never
  * report it; a caller of `openStream` can tell it apart with `instanceof`.

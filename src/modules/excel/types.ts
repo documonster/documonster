@@ -749,6 +749,11 @@ interface DataValidationBase {
   promptTitle?: string;
   showErrorMessage?: boolean;
   showInputMessage?: boolean;
+  /**
+   * The file format's `showDropDown` flag, which — despite its name — **hides** a list rule's in-cell drop-down
+   * when `true`. Written to XLSB; the XLSX writer leaves it out.
+   */
+  showDropDown?: boolean;
 }
 
 /** Data validation that requires formulae and operator */
@@ -1059,6 +1064,15 @@ export type DecodedAddress = {
   col: number;
   row: number;
   $col$row?: string;
+};
+
+/**
+ * A cell named by its 1-based position — `{ row: 2, col: 3 }` is C2. Every `Cell.*` function takes one in place of
+ * an `"A1"` address, and a {@link DecodedAddress} is one, so `Cell.getFullAddress` answers can be passed back.
+ */
+export type CellPosition = {
+  row: number;
+  col: number;
 };
 
 // ============================================================================

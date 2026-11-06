@@ -4,18 +4,29 @@
  * thrown when the entry is added rather than when the archive is streamed.
  */
 
+import {
+  OPTIONS,
+  checkArchiveArgument,
+  dateSchema,
+  levelSchema,
+  limitSchema,
+  uintSchema
+} from "@archive/core/arguments";
 import { ArchiveArgumentError } from "@archive/core/errors";
 import { resolveZipStringCodec } from "@archive/core/text";
 import { isArchiveSource } from "@archive/io/archive-source";
 import { zipModTimeProblem } from "@archive/zip-spec/timestamps";
 import { describeValue as describe } from "@utils/describe-value";
+import { s } from "@utils/schema";
 
-function fail(where: string, field: string, expected: string, value: unknown): never {
-  throw new ArchiveArgumentError(
-    field,
-    `${where}: ${field} must be ${expected}, got ${describe(value)}`
-  );
-}
+const nonEmptyString = s.string({ nonEmpty: true });
+
+const uint8ArraySchema = s.custom<Uint8Array>(v => v instanceof Uint8Array, "a Uint8Array");
+
+export const archiveSourceSchema = s.custom(
+  isArchiveSource,
+  "a Uint8Array, ArrayBuffer, string, Blob, ReadableStream or async iterable"
+);
 
 /**
  * An entry name another tool can extract without writing outside its destination.
@@ -30,9 +41,7 @@ function fail(where: string, field: string, expected: string, value: unknown): n
  * (`"legacy"`, `"posix"`, `"safe"`) decides instead.
  */
 export function checkEntryName(where: string, name: unknown): void {
-  if (typeof name !== "string" || name === "") {
-    fail(where, "name", "a non-empty string", name);
-  }
+  checkArchiveArgument(nonEmptyString, name, where, "name");
   const slashed = name.replace(/\\/g, "/");
   if (slashed.startsWith("/") || /^[a-zA-Z]:/.test(slashed)) {
     throw new ArchiveArgumentError(
@@ -61,62 +70,37 @@ export function checkEntryName(where: string, name: unknown): void {
  * answered "no such entry" from some readers and failed with a raw `TypeError` in others.
  */
 export function checkEntryPath(where: string, value: unknown, field = "path"): void {
-  if (typeof value !== "string" || value === "") {
-    fail(where, field, "a non-empty string", value);
-  }
+  checkArchiveArgument(nonEmptyString, value, where, field);
 }
 
 /** Entry content held in memory: a `Uint8Array`. */
 export function checkBytes(where: string, field: string, value: unknown): void {
-  if (!(value instanceof Uint8Array)) {
-    fail(where, field, "a Uint8Array", value);
-  }
+  checkArchiveArgument(uint8ArraySchema, value, where, field);
 }
 
 /** A string; `undefined` is accepted when `optional`. */
 export function checkString(where: string, field: string, value: unknown, optional = false): void {
-  if (typeof value !== "string" && !(optional && value === undefined)) {
-    fail(where, field, "a string", value);
-  }
+  checkArchiveArgument(optional ? s.string().optional() : s.string(), value, where, field);
 }
 
 /** Something an archive can read entry content from: an `ArchiveSource`. */
 export function checkArchiveSource(where: string, field: string, value: unknown): void {
-  if (!isArchiveSource(value)) {
-    fail(
-      where,
-      field,
-      "a Uint8Array, ArrayBuffer, string, Blob, ReadableStream or async iterable",
-      value
-    );
-  }
+  checkArchiveArgument(archiveSourceSchema, value, where, field);
 }
 
 /** A compression level: an integer from 0 (store) to 9. */
 export function checkLevel(where: string, field: string, value: unknown): void {
-  if (
-    value !== undefined &&
-    (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 9)
-  ) {
-    fail(where, field, "an integer from 0 to 9", value);
-  }
+  checkArchiveArgument(levelSchema.optional(), value, where, field);
 }
 
 /** A valid `Date`. */
 export function checkDate(where: string, field: string, value: unknown): void {
-  if (value !== undefined && (!(value instanceof Date) || Number.isNaN(value.getTime()))) {
-    fail(where, field, "a valid Date", value);
-  }
+  checkArchiveArgument(dateSchema.optional(), value, where, field);
 }
 
 /** An integer from 0 to `max`. */
 export function checkUint(where: string, field: string, value: unknown, max: number): void {
-  if (
-    value !== undefined &&
-    (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max)
-  ) {
-    fail(where, field, `an integer from 0 to ${max}`, value);
-  }
+  checkArchiveArgument(uintSchema(max).optional(), value, where, field);
 }
 
 /** One of `allowed`. */
@@ -126,9 +110,7 @@ export function checkOneOf(
   value: unknown,
   allowed: readonly unknown[]
 ): void {
-  if (value !== undefined && !allowed.includes(value)) {
-    fail(where, field, `one of ${allowed.map(describe).join(", ")}`, value);
-  }
+  checkArchiveArgument(s.oneOf(allowed).optional(), value, where, field);
 }
 
 const TIMESTAMP_MODES = ["dos", "dos+utc", "dos+utc+ntfs"] as const;
@@ -162,15 +144,7 @@ export function checkZipModTime(where: string, field: string, value: unknown): v
 
 /** A size or count limit: a number from 0, `Infinity` meaning none. */
 export function checkLimit(where: string, field: string, value: unknown): void {
-  if (
-    value !== undefined &&
-    (typeof value !== "number" ||
-      Number.isNaN(value) ||
-      value < 0 ||
-      (Number.isFinite(value) && !Number.isInteger(value)))
-  ) {
-    fail(where, field, "an integer from 0, or Infinity", value);
-  }
+  checkArchiveArgument(limitSchema.optional(), value, where, field);
 }
 
 /** The size and count limits a reader takes, by format. */
@@ -194,9 +168,7 @@ export function checkReadOptions(where: string, options: unknown, limits: readon
 
 /** An options argument: an object or `undefined`. */
 export function checkOptionsObject(where: string, options: unknown, field = "options"): void {
-  if (options !== undefined && (typeof options !== "object" || options === null)) {
-    fail(where, field, "an options object", options);
-  }
+  checkArchiveArgument(s.object({}, OPTIONS).optional(), options, where, field);
 }
 
 /** Archive-level ZIP options shared by `createZip`, `packZip` and `editZip`. */
@@ -222,8 +194,46 @@ export function checkZipOptions(
   checkOneOf(where, "options.timestamps", options.timestamps, TIMESTAMP_MODES);
   checkZipModTime(where, "options.modTime", options.modTime);
   checkOneOf(where, "options.zip64", options.zip64, ZIP64_MODES);
-  if (options.comment !== undefined && typeof options.comment !== "string") {
-    fail(where, "options.comment", "a string", options.comment);
+  checkString(where, "options.comment", options.comment, true);
+}
+
+const ZIP_ENCRYPTION_METHODS = ["none", "zipcrypto", "aes-128", "aes-192", "aes-256"] as const;
+
+const zipPasswordSchema = s.union(
+  [nonEmptyString, uint8ArraySchema.refine(v => v.length > 0, "a non-empty Uint8Array")],
+  { expected: "a non-empty string or Uint8Array" }
+);
+
+/**
+ * The encryption a ZIP builder is asked for (`Archive.createZip`, `Archive.packZip`): a method it
+ * knows, and a non-empty password exactly when the method is not `"none"`. A password with no
+ * method is refused too — it encrypted nothing, so an archive the caller meant to protect was
+ * written in the clear.
+ */
+export function checkZipEncryptionOptions(
+  where: string,
+  options: { encryptionMethod?: unknown; password?: unknown } | undefined
+): void {
+  if (options === undefined) {
+    return;
+  }
+  checkOneOf(where, "options.encryptionMethod", options.encryptionMethod, ZIP_ENCRYPTION_METHODS);
+  const method = options.encryptionMethod ?? "none";
+  const password = options.password;
+  if (password !== undefined) {
+    checkArchiveArgument(zipPasswordSchema, password, where, "options.password");
+  }
+  if (method === "none" && password !== undefined) {
+    throw new ArchiveArgumentError(
+      "options.password",
+      `${where}: options.password encrypts nothing without options.encryptionMethod ("zipcrypto", "aes-128", "aes-192" or "aes-256")`
+    );
+  }
+  if (method !== "none" && password === undefined) {
+    throw new ArchiveArgumentError(
+      "options.password",
+      `${where}: options.encryptionMethod ${describe(method)} needs options.password`
+    );
   }
 }
 
@@ -257,7 +267,5 @@ export function checkZipEntryOptions(
   // A Unix `st_mode`, type bits included, lives in the high 16 bits of the external attributes.
   checkUint(where, "options.mode", options.mode, 0xffff);
   checkOneOf(where, "options.zip64", options.zip64, ZIP64_MODES);
-  if (options.comment !== undefined && typeof options.comment !== "string") {
-    fail(where, "options.comment", "a string", options.comment);
-  }
+  checkString(where, "options.comment", options.comment, true);
 }

@@ -14,7 +14,8 @@
  *   6. = <> < > <= >=  (comparison)
  */
 
-import { FormulaArgumentError, FormulaParseError } from "@formula/errors";
+import { formulaArgument } from "@formula/arguments";
+import { FormulaParseError } from "@formula/errors";
 import type {
   AstNode,
   CellRefNode,
@@ -27,7 +28,7 @@ import { layoutOf, type FormulaLayout } from "@formula/syntax/layout";
 import type { Token, CellRefToken, RangeToken, FunctionToken } from "@formula/syntax/token-types";
 import { isSpillOperator, SPILL_OPERATOR, TokenType } from "@formula/syntax/token-types";
 import { tokenize, tokenizeWithSpans } from "@formula/syntax/tokenizer";
-import { describeValue } from "@utils/describe-value";
+import { check, s } from "@utils/schema";
 
 // ============================================================================
 // Operator Precedence
@@ -732,12 +733,11 @@ export function parseFormula(source: string | readonly Token[]): AstNode {
       throw relocate(error, source);
     }
   }
-  if (!Array.isArray(source)) {
-    throw new FormulaArgumentError(
-      "source",
-      `Formula.parse: source must be formula text or the tokens Formula.tokenize returned, got ${describeValue(source)}`
-    );
-  }
+  check(
+    s.array(s.unknown(), { expected: "formula text or the tokens Formula.tokenize returned" }),
+    source,
+    formulaArgument("Formula.parse", "source")
+  );
   try {
     return parse(source as Token[]);
   } catch (error) {

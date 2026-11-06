@@ -619,8 +619,8 @@ async function main(): Promise<void> {
   const cohorts = ["2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4", "2025-Q1", "2025-Q2", "2025-Q3"];
   cohorts.forEach((c, ci) => {
     const row = 3 + ci;
-    Cell.setValue(cohort, row, 1, c);
-    Cell.setStyle(cohort, row, 1, { font: { bold: true } });
+    Cell.setValue(cohort, { row, col: 1 }, c);
+    Cell.setStyle(cohort, { row, col: 1 }, { font: { bold: true } });
     for (let m = 0; m <= 11; m++) {
       // Cells beyond what has "happened yet" stay blank.
       if (m + ci * 3 > 20) {
@@ -629,9 +629,9 @@ async function main(): Promise<void> {
       // Base retention: 100%, 85%, 72%, 65%, 58%, 54%, 51%, 48%, 46%, 45%, 44%, 43%
       const decay = [1, 0.85, 0.72, 0.65, 0.58, 0.54, 0.51, 0.48, 0.46, 0.45, 0.44, 0.43];
       const value = decay[m] * (0.95 + rng() * 0.1);
-      Cell.setValue(cohort, row, 2 + m, Math.round(value * 1000) / 1000);
-      Cell.setStyle(cohort, row, 2 + m, { numFmt: "0.0%" });
-      Cell.setStyle(cohort, row, 2 + m, { alignment: { horizontal: "center" } });
+      Cell.setValue(cohort, { row, col: 2 + m }, Math.round(value * 1000) / 1000);
+      Cell.setStyle(cohort, { row, col: 2 + m }, { numFmt: "0.0%" });
+      Cell.setStyle(cohort, { row, col: 2 + m }, { alignment: { horizontal: "center" } });
     }
   });
 
@@ -702,14 +702,14 @@ async function main(): Promise<void> {
   // Aggregate 2025 revenue per region × month
   REGIONS.forEach((region, ri) => {
     const row = 3 + ri;
-    Cell.setValue(regional, row, 1, region);
-    Cell.setStyle(regional, row, 1, { font: { bold: true } });
+    Cell.setValue(regional, { row, col: 1 }, region);
+    Cell.setStyle(regional, { row, col: 1 }, { font: { bold: true } });
     for (let m = 0; m < 12; m++) {
       const v = txns
         .filter(t => t.Region === region && t.Year === 2025 && t.Month === monthHeaders[m])
         .reduce((s, t) => s + t.Revenue, 0);
-      Cell.setValue(regional, row, 2 + m, v);
-      Cell.setStyle(regional, row, 2 + m, { numFmt: "$#,##0" });
+      Cell.setValue(regional, { row, col: 2 + m }, v);
+      Cell.setStyle(regional, { row, col: 2 + m }, { numFmt: "$#,##0" });
     }
   });
 
@@ -757,7 +757,7 @@ async function main(): Promise<void> {
     }
     const signs = monthly.slice(1).map((v, i) => Math.sign(v - monthly[i]));
     signs.forEach((sign, i) => {
-      Cell.setValue(deltaSheet, ri + 1, i + 1, sign);
+      Cell.setValue(deltaSheet, { row: ri + 1, col: i + 1 }, sign);
     });
   });
   Sparkline.add(regional, {
@@ -776,10 +776,14 @@ async function main(): Promise<void> {
   // KPI cards row — show each segment's revenue + rating
   const kpiRow = 3 + REGIONS.length + 3;
   Worksheet.merge(regional, kpiRow - 1, 1, kpiRow - 1, 12);
-  Cell.setValue(regional, kpiRow - 1, 1, "Segment KPI cards (with icon ratings)");
-  Cell.setStyle(regional, kpiRow - 1, 1, {
-    font: { size: 12, bold: true, color: { argb: "FF2F5496" } }
-  });
+  Cell.setValue(regional, { row: kpiRow - 1, col: 1 }, "Segment KPI cards (with icon ratings)");
+  Cell.setStyle(
+    regional,
+    { row: kpiRow - 1, col: 1 },
+    {
+      font: { size: 12, bold: true, color: { argb: "FF2F5496" } }
+    }
+  );
 
   Row.setValues(regional, kpiRow, ["Segment", "Revenue", "YoY vs FY24", "Rating"]);
   Row.setFont(regional, kpiRow, { bold: true });
@@ -799,14 +803,14 @@ async function main(): Promise<void> {
       .filter(t => t.Segment === segment && t.Year === 2024)
       .reduce((s, t) => s + t.Revenue, 0);
     const yoy = fy24 ? (fy25 - fy24) / fy24 : 0;
-    Cell.setValue(regional, row, 1, segment);
-    Cell.setValue(regional, row, 2, fy25);
-    Cell.setStyle(regional, row, 2, { numFmt: "$#,##0" });
-    Cell.setValue(regional, row, 3, yoy);
-    Cell.setStyle(regional, row, 3, { numFmt: "+0.0%;-0.0%" });
+    Cell.setValue(regional, { row, col: 1 }, segment);
+    Cell.setValue(regional, { row, col: 2 }, fy25);
+    Cell.setStyle(regional, { row, col: 2 }, { numFmt: "$#,##0" });
+    Cell.setValue(regional, { row, col: 3 }, yoy);
+    Cell.setStyle(regional, { row, col: 3 }, { numFmt: "+0.0%;-0.0%" });
     // Rating = normalised YoY
-    Cell.setValue(regional, row, 4, yoy);
-    Cell.setStyle(regional, row, 4, { numFmt: "" });
+    Cell.setValue(regional, { row, col: 4 }, yoy);
+    Cell.setStyle(regional, { row, col: 4 }, { numFmt: "" });
     ratingValues.push(yoy);
   });
   ConditionalFormatting.add(regional, {
@@ -888,8 +892,8 @@ async function main(): Promise<void> {
     const cellAddr = `${Address.encodeCol(2 - 1)}${row}`;
     Cell.setValue(nav, cellAddr, { text: link.label, hyperlink: `#'${link.sheet}'!A1` });
     Cell.setFont(nav, cellAddr, { size: 13, color: { argb: "FF0563C1" }, underline: true });
-    Cell.setValue(nav, row, 3, link.desc);
-    Cell.setStyle(nav, row, 3, { font: { color: { argb: "FF595959" } } });
+    Cell.setValue(nav, { row, col: 3 }, link.desc);
+    Cell.setStyle(nav, { row, col: 3 }, { font: { color: { argb: "FF595959" } } });
   });
 
   wb.views = [

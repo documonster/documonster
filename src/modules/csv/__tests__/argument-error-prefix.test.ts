@@ -44,15 +44,15 @@ describe("CSV argument errors name the public call", () => {
       "options.encoding"
     ],
     [
-      "Csv.parseRows",
-      () => drain(Csv.parseRows("a", { delimiter: 5 as never })),
-      "Csv.parseRows:",
+      "Csv.parseStream",
+      () => drain(Csv.parseStream("a", { delimiter: 5 as never })),
+      "Csv.parseStream:",
       "options.delimiter"
     ],
     [
-      "Csv.parseRows objname",
-      () => drain(Csv.parseRows("a", { headers: true, objname: "a" })),
-      "Csv.parseRows:",
+      "Csv.parseStream objname",
+      () => drain(Csv.parseStream("a", { headers: true, objname: "a" })),
+      "Csv.parseStream:",
       "options.objname"
     ],
     [

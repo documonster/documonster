@@ -5,8 +5,9 @@
  *   `Note.create("text", { author: "Alice" })`, `Note.isNote(v)`, `Note.getModel(n)`,
  *   `Note.fromModel(model)`.
  *
- * Attaching a note to a cell (`Cell.getNote` / `Cell.setNote` /
- * `Cell.setComment`) lives on the `Cell` namespace.
+ * Deprecated as a whole: a cell's note, author included, is read and written through `Cell` (`Cell.setNote`,
+ * `Cell.getNote`, `Cell.getNoteAuthor`, `Cell.removeNote`), and a note record is needed only by the deprecated
+ * `Cell.setComment`.
  */
 import type { NoteConfig, NoteModel } from "@excel/core/cell";
 import type { NoteData } from "@excel/core/note";

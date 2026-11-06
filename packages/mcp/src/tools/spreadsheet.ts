@@ -29,15 +29,9 @@ export interface GridWindow {
 export const MAX_EXCEL_ROWS = 1_048_576;
 export const MAX_EXCEL_COLUMNS = 16_384; // XFD
 
-/**
- * Read a worksheet's name.
- *
- * The handle has no public `name` property — `ws.name` is `undefined` — so the
- * model record is the only public route. Verified empirically; do not "simplify"
- * this to `ws.name`.
- */
+/** A sheet's name. */
 export function sheetName(ws: SheetHandle): string {
-  return Worksheet.getModel(ws).name;
+  return Worksheet.getName(ws);
 }
 
 /** Every worksheet name in workbook order. */
@@ -195,15 +189,15 @@ export type CellMode = "values" | "formulas" | "both";
  * sees in Excel and what they will quote back to the model.
  */
 export function renderCell(ws: SheetHandle, row: number, column: number, mode: CellMode): string {
-  const formula = Cell.getFormula(ws, row, column);
+  const formula = Cell.getFormula(ws, { row, col: column });
 
   if (mode === "formulas") {
     return formula === undefined
-      ? escapeTableCell(Cell.getDisplayText(ws, row, column))
+      ? escapeTableCell(Cell.getDisplayText(ws, { row, col: column }))
       : escapeTableCell(`=${formula}`);
   }
 
-  const display = escapeTableCell(Cell.getDisplayText(ws, row, column));
+  const display = escapeTableCell(Cell.getDisplayText(ws, { row, col: column }));
   if (mode === "both" && formula !== undefined) {
     return `${display} \`=${escapeTableCell(formula)}\``;
   }

@@ -26,7 +26,8 @@ import {
   chartsheetTabSelected,
   chartsheetWorkbookViewId,
   chartsheetZoomScale,
-  chartsheetZoomToFit
+  chartsheetZoomToFit,
+  chartsheetMarginsSchema
 } from "@excel/core/chartsheet";
 /**
  * `Chartsheet` namespace surface — operations on a chartsheet handle.
@@ -46,7 +47,7 @@ import {
 import { checkChartsheet } from "@excel/core/feature-handles";
 import { refuseLongSheetName } from "@excel/core/workbook-core";
 import { ExcelArgumentError } from "@excel/errors";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
 
 /** Whether the chartsheet holds an Office 2016 chart (histogram, treemap, …) rather than a classic one. */
@@ -98,22 +99,11 @@ export function setState(cs: ChartsheetData, value: ChartsheetModel["state"]): v
   chartsheetSetState(cs, value);
 }
 
-const MARGIN_KEYS = ["l", "r", "t", "b", "left", "right", "top", "bottom", "header", "footer"];
-
 /** Set the chartsheet's page margins, in inches. */
 export function setPageMargins(cs: ChartsheetData, value: ChartsheetModel["pageMargins"]): void {
   checkChartsheet(cs);
   checkAttached("Chartsheet.setPageMargins", cs);
-  const check = argumentChecks("Chartsheet.setPageMargins");
-  if (check.record("value", value)) {
-    for (const [side, margin] of Object.entries(value)) {
-      // A key the margins do not have was kept and never written.
-      if (!MARGIN_KEYS.includes(side)) {
-        check.fail(`value.${side}`, `one of the margins ${MARGIN_KEYS.join(", ")}`, side);
-      }
-      check.number(`value.${side}`, margin);
-    }
-  }
+  checkSchema("Chartsheet.setPageMargins", "value", chartsheetMarginsSchema.optional(), value);
   chartsheetSetPageMargins(cs, value);
 }
 

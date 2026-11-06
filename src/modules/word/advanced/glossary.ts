@@ -9,7 +9,7 @@
  * to `doc.glossary`; the packager then serialises it to
  * `word/glossary/document.xml`, registers the `glossaryDocument` relationship,
  * and adds the `[Content_Types].xml` override (the canonical OOXML location
- * Word reads Quick Parts / AutoText from). `Io.read` reads a file's glossary
+ * Word reads Quick Parts / AutoText from). `Document.read` reads a file's glossary
  * into the same model — its entries as `blocks`, which these helpers list and
  * find — and writes it back unchanged unless `blocks` were edited. This module is useful for:
  * - Building glossary data structures programmatically

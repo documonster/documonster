@@ -156,7 +156,7 @@ const result = await Pdf.extract(bytes, {
 // Extract bookmarks (outline tree)
 const result = await Pdf.extract(bytes, { extractBookmarks: true });
 for (const bm of result.bookmarks) {
-  console.log(bm.title, `→ page ${bm.pageIndex + 1}`);
+  console.log(bm.title, bm.pageIndex === undefined ? "(no page)" : `→ page ${bm.pageIndex + 1}`);
 }
 
 // Extract tables (heuristic text-position detection)
@@ -799,7 +799,7 @@ interface PdfExtractedPage {
 
 interface PdfAnnotation {
   subtype: string; // "Link", "Text", "Highlight", "FreeText", "Stamp", etc.
-  rect: PdfRect; // Bounding rectangle { x1, y1, x2, y2 }
+  rect: PdfAnnotationRect; // Bounding rectangle { x1, y1, x2, y2 }
   contents: string; // Text content
   author: string; // Author / title
   uri: string; // For Link: destination URI
@@ -820,17 +820,22 @@ interface PdfFormField {
 }
 
 interface PdfMetadata {
-  title?: string;
-  author?: string;
-  subject?: string;
-  keywords?: string;
-  creator?: string;
-  producer?: string;
+  // Text fields hold "" when the document does not give them.
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  creator: string;
+  producer: string;
+  // Absent when the document does not give them (or a date is not a date).
   creationDate?: Date;
-  modificationDate?: Date;
+  modDate?: Date;
+  pageSize?: { width: number; height: number }; // First page, in points
+  xmpXml?: string; // Raw XMP packet
   pdfVersion: string;
   pageCount: number;
   encrypted: boolean;
+  custom: Record<string, string>; // Other Info-dictionary entries
 }
 ```
 

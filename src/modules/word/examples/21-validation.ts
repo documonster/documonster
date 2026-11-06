@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Validation } from "../index";
+import { Document, Build, Validation } from "../index";
 import type { BodyContent, DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -148,4 +148,4 @@ console.log(`  → 21-validation.txt`);
 const ok = Document.create();
 Document.useDefaultStyles(ok);
 Document.addParagraph(ok, "(See 21-validation.txt for the report.)");
-fs.writeFileSync(path.join(outDir, "21-validation.docx"), await Io.toBuffer(ok));
+fs.writeFileSync(path.join(outDir, "21-validation.docx"), await Document.toBuffer(ok));

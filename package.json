@@ -45,7 +45,8 @@
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "README.md",
-    "README_zh.md"
+    "README_zh.md",
+    "llms.txt"
   ],
   "type": "module",
   "sideEffects": false,

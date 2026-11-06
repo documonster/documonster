@@ -11,7 +11,7 @@
  * - Chrome < 103
  */
 
-import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitExceededError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 import { assertLimitOption } from "@utils/limits";
 
@@ -236,7 +236,7 @@ class BitReader {
  *
  * @param data - Compressed data in deflate-raw format
  * @param maxOutputLength - Optional output bound; decoding stops with a
- *   `ArchiveLimitError` before the output buffer grows past it
+ *   `ArchiveLimitExceededError` before the output buffer grows past it
  * @returns Decompressed data
  */
 export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Array {
@@ -256,7 +256,7 @@ export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Arr
   const ensureCapacity = (additional: number): void => {
     const required = outLen + additional;
     if (required > limit) {
-      throw new ArchiveLimitError("maxOutputLength", limit);
+      throw new ArchiveLimitExceededError("maxOutputLength", limit);
     }
     if (required <= output.length) {
       return;

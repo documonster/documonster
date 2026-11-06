@@ -5,11 +5,11 @@
  *
  * `listParts`, `readPart` and `edit` work on the package's parts and leave the
  * rest of the file as it was. `fillTemplate`, `patch` and `compileTemplate`
- * read the whole document model (as `Io.read` does) and write it out again.
+ * read the whole document model (as `Document.read` does) and write it out again.
  *
- * Every one of them reads its bytes as `Io.read` does — a ZIP or Flat OPC
+ * Every one of them reads its bytes as `Document.read` does — a ZIP or Flat OPC
  * package, an encrypted one decrypted with `{ password }`, under
- * `{ securityPolicy }` — and the writing ones take `Io.toBuffer`'s
+ * `{ securityPolicy }` — and the writing ones take `Document.toBuffer`'s
  * `compressionLevel` and `modTime`. What they write is never encrypted.
  *
  * Two template engines, for two kinds of template:

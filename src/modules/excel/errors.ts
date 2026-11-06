@@ -65,7 +65,7 @@ export class ExcelArgumentError extends ExcelError {
  * Options for the position errors — {@link ExcelInvalidAddressError}, {@link ExcelColumnOutOfBoundsError} and
  * {@link ExcelRowOutOfBoundsError}: the base options, the argument path the position was given at, and the public call.
  */
-export interface PositionErrorOptions extends BaseErrorOptions {
+export interface ExcelPositionErrorOptions extends BaseErrorOptions {
   /**
    * The path of the refused position from the parameter name in the public signature — `addr`, `row`, `col`,
    * `cell.r`. Defaults to `addr`, `row` and `col` respectively.
@@ -75,11 +75,13 @@ export interface PositionErrorOptions extends BaseErrorOptions {
   where?: string;
 }
 
-function positionMessage(text: string, options: PositionErrorOptions | undefined): string {
+function positionMessage(text: string, options: ExcelPositionErrorOptions | undefined): string {
   return options?.where ? `${options.where}: ${text}` : text;
 }
 
-function positionCause(options: PositionErrorOptions | undefined): BaseErrorOptions | undefined {
+function positionCause(
+  options: ExcelPositionErrorOptions | undefined
+): BaseErrorOptions | undefined {
   return options?.cause === undefined ? undefined : { cause: options.cause };
 }
 
@@ -95,7 +97,7 @@ export class ExcelInvalidAddressError extends ExcelArgumentError {
   constructor(
     public readonly address: string,
     details?: string,
-    options?: PositionErrorOptions
+    options?: ExcelPositionErrorOptions
   ) {
     super(
       options?.field ?? "addr",
@@ -120,7 +122,7 @@ export class ExcelColumnOutOfBoundsError extends ExcelArgumentError {
   constructor(
     public readonly column: number | string,
     details?: string,
-    options?: PositionErrorOptions
+    options?: ExcelPositionErrorOptions
   ) {
     super(
       options?.field ?? "col",
@@ -147,7 +149,7 @@ export class ExcelRowOutOfBoundsError extends ExcelArgumentError {
   constructor(
     public readonly row: number,
     details?: string,
-    options?: PositionErrorOptions
+    options?: ExcelPositionErrorOptions
   ) {
     super(
       options?.field ?? "row",
@@ -161,7 +163,7 @@ export class ExcelRowOutOfBoundsError extends ExcelArgumentError {
 }
 
 /** Options for {@link ExcelInvalidValueTypeError}: the base options plus the argument path the value was given at. */
-export interface InvalidValueTypeErrorOptions extends BaseErrorOptions {
+export interface ExcelInvalidValueTypeErrorOptions extends BaseErrorOptions {
   /** The path of the refused value from the parameter name (`values[2]`, `value.richText[0].text`). Default `value`. */
   field?: string;
 }
@@ -179,7 +181,7 @@ export class ExcelInvalidValueTypeError extends ExcelArgumentError {
   constructor(
     public readonly valueType: string,
     details?: string,
-    options?: InvalidValueTypeErrorOptions
+    options?: ExcelInvalidValueTypeErrorOptions
   ) {
     super(
       options?.field ?? "value",
@@ -255,7 +257,7 @@ export class ExcelFileError extends ExcelError {
  * Error thrown when the workbook read is encrypted (password-protected) and no `password` was given: an OLE compound
  * file holding the `EncryptionInfo` and `EncryptedPackage` streams Excel writes for a file with a password to open,
  * rather than a ZIP package. Read it again with its password — `Workbook.read(bytes, { password })`, and the same
- * option of `readFile`, `readStream`, `readWithDiagnostics` and `Stream.WorkbookReader` — as Word's `Io.read` takes it.
+ * option of `readFile`, `readStream`, `readWithDiagnostics` and `Stream.WorkbookReader` — as Word's `Document.read` takes it.
  * A wrong password is an {@link ExcelDecryptionError}.
  *
  * An {@link ExcelFileError}, so a `catch` for a file that cannot be read catches it too.
@@ -398,19 +400,58 @@ export class ExcelImageError extends ExcelError {
 }
 
 /**
- * Error thrown when a read exceeds a declared limit — `maxRows` / `maxCols`, or the most items a list may hold — the
- * counterpart of `DocxLimitExceededError` and `PdfLimitExceededError`.
+ * A read option an {@link ExcelLimitExceededError} reports: `maxRows` / `maxCols` of the read, or one of the
+ * container limits under `zip` (`maxEntrySize`, `maxTotalUncompressedSize`, `maxEntries`).
+ */
+export type ExcelLimit =
+  | "maxRows"
+  | "maxCols"
+  | "maxEntrySize"
+  | "maxTotalUncompressedSize"
+  | "maxEntries";
+
+/** Options for {@link ExcelLimitExceededError}. */
+export interface ExcelLimitExceededErrorOptions extends BaseErrorOptions {
+  /** The read option that set the bound; becomes {@link ExcelLimitExceededError.limit}. */
+  limit?: ExcelLimit;
+}
+
+/**
+ * Error thrown when a read exceeds a declared limit — `maxRows` / `maxCols`, or a container limit under `zip` — the
+ * counterpart of `DocxLimitExceededError` and `PdfLimitExceededError`. `limit` names the option and `allowed` is its
+ * value, as on the other modules' limit errors; a container limit keeps the archive's error as `cause`.
  */
 export class ExcelLimitExceededError extends ExcelError {
   override name = "ExcelLimitExceededError";
 
+  /** The read option that set the bound; `undefined` only on an error built without one. */
+  readonly limit: ExcelLimit | undefined;
+
+  /** The value of that option: the most items allowed. */
+  readonly allowed: number;
+
   constructor(
+    /** What was counted (`"row"`, `"column"`, `"part"`), as the message names it. */
     public readonly itemType: string,
+    /** @deprecated Use {@link allowed}. Removed in 1.0. */
     public readonly maxItems: number,
-    options?: BaseErrorOptions
+    options?: ExcelLimitExceededErrorOptions
   ) {
-    super(`Max ${itemType} count (${maxItems}) exceeded`, options);
+    const { limit, ...errorOptions } = options ?? {};
+    super(limitMessage(itemType, maxItems, limit), errorOptions);
+    this.limit = limit;
+    this.allowed = maxItems;
   }
+}
+
+function limitMessage(itemType: string, allowed: number, limit: ExcelLimit | undefined): string {
+  if (limit === "maxEntrySize" || limit === "maxTotalUncompressedSize") {
+    return `The ${itemType} exceeds ${limit} (${allowed} bytes)`;
+  }
+  if (limit === "maxEntries") {
+    return `Max ${itemType} count (${allowed}) exceeded (maxEntries)`;
+  }
+  return `Max ${itemType} count (${allowed}) exceeded`;
 }
 
 /**
@@ -514,3 +555,7 @@ export type MaxItemsExceededError = ExcelLimitExceededError;
 export const ExcelNotSupportedError = ExcelUnsupportedFeatureError;
 /** @deprecated Use {@link ExcelUnsupportedFeatureError}. Removed in 1.0. */
 export type ExcelNotSupportedError = ExcelUnsupportedFeatureError;
+/** @deprecated Use {@link ExcelPositionErrorOptions}. Removed in 1.0. */
+export type PositionErrorOptions = ExcelPositionErrorOptions;
+/** @deprecated Use {@link ExcelInvalidValueTypeErrorOptions}. Removed in 1.0. */
+export type InvalidValueTypeErrorOptions = ExcelInvalidValueTypeErrorOptions;

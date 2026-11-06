@@ -26,19 +26,15 @@ import {
 } from "@pdf/builder/document-builder";
 import type { PathOp } from "@pdf/builder/document-builder";
 import {
+  at,
+  checkConverterOptions,
   checkDrawPage,
-  checkFinite,
   checkMetadataText,
-  checkOptionalBoolean,
-  checkOptionalFunction,
-  checkOptionalNonNegative,
-  checkOptionalObject,
-  checkOptionalPositive,
-  checkOptionalString,
-  checkPdfDocumentOptions,
   checkPdfExportOptions,
   checkPdfInput,
-  checkString
+  checkString,
+  documentOptionsSchemaWith,
+  documentOptionsSchemaWithReadonly
 } from "@pdf/core/arguments";
 import { signPdf, verifyPdfSignature } from "@pdf/core/digital-signature";
 import type { SignPdfOptions } from "@pdf/core/digital-signature";
@@ -59,6 +55,8 @@ import type { PdfExportOptions } from "@pdf/types";
 import type { DocxDocument, DocxToPdfOptions } from "@pdf/word-bridge";
 import type { WordChart } from "@pdf/word-chart-bridge";
 import { isRecordArgument } from "@utils/object";
+import { check, fail, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // --- Writing (core engine, statically linked) ---
 
@@ -232,9 +230,11 @@ export async function fromExcel(
   // Checked before the bridge runs `recalculate`, which edits the workbook.
   checkPdfExportOptions("Pdf.fromExcel", options);
   if (options?.recalculate !== undefined && typeof options.recalculate !== "function") {
-    throw new PdfArgumentError(
-      "options.recalculate",
-      "Pdf.fromExcel: options.recalculate must be a function, such as ExcelFormula.calculate"
+    throw fail(
+      at("Pdf.fromExcel", "options"),
+      ".recalculate",
+      "a function, such as ExcelFormula.calculate",
+      options.recalculate
     );
   }
   checkWorkbookHandle("Pdf.fromExcel", workbook);
@@ -328,47 +328,97 @@ function describeHandle(value: unknown): string {
   return Array.isArray(value) ? "an array" : "an object that is not one";
 }
 
+const finite = () => s.number({ finite: true });
+const positive = () =>
+  s
+    .number({ finite: true, expected: "a finite number > 0" })
+    .refine(v => v > 0, "a finite number > 0");
+const nonNegative = () => s.number({ finite: true, min: 0 });
+const optionsObject = { expected: "an options object" };
+
+const chartToPdfOptionsSchema = documentOptionsSchemaWith({
+  pageWidth: positive().optional(),
+  pageHeight: positive().optional(),
+  width: positive().optional(),
+  height: positive().optional(),
+  margin: nonNegative().optional(),
+  forceRaster: s.boolean().optional(),
+  rasterScale: positive().optional(),
+  // The topology inside is the chart engine's to check (`checkChartRenderOptions`).
+  regionMap: s
+    .custom<NonNullable<ChartToPdfOptions["regionMap"]>>(
+      v => typeof v === "object" && v !== null && !Array.isArray(v),
+      "an options object"
+    )
+    .optional()
+});
+const _chartToPdfOptionsMatch: SchemaMatches<typeof chartToPdfOptionsSchema, ChartToPdfOptions> =
+  true;
+void _chartToPdfOptionsMatch;
+
 function checkChartToPdfOptions(options: ChartToPdfOptions | undefined): void {
   const where = "Pdf.fromChart";
-  checkOptionalObject(where, "options", options);
-  for (const field of ["pageWidth", "pageHeight", "width", "height", "rasterScale"] as const) {
-    checkOptionalPositive(where, `options.${field}`, options?.[field]);
-  }
-  checkOptionalNonNegative(where, "options.margin", options?.margin);
-  checkOptionalBoolean(where, "options.forceRaster", options?.forceRaster);
-  checkOptionalObject(where, "options.regionMap", options?.regionMap);
-  checkPdfDocumentOptions(where, options);
+  checkConverterOptions(where, chartToPdfOptionsSchema, options);
   // The properties go through `Pdf.Builder#setMetadata`, which takes only text XML can carry.
   checkMetadataText(where, (options ?? {}) as Record<string, unknown>, "options.");
 }
 
+const docxToPdfOptionsSchema = documentOptionsSchemaWithReadonly({
+  pageWidth: positive().optional(),
+  pageHeight: positive().optional(),
+  margins: s
+    .object(
+      {
+        top: nonNegative().optional(),
+        right: nonNegative().optional(),
+        bottom: nonNegative().optional(),
+        left: nonNegative().optional()
+      },
+      optionsObject
+    )
+    .optional(),
+  marginTop: nonNegative().optional(),
+  marginBottom: nonNegative().optional(),
+  marginLeft: nonNegative().optional(),
+  marginRight: nonNegative().optional(),
+  defaultFontFamily: s.string().optional(),
+  defaultFont: s.string().optional(),
+  defaultFontSize: positive().optional(),
+  headerMargin: nonNegative().optional(),
+  footerMargin: nonNegative().optional(),
+  chartRenderer: s.function<NonNullable<DocxToPdfOptions["chartRenderer"]>>().optional()
+});
+const _docxToPdfOptionsMatch: SchemaMatches<typeof docxToPdfOptionsSchema, DocxToPdfOptions> = true;
+void _docxToPdfOptionsMatch;
+
 function checkDocxToPdfOptions(options: DocxToPdfOptions | undefined): void {
   const where = "Pdf.fromDocx";
-  checkOptionalObject(where, "options", options);
-  checkOptionalPositive(where, "options.pageWidth", options?.pageWidth);
-  checkOptionalPositive(where, "options.pageHeight", options?.pageHeight);
-  checkOptionalObject(where, "options.margins", options?.margins);
-  for (const side of ["top", "right", "bottom", "left"] as const) {
-    checkOptionalNonNegative(where, `options.margins.${side}`, options?.margins?.[side]);
-  }
-  for (const field of [
-    "marginTop",
-    "marginRight",
-    "marginBottom",
-    "marginLeft",
-    "headerMargin",
-    "footerMargin"
-  ] as const) {
-    checkOptionalNonNegative(where, `options.${field}`, options?.[field]);
-  }
-  checkOptionalPositive(where, "options.defaultFontSize", options?.defaultFontSize);
-  checkOptionalString(where, "options.defaultFontFamily", options?.defaultFontFamily);
-  checkOptionalString(where, "options.defaultFont", options?.defaultFont);
-  checkOptionalFunction(where, "options.chartRenderer", options?.chartRenderer);
-  checkPdfDocumentOptions(where, options);
+  checkConverterOptions(where, docxToPdfOptionsSchema, options);
   // The properties go through `Pdf.Builder#setMetadata`, which takes only text XML can carry.
   checkMetadataText(where, (options ?? {}) as Record<string, unknown>, "options.");
 }
+
+const drawSurfaceRectSchema = s.object(
+  {
+    x: finite(),
+    y: finite(),
+    width: s.number({ finite: true }).refine(v => v > 0, "a finite number > 0"),
+    height: s.number({ finite: true }).refine(v => v > 0, "a finite number > 0")
+  },
+  { ...optionsObject, readonly: true }
+);
+const _drawSurfaceRectMatch: SchemaMatches<typeof drawSurfaceRectSchema, DrawSurfaceRect> = true;
+void _drawSurfaceRectMatch;
+
+const drawSurfaceOptionsSchema = s.object(
+  { scale: positive().optional() },
+  { ...optionsObject, readonly: true }
+);
+const _drawSurfaceOptionsMatch: SchemaMatches<
+  typeof drawSurfaceOptionsSchema,
+  PdfDrawSurfaceOptions
+> = true;
+void _drawSurfaceOptionsMatch;
 
 function checkDrawSurfaceArguments(
   page: PdfDrawPage,
@@ -376,13 +426,7 @@ function checkDrawSurfaceArguments(
   options: PdfDrawSurfaceOptions | undefined
 ): void {
   const where = "Pdf.createDrawSurface";
-  checkOptionalObject(where, "rect", rect ?? null);
-  for (const field of ["x", "y", "width", "height"] as const) {
-    checkFinite(where, `rect.${field}`, rect[field]);
-  }
-  checkOptionalPositive(where, "rect.width", rect.width);
-  checkOptionalPositive(where, "rect.height", rect.height);
+  check(drawSurfaceRectSchema, rect, at(where, "rect"));
   checkDrawPage(where, page);
-  checkOptionalObject(where, "options", options);
-  checkOptionalPositive(where, "options.scale", options?.scale);
+  check(drawSurfaceOptionsSchema.optional(), options, at(where, "options"));
 }

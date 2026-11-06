@@ -13,10 +13,12 @@
  */
 
 import { crc32UpdateByte } from "@archive/compression/crc32.base";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import { checkBytes, checkUint } from "@archive/core/entry-checks";
 import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { describeValue } from "@utils/describe-value";
+import { s } from "@utils/schema";
 
 /**
  * ZipCrypto encryption header size.
@@ -36,12 +38,12 @@ export interface ZipCryptoState {
 
 /** Refuse a password that is neither a string nor bytes. */
 export function checkZipPassword(where: string, password: unknown): void {
-  if (typeof password !== "string" && !(password instanceof Uint8Array)) {
-    throw new ArchiveArgumentError(
-      "password",
-      `${where}: password must be a string or a Uint8Array, got ${describeValue(password)}`
-    );
-  }
+  checkArchiveArgument(
+    s.custom(v => typeof v === "string" || v instanceof Uint8Array, "a string or a Uint8Array"),
+    password,
+    where,
+    "password"
+  );
 }
 
 /** Refuse a CRC-32 that is not an unsigned 32-bit integer; `undefined` is refused too. */
@@ -269,12 +271,7 @@ export function zipCryptoEncrypt(
   checkBytes(where, "data", data);
   checkZipPassword(where, password);
   checkCrc32(where, crc32);
-  if (typeof getRandomBytes !== "function") {
-    throw new ArchiveArgumentError(
-      "getRandomBytes",
-      `${where}: getRandomBytes must be a function, got ${describeValue(getRandomBytes)}`
-    );
-  }
+  checkArchiveArgument(s.function(), getRandomBytes, where, "getRandomBytes");
   const random: unknown = getRandomBytes(11);
   if (!(random instanceof Uint8Array) || random.length < 11) {
     throw new ArchiveArgumentError(

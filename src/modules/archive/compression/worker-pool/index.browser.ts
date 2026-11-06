@@ -6,6 +6,7 @@
 
 export {
   WorkerPool,
+  getDefaultPool,
   getDefaultWorkerPool,
   terminateDefaultWorkerPool,
   deflateWithPool,

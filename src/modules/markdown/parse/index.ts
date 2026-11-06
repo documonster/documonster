@@ -20,9 +20,9 @@
  * ```
  */
 
-import { describeValue } from "@markdown/arguments";
+import { checkParseArguments } from "@markdown/arguments";
 import { CELL_ESCAPE_OR_BR_REGEX, LINEBREAK_REGEX } from "@markdown/constants";
-import { MarkdownArgumentError, MarkdownParseError } from "@markdown/errors";
+import { MarkdownParseError } from "@markdown/errors";
 import type { MarkdownAlignment, MarkdownParseOptions, MarkdownParseResult } from "@markdown/types";
 
 // =============================================================================
@@ -54,37 +54,7 @@ function resolveParseOpts(
   input: unknown,
   options: MarkdownParseOptions
 ): ResolvedParseOpts {
-  if (typeof input !== "string") {
-    throw new MarkdownArgumentError(
-      "input",
-      `${where}: input must be a string, got ${describeValue(input)}`
-    );
-  }
-  if (typeof options !== "object" || options === null || Array.isArray(options)) {
-    throw new MarkdownArgumentError(
-      "options",
-      `${where}: options must be an options object, got ${describeValue(options)}`
-    );
-  }
-  const { maxRows } = options;
-  if (
-    maxRows !== undefined &&
-    (typeof maxRows !== "number" || !Number.isInteger(maxRows) || maxRows < 0)
-  ) {
-    throw new MarkdownArgumentError(
-      "options.maxRows",
-      `${where}: maxRows must be an integer >= 0, got ${describeValue(maxRows)}`
-    );
-  }
-  for (const name of ["trim", "unescape", "skipEmptyRows", "convertBr"] as const) {
-    const value = options[name];
-    if (value !== undefined && typeof value !== "boolean") {
-      throw new MarkdownArgumentError(
-        `options.${name}`,
-        `${where}: ${name} must be true or false, got ${describeValue(value)}`
-      );
-    }
-  }
+  checkParseArguments(where, input, options);
   return {
     trim: options.trim !== false,
     unescape: options.unescape !== false,

@@ -5,14 +5,11 @@
  * sections, page breaks, or heading levels.
  */
 
-import {
-  checkBoolean,
-  checkHandle,
-  checkHeadingLevel,
-  checkOneOf,
-  checkRecord
-} from "@word/core/argument-checks";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle } from "@word/core/argument-checks";
 import { collectImageKeys, indexImagesByKey } from "@word/core/image-keys";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import { listRangeMarkers, withParagraphChildren } from "@word/core/range-markers";
 import { isRun } from "@word/core/text-utils";
 import { resolveHeadingLevel } from "@word/query/heading";
@@ -60,11 +57,13 @@ export interface SplitOptions {
   readonly preserveSharedParts?: boolean;
 }
 
-const SPLIT_BY: ReadonlySet<string> = new Set<NonNullable<SplitOptions["by"]>>([
-  "section",
-  "pageBreak",
-  "heading"
-]);
+const splitOptionsSchema = w.record({
+  by: w.oneOf(["section", "pageBreak", "heading"]).optional(),
+  headingLevel: w.integer({ min: 1, max: 9 }).optional(),
+  preserveSharedParts: w.boolean().optional()
+});
+const _splitOptionsMatch: SchemaMatches<typeof splitOptionsSchema, SplitOptions> = true;
+void _splitOptionsMatch;
 
 /**
  * Split a DocxDocument into multiple documents.
@@ -74,8 +73,8 @@ const SPLIT_BY: ReadonlySet<string> = new Set<NonNullable<SplitOptions["by"]>>([
  * comments, styles, numbering, and settings are preserved in each split unless
  * `preserveSharedParts: false` is specified.
  *
- * Does not modify `doc`; each result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; each result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to split.
  * @param options - Split criteria.
@@ -84,14 +83,7 @@ const SPLIT_BY: ReadonlySet<string> = new Set<NonNullable<SplitOptions["by"]>>([
 export function splitDocument(doc: DocxDocument, options?: SplitOptions): DocxDocument[] {
   checkHandle(doc, "document", "doc", "Transform.split");
   const where = "Transform.split";
-  checkRecord(options, "options", where, { optional: true });
-  checkOneOf(options?.by, SPLIT_BY, "options.by", where, { optional: true });
-  if (options?.headingLevel !== undefined) {
-    checkHeadingLevel(options.headingLevel, "options.headingLevel", where);
-  }
-  checkBoolean(options?.preserveSharedParts, "options.preserveSharedParts", where, {
-    optional: true
-  });
+  checkSchema(splitOptionsSchema.optional(), options, where);
   const opts: Required<SplitOptions> = {
     by: options?.by ?? "section",
     headingLevel: options?.headingLevel ?? 1,
@@ -108,7 +100,9 @@ export function splitDocument(doc: DocxDocument, options?: SplitOptions): DocxDo
   }
 
   // Range markers after the source's last block belong to the last part only.
-  return segments.map((segment, i) => buildSplitDoc(doc, segment, opts, i === segments.length - 1));
+  return segments.map((segment, i) =>
+    markDerived(buildSplitDoc(doc, segment, opts, i === segments.length - 1), doc)
+  );
 }
 
 // =============================================================================

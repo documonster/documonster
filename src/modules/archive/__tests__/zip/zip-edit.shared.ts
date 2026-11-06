@@ -176,7 +176,7 @@ export function runZipEditTests(): void {
 
         // Force raw passthrough to be unavailable.
         const remote = (editor as any)._remote;
-        remote.getRawCompressedData = async (_path: string) => null;
+        remote.getRawCompressedData = async (_path: string) => undefined;
 
         // Add a new file so the output isn't empty.
         editor.set("public.txt", "OK");

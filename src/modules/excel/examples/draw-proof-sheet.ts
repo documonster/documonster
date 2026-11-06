@@ -13,7 +13,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { encodePng } from "@archive/png";
 import { Draw } from "@draw/index";
 import type { DrawList, DrawNode, DrawPathCommand } from "@draw/index";
 import { ChartEx, ChartClassic } from "@excel/chart";
@@ -31,12 +30,7 @@ const INK = { r: 0.15, g: 0.15, b: 0.15, a: 1 };
 function threeWays(name: string, list: DrawList): void {
   writeFileSync(path.join(OUT, `${name}.svg`), Draw.toSvg(list));
 
-  // Pixels and PNG encoding are separate steps on purpose: the rasteriser is
-  // part of the drawing engine, while encoding needs DEFLATE and so lives with
-  // it in `documonster/archive`. Pair them, or pair the pixels with any other
-  // encoder.
-  const image = Draw.toRgba(list, { width: list.width, height: list.height, scale: 2 });
-  writeFileSync(path.join(OUT, `${name}.png`), encodePng(image.data, image.width, image.height));
+  writeFileSync(path.join(OUT, `${name}.png`), Draw.toPng(list, { scale: 2 }).png);
 
   const builder = new Pdf.Builder();
   const page = builder.addPage({ width: list.width, height: list.height });

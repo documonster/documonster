@@ -24,7 +24,10 @@ import { dictGetRef, decodePdfStringBytes } from "@pdf/reader/pdf-parser";
 // =============================================================================
 
 /**
- * PDF document metadata.
+ * PDF document metadata. The text fields hold `""` when the document does not give them — an
+ * Info entry and its XMP counterpart are merged, and either may be present but empty, so the text
+ * fields do not tell "absent" from "empty". A field with no text form is absent (`undefined`)
+ * when the document does not give it.
  */
 export interface PdfMetadata {
   /** Document title */
@@ -39,20 +42,20 @@ export interface PdfMetadata {
   creator: string;
   /** Application that produced the PDF */
   producer: string;
-  /** Date the document was created */
-  creationDate: Date | null;
-  /** Date the document was last modified */
-  modDate: Date | null;
+  /** Date the document was created; absent when the document does not say, or says something that is not a date */
+  creationDate?: Date;
+  /** Date the document was last modified; absent as {@link creationDate} is */
+  modDate?: Date;
   /** PDF version */
   pdfVersion: string;
   /** Number of pages */
   pageCount: number;
   /** Whether the document is encrypted */
   encrypted: boolean;
-  /** Page size of the first page (in points) */
-  pageSize: { width: number; height: number } | null;
-  /** Raw XMP metadata XML (if available) */
-  xmpXml: string | null;
+  /** Page size of the first page (in points); absent when the document has no page */
+  pageSize?: { width: number; height: number };
+  /** Raw XMP metadata XML; absent when the document has none */
+  xmpXml?: string;
   /** Additional custom metadata from Info dictionary */
   custom: Record<string, string>;
 }
@@ -72,13 +75,9 @@ export function extractMetadata(doc: PdfDocument): PdfMetadata {
     keywords: "",
     creator: "",
     producer: "",
-    creationDate: null,
-    modDate: null,
     pdfVersion: extractPdfVersion(doc),
     pageCount: 0,
     encrypted: doc.trailer.has("Encrypt"),
-    pageSize: null,
-    xmpXml: null,
     custom: {}
   };
 
@@ -93,7 +92,7 @@ export function extractMetadata(doc: PdfDocument): PdfMetadata {
     const pages = doc.getPages();
     metadata.pageCount = pages.length;
     if (pages.length > 0) {
-      metadata.pageSize = extractPageSize(pages[0], doc);
+      metadata.pageSize = extractPageSize(pages[0], doc) ?? undefined;
     }
   } catch {
     // Ignore page tree errors
@@ -191,10 +190,10 @@ function extractInfoDict(doc: PdfDocument, metadata: PdfMetadata): void {
         metadata.producer = strValue;
         break;
       case "CreationDate":
-        metadata.creationDate = parsePdfDate(strValue);
+        metadata.creationDate = parsePdfDate(strValue) ?? undefined;
         break;
       case "ModDate":
-        metadata.modDate = parsePdfDate(strValue);
+        metadata.modDate = parsePdfDate(strValue) ?? undefined;
         break;
       default:
         if (!knownKeys.has(key)) {
@@ -241,11 +240,11 @@ function extractXmpMetadata(doc: PdfDocument, metadata: PdfMetadata): void {
       metadata.producer ||= text("producer") ?? "";
       const created = text("creationDate");
       if (!metadata.creationDate && created !== undefined) {
-        metadata.creationDate = validDate(created);
+        metadata.creationDate = validDate(created) ?? undefined;
       }
       const modified = text("modDate");
       if (!metadata.modDate && modified !== undefined) {
-        metadata.modDate = validDate(modified);
+        metadata.modDate = validDate(modified) ?? undefined;
       }
       return;
     }
@@ -272,13 +271,13 @@ function extractXmpMetadata(doc: PdfDocument, metadata: PdfMetadata): void {
     if (!metadata.creationDate) {
       const dateStr = extractXmpField(xml, "xmp:CreateDate");
       if (dateStr) {
-        metadata.creationDate = new Date(dateStr);
+        metadata.creationDate = validDate(dateStr) ?? undefined;
       }
     }
     if (!metadata.modDate) {
       const dateStr = extractXmpField(xml, "xmp:ModifyDate");
       if (dateStr) {
-        metadata.modDate = new Date(dateStr);
+        metadata.modDate = validDate(dateStr) ?? undefined;
       }
     }
   } catch {

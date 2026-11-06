@@ -318,13 +318,6 @@ function parseDataDescriptorVarsFast(data: Uint8Array): DataDescriptorVars {
   };
 }
 
-export interface ValidatedDataDescriptorScanResult {
-  /** Start index of the descriptor within `view`, or -1 when not found yet. */
-  foundIndex: number;
-  /** Where the caller should resume searching on the next scan of (a mostly unchanged) view. */
-  nextSearchFrom: number;
-}
-
 // =============================================================================
 // Shared Parse Loop (stream-agnostic)
 // =============================================================================

@@ -81,7 +81,7 @@ const ws = Workbook.getWorksheet(wb1, "Employees")!;
 console.log("Sheet:", Worksheet.getName(ws), "| Rows:", Row.getCount(ws));
 for (let r = 1; r <= Row.getCount(ws); r++) {
   console.log(
-    `  Row ${r}: ${Cell.getValue(ws, r, 1)} | ${Cell.getValue(ws, r, 2)} | ${Cell.getValue(ws, r, 3)}`
+    `  Row ${r}: ${Cell.getValue(ws, { row: r, col: 1 })} | ${Cell.getValue(ws, { row: r, col: 2 })} | ${Cell.getValue(ws, { row: r, col: 3 })}`
   );
 }
 
@@ -158,8 +158,8 @@ const wb3 = ExcelMarkdown.read(markdownInput, {
   }
 });
 const ws3 = Workbook.getWorksheet(wb3, "Typed")!;
-console.log("Age type:", typeof Cell.getValue(ws3, 2, 2));
-console.log("Age value:", Cell.getValue(ws3, 2, 2));
+console.log("Age type:", typeof Cell.getValue(ws3, { row: 2, col: 2 }));
+console.log("Age value:", Cell.getValue(ws3, { row: 2, col: 2 }));
 console.log();
 
 // =============================================================================
@@ -183,7 +183,7 @@ const ws5 = ExcelMarkdown.addWorksheet(wb4, markdownMultiline, {
   sheetName: "NotesParsed",
   convertBr: true
 });
-console.log("Parsed back (address):", JSON.stringify(Cell.getValue(ws5, 2, 2)));
+console.log("Parsed back (address):", JSON.stringify(Cell.getValue(ws5, { row: 2, col: 2 })));
 fs.writeFileSync(path.join(outDir, "multiline-workbook.md"), markdownMultiline, "utf8");
 console.log();
 
@@ -218,7 +218,7 @@ console.log("Wrote:", outFile);
 const wb7 = await ExcelMarkdown.readFile(outFile, { sheetName: "FromFile" });
 const fromFileSheet = Workbook.getWorksheet(wb7, "FromFile")!;
 if (fromFileSheet) {
-  console.log("Read back:", Cell.getValue(fromFileSheet, 2, 1));
+  console.log("Read back:", Cell.getValue(fromFileSheet, { row: 2, col: 1 }));
 }
 
 // ExcelMarkdown.readFile({ tables: "all" })

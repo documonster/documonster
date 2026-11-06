@@ -30,6 +30,9 @@ const svg = Mermaid.toSvg(`flowchart TD
   A[Start] --> B{Ready?}
   B -->|yes| C[Ship it]
   B -->|no| A`);
+
+// 直接得到 PNG 文件,以及画不出来的码点
+const { png, uncoveredCodePoints } = Mermaid.toPng("flowchart LR\n  A --> B", { scale: 2 });
 ```
 
 ### 同一份列表,任意后端

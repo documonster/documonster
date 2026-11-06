@@ -56,9 +56,10 @@ export async function extractAll(
   const files = new Map<string, ExtractedFile>();
   const parser = new ZipParser(zipData, options);
 
-  for (const entry of parser.getEntries()) {
-    const data = await parser.extract(entry.path);
-    const extractedData = data || new Uint8Array(0);
+  // Through `forEach`, which charges every entry against `maxTotalUncompressedSize` — extracting
+  // entry by entry here bypassed that budget, so the helper accepted what `Archive.unpackZip` refused.
+  await parser.forEach(async (entry, getData) => {
+    const extractedData = await getData();
 
     // For symlinks, the data content is the target path
     let linkTarget: string | undefined;
@@ -74,7 +75,7 @@ export async function extractAll(
       size: entry.uncompressedSize,
       mode: entry.mode
     });
-  }
+  });
 
   return files;
 }

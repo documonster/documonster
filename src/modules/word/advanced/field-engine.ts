@@ -10,9 +10,10 @@
  * modified portions of the tree).
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import { planTableOfContents } from "@word/advanced/toc-update";
 import type { TocPlan } from "@word/advanced/toc-update";
-import { checkBoolean, checkHandle, checkRecord } from "@word/core/argument-checks";
+import { checkHandle } from "@word/core/argument-checks";
 import { builtInStyle, tocStyle } from "@word/core/builtin-styles";
 import { formatFieldResult, tokenizeFieldCode } from "@word/core/field-format";
 import { evaluateIfField } from "@word/core/field-if";
@@ -23,6 +24,8 @@ import {
   rewriteSplitFields
 } from "@word/core/field-view";
 import type { Mutable } from "@word/core/internal-utils";
+import { checkSchema, model, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import { collectRangeMarkers, settleRangeMarkers } from "@word/core/range-markers";
 import { extractParagraphText, isRun } from "@word/core/text-utils";
 import { buildTocInstruction } from "@word/core/toc-instruction";
@@ -76,6 +79,23 @@ export interface FieldUpdateOptions {
 // Public API
 // =============================================================================
 
+const fieldUpdateOptionsSchema = w.record({
+  // Checked by `checkLayoutOptions`, as `Layout.compute` checks them.
+  layoutOptions: model<LayoutOptions>(),
+  updateToc: w.boolean().optional(),
+  updatePageFields: w.boolean().optional(),
+  updateReferences: w.boolean().optional(),
+  updateSequences: w.boolean().optional()
+});
+const _fieldUpdateOptionsMatch: SchemaMatches<typeof fieldUpdateOptionsSchema, FieldUpdateOptions> =
+  true;
+void _fieldUpdateOptionsMatch;
+
+function checkFieldUpdateOptions(options: unknown, where: string): void {
+  checkSchema(fieldUpdateOptionsSchema.optional(), options, where);
+  checkLayoutOptions(options?.layoutOptions, "options.layoutOptions", where);
+}
+
 /**
  * 更新文档中所有字段的 cachedValue。
  *
@@ -87,27 +107,13 @@ export interface FieldUpdateOptions {
  * 页码（PAGE、NUMPAGES、SECTIONPAGES、PAGEREF、INDEX、目录条目）来自本库的
  * 分页布局（目录按其新条目参与分页）。不会设置 `settings.updateFieldsOnOpen`。
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - 文档模型（不会被修改，返回新对象）
  * @param options - 更新选项
  * @returns 更新后的文档模型
  */
-function checkFieldUpdateOptions(options: unknown, where: string): void {
-  checkRecord(options, "options", where, { optional: true });
-  const o = options as FieldUpdateOptions | undefined;
-  checkLayoutOptions(o?.layoutOptions, "options.layoutOptions", where);
-  for (const key of [
-    "updateToc",
-    "updatePageFields",
-    "updateReferences",
-    "updateSequences"
-  ] as const) {
-    checkBoolean(o?.[key], `options.${key}`, where, { optional: true });
-  }
-}
-
 export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): DocxDocument {
   checkHandle(doc, "document", "doc", "Transform.updateFields");
   checkFieldUpdateOptions(options, "Transform.updateFields");
@@ -156,7 +162,7 @@ export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): D
   if (plan) {
     nextDoc = ensureTocStyles(nextDoc, plan, tocInstructions);
   }
-  return nextDoc;
+  return markDerived(nextDoc, doc);
 }
 
 /**
@@ -165,8 +171,8 @@ export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): D
  * 生成目录缓存段落。
  * 目录页码来自本库的分页布局，见 {@link updateFields}。
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  */
 export function updateTableOfContents(
   doc: DocxDocument,
@@ -184,7 +190,7 @@ export function updateTableOfContents(
   }
 
   const plan = planTableOfContents(doc, instructions);
-  return settleTableOfContents(plan, instructions, options?.layoutOptions).doc;
+  return markDerived(settleTableOfContents(plan, instructions, options?.layoutOptions).doc, doc);
 }
 
 /**

@@ -8,8 +8,10 @@
  */
 
 import { cssColor, relativeLuminance } from "@draw/colour";
+import { at, colour } from "@mermaid/arguments";
 import { MermaidArgumentError } from "@mermaid/errors";
-import { isNoPaintColor, parseCssColor } from "@utils/svg-lex";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import type { Rgba01 } from "@utils/svg-lex";
 
 /**
@@ -123,19 +125,30 @@ const DEFAULTS = {
   ]
 } as const;
 
-const THEME_STRING_KEYS = [
-  "background",
-  "nodeFill",
-  "nodeStroke",
-  "nodeText",
-  "edge",
-  "edgeText",
-  "edgeLabelBackground",
-  "groupFill",
-  "groupStroke",
-  "title",
-  "paletteText"
-] as const;
+const themeShape = {
+  background: colour().optional(),
+  nodeFill: colour().optional(),
+  nodeStroke: colour().optional(),
+  nodeText: colour().optional(),
+  edge: colour().optional(),
+  edgeText: colour().optional(),
+  edgeLabelBackground: colour().optional(),
+  groupFill: colour().optional(),
+  groupStroke: colour().optional(),
+  title: colour().optional(),
+  paletteText: colour().optional(),
+  palette: s
+    .readonlyArray(colour(), { minLength: 1, expected: "a non-empty array of CSS colours" })
+    .optional()
+};
+const themeOptionsSchema = s.object(themeShape, {
+  expected: "an object of CSS colours",
+  readonly: true
+});
+const _themeOptionsMatch: SchemaMatches<typeof themeOptionsSchema, ThemeOptions> = true;
+void _themeOptionsMatch;
+
+const THEME_TOKENS = Object.keys(themeShape);
 
 /**
  * Check a `ThemeOptions`: an object of CSS colour strings, with `palette` a non-empty list
@@ -144,62 +157,14 @@ const THEME_STRING_KEYS = [
  * So is a string the colour reader cannot read: it used to be drawn black, silently.
  */
 export function checkThemeOptions(where: string, value: unknown, field = "options"): void {
-  if (value === undefined) {
-    return;
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new MermaidArgumentError(field, `${where}: ${field} must be an object of CSS colours.`);
-  }
-  const theme = value as Record<string, unknown>;
-  for (const key of Object.keys(theme)) {
-    if (key === "palette") {
-      const palette = theme.palette;
-      if (palette === undefined) {
-        continue;
-      }
-      if (
-        !Array.isArray(palette) ||
-        palette.length === 0 ||
-        !palette.every(entry => typeof entry === "string")
-      ) {
-        throw new MermaidArgumentError(
-          `${field}.palette`,
-          `${where}: ${field}.palette must be a non-empty array of CSS colour strings.`
-        );
-      }
-      palette.forEach((entry, i) => checkColour(where, `${field}.palette[${i}]`, entry));
-      continue;
-    }
-    if (!(THEME_STRING_KEYS as readonly string[]).includes(key)) {
+  check(themeOptionsSchema.optional(), value, at(where, field));
+  for (const key of Object.keys(value ?? {})) {
+    if (!THEME_TOKENS.includes(key)) {
       throw new MermaidArgumentError(
         `${field}.${key}`,
-        `${where}: ${field}.${key} is not a theme token; the tokens are ${[
-          ...THEME_STRING_KEYS,
-          "palette"
-        ].join(", ")}.`
+        `${where}: ${field}.${key} is not a theme token; the tokens are ${THEME_TOKENS.join(", ")}.`
       );
     }
-    const token = theme[key];
-    if (token === undefined) {
-      continue;
-    }
-    if (typeof token !== "string") {
-      throw new MermaidArgumentError(
-        `${field}.${key}`,
-        `${where}: ${field}.${key} must be a CSS colour string.`
-      );
-    }
-    checkColour(where, `${field}.${key}`, token);
-  }
-}
-
-/** Refuse a colour string `cssColor` would not read — it would paint black instead. */
-export function checkColour(where: string, field: string, token: string): void {
-  if (!isNoPaintColor(token) && parseCssColor(token) === undefined) {
-    throw new MermaidArgumentError(
-      field,
-      `${where}: ${field} must be a CSS colour (#rgb, #rrggbb, #rrggbbaa, rgb(), hsl(), a colour name, transparent or none); got ${JSON.stringify(token)}.`
-    );
   }
 }
 

@@ -5,8 +5,11 @@
  * This file provides the same API but works in browser environments.
  */
 
+import { checkStreamArgument } from "@stream/arguments";
 import { StreamStateError, StreamArgumentError } from "@stream/errors";
 import { textEncoder } from "@utils/binary";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /**
  * Options for ChunkedBuilder
@@ -18,15 +21,28 @@ export interface ChunkedBuilderOptions {
   initialCapacity?: number;
 }
 
-function describe(value: unknown): string {
-  return value === null ? "null" : typeof value === "number" ? String(value) : typeof value;
-}
+const chunkedBuilderOptionsSchema = s.object(
+  {
+    chunkSize: s
+      .number({ integer: true, min: 1, expected: "a positive integer chunkSize" })
+      .optional(),
+    initialCapacity: s
+      .number({ integer: true, min: 0, expected: "a non-negative integer initialCapacity" })
+      .optional()
+  },
+  { expected: "an options object" }
+);
+const _chunkedBuilderOptionsMatch: SchemaMatches<
+  typeof chunkedBuilderOptionsSchema,
+  ChunkedBuilderOptions
+> = true;
+void _chunkedBuilderOptionsMatch;
 
-function checkPiece(piece: unknown): void {
+function checkPiece(piece: unknown, where = "Streams.ChunkedBuilder#push", field = "piece"): void {
   if (typeof piece !== "string") {
     throw new StreamArgumentError("a string piece", piece === null ? "null" : typeof piece, {
-      field: "piece",
-      where: "Streams.ChunkedBuilder#push"
+      field,
+      where
     });
   }
 }
@@ -46,29 +62,8 @@ export class ChunkedBuilder {
 
   constructor(options: ChunkedBuilderOptions = {}) {
     const where = (new.target as typeof ChunkedBuilder).publicName;
-    if (typeof options !== "object" || options === null) {
-      throw new StreamArgumentError("an options object", describe(options), {
-        field: "options",
-        where
-      });
-    }
-    const { chunkSize, initialCapacity } = options;
-    if (chunkSize !== undefined && (!Number.isInteger(chunkSize) || chunkSize <= 0)) {
-      throw new StreamArgumentError("a positive integer chunkSize", describe(chunkSize), {
-        field: "options.chunkSize",
-        where
-      });
-    }
-    if (
-      initialCapacity !== undefined &&
-      (!Number.isInteger(initialCapacity) || initialCapacity < 0)
-    ) {
-      throw new StreamArgumentError(
-        "a non-negative integer initialCapacity",
-        describe(initialCapacity),
-        { field: "options.initialCapacity", where }
-      );
-    }
+    checkStreamArgument(chunkedBuilderOptionsSchema, options, where, "options");
+    const { chunkSize } = options;
     this._chunkSize = chunkSize ?? 10000;
   }
 
@@ -88,9 +83,17 @@ export class ChunkedBuilder {
    * Add multiple pieces
    */
   pushAll(pieces: readonly string[]): void {
+    if (!Array.isArray(pieces)) {
+      throw new StreamArgumentError(
+        "an array of string pieces",
+        pieces === null ? "null" : typeof pieces,
+        { field: "pieces", where: "Streams.ChunkedBuilder#pushAll" }
+      );
+    }
     // Checked before any is added, so a refusal leaves the builder as it was.
-    for (const piece of pieces) {
-      checkPiece(piece);
+    // An index loop, so a refusal names the piece: `pieces[3]`.
+    for (let i = 0; i < pieces.length; i++) {
+      checkPiece(pieces[i], "Streams.ChunkedBuilder#pushAll", `pieces[${i}]`);
     }
     const len = pieces.length;
     for (let i = 0; i < len; i++) {

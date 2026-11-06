@@ -13,7 +13,7 @@ import path from "node:path";
 
 import { Cell, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
-import { Document, Io, Query } from "documonster/word";
+import { Document, Query } from "documonster/word";
 import { WordMarkdown } from "documonster/word/markdown";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
@@ -73,7 +73,7 @@ describe("doc_write", () => {
     const fx = await fixture();
     await run(docWriteTool, fx, { path: "report.docx", markdown: SAMPLE_MD });
 
-    const doc = await Io.readFile(path.join(fx.root, "report.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "report.docx"));
     const markdown = WordMarkdown.fromDocx(doc);
     expect(markdown).toContain("# Quarterly Report");
     expect(markdown).toContain("## Regions");
@@ -109,7 +109,7 @@ describe("doc_write", () => {
     ).rejects.toThrow(/already exists/);
 
     await run(docWriteTool, fx, { path: "r.docx", markdown: "# Two\n", overwrite: true });
-    const doc = await Io.readFile(path.join(fx.root, "r.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "r.docx"));
     expect(WordMarkdown.fromDocx(doc)).toContain("# Two");
   });
 
@@ -152,7 +152,7 @@ describe("doc_convert", () => {
     Document.addHeading(doc, "Policy", 1);
     Document.addParagraph(doc, "Body text here.");
     Document.addBulletList(doc, ["alpha", "beta"]);
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -306,7 +306,7 @@ describe("doc_convert", () => {
     await writeFile(path.join(fx.root, "in.md"), SAMPLE_MD, "utf8");
 
     await run(docConvertTool, fx, { from: "in.md", to: "a.docx" });
-    expect(WordMarkdown.fromDocx(await Io.readFile(path.join(fx.root, "a.docx")))).toContain(
+    expect(WordMarkdown.fromDocx(await Document.readFile(path.join(fx.root, "a.docx")))).toContain(
       "# Quarterly Report"
     );
 

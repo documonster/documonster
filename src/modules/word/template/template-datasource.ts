@@ -8,16 +8,17 @@
  */
 
 import { isRecordArgument } from "@utils/object";
+import type { SchemaMatches } from "@utils/schema";
 import {
   checkArray,
-  checkBoolean,
   checkHandle,
   checkRecord,
   checkString,
   invalidArgument
 } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
 import { DocxArgumentError } from "@word/errors";
-import { fillDocument, fillTemplate } from "@word/template/template-engine";
+import { fillDocument, fillTemplate, templateOptionsShape } from "@word/template/template-engine";
 import type { TemplateOptions } from "@word/template/template-engine";
 import type { DocxDocument } from "@word/types";
 import { parseXml } from "@xml/dom";
@@ -62,6 +63,17 @@ export interface FillFromSourceOptions extends TemplateOptions {
    */
   readonly mergeArrays?: boolean;
 }
+
+const mergeArraysShape = { mergeArrays: w.boolean().optional() };
+
+const fillFromSourceOptionsSchema = w.record({ ...templateOptionsShape, ...mergeArraysShape });
+const _fillFromSourceOptionsMatch: SchemaMatches<
+  typeof fillFromSourceOptionsSchema,
+  FillFromSourceOptions
+> = true;
+void _fillFromSourceOptionsMatch;
+
+const compositeOptionsSchema = w.record(mergeArraysShape).optional();
 
 // =============================================================================
 // Internal: shared path resolution
@@ -256,8 +268,7 @@ export function createCompositeDataSource(
       );
     }
   });
-  checkRecord(options, "options", where, { optional: true });
-  checkBoolean(options?.mergeArrays, "options.mergeArrays", where, { optional: true });
+  checkSchema(compositeOptionsSchema, options, where);
   const mergeArrays = options?.mergeArrays ?? false;
 
   return {
@@ -337,8 +348,8 @@ export function fillTemplateFromSource(
  * {@link fill} counterpart for data sources, honouring every `fill` option
  * including `richPlaceholders`.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The parsed DocxDocument model.
  * @param source - A DataSource implementation.

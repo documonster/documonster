@@ -39,8 +39,10 @@ import { refuseUnsupported } from "@excel/core/unsupported";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { getWorkbookModel } from "@excel/core/workbook-model";
 import { ExcelFileError } from "@excel/errors";
+import { containerReadLimits } from "@excel/utils/container-errors";
+import type { ContainerReadOptions } from "@excel/utils/container-errors";
 import { isXlsbPackage } from "@excel/xlsb/detect";
-import { modelHash, sameHash } from "@excel/xlsb/model-hash";
+import type { ZipWriterOptions } from "@excel/xlsx/types";
 import { base64ToUint8Array } from "@utils/utils";
 
 /** Package formats the canonical IO functions can read and write. */
@@ -93,8 +95,11 @@ export function isArrayBufferLike(value: unknown): value is ArrayBuffer {
  * A message from a loader that tried to read the file says more than one from a sniffer that
  * declined to.
  */
-export function detectFormat(bytes: Uint8Array | undefined): WorkbookFormat {
-  return bytes && isXlsbPackage(bytes) ? "xlsb" : "xlsx";
+export function detectFormat(
+  bytes: Uint8Array | undefined,
+  zip?: ContainerReadOptions
+): WorkbookFormat {
+  return bytes && isXlsbPackage(bytes, containerReadLimits(zip).maxEntries) ? "xlsb" : "xlsx";
 }
 
 /**
@@ -115,9 +120,10 @@ export function detectFormat(bytes: Uint8Array | undefined): WorkbookFormat {
  */
 export function resolveReadFormat(
   bytes: Uint8Array | undefined,
-  requested: WorkbookFormat | undefined
+  requested: WorkbookFormat | undefined,
+  zip?: ContainerReadOptions
 ): WorkbookFormat {
-  const detected = detectFormat(bytes);
+  const detected = detectFormat(bytes, zip);
   if (requested === "xlsx" && detected === "xlsb") {
     throw new ExcelFileError(
       "<buffer>",
@@ -133,6 +139,36 @@ export function resolveReadFormat(
 /** Whether a file path names an XLSB package. */
 export function formatFromPath(path: string): WorkbookFormat {
   return /\.xlsb$/i.test(path) ? "xlsb" : "xlsx";
+}
+
+/** The options of a workbook read the XLSB reader acts on. */
+export interface XlsbReadInput {
+  readonly blankCells?: "keep" | "collapse";
+  readonly formulas?: "preserve" | "cached" | "error";
+  readonly maxRows?: number;
+  readonly maxCols?: number;
+  readonly zip?: ContainerReadOptions;
+}
+
+/** The options of a workbook write the XLSB writer acts on. */
+export interface XlsbWriteInput {
+  readonly unsupported?: "error" | "ignore";
+  readonly zip?: ZipWriterOptions;
+}
+
+/**
+ * A read's options as the XLSB reader takes them — every option `Workbook.read` documents for both formats, so a
+ * limit set on a read holds whichever container the bytes turn out to be. One mapping for every XLSB entry point
+ * (`read`, `readFile`, `readWithDiagnostics`, `readStream` with `format: "xlsb"`).
+ */
+export function xlsbReadOptions(options: XlsbReadInput | undefined): XlsbReadInput {
+  return {
+    ...(options?.blankCells === undefined ? {} : { blankCells: options.blankCells }),
+    ...(options?.formulas === undefined ? {} : { formulas: options.formulas }),
+    ...(options?.maxRows === undefined ? {} : { maxRows: options.maxRows }),
+    ...(options?.maxCols === undefined ? {} : { maxCols: options.maxCols }),
+    ...(options?.zip === undefined ? {} : { zip: options.zip })
+  };
 }
 
 /**
@@ -161,17 +197,10 @@ export async function readXlsbInto(
   workbook: WorkbookData,
   bytes: Uint8Array,
   source?: string,
-  options: {
-    readonly unsupported?: "error" | "ignore";
-    readonly blankCells?: "keep" | "collapse";
-    readonly formulas?: "preserve" | "cached" | "error";
-  } = {}
+  options: XlsbReadInput & { readonly unsupported?: "error" | "ignore" } = {}
 ): Promise<WorkbookData> {
   const { commitXlsbRead, parseXlsbPackage } = await import("@excel/xlsb/read/package");
-  const parsed = await parseXlsbPackage(bytes, source, {
-    ...(options.blankCells === undefined ? {} : { blankCells: options.blankCells }),
-    ...(options.formulas === undefined ? {} : { formulas: options.formulas })
-  });
+  const parsed = await parseXlsbPackage(bytes, source, xlsbReadOptions(options));
   if (parsed.diagnostics.lost.length > 0 && options.unsupported === "error") {
     const { ExcelUnsupportedFeatureError } = await import("@excel/errors");
     throw new ExcelUnsupportedFeatureError(
@@ -204,7 +233,7 @@ export async function readXlsbInto(
  */
 export async function writeXlsbBytes(
   workbook: WorkbookData,
-  options: { readonly unsupported?: "error" | "ignore" } = {}
+  options: XlsbWriteInput = {}
 ): Promise<Uint8Array> {
   const model = getWorkbookModel(workbook);
   // **An unchanged package comes back exactly as it arrived.**
@@ -217,10 +246,12 @@ export async function writeXlsbBytes(
   //
   // `unsupported` is deliberately not consulted. There is nothing to refuse: nothing is being dropped, because
   // nothing is being rewritten. Reporting a loss here would describe a package that is not the one returned.
-  const source = (workbook as unknown as { _xlsbSource?: { bytes: Uint8Array; hash: Uint8Array } })
-    ._xlsbSource;
-  if (source !== undefined && sameHash(source.hash, modelHash(model))) {
-    return source.bytes;
+  //
+  // Explicit `zip` settings are a request about the container itself — a compression level, a timestamp — which the
+  // original bytes cannot honour, so a write that gives them is rebuilt.
+  const original = await unchangedSourceBytes(workbook, model, options);
+  if (original !== undefined) {
+    return original;
   }
   // Loaded only now, so an unchanged package — which returns above — never pays for the writer.
   const { writeXlsbPackage } = await import("@excel/xlsb/write/package");
@@ -228,7 +259,8 @@ export async function writeXlsbBytes(
     releasedMedia: workbook._releasedMedia,
     registeredFunctions: workbook.userFunctions,
     // The same stamp the XLSX writer uses, so one workbook written twice gives identical bytes.
-    modTime: model.modified ?? model.created
+    modTime: model.modified ?? model.created,
+    ...(options.zip === undefined ? {} : { zip: options.zip })
   });
   refuseUnsupported(written.unsupported, options);
   return written.bytes;
@@ -251,7 +283,7 @@ export async function writeXlsbBytes(
 export async function writeXlsbToStream(
   workbook: WorkbookData,
   stream: unknown,
-  options: { readonly unsupported?: "error" | "ignore" } = {}
+  options: XlsbWriteInput = {}
 ): Promise<void> {
   const [{ streamXlsbPackage }, { createXlsbZipWriter }] = await Promise.all([
     import("@excel/core/xlsb-stream"),
@@ -268,20 +300,44 @@ export async function writeXlsbToStream(
   //
   // Written through the sink rather than returned, so the caller's stream receives the original bytes as one part-less
   // copy of the archive. There is nothing to refuse: nothing is being rewritten, so nothing is being dropped.
-  const source = (workbook as unknown as { _xlsbSource?: { bytes: Uint8Array; hash: Uint8Array } })
-    ._xlsbSource;
-  if (source !== undefined && sameHash(source.hash, modelHash(model))) {
-    await writeBytesToStream(stream, source.bytes);
+  const original = await unchangedSourceBytes(workbook, model, options);
+  if (original !== undefined) {
+    await writeBytesToStream(stream, original);
     return;
   }
   // The policy is applied *inside*, before the archive is finalised — see `streamXlsbPackage`'s `refuse`. Applying it
   // here, after the call returned, meant the destination already held a complete package when the error was thrown.
-  const modTime = model.modified ?? model.created;
-  await streamXlsbPackage(model, stream as never, () => createXlsbZipWriter({ modTime }), {
-    refuse: unsupported => refuseUnsupported(unsupported, options),
-    releasedMedia: workbook._releasedMedia,
-    registeredFunctions: workbook.userFunctions
-  });
+  const modTime = options.zip?.modTime ?? model.modified ?? model.created;
+  await streamXlsbPackage(
+    model,
+    stream as never,
+    () => createXlsbZipWriter({ ...options.zip, modTime }),
+    {
+      refuse: unsupported => refuseUnsupported(unsupported, options),
+      releasedMedia: workbook._releasedMedia,
+      registeredFunctions: workbook.userFunctions
+    }
+  );
+}
+
+/**
+ * The bytes of the XLSB package `workbook` was read from, when a write may return them as they are: `model` still
+ * hashes to what that package hashed to, and the write asks nothing of the container (`zip`) the original cannot
+ * honour. The hash, and the SHA-256 under it, are loaded only for a workbook that has such a package: every other
+ * write — an XLSX one above all — used to carry both in its bundle without ever calling them.
+ */
+async function unchangedSourceBytes(
+  workbook: WorkbookData,
+  model: ReturnType<typeof getWorkbookModel>,
+  options: XlsbWriteInput
+): Promise<Uint8Array | undefined> {
+  const source = (workbook as unknown as { _xlsbSource?: { bytes: Uint8Array; hash: Uint8Array } })
+    ._xlsbSource;
+  if (source === undefined || options.zip !== undefined) {
+    return undefined;
+  }
+  const { modelHash, sameHash } = await import("@excel/xlsb/model-hash");
+  return sameHash(source.hash, modelHash(model)) ? source.bytes : undefined;
 }
 
 /**

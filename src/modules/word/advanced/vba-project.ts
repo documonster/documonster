@@ -12,6 +12,7 @@
  */
 
 import { checkBytes, checkHandle, invalidArgument } from "@word/core/argument-checks";
+import { markDerived } from "@word/core/ownership";
 import type { DocxDocument, OpaquePart } from "@word/types";
 
 // =============================================================================
@@ -121,8 +122,8 @@ export function getVbaProjectData(doc: DocxDocument): Uint8Array | undefined {
  * registers the relationship + content type. Any pre-existing copies in
  * `opaqueParts` are removed so we don't emit two conflicting parts.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to add VBA to.
  * @param vbaProjectBin - The vbaProject.bin binary data (OLE2 compound).
@@ -156,21 +157,24 @@ export function addVbaProject(doc: DocxDocument, vbaProjectBin: Uint8Array): Doc
   } else if (nextDocType === "template") {
     nextDocType = "macroEnabledTemplate";
   }
-  return {
-    ...doc,
-    docType: nextDocType,
-    vbaProject: vbaProjectBin,
-    ...(filteredParts !== undefined
-      ? { opaqueParts: filteredParts.length > 0 ? filteredParts : undefined }
-      : {})
-  };
+  return markDerived(
+    {
+      ...doc,
+      docType: nextDocType,
+      vbaProject: vbaProjectBin,
+      ...(filteredParts !== undefined
+        ? { opaqueParts: filteredParts.length > 0 ? filteredParts : undefined }
+        : {})
+    },
+    doc
+  );
 }
 
 /**
  * Remove VBA project from a document (converting .docm to .docx behavior).
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The macro-enabled document.
  * @returns A new document without VBA parts.
@@ -188,12 +192,12 @@ export function removeVbaProject(doc: DocxDocument): DocxDocument {
   const next: DocxDocument = { ...doc, docType: nextDocType, vbaProject: undefined };
   if (doc.opaqueParts) {
     const filteredParts = doc.opaqueParts.filter(p => !isVbaPart(p.path));
-    return {
-      ...next,
-      opaqueParts: filteredParts.length > 0 ? filteredParts : undefined
-    };
+    return markDerived(
+      { ...next, opaqueParts: filteredParts.length > 0 ? filteredParts : undefined },
+      doc
+    );
   }
-  return next;
+  return markDerived(next, doc);
 }
 
 /**

@@ -80,12 +80,12 @@ async function withFixedClock(body: () => Promise<unknown>): Promise<void> {
 
 interface Outline {
   title: string;
-  page: number;
+  page: number | undefined;
   children: Outline[];
 }
 
 async function outline(bytes: Uint8Array): Promise<Outline[]> {
-  const strip = (items: readonly { title: string; pageIndex: number; children: any[] }[]) =>
+  const strip = (items: readonly { title: string; pageIndex?: number; children: any[] }[]) =>
     items.map((item): Outline => ({
       title: item.title,
       page: item.pageIndex,
@@ -162,7 +162,7 @@ const FULL_OUTLINE: Outline[] = [
     ]
   },
   { title: "Chapter 2", page: 3, children: [{ title: "Section 2.1", page: 3, children: [] }] },
-  { title: "Website", page: -1, children: [] }
+  { title: "Website", page: undefined, children: [] }
 ];
 
 describe("PdfEditor full rewrite — the outline", () => {
@@ -195,7 +195,7 @@ describe("PdfEditor full rewrite — the outline", () => {
       { title: "Chapter 1", page: 0, children: [{ title: "Section 1.2", page: 1, children: [] }] },
       // `[3 /Fit]` named the fourth page by index; it is the third now.
       { title: "Chapter 2", page: 2, children: [{ title: "Section 2.1", page: 2, children: [] }] },
-      { title: "Website", page: -1, children: [] }
+      { title: "Website", page: undefined, children: [] }
     ]);
     const { doc, catalog } = catalogOf(out);
     expect(counts(doc, catalog)).toEqual([
@@ -215,14 +215,14 @@ describe("PdfEditor full rewrite — the outline", () => {
     expect(await outline(out)).toEqual([
       {
         title: "Chapter 1",
-        page: -1,
+        page: undefined,
         children: [
           { title: "Section 1.1", page: 0, children: [] },
           { title: "Section 1.2", page: 1, children: [] }
         ]
       },
       { title: "Chapter 2", page: 2, children: [{ title: "Section 2.1", page: 2, children: [] }] },
-      { title: "Website", page: -1, children: [] }
+      { title: "Website", page: undefined, children: [] }
     ]);
     const { doc, catalog } = catalogOf(out);
     const first = doc.derefDict(doc.derefDict(catalog.get("Outlines"))!.get("First"))!;
@@ -299,14 +299,14 @@ describe("PdfEditor full rewrite — the outline", () => {
       [
         {
           title: "Chapter 1",
-          page: -1,
+          page: undefined,
           children: [{ title: "Section 1.1", page: 0, children: [] }]
         }
       ],
       [
         {
           title: "Chapter 1",
-          page: -1,
+          page: undefined,
           children: [{ title: "Section 1.2", page: 0, children: [] }]
         }
       ],

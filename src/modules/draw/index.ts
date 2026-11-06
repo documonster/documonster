@@ -24,19 +24,20 @@
  *
  * ## Backends
  *
- * Two ship here: `Draw.toSvg` serialises to markup, and `Draw.toRgba`
- * paints pixels. A PDF page is the third and lives in `documonster/pdf`
+ * Two ship here: `Draw.toSvg` serialises to markup, and `Draw.toPng` /
+ * `Draw.toRgba` paint pixels. A PDF page is the third and lives in `documonster/pdf`
  * (`Pdf.createDrawSurface`), because it draws onto a page builder rather than
  * producing a standalone artefact. Any of them can be driven from the same list —
  * that is the whole point of having one.
  *
- * Pixels rather than a PNG: encoding one needs DEFLATE, which sits a layer above this
- * module. Pair `Draw.toRgba` with any encoder — `Archive.encodePng` from
- * `documonster/archive` is the one this repository uses.
+ * `Draw.toPng` writes a PNG file; `Draw.toRgba` hands back the pixels for any other
+ * encoder. With rolldown or rspack only `Draw.toPng` brings DEFLATE into a bundle; esbuild
+ * keeps every member of an imported namespace.
  */
 
 import * as DrawNs from "@draw/api/draw";
 import * as MatrixNs from "@draw/api/matrix";
+import type { PngImage as DrawPngImage, ToPngOptions as DrawToPngOptions } from "@draw/api/png";
 import { checkPathCommands, checkRasterCanvas } from "@draw/arguments";
 import type {
   RasterPoint as DrawRasterPoint,
@@ -100,6 +101,8 @@ export { DrawError, DrawArgumentError, isDrawError } from "@draw/errors";
 export type { DrawSurface } from "@draw/surface";
 export type {
   DrawToSvgOptions,
+  DrawToPngOptions,
+  DrawPngImage,
   DrawRasterSurfaceOptions,
   DrawRasterizeOptions,
   DrawRasterizedImage,

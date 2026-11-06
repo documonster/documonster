@@ -25,6 +25,7 @@ import {
   invalidArgument
 } from "@word/core/argument-checks";
 import { getFileName } from "@word/core/opc-paths";
+import { markDerived } from "@word/core/ownership";
 import type {
   BodyContent,
   DocxDocument,
@@ -330,8 +331,8 @@ export function createOleEmbedding(
  *    that references the same rId and embeds the ProgId, so the object is
  *    visible in Word and round-trips through `readDocx`.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * The embedding's relationship id and part paths are kept unless `doc`
  * already uses them — adding the same embedding twice, or adding one to a
@@ -417,11 +418,14 @@ export function addOleObject(
     referencedRIds
   };
 
-  return {
-    ...doc,
-    body: [...doc.body, drawing as BodyContent],
-    oleObjects: [...(doc.oleObjects ?? []), olePartEntry]
-  };
+  return markDerived(
+    {
+      ...doc,
+      body: [...doc.body, drawing as BodyContent],
+      oleObjects: [...(doc.oleObjects ?? []), olePartEntry]
+    },
+    doc
+  );
 }
 
 const DISPLAY_AS: ReadonlySet<string> = new Set<OleDisplayAs>(["icon", "content"]);

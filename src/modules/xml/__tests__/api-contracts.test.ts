@@ -237,7 +237,7 @@ describe("argument checks of the other entry points", () => {
     await expect(Xml.feedSax({} as never, ["<a/>"])).rejects.toThrow(XmlError);
     await expect(Xml.feedSax(new Xml.SaxParser(), 42 as never)).rejects.toThrow(XmlError);
     const read = async () => {
-      for await (const _ of Xml.parseSax([new Uint8Array([0xff, 0xfe, 0x3c, 0])])) {
+      for await (const _ of Xml.parseSaxStream([new Uint8Array([0xff, 0xfe, 0x3c, 0])])) {
         // drain
       }
     };

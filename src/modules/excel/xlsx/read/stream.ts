@@ -10,6 +10,7 @@ import type { Workbook } from "@excel/core/workbook";
 import {
   CompoundFileSniffer,
   containerReadError,
+  createContainerBudget,
   decryptionOf
 } from "@excel/utils/container-errors";
 import { readXlsxEntriesInto } from "@excel/xlsx/read/package";
@@ -108,20 +109,25 @@ export async function readXlsxStreamInto(
     }
   });
 
+  const budget = createContainerBudget(options?.zip);
   const entries = (async function* () {
     for await (const entry of iterateZipEntries(parser)) {
       entry.on("error", swallowError);
+      // The container limits a buffered read applies, held as the package streams: parts counted as they
+      // arrive, bytes as they inflate — parsed or drained, every byte goes through the part's meter.
+      const meter = budget.enter(entry.path);
       const drain = async () => {
         if (entry.readableEnded || entry.destroyed) {
           return;
         }
-        const draining = entry.autodrain();
-        await draining.promise();
+        for await (const chunk of entry as AsyncIterable<Uint8Array | string>) {
+          meter(chunk);
+        }
       };
       yield {
         name: entry.path,
         type: entry.type,
-        stream: entry,
+        stream: metered(entry, meter),
         drain
       };
     }
@@ -168,6 +174,16 @@ export async function readXlsxStreamInto(
         // ignore
       }
     }
+  }
+}
+
+async function* metered(
+  source: AsyncIterable<Uint8Array | string>,
+  meter: (chunk: Uint8Array | string) => void
+): AsyncGenerator<Uint8Array | string> {
+  for await (const chunk of source) {
+    meter(chunk);
+    yield chunk;
   }
 }
 

@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Glossary, Io } from "../index";
+import { Document, Build, Glossary } from "../index";
 import type { BuildingBlock, BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -104,7 +104,7 @@ insertBlock(disclaimer);
 // content. The packager registers the glossaryDocument relationship + content
 // type automatically.
 const builtDoc = { ...d, glossary };
-const buf = await Io.toBuffer(builtDoc);
+const buf = await Document.toBuffer(builtDoc);
 fs.writeFileSync(path.join(outDir, "01-letter-from-blocks.docx"), buf);
 console.log(`  → 01-letter-from-blocks.docx (${buf.length} bytes)`);
 

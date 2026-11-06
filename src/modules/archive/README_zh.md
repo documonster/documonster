@@ -282,7 +282,7 @@ entry.discard(); // 跳过不读取
 | `signal`       | `AbortSignal`                | -         | 中止信号                     |
 | `onProgress`   | `(p: UnzipProgress) => void` | -         | 进度回调                     |
 
-**限制。** 所有读取器使用同样的两个限制:`maxEntrySize`(读入内存的最大条目,超出抛 `ArchiveFileTooLargeError`),以及 ZIP 的 `maxEntries`(`ArchiveLimitError`)——`unpackZip`、`openZip`、`RemoteZipReader` 和 `ArchiveFile` 都一样;TAR 读取器也接受 `maxEntrySize`(默认 100 MiB;`maxFileSize` 是它已弃用的旧名)。读取不是自己写出的归档时请设置它们。每个读取器在调用时检查这些限制:不是从 0 起的整数(或 `Infinity`)的限制会抛 `ArchiveArgumentError`,其字段为 `options.<限制名>`。触及限制时抛 `ArchiveLimitError`,其 `limit` 是选项名,`allowed` 是它的值——`maxEntrySize` 除外:它抛 `ArchiveFileTooLargeError`,带有同样的 `limit`(`"maxEntrySize"`)和 `allowed` 字段,另带条目的 `path`。
+**限制。** 所有读取器使用同样的两个限制:`maxEntrySize`(读入内存的最大条目),以及 ZIP 的 `maxEntries`——`unpackZip`、`openZip`、`RemoteZipReader` 和 `ArchiveFile` 都一样;TAR 读取器也接受 `maxEntrySize`(默认 100 MiB;`maxFileSize` 是它已弃用的旧名)。读取不是自己写出的归档时请设置它们。每个读取器在调用时检查这些限制:不是从 0 起的整数(或 `Infinity`)的限制会抛 `ArchiveArgumentError`,其字段为 `options.<限制名>`。触及限制时抛 `ArchiveLimitExceededError`,其 `limit` 是选项名,`allowed` 是它的值;`maxEntrySize` 抛的是它的子类 `ArchiveFileTooLargeError`,另带条目的 `path`。
 
 **字符串。** 传给读取器的字符串是归档的内容,按 UTF-8 编码——绝不是文件路径或 URL。请先读出文件的字节,或在 Node 中用 `ArchiveFile.fromFile` 打开;ZIP 的二进制内容无法完整保存在 JavaScript 字符串中。
 
@@ -462,19 +462,14 @@ const checksum = Archive.crc32Finalize(state);
 ### PNG 编码
 
 PNG 就是一个 DEFLATE 流加上带 CRC-32 校验的 chunk —— 正是上面这两样原语 —— 所以编码器住在这里，
-而不是住在某个"恰好需要图片"的模块里。它之所以存在，是因为绘图引擎刻意在像素处停下：
-`documonster/draw` 的 `Draw.toRgba` 交回 RGBA，而编码需要 DEFLATE，后者位于 `draw` 之上一层。
+而不是住在某个"恰好需要图片"的模块里。显示列表用不着直接调用它 —— `Draw.toPng` 和
+`Mermaid.toPng` 会替你调用 —— 手上已经有像素时再用它：
 
 ```typescript
 import { Archive } from "documonster/archive";
-import { Draw } from "documonster/draw";
 
-// 来自任意显示列表 —— 图表、Mermaid 图、你自己的生产者
-const image = Draw.toRgba(list, { scale: 2 });
-const png = Archive.encodePng(image.data, image.width, image.height, { dpi: 192 });
-
-// 或者来自你手上已有的像素（8 位 RGBA，行优先）
-const bytes = Archive.encodePng(rgba, width, height);
+// 8 位 RGBA，行优先
+const bytes = Archive.encodePng(rgba, width, height, { dpi: 192 });
 ```
 
 输入 8 位 RGBA，filter 0，单个 `IDAT`。给了 `dpi` 会写入 `pHYs` chunk；不给则不写。
@@ -658,10 +653,17 @@ await Fs.ensureDir("./out");
 
 ## 加密
 
-支持 ZIP 传统加密（旧版）和 AES-256 加密。
+支持 ZIP 传统加密（旧版）和 WinZip AES（128、192 或 256 位）加密。
 
 ```typescript
 import { Archive } from "documonster/archive";
+
+// 写入：所有条目都会加密。AES 只能用异步构建（依赖 Web Crypto）；
+// "zipcrypto" 也可以用 packZipSync / toBufferSync 写入。
+const encryptedZip = await Archive.packZip([["secret.txt", "classified"]], {
+  encryptionMethod: "aes-256",
+  password: "secret"
+});
 
 // 加密条目（读取时自动处理）
 const reader = Archive.openZip(encryptedZip, { password: "secret" });
@@ -696,7 +698,7 @@ import {
   ZipCrc32MismatchError,
   ArchiveRangeNotSupportedError,
   ArchiveHttpRangeError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError,
   ArchiveWorkerUnsupportedError, // 在 Node 上调用 Compression.Workers;`.operation` 指出是哪一个
   ArchiveFileError, // ArchiveFile.fromFile / writeFile 被文件系统拒绝;`.cause` 是系统错误
@@ -770,22 +772,22 @@ try {
 
 ### 压缩
 
-| 函数                                                                   | 描述                    |
-| ---------------------------------------------------------------------- | ----------------------- |
-| `Compression.deflate` / `deflateSync`                                  | DEFLATE-RAW 压缩        |
-| `Compression.inflate` / `inflateSync`                                  | DEFLATE-RAW 解压        |
-| `Compression.gzip` / `gzipSync`                                        | GZIP 压缩               |
-| `Compression.gunzip` / `gunzipSync`                                    | GZIP 解压               |
-| `Compression.zlib` / `zlibSync`                                        | Zlib 压缩               |
-| `Compression.unzlib` / `unzlibSync`                                    | Zlib 解压               |
-| `Compression.decompressAuto`                                           | 自动检测并解压          |
-| `Compression.createDeflateStream`                                      | 流式 DEFLATE 压缩器     |
-| `Compression.createInflateStream`                                      | 流式 DEFLATE 解压器     |
-| `Compression.createGzipStream`                                         | 流式 GZIP 压缩器        |
-| `Compression.createGunzipStream`                                       | 流式 GZIP 解压器        |
-| `Archive.crc32`                                                        | CRC32 校验和            |
-| `Archive.encodePng`                                                    | RGBA 像素转 PNG 字节    |
-| `Compression.Workers.deflate` / `inflate`（及 `…Batch`、`WorkerPool`） | Web Worker 池（浏览器） |
+| 函数                                                             | 描述                    |
+| ---------------------------------------------------------------- | ----------------------- |
+| `Compression.deflate` / `deflateSync`                            | DEFLATE-RAW 压缩        |
+| `Compression.inflate` / `inflateSync`                            | DEFLATE-RAW 解压        |
+| `Compression.gzip` / `gzipSync`                                  | GZIP 压缩               |
+| `Compression.gunzip` / `gunzipSync`                              | GZIP 解压               |
+| `Compression.zlib` / `zlibSync`                                  | Zlib 压缩               |
+| `Compression.unzlib` / `unzlibSync`                              | Zlib 解压               |
+| `Compression.decompressAuto`                                     | 自动检测并解压          |
+| `Compression.createDeflateStream`                                | 流式 DEFLATE 压缩器     |
+| `Compression.createInflateStream`                                | 流式 DEFLATE 解压器     |
+| `Compression.createGzipStream`                                   | 流式 GZIP 压缩器        |
+| `Compression.createGunzipStream`                                 | 流式 GZIP 解压器        |
+| `Archive.crc32`                                                  | CRC32 校验和            |
+| `Archive.encodePng`                                              | RGBA 像素转 PNG 字节    |
+| `Compression.Workers.deflate` / `inflate`（及 `…Batch`、`Pool`） | Web Worker 池（浏览器） |
 
 底层 ZipCrypto / AES 原语及其常量（`encryptZipCrypto`、`decryptAes`、`AES_KEY_LENGTH` 等）位于
 `Archive.Crypto`；普通的加密读写只需要 `password` 选项。

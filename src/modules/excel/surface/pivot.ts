@@ -70,7 +70,7 @@ export function add(ws: WorksheetData, model: PivotTableModel): PivotTable {
   );
 }
 
-/** The sheet's pivot tables, in the order they were added. */
+/** The sheet's pivot tables, in the order they were added: the handles themselves, which {@link remove} takes. */
 export function list(ws: WorksheetData): PivotTable[] {
   checkWorksheet(ws);
   return getPivotTables(ws);

@@ -30,7 +30,7 @@ import { Csv } from "documonster/csv";
 import { Cell, Column, Workbook, Worksheet } from "documonster/excel";
 import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
-import { Build, Document, Io } from "documonster/word";
+import { Build, Document } from "documonster/word";
 import { WordMarkdown } from "documonster/word/markdown";
 
 const workspace = path.resolve(
@@ -223,7 +223,7 @@ Document.addParagraph(
 Document.addHeading(spec, "Exceptions", 2);
 Document.addParagraph(spec, "Education customers are exempt from the increase.");
 Document.addBulletList(spec, ["Universities", "Registered schools", "Public libraries"]);
-await Io.writeFile(spec, path.join(workspace, "spec.docx"));
+await Document.writeFile(spec, path.join(workspace, "spec.docx"));
 
 // =============================================================================
 // 6. A Word TEMPLATE — the best-shaped task in the whole server.
@@ -248,7 +248,7 @@ Document.addParagraph(
 Document.addHeading(template, "Line items", 2);
 Document.addParagraph(template, "{{#each items}}{{.description}} — {{.amount}}{{/each}}");
 Document.addParagraph(template, "Total: {{invoice.total}}");
-await Io.writeFile(template, path.join(workspace, "invoice-template.docx"));
+await Document.writeFile(template, path.join(workspace, "invoice-template.docx"));
 
 // =============================================================================
 // 7. A PDF with extractable text, and a note about what has no tool.
@@ -303,7 +303,7 @@ Document.addContent(wordForm, {
     Build.formCheckboxField({ name: "approved", default: false })
   ]
 });
-await Io.writeFile(wordForm, path.join(workspace, "leave-request.docx"));
+await Document.writeFile(wordForm, path.join(workspace, "leave-request.docx"));
 
 const pdfForm = new Pdf.Builder();
 const formPage = pdfForm.addPage();
@@ -331,7 +331,7 @@ async function writeContract(name: string, clauses: readonly string[]): Promise<
   for (const clause of clauses) {
     Document.addParagraph(doc, clause);
   }
-  await Io.writeFile(doc, path.join(workspace, name));
+  await Document.writeFile(doc, path.join(workspace, name));
 }
 
 const baseClauses = [
@@ -368,7 +368,7 @@ Document.addContent(redlined, {
   ]
 });
 Document.addParagraph(redlined, "This agreement is governed by the law of New South Wales.");
-await Io.writeFile(redlined, path.join(workspace, "contract-redlined.docx"));
+await Document.writeFile(redlined, path.join(workspace, "contract-redlined.docx"));
 
 // =============================================================================
 // Report + ready-to-paste client configuration

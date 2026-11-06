@@ -38,7 +38,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 import { WordMarkdown } from "documonster/word/markdown";
 
 import {
@@ -185,10 +185,10 @@ const doc = await WordMarkdown.toDocx(prepared.markdown, {
 });
 const file = path.join(out, "diagram-paging.docx");
 // Re-runnable: the example is run again against its own previous output, and
-// `Io.writeFile` replaces rather than refusing.
-await Io.writeFile(doc, file);
+// `Document.writeFile` replaces rather than refusing.
+await Document.writeFile(doc, file);
 
-const written = await Io.readFile(file);
+const written = await Document.readFile(file);
 console.log(
   `\nwrote ${path.relative(process.cwd(), file)} — ${written.images?.length ?? 0} image(s) for ${CASES.length} diagram(s)`
 );

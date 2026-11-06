@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query, Styles, Theme, Units } from "../index";
+import { Document, Build, Query, Styles, Theme, Units } from "../index";
 import type { StyleDef, AbstractNumbering, NumberingInstance, DocumentTheme } from "../index";
 
 const outDir = path.resolve(
@@ -269,6 +269,6 @@ const noMatch = Styles.match(merged, "p", { "style-name": "NoSuchStyle" });
 console.log(`  matchStyleMap unknown → ${noMatch}`);
 
 // Save the underlying document for visual inspection
-const buf = await Io.toBuffer(docModel);
+const buf = await Document.toBuffer(docModel);
 fs.writeFileSync(path.join(outDir, "01-styled.docx"), buf);
 console.log(`  → 01-styled.docx (${buf.length} bytes)`);

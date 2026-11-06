@@ -11,7 +11,7 @@
 import { stat, writeFile } from "node:fs/promises";
 
 import { Pdf } from "documonster/pdf";
-import { Io } from "documonster/word";
+import { Document } from "documonster/word";
 import { WordMarkdown } from "documonster/word/markdown";
 import { z } from "zod";
 
@@ -128,7 +128,7 @@ export const docWriteTool = defineTool({
     let size: number;
     if (format === "docx") {
       await writeWithPolicy(target, args.overwrite === true, temporary =>
-        Io.writeFile(doc, temporary)
+        Document.writeFile(doc, temporary)
       );
       size = (await stat(target)).size;
     } else {

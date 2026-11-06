@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,7 +32,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // paragraph for a document with no content).
 // ---------------------------------------------------------------------------
 const emptyDoc = Document.create();
-const emptyBuf = await Io.toBuffer(emptyDoc);
+const emptyBuf = await Document.toBuffer(emptyDoc);
 fs.writeFileSync(path.join(outDir, "01-basics-empty.docx"), emptyBuf);
 console.log(`  → 01-basics-empty.docx (${emptyBuf.length} bytes)`);
 
@@ -208,6 +208,6 @@ Document.addParagraph(doc, "Control char dropped: [\u0007] bell, [\u0001] SOH.")
 // ---------------------------------------------------------------------------
 // Build & write
 // ---------------------------------------------------------------------------
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "01-basics.docx"), buf);
 console.log(`  → 01-basics.docx (${buf.length} bytes)`);

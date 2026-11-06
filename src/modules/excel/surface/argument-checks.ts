@@ -4,12 +4,20 @@
  */
 import { isNoteData } from "@excel/core/note";
 import { getImage } from "@excel/core/workbook-core";
+import type { HeaderFooterImageOptions } from "@excel/core/worksheet";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { getSheetWorkbook } from "@excel/core/worksheet-core";
 import { ExcelImageError } from "@excel/errors";
+import type {
+  DataValidationRule,
+  DataValidationWithFormulae,
+  WatermarkOptions
+} from "@excel/types";
 import type { ArgumentChecks } from "@excel/utils/arguments";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import { checkStyleFacet } from "@excel/utils/style-checks";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 const MAX_ROW = 1048576;
 const MAX_COL = 16384;
@@ -26,53 +34,94 @@ export function checkImageId(where: string, ws: WorksheetData, imageId: unknown)
   }
 }
 
-// `time` is not in the published union, but readers return it and both writers write it back (see
-// `DataValidationWithFormulae.type`).
-const TYPES = ["any", "list", "whole", "decimal", "date", "time", "textLength", "custom"];
-const OPERATORS = [
-  "between",
-  "notBetween",
-  "equal",
-  "notEqual",
-  "greaterThan",
-  "lessThan",
-  "greaterThanOrEqual",
-  "lessThanOrEqual"
-];
-const ERROR_STYLES = ["stop", "warning", "information"];
+const DATA_VALIDATION_TYPES = [
+  "any",
+  "list",
+  "whole",
+  "decimal",
+  "date",
+  "time",
+  "textLength",
+  "custom"
+] as const;
+
+/** The keys every rule takes, in the order they are checked. */
+const dataValidationBaseShape = {
+  // The file format's enumeration; the published type says `string`, which is what it reads back.
+  errorStyle: s.member<string>(["stop", "warning", "information"]).optional(),
+  allowBlank: s.boolean().optional(),
+  showErrorMessage: s.boolean().optional(),
+  showInputMessage: s.boolean().optional(),
+  showDropDown: s.boolean().optional(),
+  error: s.string().optional(),
+  errorTitle: s.string().optional(),
+  prompt: s.string().optional(),
+  promptTitle: s.string().optional()
+};
+
+const dataValidationWithFormulaeSchema = s.object({
+  // Settled by the variant's tag. `time` is not in the published union, but readers return it and both writers
+  // write it back (see `DataValidationWithFormulae.type`), so it is a tag too.
+  type: s.unknown<DataValidationWithFormulae["type"]>(),
+  operator: s
+    .literal(
+      "between",
+      "notBetween",
+      "equal",
+      "notEqual",
+      "greaterThan",
+      "lessThan",
+      "greaterThanOrEqual",
+      "lessThanOrEqual"
+    )
+    .optional(),
+  ...dataValidationBaseShape,
+  // A rule with no bounds is accepted, as Excel accepts it.
+  formulae: s
+    .array(
+      s.custom<string | number | Date>(
+        formula =>
+          (typeof formula === "string" && formula.trim() !== "") ||
+          (typeof formula === "number" && Number.isFinite(formula)) ||
+          (formula instanceof Date && !Number.isNaN(formula.getTime())),
+        "a formula, a finite number or a valid Date"
+      )
+    )
+    .refine(formulae => formulae.length <= 2, "an array of 0 to 2 items")
+    .orUndefined()
+});
+
+const dataValidationAnySchema = s.object({
+  type: s.literal("any"),
+  ...dataValidationBaseShape
+});
+
+const dataValidationRuleSchema = s.variant(
+  "type",
+  {
+    any: dataValidationAnySchema,
+    list: dataValidationWithFormulaeSchema,
+    whole: dataValidationWithFormulaeSchema,
+    decimal: dataValidationWithFormulaeSchema,
+    date: dataValidationWithFormulaeSchema,
+    time: dataValidationWithFormulaeSchema,
+    textLength: dataValidationWithFormulaeSchema,
+    custom: dataValidationWithFormulaeSchema
+  },
+  { unknownTag: `one of ${DATA_VALIDATION_TYPES.map(t => JSON.stringify(t)).join(", ")}` }
+);
+const _dataValidationRuleMatch: SchemaMatches<typeof dataValidationRuleSchema, DataValidationRule> =
+  true;
+void _dataValidationRuleMatch;
 
 /**
  * Check a validation rule's vocabulary: the type, operator and error style are the file format's enumerations, the
  * flags are booleans, the messages strings, and the bounds at most two formulas, numbers or dates. A rule with no
- * bounds is accepted, as Excel accepts it.
+ * bounds is accepted, as Excel accepts it. An `any` rule has no operator or bounds, and any it is given are not
+ * written. `undefined` removes the cell's rule, as it always has.
  */
 export function checkDataValidationRule(where: string, rule: unknown): void {
-  const check = argumentChecks(where);
-  // `undefined` removes the cell's rule, as it always has.
-  if (!check.record("rule", rule)) {
-    return;
-  }
-  check.required("rule.type", rule.type);
-  check.oneOf("rule.type", rule.type, TYPES);
-  check.oneOf("rule.operator", rule.operator, OPERATORS);
-  check.oneOf("rule.errorStyle", rule.errorStyle, ERROR_STYLES);
-  for (const flag of ["allowBlank", "showErrorMessage", "showInputMessage", "showDropDown"]) {
-    check.boolean(`rule.${flag}`, rule[flag]);
-  }
-  for (const text of ["error", "errorTitle", "prompt", "promptTitle"]) {
-    check.string(`rule.${text}`, rule[text]);
-  }
-  if (check.array("rule.formulae", rule.formulae, { max: 2 })) {
-    rule.formulae.forEach((formula, i) => {
-      const ok =
-        (typeof formula === "string" && formula.trim() !== "") ||
-        (typeof formula === "number" && Number.isFinite(formula)) ||
-        (formula instanceof Date && !Number.isNaN(formula.getTime()));
-      if (!ok) {
-        check.fail(`rule.formulae[${i}]`, "a formula, a finite number or a valid Date", formula);
-      }
-    });
-  }
+  checkSchema(where, "rule", dataValidationRuleSchema.optional(), rule);
 }
 
 /**
@@ -162,29 +211,44 @@ export function checkAutoFilter(where: string, field: string, range: unknown): v
   }
 }
 
-const POSITIONS = ["LH", "CH", "RH", "LF", "CF", "RF"];
-const APPLY_TO = ["all", "odd", "even", "first"];
+const POSITIONS = ["LH", "CH", "RH", "LF", "CF", "RF"] as const;
+const position = () => s.literal(...POSITIONS);
+// Points, written into the VML shape's `style`, where `NaN` and a negative size are not lengths.
+const points = () => s.number({ finite: true, min: 0 }).optional();
+const applyTo = () => s.literal("all", "odd", "even", "first").optional();
+// Checked against the workbook's images by `checkImageId`, refused with an `ExcelImageError`.
+const imageId = () => s.unknown<string | number>();
 
-/** A header/footer picture's section, size and page variants, as `HeaderFooterImage.set` and `Watermark.set` take them. */
-export function checkHeaderImage(
-  check: ArgumentChecks,
-  argument: string,
-  keys: { position: string; width: string; height: string; applyTo: string },
-  options: Record<string, unknown>
-): void {
-  const at = (key: string) => `${argument}.${key}`;
-  check.oneOf(at(keys.position), options[keys.position], POSITIONS);
-  // Points, written into the VML shape's `style`, where `NaN` and a negative size are not lengths.
-  check.number(at(keys.width), options[keys.width], { min: 0 });
-  check.number(at(keys.height), options[keys.height], { min: 0 });
-  check.oneOf(at(keys.applyTo), options[keys.applyTo], APPLY_TO);
-}
+/** `HeaderFooterImage.set`'s options. */
+export const headerFooterImageOptionsSchema = s.object({
+  imageId: imageId(),
+  position: position(),
+  width: points(),
+  height: points(),
+  applyTo: applyTo()
+});
+const _headerFooterImageOptionsMatch: SchemaMatches<
+  typeof headerFooterImageOptionsSchema,
+  HeaderFooterImageOptions
+> = true;
+void _headerFooterImageOptionsMatch;
+
+/** `Watermark.set`'s options. */
+export const watermarkOptionsSchema = s.object({
+  imageId: imageId(),
+  mode: s.literal("overlay", "header").optional(),
+  opacity: s.number({ finite: true, min: 0, max: 1 }).optional(),
+  headerWidth: points(),
+  headerHeight: points(),
+  position: position().optional(),
+  applyTo: applyTo()
+});
+const _watermarkOptionsMatch: SchemaMatches<typeof watermarkOptionsSchema, WatermarkOptions> = true;
+void _watermarkOptionsMatch;
 
 /** A header/footer section (`"LH"` … `"RF"`), as `HeaderFooterImage.remove` takes it. */
-export function checkHeaderPosition(where: string, argument: string, position: unknown): void {
-  const check = argumentChecks(where);
-  check.required(argument, position);
-  check.oneOf(argument, position, POSITIONS);
+export function checkHeaderPosition(where: string, argument: string, value: unknown): void {
+  checkSchema(where, argument, position(), value);
 }
 
 /**

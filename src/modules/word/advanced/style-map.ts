@@ -18,6 +18,7 @@
  * ```
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import {
   checkArray,
   checkBoolean,
@@ -28,6 +29,7 @@ import {
   checkString,
   invalidArgument
 } from "@word/core/argument-checks";
+import { checkSchema, model, w } from "@word/core/option-schema";
 
 // =============================================================================
 // Types
@@ -93,6 +95,14 @@ export interface StyleMapOptions {
   /** Whether to include default mappings (Heading → h1-h6, etc.). */
   readonly includeDefaults?: boolean;
 }
+
+/** `base` is a style map, which `checkStyleMap` checks. */
+const styleMapOptionsSchema = w.record({
+  base: model<StyleMap>(),
+  includeDefaults: w.boolean().optional()
+});
+const _styleMapOptionsMatch: SchemaMatches<typeof styleMapOptionsSchema, StyleMapOptions> = true;
+void _styleMapOptionsMatch;
 
 // =============================================================================
 // Default Mappings
@@ -287,8 +297,7 @@ export const DEFAULT_STYLE_MAP: StyleMap = {
 export function parseStyleMap(dsl: string, options?: StyleMapOptions): StyleMap {
   const where = "Styles.parse";
   checkString(dsl, "dsl", where);
-  checkRecord(options, "options", where, { optional: true });
-  checkBoolean(options?.includeDefaults, "options.includeDefaults", where, { optional: true });
+  checkSchema(styleMapOptionsSchema.optional(), options, where);
   if (options?.base !== undefined) {
     checkStyleMap(options.base, "options.base", where);
   }

@@ -1,15 +1,5 @@
 import type { Worksheet } from "@excel/core/worksheet";
-import type {
-  Style,
-  NumFmt,
-  Font,
-  Alignment,
-  Protection,
-  Borders,
-  Fill,
-  CellValue,
-  ColBreak
-} from "@excel/types";
+import type { Style, Font, Alignment, CellValue, ColBreak } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { deepEqual } from "@utils/object";
 import type { DeepReadonly } from "@utils/types";
@@ -220,28 +210,12 @@ export function columnAddPageBreak(c: ColumnData): void {
   c.worksheet.colBreaks.push({ id: c.number, max: LAST_ROW_INDEX, man: 1 } satisfies ColBreak);
 }
 
-export function columnNumFmt(c: ColumnData): string | NumFmt | undefined {
-  return c.style.numFmt;
-}
-
 export function columnFont(c: ColumnData): Partial<Font> | undefined {
   return c.style.font;
 }
 
 export function columnAlignment(c: ColumnData): Partial<Alignment> | undefined {
   return c.style.alignment;
-}
-
-export function columnProtection(c: ColumnData): Partial<Protection> | undefined {
-  return c.style.protection;
-}
-
-export function columnBorder(c: ColumnData): Partial<Borders> | undefined {
-  return c.style.border;
-}
-
-export function columnFill(c: ColumnData): Fill | undefined {
-  return c.style.fill;
 }
 
 export function columnToModel(columns: readonly ColumnData[]): ColumnModel[] | undefined {

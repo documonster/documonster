@@ -1072,7 +1072,7 @@ describe("PDF Reader - Image Extraction", () => {
 
     const img = page.images[0];
     // Our test PNG has alpha channel, so SMask should be present
-    expect(img.alphaMask).not.toBeNull();
+    expect(img.alphaMask).toBeDefined();
     if (img.alphaMask) {
       expect(img.alphaMask.length).toBeGreaterThan(0);
     }
@@ -2156,10 +2156,14 @@ describe("PDF Reader - Annotation Extraction", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Links");
     const row = Row.add(sheet, ["Click here"]);
-    Cell.setValue(sheet, row, 1, {
-      text: "Example",
-      hyperlink: "https://example.com"
-    });
+    Cell.setValue(
+      sheet,
+      { row, col: 1 },
+      {
+        text: "Example",
+        hyperlink: "https://example.com"
+      }
+    );
 
     const pdfBytes = await excelToPdf(workbook);
     const result = await readPdf(pdfBytes);

@@ -25,6 +25,7 @@ import {
   resolveSplitFields,
   rewriteSplitFields
 } from "@word/core/field-view";
+import { ownTree } from "@word/core/ownership";
 import { hyperlinkContent, isHyperlink, isRun } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type {
@@ -78,6 +79,7 @@ export function mailMerge(
       : (data as Record<string, string>);
   checkRecord(options, "options", where, { optional: true });
   checkBoolean(options?.removeUnmatched, "options.removeUnmatched", where, { optional: true });
+  ownTree(doc);
   let count = 0;
   const removeUnmatched = options?.removeUnmatched ?? false;
 

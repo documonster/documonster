@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Build, Document, Io, Query, Transform } from "../index";
+import { Build, Document, Query, Transform } from "../index";
 import type { DocxTransformer, DocxVisitor, BodyContent, DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -198,7 +198,7 @@ const originalText = originalParas.map(p =>
 );
 console.log(`  pristine input still has lowercase: ${originalText.some(t => /[a-z]/.test(t))}`);
 
-const transformedBuf = await Io.toBuffer(transformed);
+const transformedBuf = await Document.toBuffer(transformed);
 fs.writeFileSync(path.join(outDir, "01-uppercased-no-tables.docx"), transformedBuf);
 console.log(`  → 01-uppercased-no-tables.docx (${transformedBuf.length} bytes)`);
 
@@ -235,7 +235,7 @@ Document.addParagraph(seed, "EXPAND:hello");
 Document.addParagraph(seed, "Plain again");
 const expanded = Transform.map(seed, expander);
 console.log(`  expander: 3 → ${expanded.body.length} body items`);
-fs.writeFileSync(path.join(outDir, "02-expanded.docx"), await Io.toBuffer(expanded));
+fs.writeFileSync(path.join(outDir, "02-expanded.docx"), await Document.toBuffer(expanded));
 console.log(`  → 02-expanded.docx`);
 
 // ---------------------------------------------------------------------------
@@ -247,5 +247,5 @@ const emptied = Transform.map(doc, {
   }
 });
 console.log(`  emptied body length: ${emptied.body.length}`);
-fs.writeFileSync(path.join(outDir, "03-empty-after-map.docx"), await Io.toBuffer(emptied));
+fs.writeFileSync(path.join(outDir, "03-empty-after-map.docx"), await Document.toBuffer(emptied));
 console.log(`  → 03-empty-after-map.docx`);

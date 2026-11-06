@@ -12,13 +12,13 @@ Documonster 是一个零依赖的 TypeScript 电子表格和文档工具包：
 
 - **AI 友好** — 简洁一致的 API,专为 AI 编程助手设计。每个模块都配有完整的文档和可运行的示例供 AI 学习。另提供 [MCP 服务器](packages/mcp/README.md),供需要操作真实文件的 AI 客户端使用
 - **零运行时依赖** — 纯 TypeScript,无外部包
-- **九大模块** — Excel、Word、Formula、PDF、CSV、Markdown、XML、Archive、Stream
+- **独立模块** — Excel、Word、Formula、PDF、CSV、Markdown、XML、Archive、Stream、Draw、Mermaid
 - **跨平台** — Node.js LTS + Current（22、24、26）、Bun latest、Chrome 98+、Firefox 102+、Safari 15.4+
 - **纯 ESM** — 原生 ES Modules,完整 tree-shaking;CommonJS 消费者在 Node >= 22.13 上写法不变,直接 `require()`
 
 ## 模块
 
-Documonster 由九个独立模块组成,每个模块都有自己的文档和可运行示例。
+Documonster 由多个独立模块组成,每个模块都有自己的文档和可运行示例。
 
 ### Excel — XLSX/JSON 工作簿管理器
 
@@ -113,7 +113,7 @@ pnpm add documonster
 bun add documonster
 ```
 
-每个模块都可以作为独立的子路径导出使用。所有子路径均支持 `browser`、`import`（ESM）和 `require`（CJS）条件导出。
+每个模块都可以作为独立的子路径导出使用。每个子路径都在默认 ESM 构建之外提供 `browser` 条件；没有单独的 CommonJS 构建——CommonJS 使用者在 Node >= 22.13 上直接 `require()` 同一份文件。
 
 ## 快速开始
 
@@ -175,12 +175,12 @@ import { Markdown } from "documonster/markdown";
 const table = Markdown.parse("| A | B |\n|---|---|\n| 1 | 2 |");
 
 // Word — 创建、读取和转换 DOCX
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 const wdoc = Document.create();
 Document.addHeading(wdoc, "报告", 1);
 Document.addParagraph(wdoc, "由 Documonster 生成。");
-const docxBytes = await Io.toBuffer(wdoc);
-const parsedDocx = await Io.read(docxBytes); // 往返读取
+const docxBytes = await Document.toBuffer(wdoc);
+const parsedDocx = await Document.read(docxBytes); // 往返读取
 
 // Formula — 可选的公式引擎(默认不打进主 bundle)
 // 重算 excel workbook：走 excel/formula subpath。

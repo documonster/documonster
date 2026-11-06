@@ -109,7 +109,7 @@ for (const incremental of [false, true]) {
       expect(xml).not.toContain("xmp:ModifyDate");
       expect(xml).not.toContain("pdf:Producer");
       expect(xml).toContain("S</rdf:li>");
-      expect((await Pdf.extract(out)).metadata.modDate).toBeNull();
+      expect((await Pdf.extract(out)).metadata.modDate).toBeUndefined();
     });
   });
 }

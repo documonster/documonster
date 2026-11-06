@@ -22,7 +22,7 @@ import {
   Units,
   Validation,
   type BodyContent,
-  type DiscardUnrecognizedValuesOptions,
+  type DocxDiscardUnrecognizedValuesOptions,
   type DocxDocument,
   type Paragraph,
   type Run,
@@ -1082,7 +1082,7 @@ const INVALID_OPTIONS: [string, string, (doc: Doc) => unknown][] = [
   ],
   [
     "WordHtml.toDocx(classStyles)",
-    "options.classStyles.a",
+    'options.classStyles["a"]',
     () => WordHtml.toDocx("<p>x</p>", { classStyles: { a: 1 as never } })
   ],
   ["WordMarkdown.toDocx(markdown)", "markdown", () => WordMarkdown.toDocx(5 as never)],
@@ -1472,9 +1472,9 @@ describe("a file's word outside the vocabulary is kept as read, not dropped or r
     expect(Document.discardUnrecognizedValues(doc)).toBe(0);
   });
 
-  it("takes its options as the flat DiscardUnrecognizedValuesOptions type, as Excel does", async () => {
+  it("takes its options as the flat DocxDiscardUnrecognizedValuesOptions type, as Excel does", async () => {
     const doc = await Io.read(await source());
-    const options: DiscardUnrecognizedValuesOptions = { filter: () => false };
+    const options: DocxDiscardUnrecognizedValuesOptions = { filter: () => false };
     expect(Document.discardUnrecognizedValues(doc, options)).toBe(0);
   });
 

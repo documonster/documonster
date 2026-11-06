@@ -3,8 +3,8 @@
  */
 
 import { ArchiveArgumentError } from "@archive/core/errors";
-import type { AesKeyStrength } from "@archive/crypto/aes";
-import { checkKeyStrength } from "@archive/crypto/aes";
+import type { AesKeyStrength } from "@archive/crypto/aes-format";
+import { checkKeyStrength } from "@archive/crypto/aes-format";
 import { describeValue } from "@utils/describe-value";
 
 /**

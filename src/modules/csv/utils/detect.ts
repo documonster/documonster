@@ -16,7 +16,11 @@
 
 import { CsvArgumentError } from "@csv/errors";
 import { detectDelimiterFor } from "@csv/parse/delimiter-detector";
-import { checkDetectDelimiterOptions, checkTextInput } from "@csv/utils/check-options";
+import {
+  checkDetectDelimiterOptions,
+  checkDetectLinebreakOptions,
+  checkTextInput
+} from "@csv/utils/check-options";
 import { isRecordArgument } from "@utils/object";
 
 // =============================================================================
@@ -115,7 +119,7 @@ export function applyFirstChunkPreprocessing(
     } else if (result !== undefined && result !== null) {
       throw new CsvArgumentError(
         "options.beforeFirstChunk",
-        `${where}: beforeFirstChunk must return a string or undefined, got ${typeof result}`
+        `${where}: options.beforeFirstChunk must return a string or undefined, got ${typeof result}`
       );
     }
   }
@@ -169,6 +173,9 @@ export function detectLinebreak(
   optionsOrQuote?: CsvDetectLinebreakOptions | string
 ): string {
   checkTextInput("Csv.detectLinebreak", input);
+  if (isRecordArgument(optionsOrQuote)) {
+    checkDetectLinebreakOptions(optionsOrQuote);
+  }
   // Only `undefined` defaults the positional quote: a `null` placeholder there has always meant
   // "no quote character", so line breaks inside quotes are not skipped.
   const quote = isRecordArgument(optionsOrQuote)
@@ -285,7 +292,7 @@ export function detectDelimiter(
 ): string {
   checkTextInput("Csv.detectDelimiter", input);
   if (isRecordArgument(optionsOrQuote)) {
-    checkDetectDelimiterOptions(optionsOrQuote as Record<string, unknown>);
+    checkDetectDelimiterOptions(optionsOrQuote);
     return detectDelimiterFor(input, {
       quote: optionsOrQuote.quote ?? '"',
       comment: optionsOrQuote.comment,

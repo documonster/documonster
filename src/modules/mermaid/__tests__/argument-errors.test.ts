@@ -130,3 +130,36 @@ describe("handles are checked (X10)", () => {
     expect(() => centredText(42 as never, ["a"], 10, "Arial", black)).toThrow(MermaidArgumentError);
   });
 });
+
+describe("refusals read as every other module's do", () => {
+  it("name the call and the field, and show the value", () => {
+    const fontSize = argumentError(() => Mermaid.toSvg("flowchart TD\nA-->B", { fontSize: NaN }));
+    expect(fontSize.field).toBe("options.fontSize");
+    expect(fontSize.message).toBe(
+      "Mermaid.toSvg: options.fontSize must be a finite number > 0, got NaN"
+    );
+    const box = argumentError(() =>
+      Mermaid.createCenteredText({ x: 0, y: 0, width: 1, height: 1 }, ["a", 2 as never], {
+        size: 10
+      })
+    );
+    expect(box.field).toBe("lines[1]");
+    expect(box.message).toBe("Mermaid.createCenteredText: lines[1] must be a string, got 2");
+  });
+
+  it("refuse an array box at the box, not at its missing x", () => {
+    const err = argumentError(() => Mermaid.createCenteredText([] as never, ["a"], { size: 10 }));
+    expect(err.field).toBe("box");
+    expect(err.message).toBe(
+      "Mermaid.createCenteredText: box must be { x, y, width, height }, got an array"
+    );
+  });
+
+  it("name the palette entry that is not a colour", () => {
+    const err = argumentError(() => Mermaid.resolveTheme({ palette: ["#fff", 3 as never] }));
+    expect(err.field).toBe("options.palette[1]");
+    expect(err.message).toMatch(
+      /^Mermaid\.resolveTheme: options\.palette\[1\] must be a CSS colour .*, got 3$/
+    );
+  });
+});

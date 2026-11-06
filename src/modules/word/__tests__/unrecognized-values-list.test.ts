@@ -2,7 +2,7 @@
  * `Document.listUnrecognizedValues(doc)` lists the values `Io.read` kept
  * because they are outside their field's vocabulary, as they are kept *now*:
  * an edit that takes over a field, or a discard, takes the value off the list.
- * Each is an `UnrecognizedValue` — `{ path, value }` with the path
+ * Each is a `DocxUnrecognizedValue` — `{ path, value }` with the path
  * `Validation.validate` and `Document.discardUnrecognizedValues` use — and the
  * discard filter is given the same objects.
  */
@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 
 import { Document, Io, Package, Validation } from "../index";
-import type { DocxDocument, Paragraph, UnrecognizedValue } from "../index";
+import type { DocxDocument, Paragraph, DocxUnrecognizedValue } from "../index";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -33,7 +33,7 @@ async function read(): Promise<DocxDocument> {
 describe("Document.listUnrecognizedValues", () => {
   it("lists every kept value with the path Validation.validate reports", async () => {
     const doc = await read();
-    const listed: UnrecognizedValue[] = Document.listUnrecognizedValues(doc);
+    const listed: DocxUnrecognizedValue[] = Document.listUnrecognizedValues(doc);
     expect(listed).toEqual([
       { path: "body[0].properties.alignment", value: "bogus" },
       { path: "body[0].children[0].properties.underline", value: "squiggle" }
@@ -61,9 +61,9 @@ describe("Document.listUnrecognizedValues", () => {
     expect(Document.listUnrecognizedValues(doc)).toEqual([]);
   });
 
-  it("gives the discard filter the same UnrecognizedValue it lists", async () => {
+  it("gives the discard filter the same DocxUnrecognizedValue it lists", async () => {
     const doc = await read();
-    const seen: UnrecognizedValue[] = [];
+    const seen: DocxUnrecognizedValue[] = [];
     Document.discardUnrecognizedValues(doc, {
       filter: v => {
         seen.push(v);

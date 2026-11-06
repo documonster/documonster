@@ -3,7 +3,7 @@
  * what they are given, so that a value with no valid form in the package is
  * refused by the call that received it — with a {@link DocxArgumentError}
  * naming the function and the field — rather than written into a part Word
- * refuses, or rejected later by `Io.toBuffer` with an error that names an XML
+ * refuses, or rejected later by `Document.toBuffer` with an error that names an XML
  * attribute instead of the argument.
  *
  * The rules follow the schema types the values are written as: half-points,
@@ -19,7 +19,9 @@
 
 import { describeValue } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
+import type { SchemaMatches } from "@utils/schema";
 import { setAsideValue, unrecognizedValue } from "@utils/unrecognized-values";
+import { checkSchema, w } from "@word/core/option-schema";
 import { DocxArgumentError } from "@word/errors";
 import { HASH_ALGORITHM_NAMES } from "@word/security/hash-names";
 import type {
@@ -28,6 +30,7 @@ import type {
   BodyContent,
   ChartLegendPosition,
   CoreProperties,
+  DocxOptions,
   Border,
   BorderStyle,
   ChartType,
@@ -416,8 +419,8 @@ export function under(parameter: string): FieldName {
 
 /**
  * The `where` of a check that cannot know its public caller: the writer's
- * validation of a document model, which every writing entry point (`Io.toBuffer`,
- * `Io.writeFile`, `Package.*`, the streaming writer) shares. Its message states
+ * validation of a document model, which every writing entry point (`Document.toBuffer`,
+ * `Document.writeFile`, `Package.*`, the streaming writer) shares. Its message states
  * the problem without a prefix, and `field` (the model path) plus the stack
  * locate it — see AGENTS.md, "An argument error says where".
  */
@@ -487,20 +490,24 @@ export function checkDateTime(
 }
 
 /**
- * The options of a function that writes a package: an object, its
- * `compressionLevel` a ZIP deflate level (0–9) and its `modTime`, when it has
- * one, a valid `Date`. Checked here so a bad level is the Word API's error
- * naming the option, not the archive's naming its own parameter.
+ * The options every function that writes a package takes: `compressionLevel` a ZIP deflate
+ * level (0–9) and `modTime`, when there is one, a valid `Date`. Checked here so a bad level is
+ * the Word API's error naming the option, not the archive's naming its own parameter.
  */
+export const packageOptionsShape = {
+  compressionLevel: w.integer({ min: 0, max: 9 }).optional(),
+  modTime: w.validDate().optional()
+};
+
+const docxOptionsSchema = w.record({ compressionLevel: packageOptionsShape.compressionLevel });
+const _docxOptionsMatch: SchemaMatches<typeof docxOptionsSchema, DocxOptions> = true;
+void _docxOptionsMatch;
+
+const packageOptionsSchema = w.record(packageOptionsShape).optional();
+
+/** The options of a function that writes a package: see {@link packageOptionsShape}. */
 export function checkPackageOptions(value: unknown, field: string, where: string): void {
-  checkRecord(value, field, where, { optional: true });
-  const options = value as { compressionLevel?: unknown; modTime?: unknown } | undefined;
-  checkInteger(options?.compressionLevel, `${field}.compressionLevel`, where, {
-    optional: true,
-    min: 0,
-    max: 9
-  });
-  checkValidDate(options?.modTime, `${field}.modTime`, where, { optional: true });
+  checkSchema(packageOptionsSchema, value, where, field);
 }
 
 /**
@@ -550,7 +557,7 @@ export function checkBoolean(
 
 /** The handles Word's functions take, each told apart by the list it always holds. */
 const HANDLES = {
-  document: { list: "body", expected: "a DocxDocument (from Document.create or Io.read)" },
+  document: { list: "body", expected: "a DocxDocument (from Document.create or Document.read)" },
   glossary: {
     list: "blocks",
     expected: "a GlossaryDocument (from Glossary.create or doc.glossary)"

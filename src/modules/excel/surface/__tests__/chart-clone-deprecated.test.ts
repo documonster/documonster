@@ -16,7 +16,8 @@ describe("Chart.clone (deprecated forward)", () => {
     const viaCopy = sheetWithChart();
     const a = Chart.clone(Chart.list(viaClone)[0]);
     const b = Chart.copyTo(Chart.list(viaCopy)[0], viaCopy);
-    expect(a).toBe(b);
+    expect(a).toBe(b.chartNumber);
+    expect(b).toBe(Chart.list(viaCopy)[1]);
     expect(Chart.getAnchorModel(Chart.list(viaClone)[1])).toEqual(
       Chart.getAnchorModel(Chart.list(viaCopy)[1])
     );

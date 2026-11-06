@@ -102,7 +102,7 @@ describe("a full rewrite keeps the information dictionary", () => {
         const meta = (await Pdf.extract(out, password ? { password } : undefined)).metadata;
         expect(meta.title).toBe("Changed");
         expect(meta.author).toBe("Ann");
-        if (meta.xmpXml !== null) {
+        if (meta.xmpXml !== undefined) {
           expect(meta.xmpXml).toContain(">Changed</");
         }
       }

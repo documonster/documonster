@@ -7,7 +7,7 @@
  * and per-header/footer relationship files.
  */
 
-import { zip } from "@archive/create-archive";
+import { createZip } from "@archive/create-archive";
 import type { EncryptOptions } from "@archive/office-crypto/agile";
 import { fitZipModTime } from "@archive/zip-spec/timestamps";
 import { finalizeDocument } from "@word/builder/document-finalize";
@@ -49,9 +49,10 @@ import type {
   AltChunk,
   EmbeddedFont,
   ImageDef,
-  SectionProperties
+  SectionProperties,
+  Watermark
 } from "@word/types";
-import { renderChartPart } from "@word/writer/chart-writer";
+import type { renderChartPart as chartPartRenderer } from "@word/writer/chart-writer";
 import { renderComments, renderCommentsExtended } from "@word/writer/comment-writer";
 import {
   createContentTypes,
@@ -67,7 +68,8 @@ import { isGlossaryAsRead, renderGlossaryDocument } from "@word/writer/glossary-
 import {
   renderHeader,
   renderFooter,
-  renderWatermarkHeader
+  renderWatermarkHeader,
+  sizeWatermark
 } from "@word/writer/header-footer-writer";
 import type { HeaderWatermark } from "@word/writer/header-footer-writer";
 import { assertUniqueReferencedIds } from "@word/writer/id-uniqueness";
@@ -247,8 +249,8 @@ function resolveDocumentContentType(doc: DocxDocument): string {
 }
 
 /**
- * Options for writing a document — `Io.toBuffer`, `Io.toBase64`,
- * `Io.writeFile`.
+ * Options for writing a document — `Document.toBuffer`, `Document.toBase64`,
+ * `Document.writeFile`.
  */
 export interface DocxWriteOptions {
   /** ZIP compression level (0-9). Default: backend-specific (typically 6). */
@@ -267,7 +269,7 @@ export interface DocxWriteOptions {
   readonly securityPolicy?: DocxSecurityPolicy;
   /**
    * Encrypt the package with this password (1 to 255 characters) — Agile Encryption in a compound file, what
-   * Word writes for "Encrypt with Password", and what `Io.read(bytes, { password })` opens. Absent: the package is
+   * Word writes for "Encrypt with Password", and what `Document.read(bytes, { password })` opens. Absent: the package is
    * written unencrypted. The same option `Workbook.toBuffer` takes.
    */
   readonly password?: string;
@@ -296,10 +298,13 @@ export async function packageDocx(
     assertUniqueReferencedIds(finalized);
     // Create a working copy so we never mutate the caller's doc
     const workDoc = shallowCopyDocForPackaging(finalized);
+    // What rendering needs loaded or measured is awaited first: the render below
+    // may not await until every part is written.
+    const prepared = await prepareForRender(workDoc);
     // The package's revision map is in effect while its parts are rendered,
     // which `_packageDocxInner` does synchronously before its first await; the
     // scope ends there, so no other code ever runs with it in effect.
-    return await withRevisionScope(() => _packageDocxInner(workDoc, opts));
+    return await withRevisionScope(() => _packageDocxInner(workDoc, opts, prepared));
   } catch (error) {
     // A model the writer cannot write — an unknown node kind, a list that is
     // not an array — may trip any pass that walks it first. Checking the tree
@@ -424,11 +429,40 @@ export function uniqueSanitizedName(
   return candidate;
 }
 
+/**
+ * What only some documents need, loaded or computed before the synchronous render: the chart part's serialiser, for a
+ * document with a chart, and the watermark sized with {@link sizeWatermark}. Kept out of the render because it may not
+ * await until every part is written, and out of the static imports so a document without them does not carry them.
+ */
+interface RenderPrerequisites {
+  readonly renderChartPart: typeof chartPartRenderer | undefined;
+  readonly watermark: Watermark | undefined;
+}
+
+async function prepareForRender(doc: DocxDocument): Promise<RenderPrerequisites> {
+  const [chartWriter, watermark] = await Promise.all([
+    hasCharts(doc) ? import("@word/writer/chart-writer") : undefined,
+    doc.watermark && sizeWatermark(doc.watermark)
+  ]);
+  return { renderChartPart: chartWriter?.renderChartPart, watermark };
+}
+
+/** Whether the body or a header or footer holds a chart — what the render collects into `charts`. */
+function hasCharts(doc: DocxDocument): boolean {
+  const found: ChartContent[] = [];
+  collectCharts(doc.body, found);
+  for (const part of [...(doc.headers?.values() ?? []), ...(doc.footers?.values() ?? [])]) {
+    collectChartsFromHeaderFooter(part.content, found);
+  }
+  return found.length > 0;
+}
+
 async function _packageDocxInner(
   doc: DocxDocument,
-  options: DocxWriteOptions
+  options: DocxWriteOptions,
+  prepared: RenderPrerequisites
 ): Promise<Uint8Array> {
-  const zipArchive = zip({
+  const zipArchive = createZip({
     level: options.compressionLevel ?? 6,
     // The document's own stamp is not the caller's choice: one a ZIP cannot hold is moved
     // to the nearest it can rather than refused. A `modTime` the caller passes is checked.
@@ -1005,7 +1039,8 @@ async function _packageDocxInner(
   // Per section in document order — the inner breaks, then the final one —
   // the header types it names the watermark-only part for.
   const watermarkRefs: HeaderFooterRef["type"][][] = [];
-  if (doc.watermark) {
+  const { watermark } = prepared;
+  if (watermark) {
     const WATERMARK_PART = "\u0000watermark";
     const plan = planWatermark(doc.settings?.evenAndOddHeaders === true, WATERMARK_PART);
     for (const item of doc.body) {
@@ -1029,17 +1064,17 @@ async function _packageDocxInner(
         continue;
       }
       let imageRId: string | undefined;
-      if (doc.watermark.type === "image") {
+      if (watermark.type === "image") {
         const remap = registerPartImages(
           headerRelManagers.get(key)!,
-          [doc.watermark.rId],
+          [watermark.rId],
           imageByRid,
           targetOf,
           svgSecondary
         );
-        imageRId = remap.get(doc.watermark.rId) ?? doc.watermark.rId;
+        imageRId = remap.get(watermark.rId) ?? watermark.rId;
       }
-      watermarkHosts.set(key, { watermark: doc.watermark, imageRId });
+      watermarkHosts.set(key, { watermark, imageRId });
     }
     if (plan.needsWatermarkHeader) {
       // Use next header index
@@ -1052,11 +1087,11 @@ async function _packageDocxInner(
       // the conventional `rId<N>` form. Allocate a fresh canonical id
       // (preferring an `addRelationship` auto-allocation) when the model
       // supplied a non-canonical id like `__img_1`.
-      if (doc.watermark.type === "image") {
+      if (watermark.type === "image") {
         const wmRels = createRelationships();
         watermarkImageRemap = registerPartImages(
           wmRels,
-          [doc.watermark.rId],
+          [watermark.rId],
           imageByRid,
           targetOf,
           svgSecondary
@@ -1837,18 +1872,18 @@ async function _packageDocxInner(
   }
 
   // Watermark header
-  if (watermarkHeaderIndex !== undefined && doc.watermark) {
+  if (watermarkHeaderIndex !== undefined && watermark) {
     // For image watermarks the model rId may have been remapped onto a
     // canonical `rId<N>` form when registering the watermark .rels (so
     // Word accepts the package). Pass the remapped value through so the
     // VML shape's r:id attribute matches the .rels entry.
     const watermarkImageRId =
-      doc.watermark.type === "image"
-        ? (watermarkImageRemap.get(doc.watermark.rId) ?? doc.watermark.rId)
+      watermark.type === "image"
+        ? (watermarkImageRemap.get(watermark.rId) ?? watermark.rId)
         : undefined;
     archive.add(
       PartPath.header(watermarkHeaderIndex),
-      renderXml(xml => renderWatermarkHeader(xml, doc.watermark!, watermarkImageRId))
+      renderXml(xml => renderWatermarkHeader(xml, watermark, watermarkImageRId))
     );
     if (watermarkHeaderRels && getRelationshipCount(watermarkHeaderRels) > 0) {
       archive.add(
@@ -2234,8 +2269,9 @@ async function _packageDocxInner(
     }
   }
 
-  // Write chart parts (rIds already registered earlier)
+  // Write chart parts (rIds already registered earlier). `prepareForRender` loaded the serialiser, as it found them.
   const chartEmbedPromises: Promise<void>[] = [];
+  const { renderChartPart } = prepared;
   charts.forEach((chartContent, i) => {
     const num = i + 1;
     const chartPath = `word/charts/chart${num}.xml`;
@@ -2257,7 +2293,7 @@ async function _packageDocxInner(
     // Register chart part
     archive.add(
       chartPath,
-      renderXml(xml => renderChartPart(xml, chartContent.chart, { rawXmlPolicy, relationshipIds }))
+      renderXml(xml => renderChartPart!(xml, chartContent.chart, { rawXmlPolicy, relationshipIds }))
     );
 
     // Register content type

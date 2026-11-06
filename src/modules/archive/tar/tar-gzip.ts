@@ -7,8 +7,8 @@
 
 import { gunzip, gunzipSync } from "@archive/compression/compress";
 import { createGunzipStream } from "@archive/compression/streaming-compress";
+import { OPTIONS, checkArchiveArgument, levelSchema } from "@archive/core/arguments";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
-import { checkLevel } from "@archive/core/entry-checks";
 import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import { collect } from "@archive/io/archive-sink";
 import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
@@ -25,21 +25,29 @@ import {
   TarArchive,
   TarReader,
   addEntries,
-  checkTarArchiveOptions,
+  tarArchiveOptionShape,
   checkTarReaderArguments
 } from "@archive/tar/tar-archive";
 import type { TarEntry, TarParseOptions, UnpackedTarEntry } from "@archive/tar/tar-parser";
 import { parseTar, readTarStream, untar, untarSync } from "@archive/tar/tar-parser";
 import { createAbortError, isAbortError, throwIfAborted } from "@utils/errors";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 export interface TarGzOptions extends TarArchiveOptions {
   /** Compression level (0-9, default: 6) */
   level?: number;
 }
 
+const tarGzOptionsSchema = s.object(
+  { ...tarArchiveOptionShape, level: levelSchema.optional() },
+  OPTIONS
+);
+const _tarGzOptionsMatch: SchemaMatches<typeof tarGzOptionsSchema, TarGzOptions> = true;
+void _tarGzOptionsMatch;
+
 function checkTarGzOptions(where: string, options: TarGzOptions | undefined): void {
-  checkTarArchiveOptions(where, options);
-  checkLevel(where, "options.level", options?.level);
+  checkArchiveArgument(tarGzOptionsSchema.optional(), options, where, "options");
 }
 
 // Use TarParseOptions directly since we don't need gzip-specific parse options

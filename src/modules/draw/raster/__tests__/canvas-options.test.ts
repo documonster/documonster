@@ -55,6 +55,18 @@ describe("BasicRasterCanvas options forms", () => {
     expect(inked(paint(c => c.drawPolyline(POINTS, undefined)))).toBe(false);
   });
 
+  it("drawLine and strokeCircle: the options form paints what the positional form did", () => {
+    const line = paint(c => c.drawLine(3, 4, 50, 33, { color: "#ff0000", width: 3 }));
+    expect(inked(line)).toBe(true);
+    expect(line).toEqual(paint(c => c.drawLine(3, 4, 50, 33, "#ff0000", 3)));
+    expect(paint(c => c.drawLine(3, 4, 50, 33, { color: "#000" }))).toEqual(
+      paint(c => c.drawLine(3, 4, 50, 33, "#000"))
+    );
+    const circle = paint(c => c.strokeCircle(30, 20, 12, { color: "#00aa00", width: 2 }));
+    expect(inked(circle)).toBe(true);
+    expect(circle).toEqual(paint(c => c.strokeCircle(30, 20, 12, "#00aa00", 2)));
+  });
+
   it("strokeRect: the options form paints what the positional form did", () => {
     const legacy = paint(c => c.strokeRect(5, 5, 40, 20, "#ff0000", 3));
     const current = paint(c => c.strokeRect(5, 5, 40, 20, { color: "#ff0000", width: 3 }));

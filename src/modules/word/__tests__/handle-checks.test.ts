@@ -101,10 +101,10 @@ const HANDLE_FUNCTIONS: readonly (readonly [name: string, param: string])[] = [
   ["Query.listUsedFormats", "doc"],
   ["Query.listParagraphs", "doc"],
   ["Query.listRuns", "doc"],
-  ["Io.toBuffer", "doc"],
-  ["Io.toBase64", "doc"],
-  ["Io.toFlatOpc", "doc"],
-  // `Io.writeFile` is Node-only and is checked in `io-node-surface.node.test.ts`.
+  ["Document.toBuffer", "doc"],
+  ["Document.toBase64", "doc"],
+  ["Document.toFlatOpc", "doc"],
+  // `Document.writeFile` is Node-only and is checked in `io-node-surface.node.test.ts`.
   ["Transform.split", "doc"],
   ["Transform.updateFields", "doc"],
   ["Transform.updateTableOfContents", "doc"],

@@ -1,5 +1,5 @@
 import { parseXml } from "@xml/dom";
-import { XmlParseError } from "@xml/errors";
+import { XmlLimitExceededError, XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import { parseXmlToObject } from "@xml/to-object";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -54,6 +54,8 @@ describe("DOM builders stop at the first error", () => {
 
       const err = catchError(() => parse(DEEP_THEN_BROKEN, 10));
       expect(err.limit).toBe("depth");
+      expect(err).toBeInstanceOf(XmlLimitExceededError);
+      expect((err as XmlLimitExceededError).allowed).toBe(10);
       expect(fail).toHaveBeenCalledTimes(1);
       // 10 levels were built, then the 11th was rejected; the 1000 siblings never were.
       expect(opentag.mock.calls.length).toBeLessThanOrEqual(11);
@@ -74,6 +76,8 @@ describe("DOM builders stop at the first error", () => {
     const xml = "<root>" + "&x;".repeat(10_000) + "</mismatch></root>";
     const err = catchError(() => parseXml(xml, { maxEntityExpansions: 5 }));
     expect(err.limit).toBe("entityExpansions");
+    expect(err).toBeInstanceOf(XmlLimitExceededError);
+    expect((err as XmlLimitExceededError).allowed).toBe(5);
     expect(fail).toHaveBeenCalledTimes(1);
   });
 

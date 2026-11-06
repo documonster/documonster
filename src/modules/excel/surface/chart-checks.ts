@@ -43,6 +43,16 @@ function checkCorner(check: ArgumentChecks, field: string, corner: unknown): voi
   }
 }
 
+/** A chart's extent, in EMU — `{ cx, cy }`, not an image's `{ width, height }` in pixels. */
+function checkChartExtent(check: ArgumentChecks, value: unknown): void {
+  if (check.record("range.ext", value)) {
+    check.required("range.ext.cx", value.cx);
+    check.number("range.ext.cx", value.cx, { min: 0, integer: true });
+    check.required("range.ext.cy", value.cy);
+    check.number("range.ext.cy", value.cy, { min: 0, integer: true });
+  }
+}
+
 /** A chart's placement: `"E1:L14"`, a two- or one-cell anchor, or an absolute position, all in the grid. */
 export function checkChartRange(where: string, range: unknown): void {
   const check = argumentChecks(where);
@@ -55,20 +65,28 @@ export function checkChartRange(where: string, range: unknown): void {
     return;
   }
   check.oneOf("range.editAs", range.editAs, ["oneCell", "twoCell", "absolute"]);
-  if (check.record("range.ext", range.ext)) {
-    check.number("range.ext.cx", range.ext.cx, { min: 0, integer: true });
-    check.number("range.ext.cy", range.ext.cy, { min: 0, integer: true });
-  }
+  // An extent without `cx` / `cy` — an image's `{ width, height }` — was accepted and written as
+  // `<xdr:ext cx="undefined" cy="undefined"/>`, a part Excel refuses to open.
   if ("pos" in range) {
     if (check.record("range.pos", range.pos)) {
+      check.required("range.pos.x", range.pos.x);
       check.number("range.pos.x", range.pos.x, { min: 0, integer: true });
+      check.required("range.pos.y", range.pos.y);
       check.number("range.pos.y", range.pos.y, { min: 0, integer: true });
     }
+    check.required("range.ext", range.ext);
+    checkChartExtent(check, range.ext);
     return;
   }
   checkCorner(check, "range.tl", range.tl);
   if (range.br !== undefined) {
     checkCorner(check, "range.br", range.br);
+  } else {
+    // Neither corner nor extent: it was read as a two-cell anchor and failed inside the anchor constructor.
+    check.required("range.ext", range.ext);
+  }
+  if (range.ext !== undefined) {
+    checkChartExtent(check, range.ext);
   }
 }
 

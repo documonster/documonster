@@ -32,8 +32,9 @@
  * models are never mutated.
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import { xmlDecode, xmlEncodeAttr } from "@utils/xml-encode";
-import { checkArray, checkOneOf, checkRecord } from "@word/core/argument-checks";
+import { checkArray, checkRecord } from "@word/core/argument-checks";
 import {
   imageKeys,
   isSamePicture,
@@ -41,6 +42,8 @@ import {
   rewriteMarkupReferences
 } from "@word/core/image-keys";
 import type { Mutable } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import { hostRangeMarkers } from "@word/core/range-markers";
 import type {
   DocxDocument,
@@ -77,12 +80,11 @@ export interface MergeOptions {
   readonly sectionBreak?: "continuous" | "nextPage" | "evenPage" | "oddPage";
 }
 
-const MERGE_BREAKS: ReadonlySet<string> = new Set<NonNullable<MergeOptions["sectionBreak"]>>([
-  "continuous",
-  "nextPage",
-  "evenPage",
-  "oddPage"
-]);
+const mergeOptionsSchema = w.record({
+  sectionBreak: w.oneOf(["continuous", "nextPage", "evenPage", "oddPage"]).optional()
+});
+const _mergeOptionsMatch: SchemaMatches<typeof mergeOptionsSchema, MergeOptions> = true;
+void _mergeOptionsMatch;
 
 interface RemapState {
   /** Map of doc[i].rId → final rId (only set when the source rId collided). */
@@ -126,8 +128,9 @@ interface RemapState {
  * the body still resolve in the output package. Each section keeps the
  * headers and footers of the document it came from.
  *
- * Does not modify `documents`; the result may share unchanged nodes with them —
- * see `Document.clone`.
+ * Does not modify `documents`; the result may share unchanged nodes with them;
+ * `Document.*` copies what it edits, so an edit made through one never reaches
+ * the other.
  *
  * @param documents - Array of documents to merge (at least 1).
  * @param options - Optional merge settings.
@@ -140,10 +143,7 @@ export function mergeDocuments(
   const where = "Transform.merge";
   checkArray(documents, "documents", where);
   documents.forEach((d, i) => checkRecord(d, `documents[${i}]`, where));
-  checkRecord(options, "options", where, { optional: true });
-  checkOneOf(options?.sectionBreak, MERGE_BREAKS, "options.sectionBreak", where, {
-    optional: true
-  });
+  checkSchema(mergeOptionsSchema.optional(), options, where);
   if (documents.length === 0) {
     return { body: [] };
   }
@@ -364,27 +364,30 @@ export function mergeDocuments(
     }
   }
 
-  return {
-    ...base,
-    body: mergedBody,
-    bodyRangeMarkersAfter: trailing,
-    images: mergedImages.length > 0 ? mergedImages : undefined,
-    styles: mergedStyles.length > 0 ? mergedStyles : undefined,
-    abstractNumberings: mergedAbstractNums.length > 0 ? mergedAbstractNums : undefined,
-    numberingInstances: mergedNumInstances.length > 0 ? mergedNumInstances : undefined,
-    footnotes: mergedFootnotes.length > 0 ? mergedFootnotes : undefined,
-    endnotes: mergedEndnotes.length > 0 ? mergedEndnotes : undefined,
-    comments: mergedComments.length > 0 ? mergedComments : undefined,
-    numPicBullets: mergedPicBullets.length > 0 ? mergedPicBullets : undefined,
-    ...(parts
-      ? {
-          headers: parts.headers.size > 0 ? parts.headers : undefined,
-          footers: parts.footers.size > 0 ? parts.footers : undefined
-        }
-      : {}),
-    // The last document's final section, opened by the requested break.
-    sectionProperties: previousFinal
-  };
+  return markDerived(
+    {
+      ...base,
+      body: mergedBody,
+      bodyRangeMarkersAfter: trailing,
+      images: mergedImages.length > 0 ? mergedImages : undefined,
+      styles: mergedStyles.length > 0 ? mergedStyles : undefined,
+      abstractNumberings: mergedAbstractNums.length > 0 ? mergedAbstractNums : undefined,
+      numberingInstances: mergedNumInstances.length > 0 ? mergedNumInstances : undefined,
+      footnotes: mergedFootnotes.length > 0 ? mergedFootnotes : undefined,
+      endnotes: mergedEndnotes.length > 0 ? mergedEndnotes : undefined,
+      comments: mergedComments.length > 0 ? mergedComments : undefined,
+      numPicBullets: mergedPicBullets.length > 0 ? mergedPicBullets : undefined,
+      ...(parts
+        ? {
+            headers: parts.headers.size > 0 ? parts.headers : undefined,
+            footers: parts.footers.size > 0 ? parts.footers : undefined
+          }
+        : {}),
+      // The last document's final section, opened by the requested break.
+      sectionProperties: previousFinal
+    },
+    ...documents
+  );
 }
 
 // =============================================================================

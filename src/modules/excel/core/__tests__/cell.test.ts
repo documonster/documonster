@@ -133,7 +133,7 @@ describe("Cell", () => {
 
     const dateValue = new Date();
     cellSetValue(a1, dateValue);
-    expect(cellGetValue(a1)).toBe(dateValue);
+    expect(cellGetValue(a1)).toEqual(dateValue);
     expect(cellType(a1)).toBe(Enums.ValueType.Date);
 
     const formulaValue = { formula: "A2", result: 5 };

@@ -22,7 +22,6 @@ import {
   seriesKeys,
   titleKeys
 } from "@word/core/chart-kept";
-import { drawingInteger } from "@word/core/drawing-geometry";
 import { DocxRawXmlPolicyError } from "@word/errors";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
@@ -36,6 +35,7 @@ import type {
   ChartSeries,
   ChartType
 } from "@word/types";
+import { DATA_LABEL_POSITION_MAP, DATA_LABEL_POSITIONS } from "@word/writer/chart-checks";
 import { withPreservedNamespaces } from "@word/writer/preserved-xml";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
@@ -991,37 +991,6 @@ function renderLegend(ctx: WriteContext, chart: Chart, node: ChartKeptNode | und
     node
   );
   xml.closeNode(); // c:legend
-}
-
-// -- Data labels position map ---------------------------------------------------
-
-const DATA_LABEL_POSITION_MAP: Record<string, string> = {
-  outsideEnd: "outEnd",
-  center: "ctr",
-  insideEnd: "inEnd",
-  bestFit: "bestFit"
-};
-const DATA_LABEL_POSITIONS: ReadonlySet<string> = new Set(Object.keys(DATA_LABEL_POSITION_MAP));
-
-/**
- * The checks the chart part's writer makes, run while the body is written —
- * where the chart's place in the document is known — so a refused value is
- * named by its path there. Fields are relative to the `Chart`.
- */
-export function checkWritableChart(chart: Chart): void {
-  if (chart.legend !== "none") {
-    writtenToken(chart, "legend", WRITTEN.legendPosition, "legend");
-  }
-  const dataLabels = chart.dataLabels;
-  if (
-    dataLabels &&
-    unrecognizedValue(dataLabels, "position") === undefined &&
-    dataLabels.position
-  ) {
-    checkOneOf(dataLabels.position, DATA_LABEL_POSITIONS, "dataLabels.position", MODEL_CHECK);
-  }
-  drawingInteger(chart.width, "width", 0);
-  drawingInteger(chart.height, "height", 0);
 }
 
 /**

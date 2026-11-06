@@ -3,6 +3,7 @@
  */
 
 import type { ZipStringEncoding } from "@archive/core/text";
+import type { ZipEncryptionMethod } from "@archive/crypto/types";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
@@ -30,6 +31,8 @@ export type ZipDeflateFileDefaults = {
   zip64: Zip64Mode;
   path: false | ZipPathOptions;
   encoding?: ZipStringEncoding;
+  encryptionMethod?: ZipEncryptionMethod;
+  password?: string | Uint8Array;
 };
 
 export function buildZipDeflateFileOptions(
@@ -51,6 +54,8 @@ export function buildZipDeflateFileOptions(
     mode: entryOptions?.mode,
     msDosAttributes: entryOptions?.msDosAttributes,
     externalAttributes: entryOptions?.externalAttributes,
-    versionMadeBy: entryOptions?.versionMadeBy
+    versionMadeBy: entryOptions?.versionMadeBy,
+    encryptionMethod: defaults.encryptionMethod,
+    password: defaults.password
   };
 }

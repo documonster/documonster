@@ -22,9 +22,11 @@
 import { discoverDrawnTextFonts, withDrawnTextFontBuild } from "@pdf/builder/drawn-text-fonts";
 import { assertImageFormat, checkImageData, writeImageXObject } from "@pdf/builder/image-utils";
 import {
+  at,
   checkFinite,
+  checkFontOptionNames,
+  fontOptionsShape,
   readFontSourceArgument,
-  checkFontOptions,
   checkOptionalBoolean,
   checkPdfFontConfig,
   checkOptionalColor,
@@ -38,7 +40,6 @@ import {
   checkOptionalString,
   checkEncryptionOptions,
   checkDocumentMetadata,
-  checkPageOptions,
   checkRectTuple,
   checkString,
   checkStringList,
@@ -59,6 +60,8 @@ import { parseTtf } from "@pdf/font/ttf-parser";
 import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
 import type { PdfColor, PdfEncryptionOptions, PdfExportOptions } from "@pdf/types";
 import type { CjkLanguage } from "@utils/cjk";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import {
   parseCssColor,
   parseSvgAttributes,
@@ -725,20 +728,77 @@ export function checkUniqueFieldNames(where: string, names: readonly string[]): 
   }
 }
 
+const derBytes = () => s.custom<Uint8Array>(isByteArray, "a Uint8Array of DER bytes");
+
+const signatureOptionsSchema = s.object(
+  {
+    certificate: derBytes(),
+    privateKey: derBytes(),
+    name: s.string().optional(),
+    reason: s.string().optional(),
+    location: s.string().optional(),
+    contactInfo: s.string().optional()
+  },
+  { expected: "an options object" }
+);
+const _signatureOptionsMatch: SchemaMatches<typeof signatureOptionsSchema, PdfSignatureOptions> =
+  true;
+void _signatureOptionsMatch;
+
+const pageOptionsSchema = s.object(
+  {
+    width: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional(),
+    height: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional()
+  },
+  { expected: "an options object" }
+);
+const _pageOptionsMatch: SchemaMatches<typeof pageOptionsSchema, PageOptions> = true;
+void _pageOptionsMatch;
+
+/** Page options: `width` and `height`, each finite and `> 0` when given. */
+export function checkPageOptions(where: string, options: PageOptions | undefined): void {
+  check(pageOptionsSchema.optional(), options, at(where, "options"));
+}
+
+const builderOptionsSchema = s.object(
+  {
+    fonts: fontOptionsShape.fonts,
+    preferSystemFonts: fontOptionsShape.preferSystemFonts,
+    textLanguage: fontOptionsShape.textLanguage,
+    disableFontAutoDiscovery: fontOptionsShape.disableFontAutoDiscovery,
+    fontManager: s.unknown<FontManager>().optional()
+  },
+  { expected: "an options object" }
+);
+const _builderOptionsMatch: SchemaMatches<
+  typeof builderOptionsSchema,
+  { -readonly [K in keyof PdfDocumentBuilderOptions]: PdfDocumentBuilderOptions[K] }
+> = true;
+void _builderOptionsMatch;
+
+const tocOptionsSchema = s.object(
+  {
+    title: s.string().optional(),
+    fontSize: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional(),
+    indent: s.number({ finite: true, min: 0 }).optional()
+  },
+  { expected: "an options object" }
+);
+const _tocOptionsMatch: SchemaMatches<typeof tocOptionsSchema, TocOptions> = true;
+void _tocOptionsMatch;
+
 /** Certificate and key bytes, and the optional signer strings. */
 export function checkSignatureOptions(where: string, options: PdfSignatureOptions): void {
-  checkOptions(where, options);
-  for (const field of ["certificate", "privateKey"] as const) {
-    if (!isByteArray(options[field])) {
-      throw new PdfArgumentError(
-        `options.${field}`,
-        `${where}: options.${field} must be a Uint8Array of DER bytes, got ${typeof options[field]}`
-      );
-    }
-  }
-  for (const field of ["name", "reason", "location", "contactInfo"] as const) {
-    checkOptionalString(where, `options.${field}`, options[field]);
-  }
+  check(signatureOptionsSchema, options, at(where, "options"));
   checkSigningMaterial(where, options.certificate, options.privateKey);
 }
 
@@ -1927,8 +1987,8 @@ export class PdfDocumentBuilder {
   private _buildQueue: Promise<void> = Promise.resolve();
 
   constructor(options: PdfDocumentBuilderOptions = {}) {
-    checkOptionalObject("new Pdf.Builder", "options", options);
-    checkFontOptions("new Pdf.Builder", "options.", options);
+    check(builderOptionsSchema, options, at("new Pdf.Builder", "options"));
+    checkFontOptionNames("new Pdf.Builder", "options.", options);
     this._fontManager =
       options.fontManager ??
       (options.fonts ? new FontManager(compilePdfFontConfig(options.fonts)) : new FontManager());
@@ -2252,10 +2312,7 @@ export class PdfDocumentBuilder {
    */
   generateTableOfContents(options?: TocOptions): PdfPageBuilder {
     const where = "Pdf.Builder#generateTableOfContents";
-    checkOptionalObject(where, "options", options);
-    checkOptionalString(where, "options.title", options?.title);
-    checkOptionalPositive(where, "options.fontSize", options?.fontSize);
-    checkOptionalNonNegative(where, "options.indent", options?.indent);
+    check(tocOptionsSchema.optional(), options, at(where, "options"));
     const tocTitle = options?.title ?? "Table of Contents";
     const fontSize = options?.fontSize ?? DEFAULT_FONT_SIZE;
     const indent = options?.indent ?? 20;
@@ -2414,7 +2471,7 @@ export class PdfDocumentBuilder {
       snapshot.pages.flatMap(page => page._formFields.map(field => field.options.name))
     );
     for (const page of snapshot.pages) {
-      page._stream.preflight();
+      page._stream.runPreflight();
     }
     return withDrawnTextFontBuild(this._fontManager, () => this._buildWithFontSession(snapshot));
   }

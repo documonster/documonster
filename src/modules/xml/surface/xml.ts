@@ -7,7 +7,7 @@
  *   `Xml.findChild(el, name)` / `Xml.listChildren(el, name)`,
  *   `new Xml.Writer()`, `new Xml.StreamWriter(target)`.
  *
- * Two ways to read XML as events, by who drives: `Xml.parseSax(source)` is pull — it
+ * Two ways to read XML as events, by who drives: `Xml.parseSaxStream(source)` is pull — it
  * yields batches of events for a `for await` loop; `new Xml.SaxParser()` is push — you
  * register `.on(...)` handlers, then `Xml.feedSax(parser, source)` feeds it every chunk of
  * a source (or call `parser.write()` / `parser.close()` yourself).
@@ -22,7 +22,7 @@ import {
   walk as walkImpl
 } from "@xml/dom";
 import { validateXmlName as validateXmlNameImpl } from "@xml/encode";
-import { saxStream as saxStreamImpl } from "@xml/sax";
+import { parseSax as parseSaxImpl, saxStream as saxStreamImpl } from "@xml/sax";
 import { StdDocAttributes as StdDocAttributesImpl } from "@xml/writer";
 
 // Encoding / decoding
@@ -42,7 +42,7 @@ export { StdDocAttributes as DEFAULT_DECLARATION } from "@xml/writer";
 export { XmlStreamWriter as StreamWriter } from "@xml/stream-writer";
 
 // Parsers
-export { SaxParser, parseSax, saxStream as feedSax } from "@xml/sax";
+export { SaxParser, parseSax as parseSaxStream, saxStream as feedSax } from "@xml/sax";
 export {
   parseXml as parse,
   findChildOf as findChild,
@@ -67,6 +67,11 @@ export const attr = attrImpl;
 export const walk = walkImpl;
 /** @deprecated Use {@link feedSax}. Removed in 1.0. */
 export const saxStream = saxStreamImpl;
+/**
+ * @deprecated Use {@link parseSaxStream}. An incremental reader takes the `Stream` suffix, as
+ * `Csv.parseStream` and `Workbook.readStream` do. Removed in 1.0.
+ */
+export const parseSax = parseSaxImpl;
 
 /** @deprecated Use {@link DEFAULT_DECLARATION}. Removed in 1.0. */
 export const StdDocAttributes = StdDocAttributesImpl;

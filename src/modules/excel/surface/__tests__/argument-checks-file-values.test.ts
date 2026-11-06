@@ -851,7 +851,7 @@ describe("a value the source file carried is kept as read, not dropped or refuse
       views: [{ state: "frozen", xSplit: NaN, ySplit: 2.5 }]
     };
     expect(setAsideInvalidSheetSettings("S", sheet)).toEqual([
-      "S: views[0].xSplit NaN is not a whole number from 0 to 16383, and was read as absent"
+      "S: views[0].xSplit NaN is not an integer from 0 to 16383, and was read as absent"
     ]);
     expect(sheet).toEqual({
       pageSetup: { scale: 100, _unrecognized: { orientation: { value: "sideways" } } },

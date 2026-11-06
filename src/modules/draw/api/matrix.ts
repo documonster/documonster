@@ -36,7 +36,13 @@ export function multiply(outer: DrawMatrix, inner: DrawMatrix): DrawMatrix {
   return multiplyImpl(outer, inner);
 }
 
-/** A clockwise rotation about `(cx, cy)` (default the origin), as SVG's `rotate(a cx cy)`. */
+/**
+ * A clockwise rotation about `(cx, cy)` (default the origin), as SVG's `rotate(a cx cy)`.
+ *
+ * The centre is positional, which the API conventions otherwise rule out for optional values, on
+ * purpose: the parameters are the SVG transform function's, in its order, as {@link scale}'s are
+ * `scale(sx sy)`'s — a caller translating a `transform` attribute passes them straight across.
+ */
 export function rotate(degrees: number, cx?: number, cy?: number): DrawMatrix {
   checkFinite("Matrix.rotate", "degrees", degrees);
   if (cx !== undefined) {

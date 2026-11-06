@@ -12,7 +12,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { encodePng } from "@archive/png";
 import { Draw } from "@draw/index";
 import { Mermaid } from "@mermaid/index";
 import { Pdf } from "@pdf/index";
@@ -356,8 +355,7 @@ async function main(): Promise<void> {
 
     writeFileSync(path.join(OUT, `${name}.svg`), Draw.toSvg(list));
 
-    const image = Draw.toRgba(list, { scale: 2 });
-    writeFileSync(path.join(OUT, `${name}.png`), encodePng(image.data, image.width, image.height));
+    writeFileSync(path.join(OUT, `${name}.png`), Draw.toPng(list, { scale: 2 }).png);
 
     const builder = new Pdf.Builder();
     const page = builder.addPage({ width: list.width + 40, height: list.height + 40 });

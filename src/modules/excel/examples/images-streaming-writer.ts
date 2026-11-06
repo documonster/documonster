@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { streamBothFormats } from "@excel/examples/utils/stream-both";
+import { Image, Workbook } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
@@ -21,12 +22,12 @@ const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 await streamBothFormats(filename, {}, wb => {
-  const imageId = wb.addImage({
+  const imageId = Image.add(wb, {
     filename: path.join(exampleDir, "data/image2.png"),
     extension: "png"
   });
-  const ws = wb.addWorksheet("Foo");
-  ws.addBackgroundImage(imageId);
+  const ws = Workbook.addWorksheet(wb, "Foo");
+  Image.setBackground(ws, imageId);
   ws.commit();
 });
 

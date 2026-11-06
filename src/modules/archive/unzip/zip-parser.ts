@@ -3,9 +3,9 @@
  * Works in both Node.js and browser environments
  * No dependency on Node.js stream module
  */
-
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { ArchiveLimitError, ArchiveFileTooLargeError } from "@archive/core/errors";
+import { DEFAULT_MAX_ENTRY_SIZE } from "@archive/core/defaults";
+import { ArchiveLimitExceededError, ArchiveFileTooLargeError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import {
   processEntryData,
@@ -69,7 +69,7 @@ export interface ZipParseOptions {
 
   /**
    * Largest combined uncompressed size, in bytes, that `extractAll` /
-   * `extractAllSync` / `forEach` may produce (`ArchiveLimitError`). Each entry is
+   * `extractAllSync` / `forEach` may produce (`ArchiveLimitExceededError`). Each entry is
    * already bounded by `maxEntrySize`; this bounds many entries together.
    *
    * Unbounded by default: what a process can afford to hold depends on the
@@ -79,7 +79,7 @@ export interface ZipParseOptions {
   maxTotalUncompressedSize?: number;
 
   /**
-   * Most entries the archive may contain (`ArchiveLimitError`, limit
+   * Most entries the archive may contain (`ArchiveLimitExceededError`, limit
    * `"maxEntries"`), checked before entry records are allocated. Unbounded by
    * default; a 46-byte-per-record sanity check only rules out impossible counts.
    */
@@ -216,7 +216,10 @@ export class ZipParser {
       }
     }
     if (total > this.maxTotalUncompressedSize) {
-      throw new ArchiveLimitError("maxTotalUncompressedSize", this.maxTotalUncompressedSize);
+      throw new ArchiveLimitExceededError(
+        "maxTotalUncompressedSize",
+        this.maxTotalUncompressedSize
+      );
     }
   }
 
@@ -435,20 +438,42 @@ export class ZipParser {
       let dataPromise: Promise<Uint8Array> | null = null;
       const getData = () => {
         if (!dataPromise) {
+          // The rest of the total budget bounds this entry as it inflates, so a total past it is stopped then rather
+          // than after a whole entry has been held; a refusal on that bound is the total's, not the entry's. The
+          // entry's own bound is the effective one — its default included — so a total never widens it.
+          const entryBound = this.maxEntrySize ?? DEFAULT_MAX_ENTRY_SIZE;
+          const remaining = this.maxTotalUncompressedSize - produced;
+          const byTotal = remaining < entryBound;
           dataPromise = extractEntryData(this.data, entry, {
             password: pw,
-            maxEntrySize: this.maxEntrySize,
+            maxEntrySize: byTotal ? remaining : entryBound,
             checkCrc32: this.checkCrc32
-          }).then(bytes => {
-            produced += bytes.length;
-            if (produced > this.maxTotalUncompressedSize) {
-              throw new ArchiveLimitError(
-                "maxTotalUncompressedSize",
-                this.maxTotalUncompressedSize
-              );
+          }).then(
+            bytes => {
+              produced += bytes.length;
+              if (produced > this.maxTotalUncompressedSize) {
+                throw new ArchiveLimitExceededError(
+                  "maxTotalUncompressedSize",
+                  this.maxTotalUncompressedSize
+                );
+              }
+              return bytes;
+            },
+            (error: unknown) => {
+              if (
+                byTotal &&
+                error instanceof ArchiveFileTooLargeError &&
+                error.allowed === remaining
+              ) {
+                throw new ArchiveLimitExceededError(
+                  "maxTotalUncompressedSize",
+                  this.maxTotalUncompressedSize,
+                  { cause: error }
+                );
+              }
+              throw error;
             }
-            return bytes;
-          });
+          );
         }
         return dataPromise;
       };

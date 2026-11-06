@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Package, Template, DocxTemplateError, Units } from "../index";
+import { Document, Build, Package, Template, DocxTemplateError, Units } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -119,7 +119,7 @@ function buildTemplate(): DocxDocument {
     { strict: false, richPlaceholders: true }
   );
 
-  const buf = await Io.toBuffer(filled);
+  const buf = await Document.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "01-Template.fill.docx"), buf);
   console.log(`  → 01-Template.fill.docx (${buf.length} bytes)`);
 }
@@ -153,7 +153,7 @@ function buildTemplate(): DocxDocument {
     { strict: false }
   );
 
-  const buf = await Io.toBuffer(result);
+  const buf = await Document.toBuffer(result);
   fs.writeFileSync(path.join(outDir, "02-enhanced.docx"), buf);
   console.log(`  → 02-enhanced.docx (${buf.length} bytes)`);
 }
@@ -167,7 +167,7 @@ function buildTemplate(): DocxDocument {
   Document.addHeading(d, "Hello <% who %>", 1);
   Document.addParagraph(d, "Today is <% date %>.");
   const filled = Template.fill(d, { who: "World", date: "Friday" }, { delimiters: ["<%", "%>"] });
-  const buf = await Io.toBuffer(filled);
+  const buf = await Document.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "03-custom-delimiters.docx"), buf);
   console.log(`  → 03-custom-delimiters.docx (${buf.length} bytes)`);
 }
@@ -188,7 +188,7 @@ function buildTemplate(): DocxDocument {
     grandTotal: 11
   });
   const filled = Template.fillFromSource(tpl, json, { strict: false });
-  const buf = await Io.toBuffer(filled);
+  const buf = await Document.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "04-json-source.docx"), buf);
   console.log(`  → 04-json-source.docx (${buf.length} bytes)`);
 }
@@ -206,7 +206,7 @@ function buildTemplate(): DocxDocument {
       <grandTotal>22</grandTotal>
     </root>`);
   const filled = Template.fillFromSource(tpl, xml, { strict: false });
-  const buf = await Io.toBuffer(filled);
+  const buf = await Document.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "05-xml-source.docx"), buf);
   console.log(`  → 05-xml-source.docx (${buf.length} bytes)`);
 }
@@ -236,7 +236,7 @@ function buildTemplate(): DocxDocument {
     },
     { strict: false }
   );
-  const buf = await Io.toBuffer(filled);
+  const buf = await Document.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "06-csv-source.docx"), buf);
   console.log(`  → 06-csv-source.docx (${buf.length} bytes)`);
 }
@@ -259,13 +259,13 @@ function buildTemplate(): DocxDocument {
   Document.addHeading(d, "Invoice for {{customer.name}}", 1);
   Document.addParagraph(d, "Date: {{date}}");
   Document.addParagraph(d, "Project: {{project}}");
-  const tplBuf = await Io.toBuffer(d);
+  const tplBuf = await Document.toBuffer(d);
   // Round-trip: read it back, then patch with named placeholders that
   // happen to match the {{...}} tokens. Package.patch doesn't understand
   // template syntax — we treat each `{{tag}}` as a literal string. This
   // demonstrates that the same .docx is a valid input to both workflows.
-  const round = await Io.read(tplBuf);
-  void round; // unused; kept to demonstrate Io.read works on the template
+  const round = await Document.read(tplBuf);
+  void round; // unused; kept to demonstrate Document.read works on the template
 
   const out = await Package.patch(tplBuf, [
     { placeholder: "{{customer.name}}", content: { type: "text", text: "Patch Co." } },
@@ -310,7 +310,7 @@ function buildTemplate(): DocxDocument {
       }
     ]
   });
-  const buf = await Io.toBuffer(filled);
+  const buf = await Document.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "08-nested-each.docx"), buf);
   console.log(`  → 08-nested-each.docx (${buf.length} bytes)`);
 }

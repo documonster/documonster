@@ -203,7 +203,7 @@ const fromFile = await Workbook.readFile("in.xlsx"); // Node only
 ## 4. Excel API mapping tables (class member → namespace function)
 
 Apply these substitutions. In all rows, `wb` is a workbook handle, `ws` is a
-worksheet handle. Addresses are `"A1"` strings **or** 1-based `(row, col)` pairs
+worksheet handle. Addresses are `"A1"` strings **or** 1-based `{ row, col }` positions
 where noted.
 
 ### 4.1 `Workbook`
@@ -319,43 +319,42 @@ methods that were on `Worksheet` moved to their own namespaces (see §4.7–§4.
 
 ### 4.3 `Cell`
 
-All cell operations take `(ws, addr)` or `(ws, row, col)`. There is **no cell
-object**. `addr` is `"A1"` or a `(row, col)` pair for `getValue`/`setValue`/
-`getStyle`/`setStyle`.
+All cell operations take `(ws, addr)`. There is **no cell
+object**. `addr` is `"A1"` or a 1-based `{ row, col }` position.
 
-| Old (`cell` = `ws.getCell(...)`)        | New (`Cell.*`)                                                                 |
-| --------------------------------------- | ------------------------------------------------------------------------------ |
-| `cell.value` (get)                      | `Cell.getValue(ws, addr)`                                                      |
-| `cell.value = v`                        | `Cell.setValue(ws, addr, v)` / `Cell.setValue(ws, row, col, v)`                |
-| `cell.text`                             | `Cell.getText(ws, addr)`                                                       |
-| `cell.displayText`                      | `Cell.getDisplayText(ws, addr)`                                                |
-| `cell.type`                             | `Cell.getType(ws, addr)`                                                       |
-| `cell.effectiveType`                    | `Cell.getEffectiveType(ws, addr)`                                              |
-| `cell.formula`                          | `Cell.getFormula(ws, addr)`                                                    |
-| `cell.result` (get) / `cell.result = r` | `Cell.getResult(ws, addr)` / `Cell.setResult(ws, addr, r)`                     |
-| `cell.style` (get)                      | `Cell.getStyle(ws, addr)`                                                      |
-| _(assign to `cell.style`)_              | `Cell.setStyle(ws, addr, partialStyle)` / `Cell.setStyle(ws, row, col, style)` |
-| `cell.font` (get) / `= v`               | `Cell.getFont(ws, addr)` / `Cell.setFont(ws, addr, v)`                         |
-| `cell.numFmt` / `= v`                   | `Cell.getNumFmt(ws, addr)` / `Cell.setNumFmt(ws, addr, v)`                     |
-| `cell.alignment` / `= v`                | `Cell.getAlignment(ws, addr)` / `Cell.setAlignment(ws, addr, v)`               |
-| `cell.border` / `= v`                   | `Cell.getBorder(ws, addr)` / `Cell.setBorder(ws, addr, v)`                     |
-| `cell.fill` / `= v`                     | `Cell.getFill(ws, addr)` / `Cell.setFill(ws, addr, v)`                         |
-| `cell.protection` / `= v`               | `Cell.getProtection(ws, addr)` / `Cell.setProtection(ws, addr, v)`             |
-| `cell.isMerged`                         | `Cell.isMerged(ws, addr)`                                                      |
-| `cell.master`                           | `Cell.getMergeMasterAddress(ws, addr)` — the master's address                  |
-| `cell.hyperlink`                        | `Cell.getHyperlink(ws, addr)`                                                  |
-| `cell.note` (get) / `= v`               | `Cell.getNote(ws, addr)` / `Cell.setNote(ws, addr, v)`                         |
-| `cell.comment` (get) / `= v`            | `Cell.getComment(ws, addr)` / `Cell.setComment(ws, addr, v)`                   |
-| `cell.dataValidation` (get) / `= v`     | `Cell.getValidation(ws, addr)` / `Cell.setValidation(ws, addr, v)`             |
-| `cell.name` / `cell.names`              | `Cell.getNames(ws, addr)`                                                      |
-| `cell.addName(n)`                       | `Cell.addName(ws, addr, n)`                                                    |
-| `cell.removeName(n)`                    | `Cell.removeName(ws, addr, n)`                                                 |
-| `cell.removeAllNames()`                 | `Cell.clearNames(ws, addr)`                                                    |
-| _(set a single name)_                   | `Cell.setNames(ws, addr, [n])`                                                 |
-| _(set names)_                           | `Cell.setNames(ws, addr, names)`                                               |
-| `cell.fullAddress`                      | `Cell.getFullAddress(ws, addr)`                                                |
-| `cell.model` (get) / `= m`              | `Cell.getModel(ws, addr)` / `Cell.setModel(ws, addr, m)`                       |
-| `cell.merge(master)` / `cell.unmerge()` | Use `Worksheet.merge(ws, range)` / `Worksheet.unmerge(ws, range)`              |
+| Old (`cell` = `ws.getCell(...)`)        | New (`Cell.*`)                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| `cell.value` (get)                      | `Cell.getValue(ws, addr)`                                                          |
+| `cell.value = v`                        | `Cell.setValue(ws, addr, v)` / `Cell.setValue(ws, { row, col }, v)`                |
+| `cell.text`                             | `Cell.getText(ws, addr)`                                                           |
+| `cell.displayText`                      | `Cell.getDisplayText(ws, addr)`                                                    |
+| `cell.type`                             | `Cell.getType(ws, addr)`                                                           |
+| `cell.effectiveType`                    | `Cell.getEffectiveType(ws, addr)`                                                  |
+| `cell.formula`                          | `Cell.getFormula(ws, addr)`                                                        |
+| `cell.result` (get) / `cell.result = r` | `Cell.getResult(ws, addr)` / `Cell.setResult(ws, addr, r)`                         |
+| `cell.style` (get)                      | `Cell.getStyle(ws, addr)`                                                          |
+| _(assign to `cell.style`)_              | `Cell.setStyle(ws, addr, partialStyle)` / `Cell.setStyle(ws, { row, col }, style)` |
+| `cell.font` (get) / `= v`               | `Cell.getFont(ws, addr)` / `Cell.setFont(ws, addr, v)`                             |
+| `cell.numFmt` / `= v`                   | `Cell.getNumFmt(ws, addr)` / `Cell.setNumFmt(ws, addr, v)`                         |
+| `cell.alignment` / `= v`                | `Cell.getAlignment(ws, addr)` / `Cell.setAlignment(ws, addr, v)`                   |
+| `cell.border` / `= v`                   | `Cell.getBorder(ws, addr)` / `Cell.setBorder(ws, addr, v)`                         |
+| `cell.fill` / `= v`                     | `Cell.getFill(ws, addr)` / `Cell.setFill(ws, addr, v)`                             |
+| `cell.protection` / `= v`               | `Cell.getProtection(ws, addr)` / `Cell.setProtection(ws, addr, v)`                 |
+| `cell.isMerged`                         | `Cell.isMerged(ws, addr)`                                                          |
+| `cell.master`                           | `Cell.getMergeMasterAddress(ws, addr)` — the master's address                      |
+| `cell.hyperlink`                        | `Cell.getHyperlink(ws, addr)`                                                      |
+| `cell.note` (get) / `= v`               | `Cell.getNote(ws, addr)` / `Cell.setNote(ws, addr, v)`                             |
+| `cell.comment` (get) / `= v`            | `Cell.getComment(ws, addr)` / `Cell.setComment(ws, addr, v)`                       |
+| `cell.dataValidation` (get) / `= v`     | `Cell.getValidation(ws, addr)` / `Cell.setValidation(ws, addr, v)`                 |
+| `cell.name` / `cell.names`              | `Cell.getNames(ws, addr)`                                                          |
+| `cell.addName(n)`                       | `Cell.addName(ws, addr, n)`                                                        |
+| `cell.removeName(n)`                    | `Cell.removeName(ws, addr, n)`                                                     |
+| `cell.removeAllNames()`                 | `Cell.clearNames(ws, addr)`                                                        |
+| _(set a single name)_                   | `Cell.setNames(ws, addr, [n])`                                                     |
+| _(set names)_                           | `Cell.setNames(ws, addr, names)`                                                   |
+| `cell.fullAddress`                      | `Cell.getFullAddress(ws, addr)`                                                    |
+| `cell.model` (get) / `= m`              | `Cell.getModel(ws, addr)` / `Cell.setModel(ws, addr, m)`                           |
+| `cell.merge(master)` / `cell.unmerge()` | Use `Worksheet.merge(ws, range)` / `Worksheet.unmerge(ws, range)`                  |
 
 ### 4.4 `Row`
 
@@ -805,14 +804,14 @@ These modules moved their value APIs behind a single namespace re-export
 applies to the **standalone** `xml`, `markdown`, `formula`, `csv`, and `pdf`
 modules — not only the Excel/Word integrations.
 
-| Module                 | Namespace                              | Example                                       |
-| ---------------------- | -------------------------------------- | --------------------------------------------- |
-| `documonster/xml`      | `Xml`                                  | `Xml.parse(...)`, `Xml.encode(...)`           |
-| `documonster/markdown` | `Markdown`                             | `Markdown.parse(...)`, `Markdown.format(...)` |
-| `documonster/csv`      | `Csv`                                  | `Csv.parse(...)`, `Csv.format(...)`           |
-| `documonster/formula`  | `Formula`                              | `Formula.tokenize(...)`, `Formula.parse(...)` |
-| `documonster/pdf`      | `Pdf`                                  | `Pdf.fromTable(...)`, `Pdf.extract(...)`      |
-| `documonster/word`     | `Build`, `Query`, `Io`, … (many, §8.5) | `Io.read(...)`, `Document.replaceText(...)`   |
+| Module                 | Namespace                              | Example                                           |
+| ---------------------- | -------------------------------------- | ------------------------------------------------- |
+| `documonster/xml`      | `Xml`                                  | `Xml.parse(...)`, `Xml.encode(...)`               |
+| `documonster/markdown` | `Markdown`                             | `Markdown.parse(...)`, `Markdown.format(...)`     |
+| `documonster/csv`      | `Csv`                                  | `Csv.parse(...)`, `Csv.format(...)`               |
+| `documonster/formula`  | `Formula`                              | `Formula.tokenize(...)`, `Formula.parse(...)`     |
+| `documonster/pdf`      | `Pdf`                                  | `Pdf.fromTable(...)`, `Pdf.extract(...)`          |
+| `documonster/word`     | `Build`, `Query`, `Io`, … (many, §8.5) | `Document.read(...)`, `Document.replaceText(...)` |
 
 If you previously imported individual functions from these modules (e.g.
 `import { parseCsv } from ".../csv"`), switch to the namespace form
@@ -838,7 +837,7 @@ and errors (`CsvError`, `isCsvError`) plus
 | -------------------------------------------------- | --------------------------------------------------------------------------- |
 | `parseCsv`                                         | `Csv.parse`                                                                 |
 | `parseCsvAsync`                                    | `Csv.parseAsync`                                                            |
-| `parseCsvRows`                                     | `Csv.parseRows`                                                             |
+| `parseCsvRows`                                     | `Csv.parseStream`                                                           |
 | `parseCsvWithProgress`                             | `Csv.parseAsync(input, { onProgress })`                                     |
 | `formatCsv`                                        | `Csv.format`                                                                |
 | `createCsvParserStream`                            | `new Csv.ParserStream()`                                                    |
@@ -910,16 +909,16 @@ namespace): `Build.*` (all run/paragraph/table/math/shape/field builders:
 
 | Old flat export                                                    | New access path                                                                                |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `readDocx`                                                         | `Io.read`                                                                                      |
-| `packageDocx`                                                      | `Io.toBuffer`                                                                                  |
+| `readDocx`                                                         | `Document.read`                                                                                |
+| `packageDocx`                                                      | `Document.toBuffer`                                                                            |
 | `mergeDocuments`                                                   | `Transform.merge`                                                                              |
 | `splitDocument`                                                    | `Transform.split`                                                                              |
 | `editDocxIncremental`                                              | `Package.edit`                                                                                 |
 | `listDocxParts` / `readDocxPart`                                   | `Package.listParts` / `Package.readPart`                                                       |
 | `patchDocument` / `compileTemplate` / `patchTemplate`              | `Package.patch` / `Package.compileTemplate` / `Package.patchTemplate`                          |
 | `updateFields` / `updateTableOfContents`                           | `Transform.updateFields` / `Transform.updateTableOfContents`                                   |
-| `toBuffer` / `toBase64`                                            | `Io.toBuffer` / `Io.toBase64`                                                                  |
-| _(new)_ file-path IO                                               | `Io.readFile` / `Io.writeFile`                                                                 |
+| `toBuffer` / `toBase64`                                            | `Document.toBuffer` / `Document.toBase64`                                                      |
+| _(new)_ file-path IO                                               | `Document.readFile` / `Document.writeFile`                                                     |
 | `resolveThemeColor`                                                | `Theme.resolveColor`                                                                           |
 | `fillTemplate` / `fillTemplateEnhanced` / `listTemplateTags`       | `Template.fill` / `Template.fill(doc, data, { richPlaceholders: true })` / `Template.listTags` |
 | `fillTemplateFromSource` / `bindChartData`                         | `Template.fillFromSource` / `Template.bindChartData`                                           |
@@ -973,9 +972,9 @@ subpaths are namespaces: `WordHtml` (`documonster/word/html`), `WordMarkdown`
 > (`import { Document } from "documonster/word"`), but it is now a **namespace
 > re-export** of the document-handle module rather than a single binding.
 > Members are reached as `Document.<member>`. The document object itself is
-> `DocxDocument`: `Document.create()` and `Io.read()` return the same type, so
+> `DocxDocument`: `Document.create()` and `Document.read()` return the same type, so
 > a document read from disk can be edited with `Document.*`, and there is no
-> build step — pass it straight to `Io.toBuffer`.
+> build step — pass it straight to `Document.toBuffer`.
 
 ### 8.6 Removed utility re-exports (previously on the root entry)
 
@@ -1013,14 +1012,14 @@ Things that used to need a workaround, or worked by accident:
 | `[...ws.columns.map(c => c.defn), extra]`, or hand-copying 7 fields                  | `[...Column.getDefinitions(ws), extra]` (single column: `Column.getDefinition(ws, ref)`)                                                                                                                                        |
 | `ws.eachRow` + `row.getCell` to walk one column                                      | `Column.getValues(ws, ref, { base: 1 })` (row-number indexed) / `Column.getValues(ws, ref)` (0-based) / `Column.setValues(ws, ref, v)`; neither read materialises a cell, and the writer takes everything `Cell.setValue` takes |
 | `cell.value` on a handle from `row.eachCell`                                         | `Row.eachAddress(ws, n, address => Cell.getValue(ws, address))` — iterate positions, read and write through `Cell.*`                                                                                                            |
-| `Cell.setFont(ws, "B3", …)` only                                                     | `Cell.setFont(ws, 3, 2, …)` too — every cell function takes `"A1"` **or** `(row, col)`                                                                                                                                          |
+| `Cell.setFont(ws, "B3", …)` only                                                     | `Cell.setFont(ws, { row: 3, col: 2 }, …)` too — every cell function takes `"A1"` **or** `{ row, col }`                                                                                                                          |
 
 Two deliberate compile-time breaks:
 
 - **Mixed addressing is rejected.** `Cell.getValue(ws, "A1", 99)` used to
   type-check and silently read `"CUA1"` (`n2l(99) + "A1"`); `Cell.getValue(ws, 5)`
   used to type-check and throw `ExcelInvalidAddressError`. Both are now errors. Pass
-  `"A1"` alone, or `(row, col)` together.
+  `"A1"` or a `{ row, col }` position.
 - **Columns are not handed out.** `ws.columns[0].header = "X"` (which used to
   work, unadvertised, and bypassed the key registry and cell styles) has no
   counterpart. Declare columns with `Column.setDefinitions`, change them with
@@ -1163,7 +1162,7 @@ Apply in order:
    as they are; other workbook-level state goes through its functions (§4.1).
 10. **Update standalone-module calls** to their namespaces: `parseCsv`→`Csv.parse`,
     `formatMarkdown`→`Markdown.format`, `xmlEncode`→`Xml.encode`, and every Word
-    flat function → its namespace (`readDocx`→`Io.read`, `replaceText`→
+    flat function → its namespace (`readDocx`→`Document.read`, `replaceText`→
     `Document.replaceText`, `layoutDocument`→`Layout.getPageMap`, `encryptDocx`→
     `WordCrypto.encrypt`, …) per §8.2–§8.5.
 11. **Type-check.** Because the API is now function-based, TypeScript will flag

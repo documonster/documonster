@@ -4,7 +4,6 @@
  * Renders word/header{N}.xml and word/footer{N}.xml parts.
  */
 
-import { mapToStandardFont, measureTextWidth } from "@utils/font-metrics";
 import {
   DOCUMENT_NAMESPACES,
   NS_W,
@@ -15,6 +14,7 @@ import {
   STD_DOC_ATTRIBUTES
 } from "@word/constants";
 import { atNode, unwritableNode, writableList } from "@word/core/node-path";
+import { DocxWriteError } from "@word/errors";
 import type { HeaderFooterContent, TextWatermark, Watermark } from "@word/types";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
@@ -159,7 +159,7 @@ function renderWatermarkRun(xml: XmlSink, watermark: Watermark, imageRId?: strin
 
 function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
   const color = wm.color ?? "C0C0C0";
-  const font = wm.font ?? "Calibri";
+  const font = wm.font ?? TEXT_WATERMARK_FONT;
   const rotation = wm.rotation ?? -45;
 
   // Full WordArt shapetype definition (t136) exactly as Microsoft Word
@@ -212,7 +212,7 @@ function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
   // in width/height. A requested fontSize is therefore expressed as a box one
   // line of that size tall and as wide as the text, and written on the text
   // path as well so it reads back; rotation goes on the shape's style.
-  const { widthPt, heightPt } = textWatermarkBox(wm, font);
+  const { widthPt, heightPt } = textWatermarkBox(wm);
   const style =
     `position:absolute;margin-left:0;margin-top:0;width:${formatPt(widthPt)}pt;height:${formatPt(heightPt)}pt;` +
     `${rotation ? `rotation:${rotation};` : ""}z-index:-251658752;` +
@@ -241,27 +241,49 @@ function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
   xml.closeNode(); // v:shape
 }
 
+/** The font a text watermark names none of. */
+const TEXT_WATERMARK_FONT = "Calibri";
+
 /** Word's box for a watermark nobody sized: the width of a Letter page's text column, half as tall. */
 const DEFAULT_TEXT_WATERMARK_BOX = { widthPt: 468, heightPt: 234 } as const;
 
-function textWatermarkBox(
-  wm: TextWatermark,
-  font: string
-): { readonly widthPt: number; readonly heightPt: number } {
-  if (wm.widthPt !== undefined && wm.heightPt !== undefined) {
-    return { widthPt: wm.widthPt, heightPt: wm.heightPt };
+/**
+ * `watermark` with the width a text watermark's `fontSize` implies filled in, when it gives a size and no width — the
+ * text measured in the font it names. Every other watermark comes back as it is.
+ *
+ * The writers call this before rendering, because measuring needs the glyph-advance tables and rendering is
+ * synchronous: loading them here, only for the watermark that needs them, keeps them out of every other document's
+ * bundle. A rendered text watermark with a `fontSize` and no `widthPt` has therefore not been through this.
+ */
+export async function sizeWatermark(watermark: Watermark): Promise<Watermark> {
+  if (
+    watermark.type !== "text" ||
+    watermark.fontSize === undefined ||
+    watermark.widthPt !== undefined
+  ) {
+    return watermark;
   }
+  const { mapToStandardFont, measureTextWidth } = await import("@utils/font-metrics");
+  const font = mapToStandardFont(watermark.font ?? TEXT_WATERMARK_FONT);
+  return { ...watermark, widthPt: measureTextWidth(watermark.text, font, watermark.fontSize / 2) };
+}
+
+function textWatermarkBox(wm: TextWatermark): {
+  readonly widthPt: number;
+  readonly heightPt: number;
+} {
   if (wm.fontSize === undefined) {
     return {
       widthPt: wm.widthPt ?? DEFAULT_TEXT_WATERMARK_BOX.widthPt,
       heightPt: wm.heightPt ?? DEFAULT_TEXT_WATERMARK_BOX.heightPt
     };
   }
-  const sizePt = wm.fontSize / 2;
-  return {
-    widthPt: wm.widthPt ?? measureTextWidth(wm.text, mapToStandardFont(font), sizePt),
-    heightPt: wm.heightPt ?? sizePt
-  };
+  if (wm.widthPt === undefined) {
+    throw new DocxWriteError(
+      "a text watermark with a fontSize must be sized with sizeWatermark before it is rendered"
+    );
+  }
+  return { widthPt: wm.widthPt, heightPt: wm.heightPt ?? wm.fontSize / 2 };
 }
 
 /** A length for a VML style: at most two decimals, no trailing zeros. */

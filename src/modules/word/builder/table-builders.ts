@@ -8,6 +8,8 @@ import { isRecordArgument } from "@utils/object";
 import { checkedTextParagraph } from "@word/builder/paragraph-builders";
 import {
   checkArray,
+  checkRunProperties,
+  invalidArgument,
   checkBorderStyle,
   checkHexColor,
   checkInteger,
@@ -30,6 +32,7 @@ import type {
   TableBorders,
   TableWidth,
   Paragraph,
+  RunProperties,
   Twips
 } from "@word/types";
 
@@ -197,8 +200,19 @@ function checkColumnWidths(columnWidths: unknown, where: string, field: string):
 
 /** Options for {@link simpleTable}. */
 export interface SimpleTableOptions {
-  /** Mark the first row as a header row, repeated at the top of every page (default: true). */
+  /**
+   * Mark the first row as the table's header row (default: true): Word repeats it at the top of every page the
+   * table crosses, and assistive technology and tagged PDF read it as column headers (`w:tblHeader`).
+   *
+   * It changes how the row behaves, not how it looks — as in Word, where "Repeat as header row" and the row's
+   * formatting are separate settings. For a header that stands out, pass {@link headerRunProperties}.
+   */
   readonly headerRow?: boolean;
+  /**
+   * Run formatting for the header row's text, e.g. `{ bold: true }`; the other rows are left unformatted. Refused
+   * with `headerRow: false`, where there is no header row to format.
+   */
+  readonly headerRunProperties?: RunProperties;
   /** Draw single grid borders (default: true). */
   readonly borders?: boolean;
   /** The table's width (default: the full text width, `{ value: 5000, type: "pct" }`). */
@@ -232,11 +246,29 @@ export function checkedSimpleTable(
   checkRecord(options, "options", where, { optional: true });
   checkTableWidth(options?.width, "options.width", where, { optional: true });
   checkColumnWidths(options?.columnWidths, where, "options.columnWidths");
+  checkRunProperties(options?.headerRunProperties, "options.headerRunProperties", where);
+  if (options?.headerRow === false && options.headerRunProperties !== undefined) {
+    // Formatting for a header the table does not have would be dropped without a word.
+    invalidArgument(
+      where,
+      "options.headerRunProperties",
+      "absent when options.headerRow is false",
+      options.headerRunProperties
+    );
+  }
   const opts = { headerRow: true, borders: true, ...options };
-  const tableRows: TableRow[] = data.map((rowData, rowIndex) => ({
-    properties: rowIndex === 0 && opts.headerRow ? { tableHeader: true } : undefined,
-    cells: rowData.map(cellText => checkedCell(where, "data", cellText, undefined))
-  }));
+  const tableRows: TableRow[] = data.map((rowData, rowIndex) => {
+    const header = rowIndex === 0 && opts.headerRow;
+    const run = header ? opts.headerRunProperties : undefined;
+    return {
+      properties: header ? { tableHeader: true } : undefined,
+      cells: rowData.map(cellText =>
+        run
+          ? { content: [checkedTextParagraph(where, cellText, { run })] }
+          : checkedCell(where, "data", cellText, undefined)
+      )
+    };
+  });
 
   return {
     type: "table",

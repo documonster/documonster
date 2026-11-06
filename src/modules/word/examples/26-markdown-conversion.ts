@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Io, Units } from "../index";
+import { Document, Units } from "../index";
 import { WordMarkdown } from "../markdown";
 
 const outDir = path.resolve(
@@ -136,7 +136,7 @@ const importedDoc = await WordMarkdown.toDocx(md, {
     return undefined;
   }
 });
-const buf = await Io.toBuffer(importedDoc);
+const buf = await Document.toBuffer(importedDoc);
 fs.writeFileSync(path.join(outDir, "26-md-imported.docx"), buf);
 console.log(`  WordMarkdown.toDocx → ${importedDoc.body.length} body items, ${buf.length} bytes`);
 console.log(
@@ -148,7 +148,7 @@ console.log(`  → 26-md-imported.docx`);
 // 2. DOCX → Markdown round-trip (re-read the just-written DOCX so the
 //    pipeline goes Markdown → DOCX → file → DOCX → Markdown)
 // ---------------------------------------------------------------------------
-const reread = await Io.read(buf);
+const reread = await Document.read(buf);
 const mdRoundtrip = WordMarkdown.fromDocx(reread, {
   headingStyle: "atx",
   includeImages: true,
@@ -218,7 +218,7 @@ console.log(`  → 26-md-setext.md`);
     Document.addContent(host, item);
   }
   Document.addParagraph(host, "(End of imported fragment.)");
-  const buf3 = await Io.toBuffer(host);
+  const buf3 = await Document.toBuffer(host);
   fs.writeFileSync(path.join(outDir, "26-md-fragment-spliced.docx"), buf3);
   console.log(
     `  WordMarkdown.toDocxBody → ${fragment.body.length} body items spliced into host doc`

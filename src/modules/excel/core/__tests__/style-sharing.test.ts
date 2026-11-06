@@ -408,7 +408,7 @@ describe("style sharing", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "S");
       for (let r = 1; r <= 4; r++) {
-        Cell.setValue(ws, r, 1, r);
+        Cell.setValue(ws, { row: r, col: 1 }, r);
       }
       Column.setStyle(ws, 1, { font: { bold: true, size: 13 } });
       const bytes = new Uint8Array(await Workbook.toBuffer(wb));
@@ -468,14 +468,14 @@ describe("style sharing", () => {
         const wb = Workbook.create();
         const ws = Workbook.addWorksheet(wb, "S");
         for (let r = 1; r <= 4; r++) {
-          Cell.setValue(ws, r, 1, r);
+          Cell.setValue(ws, { row: r, col: 1 }, r);
         }
         Column.setStyle(ws, 1, { font: { bold: true }, numFmt: "0.00" });
         if (separate) {
           // Materialise every cell; the content is identical, so the written
           // stylesheet must be too.
           for (let r = 1; r <= 4; r++) {
-            Cell.getStyle(ws, r, 1);
+            Cell.getStyle(ws, { row: r, col: 1 });
           }
         }
         return wb;

@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query, Units } from "../index";
+import { Document, Build, Query, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -80,7 +80,7 @@ Document.addParagraph(
 );
 Document.addParagraph(d, "TODO: also reconcile the figures.");
 
-fs.writeFileSync(path.join(outDir, "44-queries.docx"), await Io.toBuffer(d));
+fs.writeFileSync(path.join(outDir, "44-queries.docx"), await Document.toBuffer(d));
 
 // ---------------------------------------------------------------------------
 // 1. Query.getBookmark — returns { bookmark, paragraphIndex, childIndex }

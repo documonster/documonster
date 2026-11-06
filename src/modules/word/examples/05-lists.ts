@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Document, Build } from "../index";
 import type {
   AbstractNumbering,
   NumberingInstance,
@@ -246,6 +246,6 @@ const final = {
   ]
 };
 
-const buf = await Io.toBuffer(final);
+const buf = await Document.toBuffer(final);
 fs.writeFileSync(path.join(outDir, "05-lists.docx"), buf);
 console.log(`  → 05-lists.docx (${buf.length} bytes)`);

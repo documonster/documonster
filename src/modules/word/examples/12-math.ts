@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Document, Build } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -60,12 +60,12 @@ Document.addMath(doc, [
 // Linear fraction
 Document.addMath(doc, [
   Build.mathRun("linear: "),
-  Build.mathFraction([Build.mathRun("a")], [Build.mathRun("b")], "lin")
+  Build.mathFraction([Build.mathRun("a")], [Build.mathRun("b")], { fractionType: "lin" })
 ]);
 // No-bar (stack)
 Document.addMath(doc, [
   Build.mathRun("stack: "),
-  Build.mathFraction([Build.mathRun("a")], [Build.mathRun("b")], "noBar")
+  Build.mathFraction([Build.mathRun("a")], [Build.mathRun("b")], { fractionType: "noBar" })
 ]);
 
 // ---------------------------------------------------------------------------
@@ -210,9 +210,9 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "9. Accents & decorations", 2);
 Document.addMath(doc, [
-  Build.mathAccent([Build.mathRun("v")], "→"),
+  Build.mathAccent([Build.mathRun("v")], { char: "→" }),
   Build.mathRun(" + "),
-  Build.mathAccent([Build.mathRun("u")], "^"),
+  Build.mathAccent([Build.mathRun("u")], { char: "^" }),
   Build.mathRun(" + "),
   Build.mathBar([Build.mathRun("z")], { position: "top" }),
   Build.mathRun(" + "),
@@ -268,6 +268,6 @@ Document.addMath(doc, [
 // adjacent to text paragraphs (Word treats mathBlock as its own paragraph).
 Document.addParagraph(doc, "End of math examples.");
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "12-math.docx"), buf);
 console.log(`  → 12-math.docx (${buf.length} bytes)`);

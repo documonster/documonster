@@ -64,14 +64,15 @@ flowchart TD
 
 ### 桥接例外
 
-登记为例外的桥接文件恰好 5 个。权威清单位于 `scripts/verify-layers.ts` 的 `EXCEPTIONS`
+登记为例外的桥接文件恰好 6 个。权威清单位于 `scripts/verify-layers.ts` 的 `EXCEPTIONS`
 映射中；`pnpm verify:layers` 会拒绝其他向上或横向引用。
 
-| 边界          | 用途             |
-| ------------- | ---------------- |
-| PDF 到 Excel  | 工作簿和图表渲染 |
-| PDF 到 Word   | 文档布局和渲染   |
-| Word 到 Excel | 嵌入工作簿支持   |
+| 边界            | 用途                     |
+| --------------- | ------------------------ |
+| PDF 到 Excel    | 工作簿和图表渲染         |
+| PDF 到 Word     | 文档布局和渲染           |
+| Word 到 Excel   | 嵌入工作簿支持           |
+| Draw 到 Archive | PNG 编码（`Draw.toPng`） |
 
 ## 绘图流水线
 

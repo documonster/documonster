@@ -199,7 +199,7 @@ export const archiveReadTool = defineTool({
         if (entry.isDirectory) {
           continue;
         }
-        let bytes: Uint8Array | null;
+        let bytes: Uint8Array | undefined;
         try {
           bytes = await archive.readEntry(entry.path, { password: args.password });
         } catch (cause) {
@@ -212,7 +212,7 @@ export const archiveReadTool = defineTool({
             { cause }
           );
         }
-        if (bytes === null) {
+        if (bytes === undefined) {
           warnings.push(`${entry.path}: no data (skipped)`);
           destinations.delete(entry.path);
           continue;

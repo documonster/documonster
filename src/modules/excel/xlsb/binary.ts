@@ -90,11 +90,6 @@ export function* iterateBiffRecords(bytes: Uint8Array, context: string): Generat
   }
 }
 
-/** Read the whole part into an array. Convenient where streaming buys nothing. */
-export function readBiffRecords(bytes: Uint8Array, context: string): BiffRecord[] {
-  return [...iterateBiffRecords(bytes, context)];
-}
-
 interface VarUInt {
   readonly value: number;
   readonly next: number;

@@ -9,6 +9,7 @@ import { getWorksheets } from "@excel/core/workbook-core";
 import type { WorkbookModel } from "@excel/core/workbook-model";
 import { createWorkbook } from "@excel/core/workbook.browser";
 import { checkWorkbookModel } from "@excel/surface/model-checks";
+import { copyPlain } from "@excel/utils/copy-plain";
 
 /**
  * Replace the workbook's contents with `value` — the inverse of `getModel`.
@@ -22,10 +23,13 @@ import { checkWorkbookModel } from "@excel/surface/model-checks";
  */
 export function setModel(wb: WorkbookData, value: WorkbookModel): void {
   checkWorkbookModel("Workbook.setModel", value);
+  // Copied in, as every setter copies what it is given: loading takes the model's records as the workbook's own, so
+  // an edit the caller made to `value` afterwards changed the workbook.
+  const model = copyPlain(value);
   const probe = wb._definedNames._explicitProbe;
-  loadWorkbookModel(createWorkbook(probe ? { formulaSyntaxProbe: probe } : undefined), value);
+  loadWorkbookModel(createWorkbook(probe ? { formulaSyntaxProbe: probe } : undefined), model);
   const previous = getWorksheets(wb);
-  loadWorkbookModel(wb, value);
+  loadWorkbookModel(wb, model);
   for (const worksheet of previous) {
     worksheet._removed = true;
   }

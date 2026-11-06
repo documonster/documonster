@@ -1,14 +1,13 @@
 /**
  * Every limit an archive reader enforces says which limit (`limit`, the option's name) and its
- * value (`allowed`). The per-entry limit is a `ArchiveFileTooLargeError`, which said both only in its
- * message; it now carries the same `limit` / `allowed` fields as `ArchiveLimitError` (plus the
- * entry's `path`), while staying outside that class so the published `ArchiveLimit` union is
- * unchanged.
+ * value (`allowed`). The per-entry limit is a `ArchiveFileTooLargeError`, a subclass of
+ * `ArchiveLimitExceededError` that also names the entry (`path`), so catching the limit class
+ * sees every limit.
  */
 import {
   Archive,
   ArchiveError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ArchiveFileTooLargeError,
   type ArchiveLimit
 } from "@archive/index";
@@ -32,12 +31,12 @@ async function failure(run: () => unknown): Promise<unknown> {
 function expectEntryLimit(error: unknown, allowed: number): void {
   expect(error).toBeInstanceOf(ArchiveFileTooLargeError);
   expect(error).toBeInstanceOf(ArchiveError);
-  expect(error).not.toBeInstanceOf(ArchiveLimitError);
+  expect(error).toBeInstanceOf(ArchiveLimitExceededError);
   expect(error).toMatchObject({ limit: "maxEntrySize", allowed, path: "big.bin" });
   expect((error as Error).name).toBe("ArchiveFileTooLargeError");
 }
 
-describe("maxEntrySize is an ArchiveLimitError naming the limit and its value", () => {
+describe("maxEntrySize is an ArchiveLimitExceededError naming the limit and its value", () => {
   it.each([
     ["unpackZip stored", () => Archive.unpackZip(zip, { maxEntrySize: 100 })],
     ["unpackZip deflated", () => Archive.unpackZip(deflated, { maxEntrySize: 100 })],
@@ -83,8 +82,8 @@ describe("maxEntrySize is an ArchiveLimitError naming the limit and its value", 
     expect(new ArchiveFileTooLargeError("x.bin", "r", { allowed: 10 }).allowed).toBe(10);
   });
 
-  it("reads like an ArchiveLimitError: the same field names and meaning", () => {
-    const limitError = new ArchiveLimitError("maxEntries", 3);
+  it("reads like an ArchiveLimitExceededError: the same field names and meaning", () => {
+    const limitError = new ArchiveLimitExceededError("maxEntries", 3);
     const sizeError = new ArchiveFileTooLargeError("x.bin", "r", { allowed: 10 });
     const describeLimit = (e: { limit: string; allowed: number }) => `${e.limit}=${e.allowed}`;
     expect(describeLimit(limitError)).toBe("maxEntries=3");
@@ -93,10 +92,68 @@ describe("maxEntrySize is an ArchiveLimitError naming the limit and its value", 
     expectTypeOf(sizeError.allowed).toEqualTypeOf<number>();
   });
 
-  it("ArchiveLimit keeps its three published members", () => {
+  it("ArchiveLimit names every limit, maxEntrySize included", () => {
     expectTypeOf<ArchiveLimit>().toEqualTypeOf<
-      "maxOutputLength" | "maxTotalUncompressedSize" | "maxEntries"
+      "maxOutputLength" | "maxTotalUncompressedSize" | "maxEntries" | "maxEntrySize"
     >();
-    expectTypeOf(new ArchiveLimitError("maxEntries", 1).limit).toEqualTypeOf<ArchiveLimit>();
+    expectTypeOf(
+      new ArchiveLimitExceededError("maxEntries", 1).limit
+    ).toEqualTypeOf<ArchiveLimit>();
+  });
+});
+
+describe("the internal extractAll helper", () => {
+  it("charges maxTotalUncompressedSize as unpackZip does", async () => {
+    const { extractAll } = await import("@archive/unzip/extract");
+    await expect(Archive.unpackZip(zip, { maxTotalUncompressedSize: 100 })).rejects.toBeInstanceOf(
+      ArchiveLimitExceededError
+    );
+    await expect(extractAll(zip, { maxTotalUncompressedSize: 100 })).rejects.toMatchObject({
+      limit: "maxTotalUncompressedSize",
+      allowed: 100
+    });
+  });
+});
+
+describe("maxTotalUncompressedSize while an entry inflates", () => {
+  it("stops an entry that would cross the total, reporting the total", async () => {
+    const two = Archive.packZipSync(
+      [
+        ["a.bin", new Uint8Array(3000).fill(1)],
+        ["b.bin", new Uint8Array(3000).fill(2)]
+      ],
+      { level: 9 }
+    );
+    const { extractAll } = await import("@archive/unzip/extract");
+    const error = await extractAll(two, { maxTotalUncompressedSize: 4000 }).catch(
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(ArchiveLimitExceededError);
+    expect(error).not.toBeInstanceOf(ArchiveFileTooLargeError);
+    expect(error).toMatchObject({ limit: "maxTotalUncompressedSize", allowed: 4000 });
+  });
+});
+
+describe("a total limit never widens the per-entry default", () => {
+  it("still refuses an entry declaring more than 512 MiB when the total allows 1 GiB", async () => {
+    const { createZipSync } = await import("@archive/zip/zip-bytes");
+    const { ZipParser } = await import("@archive/unzip/zip-parser");
+    const bytes = createZipSync([{ name: "x.bin", data: new Uint8Array([1]) }], { level: 0 });
+    // Declare a 600 MiB entry in the central directory; nothing that large is allocated.
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < bytes.length - 28; i++) {
+      if (view.getUint32(i, true) === 0x02014b50) {
+        view.setUint32(i + 24, 600 * 1024 * 1024, true);
+        break;
+      }
+    }
+    const parser = new ZipParser(bytes, { maxTotalUncompressedSize: 1024 * 1024 * 1024 });
+    const error = await parser
+      .forEach(async (_entry, getData) => {
+        await getData();
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ArchiveFileTooLargeError);
+    expect(error).toMatchObject({ limit: "maxEntrySize", allowed: 512 * 1024 * 1024 });
   });
 });

@@ -46,7 +46,7 @@ export class DocxWriteError extends DocxError {
  * by the call that received the value, before it changes anything, with a
  * message naming the function and the field.
  *
- * Also thrown while a document model is written (`Io.toBuffer`, `Io.writeFile`,
+ * Also thrown while a document model is written (`Document.toBuffer`, `Document.writeFile`,
  * `Package.*`, the streaming writer) for a value the writer cannot write. That
  * check is shared by every writing entry point, so its message names no call.
  */
@@ -72,7 +72,7 @@ export class DocxArgumentError extends DocxError {
 }
 
 /**
- * Error thrown when the file system will not let `Io.readFile` / `Io.writeFile`
+ * Error thrown when the file system will not let `Document.readFile` / `Document.writeFile`
  * read or write a file — it does not exist, permission is denied, the directory
  * is missing. The system's own error is the `cause` (its `code`, `ENOENT` or
  * `EACCES`, is `error.cause.code`), as `ExcelFileError` keeps it. A file that was
@@ -193,7 +193,7 @@ export class DocxUnsupportedFeatureError extends DocxError {
 
 /**
  * Error thrown when a DOCX file is encrypted (CFB format) and no password
- * was provided. Pass `{ password }` in the read options — of `Io.read()`, a
+ * was provided. Pass `{ password }` in the read options — of `Document.read()`, a
  * `Package` function or `new Stream.DocumentReader()` — to decrypt automatically,
  * or call `WordCrypto.decrypt()` from `documonster/word/crypto` directly if you
  * need lower-level access to the decrypted ZIP bytes.
@@ -201,11 +201,12 @@ export class DocxUnsupportedFeatureError extends DocxError {
 export class DocxEncryptedError extends DocxError {
   override name = "DocxEncryptedError";
 
-  constructor() {
+  constructor(options?: BaseErrorOptions) {
     super(
       "The document is encrypted (password-protected). " +
-        "Pass { password } in the read options (Io.read(), Package.*, new Stream.DocumentReader()), " +
-        'or use WordCrypto.decrypt() from "documonster/word/crypto" for lower-level decryption.'
+        "Pass { password } in the read options (Document.read(), Package.*, new Stream.DocumentReader()), " +
+        'or use WordCrypto.decrypt() from "documonster/word/crypto" for lower-level decryption.',
+      options
     );
   }
 }
@@ -244,9 +245,14 @@ export class DocxDecryptionError extends DocxError {
  */
 export class DocxLimitExceededError extends DocxParseError {
   override name = "DocxLimitExceededError";
-  /** Limit category that was exceeded. */
+  /**
+   * What was exceeded: `"packageSize"` (`securityPolicy.maxPackageSize`), `"partSize"` (`maxPartSize`),
+   * `"partCount"` (`maxPartCount`) or `"xmlDepth"` (`maxXmlDepth`) — options of the `securityPolicy`.
+   */
   readonly limit: "packageSize" | "partSize" | "partCount" | "xmlDepth";
-  /** Configured maximum. */
+  /** The configured maximum — named as the other modules' limit errors name it. */
+  readonly allowed: number;
+  /** @deprecated Use {@link allowed}. Removed in 1.0. */
   readonly maximum: number;
   /** Actual measured value (or the value that would have been reached). */
   readonly actual: number;
@@ -262,6 +268,7 @@ export class DocxLimitExceededError extends DocxParseError {
         (detail ? ` (${detail})` : "")
     );
     this.limit = limit;
+    this.allowed = maximum;
     this.maximum = maximum;
     this.actual = actual;
   }

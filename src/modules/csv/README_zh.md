@@ -137,7 +137,7 @@ interface CsvParseResult<T> {
 
 异步解析器，支持字符串、字节（`Uint8Array` 或任意 `ArrayBufferView`、`ArrayBuffer`）、`Blob` / `File`、
 `AsyncIterable<string | Uint8Array>` 和 `ReadableStream`。字节按同样的字节以流形式输入时的方式解码（`encoding`、BOM）。
-`Csv.parseRows` 接受同样的输入。
+`Csv.parseStream` 接受同样的输入。
 
 ```typescript
 import { Csv } from "documonster/csv";
@@ -156,14 +156,14 @@ const result = await Csv.parseAsync(asyncChunks, { headers: true });
 const result = await Csv.parseAsync(fileInput.files[0], { headers: true });
 ```
 
-### `Csv.parseRows(input, options?)`
+### `Csv.parseStream(input, options?)`
 
 真正的流式异步生成器 — 逐行产出。适合大文件的内存高效处理。
 
 ```typescript
 import { Csv } from "documonster/csv";
 
-for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
+for await (const row of Csv.parseStream(hugeFile, { headers: true })) {
   console.log(row); // { name: "...", age: "..." }
 }
 ```
@@ -432,7 +432,7 @@ try {
 | --------------------------------------- | ---------------------------------------------------- |
 | `Csv.parse(input, options?)`            | 同步 CSV 解析器                                      |
 | `Csv.parseAsync(input, options?)`       | 异步解析器（字符串、字节、Blob、流、异步可迭代对象） |
-| `Csv.parseRows(input, options?)`        | 异步生成器，逐行产出                                 |
+| `Csv.parseStream(input, options?)`      | 异步生成器，逐行产出                                 |
 | `Csv.parseAsync(input, { onProgress })` | 带进度报告的解析器                                   |
 | `Csv.format(data, options?)`            | 批量 CSV 格式化器                                    |
 

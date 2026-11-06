@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Pdf } from "../../pdf";
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -64,7 +64,12 @@ fs.mkdirSync(outDir, { recursive: true });
     0x00, 0x00, 0x03, 0x00, 0x01, 0x5b, 0x6e, 0x5e, 0x49, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82
   ]);
-  Document.addImage(d, tinyPng, "png", Units.cmToEmu(1.5), Units.cmToEmu(1.5), { altText: "logo" });
+  Document.addImage(d, tinyPng, {
+    type: "png",
+    width: Units.cmToEmu(1.5),
+    height: Units.cmToEmu(1.5),
+    altText: "logo"
+  });
 
   const pdfBytes = await Pdf.fromDocx(d);
   fs.writeFileSync(path.join(outDir, "01-basic.pdf"), pdfBytes);
@@ -101,10 +106,10 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addHeading(d, "From file", 1);
   Document.addParagraph(d, "This document was first written to disk and then re-read.");
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "03-source.docx"), buf);
 
-  const reread = await Io.read(buf);
+  const reread = await Document.read(buf);
   const pdfBytes = await Pdf.fromDocx(reread);
   fs.writeFileSync(path.join(outDir, "03-from-file.pdf"), pdfBytes);
   console.log(`  → 03-from-file.pdf (${pdfBytes.length} bytes)`);

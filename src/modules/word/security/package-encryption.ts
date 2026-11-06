@@ -5,12 +5,15 @@
  *
  * - Reading: an encrypted package (a compound file holding `EncryptionInfo` and `EncryptedPackage`) is decrypted with
  *   the read's `password`; anything else is read as it is.
- * - Writing: `Io.toBuffer` / `toBase64` / `writeFile` take `password` (and `encryption`), and encrypt the package.
+ * - Writing: `Document.toBuffer` / `toBase64` / `writeFile` take `password` (and `encryption`), and encrypt the package.
  */
 
 import { hasEncryptedPackageStreams, isCfb } from "@archive/cfb/signature";
 import type { EncryptOptions } from "@archive/office-crypto/agile";
-import { checkInteger, checkOneOf, checkRecord, invalidArgument } from "@word/core/argument-checks";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+import { invalidArgument } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
 import { DocxEncryptedError, DocxParseError } from "@word/errors";
 import { HASH_ALGORITHM_NAMES } from "@word/security/hash-names";
 
@@ -42,25 +45,23 @@ export async function decryptIfEncrypted(
   return decryptDocx(buffer, password, maxPackageSize);
 }
 
+const encryptOptionsSchema = w.record({
+  keyBits: s.oneOf([128, 192, 256], { expected: "one of 128, 192, 256" }).optional(),
+  hashAlgorithm: s
+    .member<NonNullable<EncryptOptions["hashAlgorithm"]>>(HASH_ALGORITHM_NAMES)
+    .optional(),
+  // MS-OFFCRYPTO: the spin count is at most 10,000,000.
+  spinCount: w.integer({ min: 0, max: 10_000_000 }).optional()
+});
+const _encryptOptionsMatch: SchemaMatches<typeof encryptOptionsSchema, EncryptOptions> = true;
+void _encryptOptionsMatch;
+
 /**
  * The `EncryptOptions` of `where` (`keyBits`, `hashAlgorithm`, `spinCount`), checked; `field` is their path
  * (`options` for `WordCrypto.encrypt`, `options.encryption` for a write option).
  */
 export function checkEncryptOptions(options: unknown, field: string, where: string): void {
-  checkRecord(options, field, where, { optional: true });
-  const o = options as EncryptOptions | undefined;
-  if (o?.keyBits !== undefined && ![128, 192, 256].includes(o.keyBits)) {
-    invalidArgument(where, `${field}.keyBits`, "one of 128, 192, 256", o.keyBits);
-  }
-  checkOneOf(o?.hashAlgorithm, HASH_ALGORITHM_NAMES, `${field}.hashAlgorithm`, where, {
-    optional: true
-  });
-  // MS-OFFCRYPTO: the spin count is at most 10,000,000.
-  checkInteger(o?.spinCount, `${field}.spinCount`, where, {
-    optional: true,
-    min: 0,
-    max: 10_000_000
-  });
+  checkSchema(encryptOptionsSchema.optional(), options, where, field);
 }
 
 /** What a write that encrypts takes: the password, and how to encrypt with it. */
@@ -70,21 +71,15 @@ interface EncryptingWriteOptions {
 }
 
 /**
- * A write's `password` and `encryption`, checked: a password is a string of 1 to 255 characters (MS-OFFCRYPTO
- * §2.3.4.10 caps it at 255, and an empty one would be the absence of one), and `encryption` comes with a password.
+ * A write's `encryption`, once the options are known to be an object whose `password` is a string of 1 to 255
+ * characters: it comes with a password, and holds `EncryptOptions`.
  */
-export function checkWriteEncryption(options: unknown, where: string): void {
-  if (options === null || typeof options !== "object") {
-    return;
-  }
-  const { password, encryption } = options as Record<string, unknown>;
-  if (
-    password !== undefined &&
-    (typeof password !== "string" || password.length === 0 || password.length > 255)
-  ) {
-    invalidArgument(where, "options.password", "a string of 1 to 255 characters", password);
-  }
-  if (encryption !== undefined && password === undefined) {
+export function checkWriteEncryption(
+  options: EncryptingWriteOptions | undefined,
+  where: string
+): void {
+  const encryption = options?.encryption;
+  if (encryption !== undefined && options?.password === undefined) {
     invalidArgument(where, "options.encryption", "set only with options.password", encryption);
   }
   checkEncryptOptions(encryption, "options.encryption", where);

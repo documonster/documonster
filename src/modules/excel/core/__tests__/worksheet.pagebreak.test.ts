@@ -124,7 +124,7 @@ describe("Worksheet", () => {
       const ws = sheet();
 
       for (let col = 1; col <= 10; col++) {
-        Cell.setValue(ws, 1, col, `Col ${col}`);
+        Cell.setValue(ws, { row: 1, col }, `Col ${col}`);
       }
 
       Column.addPageBreak(ws, 3);

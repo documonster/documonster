@@ -15,7 +15,7 @@ import {
 import { TarGzArchive, targz, untargz } from "@archive/tar/tar-gzip";
 import { untar } from "@archive/tar/tar-parser";
 import { ZipArchive } from "@archive/zip/zip-archive";
-import { glob, safeStats } from "@utils/fs";
+import { glob } from "@utils/fs";
 import { describe, expect, it } from "vitest";
 
 describe("Archive namespace", () => {
@@ -82,15 +82,15 @@ describe("Compression namespace", () => {
     expect(entry.decompress).toBe(decompress);
     expect(await entry.gzip(data)).toEqual(await Compression.gzip(data));
     expect(typeof entry.createDeflateStream).toBe("function");
-    expect(entry.WorkerPool).toBe(Compression.Workers.WorkerPool);
+    expect(entry.WorkerPool).toBe(Compression.Workers.Pool);
     expect(entry.deflateWithPool).toBe(Compression.Workers.deflate);
     expect(entry.inflateBatchWithPool).toBe(Compression.Workers.inflateBatch);
-    expect(entry.getDefaultWorkerPool).toBe(Compression.Workers.getDefaultPool);
+    expect(typeof entry.getDefaultWorkerPool).toBe("function");
   });
 
-  it("Workers.WorkerPool cannot be constructed in Node", () => {
+  it("Workers.Pool cannot be constructed in Node", () => {
     expect(Compression.hasWorkerSupport()).toBe(false);
-    expect(() => new Compression.Workers.WorkerPool()).toThrow(ArchiveWorkerUnsupportedError);
+    expect(() => new Compression.Workers.Pool()).toThrow(ArchiveWorkerUnsupportedError);
     expect(() => Compression.Workers.terminateDefaultPool()).not.toThrow();
   });
 
@@ -149,22 +149,27 @@ describe("Archive reader lookups", () => {
     const reader = Archive.openZip(zip);
     expect(new TextDecoder().decode((await reader.bytes("a.txt"))!)).toBe("alpha");
     expect((await reader.get("a.txt"))?.path).toBe("a.txt");
-    expect(await reader.get("missing")).toBeNull();
-    expect(await reader.bytes("missing")).toBeNull();
+    expect(await reader.get("missing")).toBeUndefined();
+    expect(await reader.bytes("missing")).toBeUndefined();
   });
 
   it("TarReader.get/bytes return null for a missing entry", async () => {
     const reader = Archive.openTar(await Archive.packTar(files));
     expect(new TextDecoder().decode((await reader.bytes("a.txt"))!)).toBe("alpha");
-    expect(await reader.get("missing")).toBeNull();
-    expect(await reader.bytes("missing")).toBeNull();
+    expect(await reader.get("missing")).toBeUndefined();
+    expect(await reader.bytes("missing")).toBeUndefined();
   });
 
-  it("RemoteZipReader.fromReader reads through any RandomAccessReader; extract returns null when missing", async () => {
+  it("RemoteZipReader.fromReader reads through any RandomAccessReader; extract and the raw reads return undefined when missing", async () => {
     const zip = await Archive.packZip(files);
     const remote = await Archive.RemoteZipReader.fromReader(Archive.createBufferReader(zip));
     expect(new TextDecoder().decode((await remote.extract("a.txt"))!)).toBe("alpha");
-    expect(await remote.extract("missing")).toBeNull();
+    expect(await remote.extract("missing")).toBeUndefined();
+    expect(await remote.getRawCompressedData("missing")).toBeUndefined();
+    expect(remote.getRawCompressedStream("missing")).toBeUndefined();
+    expect(await remote.getRawEntry("missing")).toBeUndefined();
+    expect(remote.getRawEntryStream("missing")).toBeUndefined();
+    expect(await remote.verifyCrc32("missing")).toBeUndefined();
     await remote.close();
   });
 
@@ -219,16 +224,17 @@ describe("Fs namespace", () => {
   it("holds the file-system helpers; the flat forwards keep the unchecked v0.21.1 functions", () => {
     expect(typeof Fs.glob).toBe("function");
     expect(entry.glob).toBe(glob);
-    expect(entry.safeStats).toBe(safeStats);
     // Fs checks its arguments first, so it wraps rather than re-exports them.
     expect(Fs.glob).not.toBe(glob);
   });
 
-  it("safeStats reports a missing path as null", async () => {
+  it("Fs.safeStats reports a missing path as undefined; the deprecated flat forwards keep their null", async () => {
     const missing = "/definitely/not/here/documonster";
-    expect(await Fs.safeStats(missing)).toBeNull();
-    expect(Fs.safeStatsSync(missing)).toBeNull();
+    expect(await Fs.safeStats(missing)).toBeUndefined();
+    expect(Fs.safeStatsSync(missing)).toBeUndefined();
     expect(await entry.safeStats(missing)).toBeNull();
+    expect(entry.safeStatsSync(missing)).toBeNull();
+    expect((await entry.safeStats(import.meta.dirname))?.isDirectory()).toBe(true);
     expect((await Fs.safeStats(import.meta.dirname))?.isDirectory()).toBe(true);
   });
 });

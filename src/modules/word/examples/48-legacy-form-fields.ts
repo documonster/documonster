@@ -26,7 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query, Transform } from "../index";
+import { Document, Build, Query, Transform } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -107,7 +107,7 @@ const before = Document.getContentCount(doc);
 Document.insertContent(doc, 0, Build.heading("Registration form", 1));
 console.log(`  insertContentAt(0): body length ${before} → ${Document.getContentCount(doc)}`);
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "48-legacy-form-fields.docx"), buf);
 console.log(`  → 48-legacy-form-fields.docx (${buf.length} bytes)`);
 
@@ -140,6 +140,6 @@ for (const f of filledFields) {
   console.log(`    • ${f.name} (${f.type}) = ${JSON.stringify(f.value)}`);
 }
 
-const filledBuf = await Io.toBuffer(filled);
+const filledBuf = await Document.toBuffer(filled);
 fs.writeFileSync(path.join(outDir, "48-legacy-form-fields-filled.docx"), filledBuf);
 console.log(`  → 48-legacy-form-fields-filled.docx (${filledBuf.length} bytes)`);

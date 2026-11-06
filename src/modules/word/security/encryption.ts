@@ -9,7 +9,7 @@
  * damaged package) a `DocxDecryptionError` — each with the shared error as its `cause`.
  *
  * It is loaded only when a password is involved: the readers test for a compound file with `@archive/cfb/signature`
- * (see `security/decrypt.ts`) and `Io.toBuffer` imports this module for `{ password }` alone.
+ * (see `security/decrypt.ts`) and `Document.toBuffer` imports this module for `{ password }` alone.
  */
 
 import { CfbError } from "@archive/cfb/cfb";
@@ -58,9 +58,6 @@ async function translated<T>(work: () => Promise<T>): Promise<T> {
 export function isEncryptedDocx(buffer: Uint8Array | ArrayBuffer | ArrayBufferView): boolean {
   return isCfb(checkBytes(buffer, "buffer", "WordCrypto.isEncrypted"));
 }
-
-/** Whether bytes start with the CFB signature `D0 CF 11 E0 A1 B1 1A E1`. */
-export const hasCfbSignature = isCfb;
 
 /**
  * Derive an encryption key from a password using the agile encryption KDF (MS-OFFCRYPTO §2.3.4.11).
@@ -155,7 +152,7 @@ export function verifyDocxPassword(
 export interface DecryptOptions {
   /**
    * Cap on the decrypted package size in bytes, `Infinity` for none. Default: the
-   * default security policy's `maxPackageSize` (500 MiB), the cap `Io.read` applies.
+   * default security policy's `maxPackageSize` (500 MiB), the cap `Document.read` applies.
    */
   readonly maxDecryptedSize?: number;
 }

@@ -8,7 +8,10 @@
  * a new document without mutating the input.
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import {
   foldRangeMarkers,
   listChildRangeMarkers,
@@ -18,6 +21,7 @@ import {
 } from "@word/core/range-markers";
 import { hyperlinkContent, isRun, withHyperlinkContent } from "@word/core/text-utils";
 import type { WalkPath } from "@word/core/walker";
+import { walkOptionsShape } from "@word/core/walker";
 import { DocxArgumentError } from "@word/errors";
 import type {
   BodyContent,
@@ -64,6 +68,10 @@ export interface MapOptions {
   readonly includeComments?: boolean;
 }
 
+const mapOptionsSchema = w.record(walkOptionsShape);
+const _mapOptionsMatch: SchemaMatches<typeof mapOptionsSchema, MapOptions> = true;
+void _mapOptionsMatch;
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -73,8 +81,8 @@ export interface MapOptions {
  * Rebuilds the document tree, allowing callers to replace or filter nodes.
  * Never mutates the input document.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to transform.
  * @param transformer - Callbacks to transform each node type.
@@ -88,7 +96,7 @@ export function mapDocument(
 ): DocxDocument {
   checkHandle(doc, "document", "doc", "Transform.map");
   checkRecord(transformer, "transformer", "Transform.map");
-  checkRecord(options, "options", "Transform.map", { optional: true });
+  checkSchema(mapOptionsSchema.optional(), options, "Transform.map");
   const opts: Required<MapOptions> = {
     includeHeaders: options?.includeHeaders ?? true,
     includeFooters: options?.includeFooters ?? true,
@@ -203,15 +211,18 @@ export function mapDocument(
     });
   }
 
-  return {
-    ...doc,
-    body,
-    headers,
-    footers,
-    footnotes,
-    endnotes,
-    comments
-  };
+  return markDerived(
+    {
+      ...doc,
+      body,
+      headers,
+      footers,
+      footnotes,
+      endnotes,
+      comments
+    },
+    doc
+  );
 }
 
 // =============================================================================

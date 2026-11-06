@@ -16,8 +16,13 @@
  *
  * Only what the format itself rules out is refused: enumerations, booleans, and the integers and references the
  * schema types require. Ranges Excel's dialogs enforce but its reader may tolerate are left alone.
+ *
+ * This is a visitor rather than an `@utils/schema` declaration because a read needs every value outside the vocabulary
+ * — each one set aside in place, on the object that held it — where a schema reports the first. Its wording is the
+ * schema's, so a refusal here reads as one from a schema-checked option does.
  */
-import { ExcelArgumentError, ExcelInvalidAddressError } from "@excel/errors";
+import { ExcelInvalidAddressError } from "@excel/errors";
+import { argumentFailure } from "@excel/utils/arguments";
 import { describeValue as describe } from "@utils/describe-value";
 import {
   UNRECOGNIZED_KEY,
@@ -101,7 +106,7 @@ function fieldChecks(sink: Sink) {
     bool(c: Fields, key: string, path: string): void {
       const v = c[key];
       if (v !== undefined && typeof v !== "boolean") {
-        sink.invalid(c, key, path, "a boolean");
+        sink.invalid(c, key, path, "true or false");
       }
     },
     str(c: Fields, key: string, path: string, nullable = false): void {
@@ -127,13 +132,14 @@ function fieldChecks(sink: Sink) {
         (min !== undefined && v < min) ||
         (max !== undefined && v > max)
       ) {
+        const noun = integer ? "an integer" : "a finite number";
         const range =
           min !== undefined && max !== undefined
             ? ` from ${min} to ${max}`
             : min !== undefined
-              ? ` of at least ${min}`
+              ? ` >= ${min}`
               : "";
-        sink.invalid(c, key, path, `${integer ? "a whole number" : "a number"}${range}`);
+        sink.invalid(c, key, path, `${noun}${range}`);
       }
     },
     cell(c: Fields, key: string, path: string): void {
@@ -303,11 +309,13 @@ export function checkSheetSettings(
       // The setting's path as the caller named it: `options.pageSetup.orientation`, or `value.orientation` for a setter
       // that takes the one setting.
       const path = field(settingPath);
-      const message = `${where}: ${path} must be ${expected}, got ${describe(container[key])}.`;
       if (address) {
-        throw new ExcelInvalidAddressError(String(container[key]), message);
+        throw new ExcelInvalidAddressError(
+          String(container[key]),
+          `${where}: ${path} must be ${expected}, got ${describe(container[key])}`
+        );
       }
-      throw new ExcelArgumentError(path, message);
+      throw argumentFailure(where, path, expected, container[key]);
     }
   });
 }

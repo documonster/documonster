@@ -11,6 +11,7 @@ import {
   checkString,
   namedValueField
 } from "@word/core/argument-checks";
+import { markDerived } from "@word/core/ownership";
 import {
   arrangeParagraphChildren,
   collectRangeMarkers,
@@ -42,8 +43,8 @@ import type { XmlElement, XmlNode } from "@xml/types";
  * - Repeating sections: SDT with `repeatingSection` is duplicated per data row
  * - Conditional display: SDT is removed if XPath returns empty/false
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to process (returns a new modified copy).
  * @param data - Optional override data (storeItemId → XML string), as a `Map` or a
@@ -77,7 +78,7 @@ export function resolveDataBindings(
   }
 
   const newBody = doc.body.map(block => resolveBlockBinding(block, xmlStore));
-  return { ...doc, body: newBody };
+  return markDerived({ ...doc, body: newBody }, doc);
 }
 
 // =============================================================================

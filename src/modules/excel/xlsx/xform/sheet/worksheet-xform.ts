@@ -609,7 +609,8 @@ class WorkSheetXform extends BaseXform {
                 }
               })
         }),
-        maxItems: maxRows
+        maxItems: maxRows,
+        limit: "maxRows"
       }),
       autoFilter: new AutoFilterXform(),
       sortState: new PreservedSubtreeXform(),

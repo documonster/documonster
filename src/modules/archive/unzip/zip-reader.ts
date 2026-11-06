@@ -259,7 +259,7 @@ export interface UnzipOptions {
   maxEntrySize?: number;
 
   /**
-   * Most entries the archive may contain (`ArchiveLimitError`), checked against the central
+   * Most entries the archive may contain (`ArchiveLimitExceededError`), checked against the central
    * directory before its records are read — so for a streamed source only by `list` / `get` /
    * `bytes`, which need it. Unbounded by default.
    */
@@ -1118,34 +1118,34 @@ export class ZipReader {
   }
 
   /**
-   * Get one entry by path; `null` when the archive has no such entry. Of two entries with one
+   * Get one entry by path; `undefined` when the archive has no such entry. Of two entries with one
    * name the later is the one returned, as `unpackZip` and every extractor keep it.
    * Buffers a one-shot source as {@link ZipReader.list} does.
    */
-  async get(path: string): Promise<UnzipEntry | null> {
+  async get(path: string): Promise<UnzipEntry | undefined> {
     checkEntryPath("Archive.ZipReader#get", path);
     return this._get(path, "get");
   }
 
   /**
-   * Read one entry's decompressed bytes; `null` when the archive has no such entry. Buffers a
+   * Read one entry's decompressed bytes; `undefined` when the archive has no such entry. Buffers a
    * one-shot source as {@link ZipReader.list} does.
    */
-  async bytes(path: string): Promise<Uint8Array | null> {
+  async bytes(path: string): Promise<Uint8Array | undefined> {
     checkEntryPath("Archive.ZipReader#bytes", path);
     // Through `get`, so a subclass that overrides it is honoured
     const entry = await this.get(path);
     if (!entry) {
-      return null;
+      return undefined;
     }
     return entry.bytes();
   }
 
-  private async _get(path: string, where: "get" | "bytes"): Promise<UnzipEntry | null> {
+  private async _get(path: string, where: "get" | "bytes"): Promise<UnzipEntry | undefined> {
     const { parser, data } = await this._ensureBufferParser(where);
     const info = parser.getEntry(path);
     if (!info) {
-      return null;
+      return undefined;
     }
     return UnzipEntry._create(
       { kind: "buffer", data, info, password: this._options.password },

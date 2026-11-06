@@ -10,6 +10,9 @@
  *
  * Each also takes a sheet's rule collection by itself — `ws.dataValidations` — in place of the sheet. Cell-level validation (`Cell.getValidation` / `Cell.setValidation`) lives on the `Cell`
  * namespace.
+ *
+ * A streaming worksheet writer (`Stream.WorksheetWriter`) is a target too; its rules are written when it is committed,
+ * so an edit after that is refused.
  */
 import type { DataValidationModel, DataValidationsData } from "@excel/core/data-validations";
 import {
@@ -22,6 +25,8 @@ import {
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { checkWorksheetAttached } from "@excel/core/worksheet-core";
 import { checkDataValidationRule } from "@excel/surface/argument-checks";
+import type { StreamWorksheet } from "@excel/surface/stream-targets";
+import { asStreamWorksheet } from "@excel/surface/stream-targets";
 import type { DataValidationRule } from "@excel/types";
 import { argumentChecks, normalizeReference } from "@excel/utils/arguments";
 import { isRecordArgument } from "@utils/object";
@@ -35,16 +40,23 @@ export const create = (model?: DataValidationModel): DataValidationsData =>
 
 /** The rule collection a call names: a sheet's, or the collection itself. An edit refuses a removed sheet. */
 function rules(
-  target: WorksheetData | DataValidationsData,
+  target: WorksheetData | StreamWorksheet | DataValidationsData,
   where: string,
   edit: boolean
 ): DataValidationsData {
   const check = argumentChecks(where);
   check.required("target", target);
   check.record("target", target);
+  const writer = asStreamWorksheet(target);
+  if (writer) {
+    if (edit) {
+      writer._checkOpen("edit data validation");
+    }
+    return writer.dataValidations;
+  }
   if ("dataValidations" in target) {
     if (edit) {
-      checkWorksheetAttached(target);
+      checkWorksheetAttached(target as WorksheetData);
     }
     return target.dataValidations;
   }
@@ -83,7 +95,7 @@ function localReference(where: string, argument: string, ref: unknown, range: bo
  * @throws {ExcelInvalidAddressError} when `ref` is not a cell or range of the sheet (a sheet name is refused).
  */
 export function add(
-  target: WorksheetData | DataValidationsData,
+  target: WorksheetData | StreamWorksheet | DataValidationsData,
   ref: string,
   validation: DataValidationRule
 ): DataValidationRule {
@@ -97,7 +109,7 @@ export function add(
 
 /** A copy of the validation covering the cell `address`, or `undefined`. */
 export function find(
-  target: WorksheetData | DataValidationsData,
+  target: WorksheetData | StreamWorksheet | DataValidationsData,
   address: string
 ): DataValidationRule | undefined {
   const local = localReference("DataValidation.find", "address", address, false);
@@ -106,7 +118,10 @@ export function find(
 }
 
 /** Remove the validation registered for `ref`. Returns `true` if there was one. */
-export function remove(target: WorksheetData | DataValidationsData, ref: string): boolean {
+export function remove(
+  target: WorksheetData | StreamWorksheet | DataValidationsData,
+  ref: string
+): boolean {
   const local = localReference("DataValidation.remove", "ref", ref, true);
   return dataValidationRemove(rules(target, "DataValidation.remove", true), local);
 }
@@ -120,7 +135,7 @@ export interface Entry {
 }
 
 /** Every validation of `target`, in the order they were registered — copies, so editing one changes nothing. */
-export function list(target: WorksheetData | DataValidationsData): Entry[] {
+export function list(target: WorksheetData | StreamWorksheet | DataValidationsData): Entry[] {
   const { model } = rules(target, "DataValidation.list", false);
   const entries: Entry[] = [];
   for (const [key, rule] of Object.entries(model)) {
@@ -135,7 +150,7 @@ export function list(target: WorksheetData | DataValidationsData): Entry[] {
 }
 
 /** Remove every validation of `target`. */
-export function clear(target: WorksheetData | DataValidationsData): void {
+export function clear(target: WorksheetData | StreamWorksheet | DataValidationsData): void {
   const { model } = rules(target, "DataValidation.clear", true);
   for (const key of Object.keys(model)) {
     delete model[key];

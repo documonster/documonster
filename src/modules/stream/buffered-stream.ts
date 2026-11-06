@@ -5,10 +5,16 @@
  * Works identically in both browser and Node.js environments.
  */
 
+import {
+  bufferedStreamOptionsSchema,
+  byteArraySchema,
+  checkStreamArgument
+} from "@stream/arguments";
 import { StreamStateError, StreamArgumentError } from "@stream/errors";
 import type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
 import { textEncoder } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
+import { s } from "@utils/schema";
 
 export type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
 
@@ -16,12 +22,7 @@ export type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
  * Create a string-backed data chunk.
  */
 export function createStringChunk(data: string): StreamDataChunk {
-  if (typeof data !== "string") {
-    throw new StreamArgumentError("a string", data === null ? "null" : typeof data, {
-      field: "data",
-      where: "Streams.createStringChunk"
-    });
-  }
+  checkStreamArgument(s.string(), data, "Streams.createStringChunk", "data");
   let buffer: Uint8Array | undefined;
   function toUint8Array(): Uint8Array {
     if (!buffer) {
@@ -48,14 +49,7 @@ export function createStringChunk(data: string): StreamDataChunk {
  * Create a Uint8Array-backed data chunk.
  */
 export function createByteChunk(data: Uint8Array): StreamDataChunk {
-  if (
-    !(ArrayBuffer.isView(data) && (data as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1)
-  ) {
-    throw new StreamArgumentError("a Uint8Array", data === null ? "null" : typeof data, {
-      field: "data",
-      where: "Streams.createByteChunk"
-    });
-  }
+  checkStreamArgument(byteArraySchema, data, "Streams.createByteChunk", "data");
   return {
     get length(): number {
       return data.length;
@@ -145,23 +139,8 @@ export class BufferedStream extends EventEmitter {
 
   constructor(options: BufferedStreamOptions = {}) {
     super();
-    if (typeof options !== "object" || options === null) {
-      throw new StreamArgumentError(
-        "an options object",
-        options === null ? "null" : typeof options,
-        {
-          field: "options",
-          where: "Streams.BufferedStream"
-        }
-      );
-    }
+    checkStreamArgument(bufferedStreamOptionsSchema, options, "Streams.BufferedStream", "options");
     const { batchSize } = options;
-    if (batchSize !== undefined && (!Number.isInteger(batchSize) || batchSize <= 0)) {
-      throw new StreamArgumentError("a positive integer batchSize", String(batchSize), {
-        field: "options.batchSize",
-        where: "Streams.BufferedStream"
-      });
-    }
     this._batchSize = batchSize ?? 16384; // 16KB default
   }
 

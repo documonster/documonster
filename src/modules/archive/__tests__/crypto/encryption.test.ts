@@ -12,13 +12,15 @@ import {
   aesCtr,
   aesComputeHmac,
   aesCheckPasswordOnly,
-  aesCheckSignature,
+  aesCheckSignature
+} from "../../crypto/aes";
+import {
   parseAesExtraField,
   AES_KEY_LENGTH,
   AES_SALT_LENGTH,
   AES_AUTH_CODE_LENGTH
-} from "../../crypto/aes";
-import type { AesKeyStrength } from "../../crypto/aes";
+} from "../../crypto/aes-format";
+import type { AesKeyStrength } from "../../crypto/aes-format";
 import {
   zipCryptoInitKeys,
   zipCryptoDecryptByte,

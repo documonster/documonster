@@ -25,6 +25,7 @@ import {
   ArchiveRangeNotSupportedError as ArchiveRangeNotSupportedErrorImpl,
   ArchiveHttpRangeError as ArchiveHttpRangeErrorImpl,
   ArchiveFileTooLargeError as ArchiveFileTooLargeErrorImpl,
+  ArchiveLimitExceededError as ArchiveLimitExceededErrorImpl,
   ArchiveWorkerStreamStartError as ArchiveWorkerStreamStartErrorImpl
 } from "@archive/core/errors";
 import { encodePng as encodePngImpl } from "@archive/png";
@@ -166,7 +167,7 @@ export {
   ArchiveFileError,
   ZipUnsupportedCompressionError,
   ZipEntrySizeMismatchError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError,
   ArchiveWorkerUnsupportedError,
   // Error types
@@ -220,6 +221,13 @@ export const FileTooLargeError = ArchiveFileTooLargeErrorImpl;
 export type FileTooLargeError = ArchiveFileTooLargeErrorImpl;
 /** @deprecated Use {@link ArchiveFileTooLargeErrorOptions}. Removed in 1.0. */
 export type FileTooLargeErrorOptions = ArchiveFileTooLargeErrorOptionsImpl;
+/**
+ * @deprecated Use {@link ArchiveLimitExceededError} — the same class, under the name every module's limit error has
+ * (`ExcelLimitExceededError`, `DocxLimitExceededError`, `PdfLimitExceededError`). Removed in 1.0.
+ */
+export const ArchiveLimitError = ArchiveLimitExceededErrorImpl;
+/** @deprecated Use {@link ArchiveLimitExceededError}. Removed in 1.0. */
+export type ArchiveLimitError = ArchiveLimitExceededErrorImpl;
 /** @deprecated Use {@link ArchiveWorkerStreamStartError}. Removed in 1.0. */
 export const WorkerStreamStartError = ArchiveWorkerStreamStartErrorImpl;
 /** @deprecated Use {@link ArchiveWorkerStreamStartError}. Removed in 1.0. */

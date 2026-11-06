@@ -7,8 +7,9 @@
  * Ownership rule for the Word API: `Document.*` edits the document you pass,
  * in place. Every other namespace function that returns a `DocxDocument`
  * leaves its input unchanged; the result may share unchanged nodes with the
- * input, so before editing a result in place while you still use the input,
- * take {@link clone}.
+ * input, and `Document.*` copies a shared array or node before it changes it
+ * (`@word/core/ownership`), so an edit made through either document never
+ * reaches the other.
  */
 
 import { isRecordArgument } from "@utils/object";
@@ -62,11 +63,12 @@ import {
 } from "@word/core/header-references";
 import { assertImageMediaType } from "@word/core/image-media";
 import type { Mutable } from "@word/core/internal-utils";
+import { claim, isSharing, markDerived, ownContainer, ownTree } from "@word/core/ownership";
 import { removeBlock } from "@word/core/range-markers";
 import { parseTocInstruction } from "@word/core/toc-instruction";
 import type {
-  DiscardUnrecognizedValuesOptions,
-  UnrecognizedValue,
+  DocxDiscardUnrecognizedValuesOptions,
+  DocxUnrecognizedValue,
   DocxDocument,
   BodyContent,
   Paragraph,
@@ -115,7 +117,7 @@ export {
 export { setCompatibilityMode } from "@word/query/compat";
 
 /**
- * The values `Io.read` kept because they are outside their field's vocabulary, as they are kept now — a field set
+ * The values `Document.read` kept because they are outside their field's vocabulary, as they are kept now — a field set
  * since takes its value off the list, `discardUnrecognizedValues` takes them off for good — each with the path
  * `Validation.validate` reports (`body[0].properties.alignment`) and the text the file had. Empty for a document no
  * reader made.
@@ -124,13 +126,13 @@ export { setCompatibilityMode } from "@word/query/compat";
  * for (const { path, value } of Document.listUnrecognizedValues(doc)) console.log(path, value);
  * ```
  */
-export function listUnrecognizedValues(doc: DocxDocument): UnrecognizedValue[] {
+export function listUnrecognizedValues(doc: DocxDocument): DocxUnrecognizedValue[] {
   checkHandle(doc, "document", "doc", "Document.listUnrecognizedValues");
   return findUnrecognizedValues(doc);
 }
 
 /**
- * Drop the values `Io.read` kept because they are outside their field's vocabulary — what `Validation.validate`
+ * Drop the values `Document.read` kept because they are outside their field's vocabulary — what `Validation.validate`
  * reports as `"unrecognized-value"` — so the document is written with each such field as it now reads. Returns how
  * many there were.
  *
@@ -144,7 +146,7 @@ export function listUnrecognizedValues(doc: DocxDocument): UnrecognizedValue[] {
  */
 export function discardUnrecognizedValues(
   doc: DocxDocument,
-  options?: DiscardUnrecognizedValuesOptions
+  options?: DocxDiscardUnrecognizedValuesOptions
 ): number {
   checkHandle(doc, "document", "doc", "Document.discardUnrecognizedValues");
   const where = "Document.discardUnrecognizedValues";
@@ -152,6 +154,7 @@ export function discardUnrecognizedValues(
   if (options?.filter !== undefined && typeof options.filter !== "function") {
     invalidArgument(where, "options.filter", "a function", options.filter);
   }
+  ownTree(doc);
   return discardUnrecognizedValuesUnder(doc, options?.filter);
 }
 // =============================================================================
@@ -168,8 +171,9 @@ function _w(doc: DocxDocument): _Writable {
   return doc as _Writable;
 }
 
+/** The body, which `doc` may edit in place — see `@word/core/ownership`. */
 function _body(doc: DocxDocument): BodyContent[] {
-  return doc.body as BodyContent[];
+  return ownContainer(doc, "body", doc.body as BodyContent[]);
 }
 
 type _ArrayField = {
@@ -186,9 +190,18 @@ function _ensure<K extends _ArrayField>(
   key: K
 ): (NonNullable<DocxDocument[K]> extends readonly (infer T)[] ? T : never)[] {
   const w = _w(doc) as Record<string, unknown>;
-  return (w[key] ??= []) as (NonNullable<DocxDocument[K]> extends readonly (infer T)[]
-    ? T
-    : never)[];
+  const list = w[key];
+  if (list === undefined) {
+    const created: unknown[] = [];
+    claim(doc, created);
+    w[key] = created;
+    return created as (NonNullable<DocxDocument[K]> extends readonly (infer T)[] ? T : never)[];
+  }
+  return ownContainer(
+    doc,
+    key,
+    list as (NonNullable<DocxDocument[K]> extends readonly (infer T)[] ? T : never)[]
+  );
 }
 
 function _ensureMap(
@@ -196,7 +209,14 @@ function _ensureMap(
   key: "headers" | "footers"
 ): Map<string, HeaderDef | FooterDef> {
   const w = _w(doc) as Record<string, unknown>;
-  return (w[key] ??= new Map()) as Map<string, HeaderDef | FooterDef>;
+  const map = w[key] as Map<string, HeaderDef | FooterDef> | undefined;
+  if (map === undefined) {
+    const created = new Map<string, HeaderDef | FooterDef>();
+    claim(doc, created);
+    w[key] = created;
+    return created;
+  }
+  return ownContainer(doc, key, map);
 }
 
 // -----------------------------------------------------------------------------
@@ -452,17 +472,17 @@ function _ensureNumberingInstance(doc: DocxDocument, abstractNumId: number): num
  *
  * Replaces the former `DocumentBuilder` class with tree-shakeable free functions.
  * Each function operates on a `DocxDocument` — a transparent content tree that
- * `Document.create()` and `Io.read` return and `Io.toBuffer` writes.
+ * `Document.create()` and `Document.read` return and `Document.toBuffer` writes.
  *
  * @example
  * ```ts
- * import { Document, Io } from "documonster/word";
+ * import { Document } from "documonster/word";
  *
  * const doc = Document.create();
  * Document.addHeading(doc, "Hello World", 1);
  * Document.addParagraph(doc, "This is a paragraph.");
  * Document.addTable(doc, [["Name", "Age"], ["Alice", "30"]]);
- * const bytes = await Io.toBuffer(doc);
+ * const bytes = await Document.toBuffer(doc);
  * ```
  */
 export function create(): DocxDocument {
@@ -474,6 +494,7 @@ export function create(): DocxDocument {
     },
     deriveEastAsianDefaults: true
   };
+  claim(doc, doc.body);
   return doc;
 }
 
@@ -481,11 +502,10 @@ export function create(): DocxDocument {
  * A deep copy of `doc` that shares nothing with it, so editing either in place
  * never reaches the other.
  *
- * Take one before editing a document in place — with `Document.*`, or by
- * assigning to its fields — while another document may still share its nodes:
- * a document returned by `Template.fill`, `Transform.*`, `Security.*` or any
- * other function outside `Document` may share unchanged nodes with that
- * function's input.
+ * `Document.*` needs no clone to keep documents apart: it copies whatever a
+ * document shares with another before changing it. Take one to keep a
+ * snapshot, or before editing nodes by hand (assigning into a paragraph you
+ * read from the tree), which nothing copies for you.
  *
  * The model is plain data — objects, arrays, `Map`s, byte arrays, `Date`s and
  * primitives — so this is a `structuredClone`; a value outside the model (a
@@ -577,6 +597,11 @@ export function removeContent(doc: DocxDocument, index: number): BodyContent | u
   if (index < 0 || index >= body.length) {
     return undefined;
   }
+  if (isSharing(doc)) {
+    // `removeBlock` takes the range markers off the block it removes, which
+    // another document may still hold.
+    body[index] = { ...body[index]! };
+  }
   const { removed, markersAfter } = removeBlock(body, index);
   if (markersAfter.length > 0) {
     _w(doc).bodyRangeMarkersAfter = [...markersAfter, ...(doc.bodyRangeMarkersAfter ?? [])];
@@ -587,7 +612,7 @@ export function removeContent(doc: DocxDocument, index: number): BodyContent | u
 /** The number of blocks in the body. */
 export function getContentCount(doc: DocxDocument): number {
   checkHandle(doc, "document", "doc", "Document.getContentCount");
-  return _body(doc).length;
+  return doc.body.length;
 }
 
 /**
@@ -598,7 +623,7 @@ export function getContentCount(doc: DocxDocument): number {
 export function getContent(doc: DocxDocument, index: number): BodyContent | undefined {
   checkHandle(doc, "document", "doc", "Document.getContent");
   _checkPosition(index, "Document.getContent");
-  return _body(doc)[index];
+  return doc.body[index];
 }
 
 /**
@@ -702,10 +727,85 @@ function _checkImage(
   return { data: bytes, fallbackData };
 }
 
+/** What {@link addImage} takes beside the image bytes. */
+export interface DocxAddImageOptions {
+  /** The image format, as a file-extension name (`"png"`, `"jpeg"`, …), not a MIME type. */
+  readonly type: ImageMediaType;
+  /** Width in EMU — convert with `Units.cmToEmu`, `Units.inchesToEmu` or `Units.pxToEmu`. */
+  readonly width: Emu;
+  /** Height in EMU — convert with `Units.cmToEmu`, `Units.inchesToEmu` or `Units.pxToEmu`. */
+  readonly height: Emu;
+  /** Alternative text read by assistive technology. */
+  readonly altText?: string;
+  /** The drawing's name. Default: `Picture <n>`. */
+  readonly name?: string;
+  /** A raster fallback for a vector `type` (`svg`), shown by readers that cannot draw it. */
+  readonly fallbackData?: Uint8Array;
+}
+
+/** What {@link addFloatingImage} takes beside the image bytes: {@link DocxAddImageOptions} plus the anchor. */
+export interface DocxAddFloatingImageOptions extends DocxAddImageOptions {
+  readonly horizontalPosition?: FloatingImage["horizontalPosition"];
+  readonly verticalPosition?: FloatingImage["verticalPosition"];
+  readonly wrap?: FloatingImage["wrap"];
+  readonly behindDoc?: boolean;
+  readonly lockAnchor?: boolean;
+  readonly layoutInCell?: boolean;
+  readonly allowOverlap?: boolean;
+  /** Distance from the text above, in EMU. */
+  readonly distT?: Emu;
+  /** Distance from the text below, in EMU. */
+  readonly distB?: Emu;
+  /** Distance from the text to the left, in EMU. */
+  readonly distL?: Emu;
+  /** Distance from the text to the right, in EMU. */
+  readonly distR?: Emu;
+  /** Clockwise rotation in degrees. */
+  readonly rotation?: number;
+  readonly flipHorizontal?: boolean;
+  readonly flipVertical?: boolean;
+}
+
 /**
- * Append a paragraph holding an inline picture, `width` × `height` EMU, and
- * register the image bytes with the document. Returns the relationship id the
- * picture refers to the image by and its drawing id (`wp:docPr/@id`).
+ * The options of an image helper called either as `(doc, data, options)` or in the deprecated
+ * `(doc, data, mediaType, width, height, options?)` form, told apart by whether the third argument is
+ * an options record. In the options form nothing may follow it: a width there would be silently ignored.
+ */
+function _imageOptions<O extends DocxAddImageOptions>(
+  where: string,
+  optionsOrType: O | ImageMediaType,
+  width: unknown,
+  height: unknown,
+  rest: Omit<O, "type" | "width" | "height"> | undefined
+): O {
+  if (isRecordArgument(optionsOrType)) {
+    if (width !== undefined || height !== undefined || rest !== undefined) {
+      invalidArgument(
+        where,
+        "options",
+        "the last argument after the image bytes",
+        width !== undefined ? width : height !== undefined ? height : rest
+      );
+    }
+    return optionsOrType;
+  }
+  checkRecord(rest, "options", where, { optional: true });
+  return { ...rest, type: optionsOrType, width, height } as O;
+}
+
+/**
+ * Append a paragraph holding an inline picture and register the image bytes with the
+ * document: `Document.addImage(doc, png, { type: "png", width: Units.cmToEmu(5), height: Units.cmToEmu(3) })`.
+ * Returns the relationship id the picture refers to the image by and its drawing id (`wp:docPr/@id`).
+ */
+export function addImage(
+  doc: DocxDocument,
+  data: Uint8Array,
+  options: DocxAddImageOptions
+): { rId: string; drawingId: number };
+/**
+ * @deprecated Pass the format and size in the options:
+ * `Document.addImage(doc, data, { type, width, height })`. Removed in 1.0.
  */
 export function addImage(
   doc: DocxDocument,
@@ -714,10 +814,25 @@ export function addImage(
   width: Emu,
   height: Emu,
   options?: { altText?: string; name?: string; fallbackData?: Uint8Array }
+): { rId: string; drawingId: number };
+export function addImage(
+  doc: DocxDocument,
+  data: Uint8Array,
+  optionsOrType: DocxAddImageOptions | ImageMediaType,
+  widthArg?: Emu,
+  heightArg?: Emu,
+  rest?: { altText?: string; name?: string; fallbackData?: Uint8Array }
 ): { rId: string; drawingId: number } {
   checkHandle(doc, "document", "doc", "Document.addImage");
-  assertImageMediaType(mediaType, "Document.addImage");
-  assertDrawingNumbers("Document.addImage", { width, height });
+  const options = _imageOptions("Document.addImage", optionsOrType, widthArg, heightArg, rest);
+  const record = isRecordArgument(optionsOrType);
+  const { type: mediaType, width, height } = options;
+  assertImageMediaType(mediaType, "Document.addImage", record ? "options.type" : "mediaType");
+  assertDrawingNumbers(
+    "Document.addImage",
+    { width, height },
+    record ? under("options") : undefined
+  );
   const bytes = _checkImage(data, options, "Document.addImage");
   const imageId = _allocate(doc, "image");
   const fileName = `image${imageId}.${mediaType}`;
@@ -754,9 +869,18 @@ export function addImage(
 }
 
 /**
- * Append a floating (anchored) picture, `width` × `height` EMU, and register
- * the image bytes with the document. Returns the relationship id the picture
- * refers to the image by.
+ * Append a floating (anchored) picture and register the image bytes with the document:
+ * `Document.addFloatingImage(doc, png, { type: "png", width, height, wrap: { style: "square" } })`.
+ * Returns the relationship id the picture refers to the image by.
+ */
+export function addFloatingImage(
+  doc: DocxDocument,
+  data: Uint8Array,
+  options: DocxAddFloatingImageOptions
+): string;
+/**
+ * @deprecated Pass the format and size in the options:
+ * `Document.addFloatingImage(doc, data, { type, width, height, … })`. Removed in 1.0.
  */
 export function addFloatingImage(
   doc: DocxDocument,
@@ -764,31 +888,37 @@ export function addFloatingImage(
   mediaType: ImageMediaType,
   width: Emu,
   height: Emu,
-  options?: {
-    altText?: string;
-    name?: string;
-    horizontalPosition?: FloatingImage["horizontalPosition"];
-    verticalPosition?: FloatingImage["verticalPosition"];
-    wrap?: FloatingImage["wrap"];
-    behindDoc?: boolean;
-    lockAnchor?: boolean;
-    layoutInCell?: boolean;
-    allowOverlap?: boolean;
-    distT?: Emu;
-    distB?: Emu;
-    distL?: Emu;
-    distR?: Emu;
-    rotation?: number;
-    flipHorizontal?: boolean;
-    flipVertical?: boolean;
-    fallbackData?: Uint8Array;
-  }
+  options?: Omit<DocxAddFloatingImageOptions, "type" | "width" | "height">
+): string;
+export function addFloatingImage(
+  doc: DocxDocument,
+  data: Uint8Array,
+  optionsOrType: DocxAddFloatingImageOptions | ImageMediaType,
+  widthArg?: Emu,
+  heightArg?: Emu,
+  rest?: Omit<DocxAddFloatingImageOptions, "type" | "width" | "height">
 ): string {
   checkHandle(doc, "document", "doc", "Document.addFloatingImage");
-  assertImageMediaType(mediaType, "Document.addFloatingImage");
-  assertDrawingNumbers("Document.addFloatingImage", { width, height });
-  checkRecord(options, "options", "Document.addFloatingImage", { optional: true });
-  assertAnchorNumbers("Document.addFloatingImage", options ?? {}, under("options"));
+  const options = _imageOptions(
+    "Document.addFloatingImage",
+    optionsOrType,
+    widthArg,
+    heightArg,
+    rest
+  );
+  const record = isRecordArgument(optionsOrType);
+  const { type: mediaType, width, height } = options;
+  assertImageMediaType(
+    mediaType,
+    "Document.addFloatingImage",
+    record ? "options.type" : "mediaType"
+  );
+  assertDrawingNumbers(
+    "Document.addFloatingImage",
+    { width, height },
+    record ? under("options") : undefined
+  );
+  assertAnchorNumbers("Document.addFloatingImage", options, under("options"));
   const bytes = _checkImage(data, options, "Document.addFloatingImage");
   const imageId = _allocate(doc, "image");
   const fileName = `image${imageId}.${mediaType}`;
@@ -1322,7 +1452,7 @@ function addDefaultStyles(doc: DocxDocument): void {
  * section.
  *
  * `key` is a header type — `"default"`, `"first"` or `"even"` — or the key
- * under which the document already stores a header (a document from `Io.read`
+ * under which the document already stores a header (a document from `Document.read`
  * keys its headers by relationship id, `"rId7"`), or a key a section's
  * header references name (`{ type: "default", rId: "cover" }`).
  *
@@ -1614,7 +1744,7 @@ export const nextBookmarkId = allocateBookmarkId;
 
 /**
  * @deprecated A document needs no build step: pass the document itself to
- * `Io.toBuffer`, `Layout.*`, `WordHtml.fromDocx` or `Pdf.fromDocx`, which apply
+ * `Document.toBuffer`, `Layout.*`, `WordHtml.fromDocx` or `Pdf.fromDocx`, which apply
  * the same write-time defaults. Removed in 1.0.
  */
 export function build(doc: DocxDocument): DocxDocument {
@@ -1637,5 +1767,5 @@ export function build(doc: DocxDocument): DocxDocument {
     pageSize: { width: 12240, height: 15840 },
     margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
   };
-  return out as unknown as DocxDocument;
+  return markDerived(out as unknown as DocxDocument, doc);
 }

@@ -18,12 +18,12 @@ const ws = Workbook.addWorksheet(wb, "Stats");
 // Sample dataset
 const nums = [12, 15, 14, 10, 18, 22, 19, 24, 13, 21];
 for (let i = 0; i < nums.length; i++) {
-  Cell.setValue(ws, i + 1, 1, nums[i]); // A1:A10
+  Cell.setValue(ws, { row: i + 1, col: 1 }, nums[i]); // A1:A10
 }
 // Second dataset for correlation
 const ys = [30, 33, 31, 29, 40, 42, 39, 45, 32, 44];
 for (let i = 0; i < ys.length; i++) {
-  Cell.setValue(ws, i + 1, 2, ys[i]); // B1:B10
+  Cell.setValue(ws, { row: i + 1, col: 2 }, ys[i]); // B1:B10
 }
 
 // Descriptive

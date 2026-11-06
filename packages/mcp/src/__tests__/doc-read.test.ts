@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Pdf } from "documonster/pdf";
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
@@ -57,7 +57,7 @@ async function makeWord(fx: Fixture, name: string, extraParagraphs = 0): Promise
   for (let index = 0; index < extraParagraphs; index += 1) {
     Document.addParagraph(doc, `Filler paragraph number ${index + 1}.`);
   }
-  await Io.writeFile(doc, path.join(fx.root, name));
+  await Document.writeFile(doc, path.join(fx.root, name));
   return name;
 }
 
@@ -97,7 +97,7 @@ describe("doc_read — Word", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Just a sentence.");
-    await Io.writeFile(doc, path.join(fx.root, "flat.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "flat.docx"));
 
     expect(await read(fx, { path: "flat.docx", outline: true })).toContain("no headings");
   });

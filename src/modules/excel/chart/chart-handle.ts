@@ -57,6 +57,7 @@ import { checkWorksheetAttached, getSheetWorkbook } from "@excel/core/worksheet-
 import { ExcelChartOptionsError, ExcelArgumentError } from "@excel/errors";
 import { argumentChecks } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
+import { copyPlain } from "@excel/utils/copy-plain";
 import { RelType } from "@excel/xlsx/rel-type";
 
 /**
@@ -345,8 +346,9 @@ export function chartAnchorModel(c: ChartHandle): ChartAnchorModel {
       tl: anchorModel(c.range.tl),
       br: c.range.br ? anchorModel(c.range.br) : undefined,
       editAs: c.range.editAs,
-      pos: c.range.pos,
-      ext: c.range.ext
+      // Copied, so the "new object" holds all the way down rather than handing out the chart's own placement.
+      pos: copyPlain(c.range.pos),
+      ext: copyPlain(c.range.ext)
     } as ChartAnchorModel["range"]
   };
   return base;
@@ -430,6 +432,7 @@ export function chartUnknownElements(
  *
  * Classic charts only. Returns `undefined` on chartEx charts (they
  * have their own extension mechanism and do not use `c:userShapes`).
+ * The bytes are the chart's own, not a copy: write into them and the file changes.
  */
 export function chartUserShapesXml(c: ChartHandle): Uint8Array | undefined {
   checkChart(c);
@@ -743,7 +746,7 @@ export function chartSetTitleRichText(c: ChartHandle, richText: ChartRichText): 
 }
 
 /**
- * Get the structured rich text of the chart title.
+ * Get the structured rich text of the chart title — part of the live model {@link chartChartModel} returns, not a copy.
  * Returns undefined if the title is unset, formula-only, or captured as rawTx.
  */
 export function chartTitleRichText(c: ChartHandle): ChartRichText | undefined {
@@ -753,19 +756,22 @@ export function chartTitleRichText(c: ChartHandle): ChartRichText | undefined {
   );
 }
 
-/** Get the chart type groups in the plot area */
+/**
+ * The chart type groups in the plot area — the live model's own array, as {@link chartChartModel} hands it out, not a
+ * copy. The setters check what they are given; `Chart.mutate` reaches what they do not cover.
+ */
 export function chartChartTypes(c: ChartHandle): ChartTypeGroup[] {
   checkChart(c);
   return chartChartModel(c)?.chart?.plotArea?.chartTypes ?? [];
 }
 
-/** Get the chart axes */
+/** The chart's axes — the live model's own, as {@link chartChartTypes} describes. */
 export function chartAxes(c: ChartHandle): ChartAxis[] {
   checkChart(c);
   return chartChartModel(c)?.chart?.plotArea?.axes ?? [];
 }
 
-/** Get the chart legend */
+/** The chart's legend — the live model's own, as {@link chartChartTypes} describes; set it with {@link chartSetLegend}. */
 export function chartLegend(c: ChartHandle): ChartLegend | undefined {
   checkChart(c);
   return chartChartModel(c)?.chart?.legend ?? chartChartExModel(c)?.chartSpace?.chart?.legend;
@@ -783,7 +789,8 @@ export function chartSetLegend(c: ChartHandle, value: ChartLegend | undefined): 
 }
 
 /**
- * Get the chart-level shape properties. Works for both classic charts
+ * Get the chart-level shape properties — the live model's own, as {@link chartChartTypes} describes; set them with
+ * {@link chartSetSpPr}. Works for both classic charts
  * (`c:chartSpace/c:spPr`) and ChartEx (`cx:chartSpace/cx:spPr` — the
  * Chart2014 schema puts `spPr` on `chartSpace`, not on `chart`).
  */
@@ -825,7 +832,7 @@ export function chartSetSpPr(c: ChartHandle, value: ShapeProperties | undefined)
 }
 
 /**
- * Get an axis by its ID.
+ * Get an axis by its ID — the live model's own, as {@link chartChartTypes} describes.
  */
 export function chartGetAxis(c: ChartHandle, axId: number): ChartAxis | undefined {
   checkChart(c);
@@ -833,7 +840,7 @@ export function chartGetAxis(c: ChartHandle, axId: number): ChartAxis | undefine
 }
 
 /**
- * Get the category (X) axis, if any.
+ * Get the category (X) axis, if any — the live model's own, as {@link chartChartTypes} describes.
  */
 export function chartCategoryAxis(c: ChartHandle): ChartAxis | undefined {
   checkChart(c);
@@ -841,14 +848,17 @@ export function chartCategoryAxis(c: ChartHandle): ChartAxis | undefined {
 }
 
 /**
- * Get the value (Y) axis, if any.
+ * Get the value (Y) axis, if any — the live model's own, as {@link chartChartTypes} describes.
  */
 export function chartValueAxis(c: ChartHandle): ChartAxis | undefined {
   checkChart(c);
   return chartAxes(c).find(ax => ax.axisType === "val");
 }
 
-/** Get the plot area for direct manipulation */
+/**
+ * The plot area — the live model's own, as {@link chartChartTypes} describes. An edit made to it directly reaches the
+ * file unchecked and cannot be undone; `Chart.mutate` makes an unchecked edit too, but applies it only if it completes.
+ */
 export function chartPlotArea(c: ChartHandle): PlotArea | undefined {
   checkChart(c);
   return chartChartModel(c)?.chart?.plotArea;
@@ -1100,7 +1110,8 @@ export function chartRemoveSeries(
 }
 
 /**
- * Get a series from a chart type group.
+ * Get a series from a chart type group — the live model's own, as {@link chartChartTypes} describes; change it with
+ * `Chart.updateSeries`.
  *
  * @param index - 0-based index of the series within the group.
  * @param groupIndex - 0-based index of the chart type group (for combo charts). Defaults to 0.

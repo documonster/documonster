@@ -10,7 +10,7 @@
  * - DOM parsing with Xml.parse
  * - DOM navigation: Xml.findChild, Xml.listChildren, Xml.getAttr, Xml.getText, Xml.eachElement
  * - Query engine: Xml.query, Xml.queryAll (XPath-like syntax)
- * - SAX streaming parser: Xml.SaxParser, Xml.parseSax
+ * - SAX streaming parser: Xml.SaxParser, Xml.parseSaxStream
  * - Xml.parseToObject: convert XML to plain JS objects
  * - Encoding utilities: Xml.encode, Xml.decode, Xml.encodeAttr
  * - Error handling: XmlError, XmlParseError, XmlWriteError

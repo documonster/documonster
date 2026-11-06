@@ -3,87 +3,217 @@
  *
  * Parsing and formatting each resolve their options in one place (`createParseConfig`,
  * `createFormatConfig`), so the checks live there and cover `Csv.parse`, `Csv.parseAsync`,
- * `Csv.parseRows`, the streams and the worker alike. Each refusal is a {@link CsvArgumentError}
+ * `Csv.parseStream`, the streams and the worker alike. Each refusal is a {@link CsvArgumentError}
  * naming the option, thrown before any input is read: a formatter given `delimiter: ""`
  * wrote rows with nothing between the fields, and `quote` equal to the delimiter wrote a
  * file no reader can split.
  */
 
 import { CsvArgumentError } from "@csv/errors";
-import type { CsvFormatOptions, CsvParseOptions } from "@csv/types";
+import type {
+  CastDateConfig,
+  CsvFormatOptions,
+  CsvParseOptions,
+  HeaderTransformFunction,
+  OnSkipCallback,
+  TypeTransformMap
+} from "@csv/types";
+import type { CsvDetectDelimiterOptions, CsvDetectLinebreakOptions } from "@csv/utils/detect";
 import { describeValue } from "@utils/describe-value";
+import { check, fail as schemaFail, s } from "@utils/schema";
+import type { SchemaCheckOptions, SchemaMatches } from "@utils/schema";
 export { describeValue } from "@utils/describe-value";
 
-/** The argument path an option or argument name stands for: `delimiter` → `options.delimiter`. */
-function fieldOf(option: string): string {
-  return option === "options" ||
-    option === "data" ||
-    option === "input" ||
-    option.startsWith("data[") ||
-    option.startsWith("options.")
-    ? option
-    : `options.${option}`;
+/** The {@link SchemaCheckOptions.error} of every CSV check. */
+export function argumentError(field: string, message: string): CsvArgumentError {
+  return new CsvArgumentError(field, message);
+}
+
+/** How an option of an options object is reported: `field` and message both `options.x`. */
+function optionsAt(where: string): SchemaCheckOptions {
+  return { where, field: "options", error: argumentError };
 }
 
 function fail(where: string, option: string, expected: string, value: unknown): never {
-  throw new CsvArgumentError(
-    fieldOf(option),
-    `${where}: ${option} must be ${expected}, got ${describeValue(value)}`
-  );
+  throw schemaFail(optionsAt(where), `.${option}`, expected, value);
 }
 
-function checkString(where: string, option: string, value: unknown, allowEmpty: boolean): void {
-  if (value === undefined) {
-    return;
-  }
-  if (typeof value !== "string" || (!allowEmpty && value === "")) {
-    fail(where, option, allowEmpty ? "a string" : "a non-empty string", value);
-  }
-}
+const hasNoLineBreak = (value: string): boolean => !value.includes("\n") && !value.includes("\r");
 
 /** A quote or escape option: one character, or `false`/`null` to disable. */
-function checkCharOption(where: string, option: string, value: unknown, allowEmpty: boolean): void {
-  if (value === undefined || value === false || value === null) {
-    return;
-  }
-  if (typeof value !== "string" || value.length > 1 || (!allowEmpty && value === "")) {
-    fail(where, option, "a single character, or false to disable", value);
-  }
-  if (value === "\r" || value === "\n") {
-    fail(where, option, "a character other than a line break", value);
-  }
+function charOption(allowEmpty: boolean) {
+  return s
+    .custom<string | false | null>(
+      v =>
+        v === false ||
+        v === null ||
+        (typeof v === "string" && v.length <= 1 && (allowEmpty || v !== "")),
+      "a single character, or false to disable"
+    )
+    .refine(v => v !== "\r" && v !== "\n", "a character other than a line break")
+    .optional();
 }
 
-function checkCount(where: string, option: string, value: unknown, min: number): void {
-  if (
-    value !== undefined &&
-    (typeof value !== "number" || !Number.isInteger(value) || value < min)
-  ) {
-    fail(where, option, `an integer >= ${min}`, value);
-  }
-}
+const count = (min: number) => s.number({ integer: true, min }).optional();
+const flag = () => s.boolean().optional();
 
-function checkFunction(where: string, option: string, value: unknown): void {
-  if (value !== undefined && typeof value !== "function") {
-    fail(where, option, "a function", value);
-  }
-}
+/**
+ * A `dynamicTyping` setting: a boolean, or a map whose own entries are booleans or converter
+ * functions. Only own entries are ever looked up, so a column named `toString` is not read
+ * through `Object.prototype`.
+ */
+export const dynamicTypingSchema = s.union(
+  [
+    s.boolean(),
+    s.record(
+      s.union([s.boolean(), s.function<(value: string) => unknown>()], {
+        expected: "true, false or a function"
+      })
+    )
+  ],
+  { expected: "true, false or a map of column name to boolean or function" }
+);
 
-function checkEnum(
-  where: string,
-  option: string,
-  value: unknown,
-  allowed: readonly unknown[]
-): void {
-  if (value !== undefined && !allowed.includes(value)) {
-    fail(where, option, `one of ${allowed.map(v => describeValue(v)).join(", ")}`, value);
-  }
-}
+export const castDateSchema = s.custom<CastDateConfig>(
+  v => typeof v === "boolean" || (Array.isArray(v) && v.every(c => typeof c === "string")),
+  "true, false or an array of column names"
+);
+
+const parseOptionsSchema = s.object(
+  {
+    delimiter: s.string().refine(hasNoLineBreak, "a string without line breaks").optional(),
+    // An empty quote or escape has always meant that no character matches, so it is kept.
+    quote: charOption(true),
+    escape: charOption(true),
+    objectMode: flag(),
+    delimitersToGuess: s
+      .readonlyArray(
+        s.string({ nonEmpty: true }).refine(hasNoLineBreak, "a string without line breaks"),
+        { expected: "an array of delimiters" }
+      )
+      .optional(),
+    lineEnding: s.string().optional(),
+    comment: s.string().optional(),
+    skipEmptyLines: s.literal(true, false, "greedy").optional(),
+    maxRows: count(0),
+    toLine: count(0),
+    skipLines: count(0),
+    skipRows: count(0),
+    maxRowBytes: count(1),
+    chunkSize: count(1),
+    columnMismatch: s
+      .object(
+        {
+          less: s.literal("error", "pad").orUndefined(),
+          more: s.literal("error", "truncate", "keep").orUndefined()
+        },
+        { expected: "{ less, more }" }
+      )
+      .optional(),
+    encoding: s.string({ nonEmpty: true }).optional(),
+    rowTransform: s.function<CsvParseOptions["rowTransform"]>().optional(),
+    validate: s.function<CsvParseOptions["validate"]>().optional(),
+    chunk: s.function<CsvParseOptions["chunk"]>().optional(),
+    beforeFirstChunk: s.function<CsvParseOptions["beforeFirstChunk"]>().optional(),
+    onSkip: s.function<OnSkipCallback>().optional(),
+    trim: flag(),
+    ltrim: flag(),
+    rtrim: flag(),
+    groupColumnsByName: flag(),
+    fastMode: flag(),
+    info: flag(),
+    raw: flag(),
+    relaxQuotes: flag(),
+    skipRecordsWithError: flag(),
+    skipRecordsWithEmptyValues: flag(),
+    headers: s
+      .union(
+        [
+          s.boolean(),
+          s.function<HeaderTransformFunction>(),
+          s.array(
+            s.union([s.string(), s.literal(null, undefined)], {
+              expected: "a string, null or undefined"
+            })
+          )
+        ],
+        { expected: "true, false, an array of header names or a function" }
+      )
+      .optional(),
+    dynamicTyping: dynamicTypingSchema.optional(),
+    castDate: castDateSchema.optional(),
+    objname: s.string({ nonEmpty: true }).optional(),
+    decimalSeparator: s.literal(".", ",").optional()
+  },
+  { expected: "an options object" }
+);
+const _parseOptionsMatch: SchemaMatches<typeof parseOptionsSchema, CsvParseOptions> = true;
+void _parseOptionsMatch;
+
+const quoteConfig = () =>
+  s
+    .union([s.boolean(), s.array(s.boolean().optional()), s.record(s.boolean().optional())], {
+      expected: "true, false, an array of booleans or a map of header to boolean"
+    })
+    .optional();
+
+const optionalFunction = <F>() => s.function<F>().optional();
+
+const formatOptionsSchema = s.object(
+  {
+    delimiter: s
+      .string({ nonEmpty: true })
+      .refine(hasNoLineBreak, "a string without line breaks")
+      .optional(),
+    quote: charOption(false),
+    // An empty escape has always fallen back to the quote character.
+    escape: charOption(true),
+    objectMode: flag(),
+    readableObjectMode: flag(),
+    lineEnding: s.string({ nonEmpty: true }).optional(),
+    decimalSeparator: s.oneOf([".", ","], { expected: '"." or ","' }).optional(),
+    quoteColumns: quoteConfig(),
+    quoteHeaders: quoteConfig(),
+    headers: s
+      .union([s.boolean(), s.literal(null), s.readonlyArray(s.string())], {
+        expected: "true, false or an array of header names"
+      })
+      .optional(),
+    columns: s
+      .readonlyArray(
+        s.union([s.string(), s.object({ key: s.string(), header: s.string().optional() })], {
+          expected: "a key or { key, header? }"
+        }),
+        { expected: "an array of keys or { key, header? } objects" }
+      )
+      .optional(),
+    writeHeaders: flag(),
+    firstRowIsHeader: flag(),
+    bom: flag(),
+    trailingNewline: flag(),
+    escapeFormulae: flag(),
+    typeTransform: s
+      .object(
+        {
+          boolean: optionalFunction<TypeTransformMap["boolean"]>(),
+          date: optionalFunction<TypeTransformMap["date"]>(),
+          number: optionalFunction<TypeTransformMap["number"]>(),
+          bigint: optionalFunction<TypeTransformMap["bigint"]>(),
+          object: optionalFunction<TypeTransformMap["object"]>(),
+          string: optionalFunction<TypeTransformMap["string"]>(),
+          row: optionalFunction<TypeTransformMap["row"]>()
+        },
+        { expected: "an object of transform functions", unknownKeys: "reject" }
+      )
+      .optional()
+  },
+  { expected: "an options object" }
+);
+const _formatOptionsMatch: SchemaMatches<typeof formatOptionsSchema, CsvFormatOptions> = true;
+void _formatOptionsMatch;
 
 export function checkObject(where: string, value: unknown): void {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    fail(where, "options", "an options object", value);
-  }
+  check(s.object({}, { expected: "an options object" }), value, optionsAt(where));
 }
 
 /** The quote and escape characters must not be the delimiter, or a field cannot be read back. */
@@ -102,13 +232,10 @@ function checkDistinct(where: string, delimiter: string, quote: unknown, escape:
 }
 
 /**
- * A delimiter holding a line break splits records instead of fields, and a line ending that
- * overlaps the delimiter splits fields instead of records: neither can be read back.
+ * A line ending that overlaps the delimiter splits fields instead of records, so it cannot be
+ * read back. (A delimiter holding a line break is refused by the schema.)
  */
 function checkSeparators(where: string, delimiter: string, lineEnding: string | undefined): void {
-  if (delimiter.includes("\n") || delimiter.includes("\r")) {
-    fail(where, "delimiter", "a string without line breaks", delimiter);
-  }
   if (
     delimiter !== "" &&
     lineEnding !== undefined &&
@@ -124,149 +251,19 @@ function checkSeparators(where: string, delimiter: string, lineEnding: string | 
   }
 }
 
-function checkBoolean(where: string, option: string, value: unknown): void {
-  if (value !== undefined && typeof value !== "boolean") {
-    fail(where, option, "true or false", value);
-  }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * A `dynamicTyping` setting: a boolean, or a map whose own entries are booleans or converter
- * functions. Only own entries are ever looked up, so a column named `toString` is not read
- * through `Object.prototype`.
- *
- * `field` is where the setting sits in the public signature: `options.dynamicTyping` for a
- * parse option, `dynamicTyping` where it is a parameter of its own
- * (`Csv.applyDynamicTypingToRow`).
- */
-export function checkDynamicTyping(
-  where: string,
-  dynamicTyping: unknown,
-  field = "options.dynamicTyping"
-): void {
-  if (dynamicTyping === undefined || typeof dynamicTyping === "boolean") {
-    return;
-  }
-  if (!isPlainRecord(dynamicTyping)) {
-    throw new CsvArgumentError(
-      field,
-      `${where}: dynamicTyping must be true, false or a map of column name to boolean or function, got ${describeValue(dynamicTyping)}`
-    );
-  }
-  for (const key of Object.keys(dynamicTyping)) {
-    const v = dynamicTyping[key];
-    if (typeof v !== "boolean" && typeof v !== "function") {
-      const entry = `[${JSON.stringify(key)}]`;
-      throw new CsvArgumentError(
-        `${field}${entry}`,
-        `${where}: dynamicTyping${entry} must be true, false or a function, got ${describeValue(v)}`
-      );
-    }
-  }
-}
-
 /** Check {@link CsvParseOptions}. `delimiter: ""` and `lineEnding: ""` mean auto-detect. */
 export function checkParseOptions(options: CsvParseOptions, where = "Csv.parse"): void {
-  checkObject(where, options);
-  checkString(where, "delimiter", options.delimiter, true);
-  // An empty quote or escape has always meant that no character matches, so it is kept.
-  checkCharOption(where, "quote", options.quote, true);
-  checkCharOption(where, "escape", options.escape, true);
-  checkDistinct(where, options.delimiter ?? ",", options.quote ?? '"', options.escape);
-  if (options.delimitersToGuess !== undefined) {
-    if (!Array.isArray(options.delimitersToGuess)) {
-      fail(where, "delimitersToGuess", "an array of delimiters", options.delimitersToGuess);
-    }
-    options.delimitersToGuess.forEach((d, i) => {
-      checkString(where, `delimitersToGuess[${i}]`, d, false);
-      checkSeparators(where, d, undefined);
-    });
-  }
-  checkString(where, "lineEnding", options.lineEnding, true);
-  checkSeparators(where, options.delimiter ?? ",", options.lineEnding);
-  checkString(where, "comment", options.comment, true);
-  checkEnum(where, "skipEmptyLines", options.skipEmptyLines, [true, false, "greedy"]);
-  checkCount(where, "maxRows", options.maxRows, 0);
-  checkCount(where, "toLine", options.toLine, 0);
-  checkCount(where, "skipLines", options.skipLines, 0);
-  checkCount(where, "skipRows", options.skipRows, 0);
-  checkCount(where, "maxRowBytes", options.maxRowBytes, 1);
-  checkCount(where, "chunkSize", options.chunkSize, 1);
-  if (options.columnMismatch !== undefined) {
-    if (typeof options.columnMismatch !== "object" || options.columnMismatch === null) {
-      fail(where, "columnMismatch", "{ less, more }", options.columnMismatch);
-    }
-    checkEnum(where, "columnMismatch.less", options.columnMismatch.less, ["error", "pad"]);
-    checkEnum(where, "columnMismatch.more", options.columnMismatch.more, [
-      "error",
-      "truncate",
-      "keep"
-    ]);
-  }
-  checkString(where, "encoding", options.encoding, false);
-  for (const option of [
-    "rowTransform",
-    "validate",
-    "chunk",
-    "beforeFirstChunk",
-    "onSkip"
-  ] as const) {
-    checkFunction(where, option, options[option]);
-  }
-  for (const option of [
-    "trim",
-    "ltrim",
-    "rtrim",
-    "groupColumnsByName",
-    "fastMode",
-    "info",
-    "raw",
-    "relaxQuotes",
-    "skipRecordsWithError",
-    "skipRecordsWithEmptyValues",
-    "objectMode"
-  ] as const) {
-    checkBoolean(where, option, options[option]);
-  }
-  const { headers } = options;
+  check(parseOptionsSchema, options, optionsAt(where));
+  const delimiter = options.delimiter ?? ",";
+  checkDistinct(where, delimiter, options.quote ?? '"', options.escape);
+  checkSeparators(where, delimiter, options.lineEnding);
   if (
-    headers !== undefined &&
-    typeof headers !== "boolean" &&
-    typeof headers !== "function" &&
-    !Array.isArray(headers)
+    options.objname !== undefined &&
+    (options.headers === undefined || options.headers === false)
   ) {
-    fail(where, "headers", "true, false, an array of header names or a function", headers);
+    fail(where, "objname", "used with headers (it names a header column)", options.objname);
   }
-  if (Array.isArray(headers)) {
-    headers.forEach((h, i) => {
-      if (h !== null && h !== undefined && typeof h !== "string") {
-        fail(where, `headers[${i}]`, "a string, null or undefined", h);
-      }
-    });
-  }
-  checkDynamicTyping(where, options.dynamicTyping);
-  const { castDate } = options;
-  if (castDate !== undefined && typeof castDate !== "boolean") {
-    if (!Array.isArray(castDate) || castDate.some(c => typeof c !== "string")) {
-      fail(where, "castDate", "true, false or an array of column names", castDate);
-    }
-  }
-  if (options.objname !== undefined) {
-    checkString(where, "objname", options.objname, false);
-    if (headers === undefined || headers === false) {
-      fail(where, "objname", "used with headers (it names a header column)", options.objname);
-    }
-  }
-  checkEnum(where, "decimalSeparator", options.decimalSeparator, [".", ","]);
-  if (
-    options.decimalSeparator === "," &&
-    (options.delimiter ?? ",") !== "" &&
-    (options.delimiter ?? ",").includes(",")
-  ) {
+  if (options.decimalSeparator === "," && delimiter !== "" && delimiter.includes(",")) {
     fail(where, "decimalSeparator", "different from the delimiter", options.decimalSeparator);
   }
 }
@@ -281,48 +278,17 @@ export function checkNoStreamingOptions(where: string, options: CsvParseOptions)
     if (options[option] !== undefined) {
       throw new CsvArgumentError(
         `options.${option}`,
-        `${where}: ${option} is only supported by Csv.parseRows and Csv.ParserStream`
+        `${where}: ${option} is only supported by Csv.parseStream and Csv.ParserStream`
       );
     }
   }
 }
 
-const TYPE_TRANSFORM_KEYS: readonly string[] = [
-  "boolean",
-  "date",
-  "number",
-  "bigint",
-  "object",
-  "string",
-  "row"
-];
-
-function checkQuoteConfig(where: string, option: string, value: unknown): void {
-  if (value === undefined || typeof value === "boolean") {
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((v, i) => checkBoolean(where, `${option}[${i}]`, v));
-    return;
-  }
-  if (!isPlainRecord(value)) {
-    fail(where, option, "true, false, an array of booleans or a map of header to boolean", value);
-  }
-  for (const key of Object.keys(value)) {
-    checkBoolean(where, `${option}[${JSON.stringify(key)}]`, value[key]);
-  }
-}
-
 /** Check {@link CsvFormatOptions}. */
 export function checkFormatOptions(options: CsvFormatOptions, where = "Csv.format"): void {
-  checkObject(where, options);
-  checkString(where, "delimiter", options.delimiter, false);
-  checkCharOption(where, "quote", options.quote, false);
-  // An empty escape has always fallen back to the quote character.
-  checkCharOption(where, "escape", options.escape, true);
+  check(formatOptionsSchema, options, optionsAt(where));
   const delimiter = options.delimiter ?? ",";
   checkDistinct(where, delimiter, options.quote ?? '"', options.escape);
-  checkString(where, "lineEnding", options.lineEnding, false);
   checkSeparators(where, delimiter, options.lineEnding);
   const quote = options.quote === undefined ? '"' : options.quote;
   if (
@@ -338,68 +304,17 @@ export function checkFormatOptions(options: CsvFormatOptions, where = "Csv.forma
       options.lineEnding
     );
   }
-  for (const option of [
-    "objectMode",
-    "readableObjectMode",
-    "writeHeaders",
-    "bom",
-    "trailingNewline",
-    "escapeFormulae"
-  ] as const) {
-    checkBoolean(where, option, options[option]);
-  }
-  const { headers, columns, typeTransform } = options;
-  if (headers !== undefined && headers !== null && typeof headers !== "boolean") {
-    if (!Array.isArray(headers)) {
-      fail(where, "headers", "true, false or an array of header names", headers);
-    }
-    headers.forEach((h, i) => {
-      if (typeof h !== "string") {
-        fail(where, `headers[${i}]`, "a string", h);
-      }
-    });
-  }
-  if (columns !== undefined) {
-    if (!Array.isArray(columns)) {
-      fail(where, "columns", "an array of keys or { key, header? } objects", columns);
-    }
-    columns.forEach((c, i) => {
-      if (typeof c === "string") {
-        return;
-      }
-      if (!isPlainRecord(c) || typeof c.key !== "string") {
-        fail(where, `columns[${i}]`, "a key or { key, header? }", c);
-      }
-      if (c.header !== undefined && typeof c.header !== "string") {
-        fail(where, `columns[${i}].header`, "a string", c.header);
-      }
-    });
-  }
-  checkQuoteConfig(where, "quoteColumns", options.quoteColumns);
-  checkQuoteConfig(where, "quoteHeaders", options.quoteHeaders);
-  if (typeTransform !== undefined) {
-    if (!isPlainRecord(typeTransform)) {
-      fail(where, "typeTransform", "an object of transform functions", typeTransform);
-    }
-    for (const key of Object.keys(typeTransform)) {
-      if (!TYPE_TRANSFORM_KEYS.includes(key)) {
-        fail(
-          where,
-          `typeTransform[${JSON.stringify(key)}]`,
-          `a key in ${TYPE_TRANSFORM_KEYS.join(", ")}`,
-          key
-        );
-      }
-      checkFunction(where, `typeTransform.${key}`, typeTransform[key]);
-    }
-  }
 }
+
+const rowsSchema = s.custom<readonly unknown[]>(Array.isArray, "an array of rows");
 
 /** The data handed to `Csv.format`: an array of rows. */
 export function checkFormatRows(data: unknown, where = "Csv.format"): void {
-  if (!Array.isArray(data)) {
-    fail(where, "data", "an array of rows", data);
-  }
+  check(rowsSchema, data, {
+    where,
+    field: "data",
+    error: argumentError
+  });
 }
 
 /**
@@ -413,37 +328,55 @@ export function checkFormatRow(
   where = "Csv.format"
 ): void {
   if (typeof row !== "object" || row === null) {
-    fail(
-      where,
-      from === undefined ? `data[${index}]` : `${from} result for data[${index}]`,
-      "an array or an object",
-      row
-    );
+    // A row the caller passed is `data[i]`; one `typeTransform.row` returned is a wrong return
+    // value of that callback, reported at the option as every other callback result is.
+    throw from === undefined
+      ? new CsvArgumentError(
+          `data[${index}]`,
+          `${where}: data[${index}] must be an array or an object, got ${describeValue(row)}`
+        )
+      : new CsvArgumentError(
+          `options.${from}`,
+          `${where}: ${from} must return an array or an object for data[${index}], got ${describeValue(row)}`
+        );
   }
 }
+
+const textInputSchema = s.string();
 
 /** The text a CSV function reads: a `string`, refused with a {@link CsvArgumentError} otherwise. */
 export function checkTextInput(where: string, input: unknown): void {
-  if (typeof input !== "string") {
-    throw new CsvArgumentError(
-      "input",
-      `${where}: input must be a string, got ${describeValue(input)}`
-    );
-  }
+  check(textInputSchema, input, { where, field: "input", error: argumentError });
 }
 
-/** The options object of `Csv.detectDelimiter`. */
-export function checkDetectDelimiterOptions(options: Record<string, unknown>): void {
-  const where = "Csv.detectDelimiter";
-  checkString(where, "quote", options.quote, true);
-  checkString(where, "comment", options.comment, true);
-  const guesses = options.delimitersToGuess;
-  if (guesses !== undefined) {
-    if (!Array.isArray(guesses)) {
-      fail(where, "delimitersToGuess", "an array of delimiters", guesses);
-    }
-    guesses.forEach((d, i) => checkString(where, `delimitersToGuess[${i}]`, d, false));
-  }
+const detectDelimiterOptionsSchema = s.object({
+  quote: s.string().optional(),
+  delimitersToGuess: s
+    .readonlyArray(s.string({ nonEmpty: true }), { expected: "an array of delimiters" })
+    .optional(),
+  comment: s.string().optional()
+});
+const _detectDelimiterOptionsMatch: SchemaMatches<
+  typeof detectDelimiterOptionsSchema,
+  CsvDetectDelimiterOptions
+> = true;
+void _detectDelimiterOptionsMatch;
+
+const detectLinebreakOptionsSchema = s.object({ quote: s.string().optional() });
+const _detectLinebreakOptionsMatch: SchemaMatches<
+  typeof detectLinebreakOptionsSchema,
+  CsvDetectLinebreakOptions
+> = true;
+void _detectLinebreakOptionsMatch;
+
+/** The options object of `Csv.detectLinebreak`, already known to be a record. */
+export function checkDetectLinebreakOptions(options: CsvDetectLinebreakOptions): void {
+  check(detectLinebreakOptionsSchema, options, optionsAt("Csv.detectLinebreak"));
+}
+
+/** The options object of `Csv.detectDelimiter`, already known to be a record. */
+export function checkDetectDelimiterOptions(options: CsvDetectDelimiterOptions): void {
+  check(detectDelimiterOptionsSchema, options, optionsAt("Csv.detectDelimiter"));
 }
 
 /**
@@ -459,7 +392,7 @@ export function createCsvTextDecoder(
   } catch (cause) {
     throw new CsvArgumentError(
       "options.encoding",
-      `${where}: encoding must be a label TextDecoder supports, got ${describeValue(encoding)}`,
+      `${where}: options.encoding must be a label TextDecoder supports, got ${describeValue(encoding)}`,
       { cause }
     );
   }

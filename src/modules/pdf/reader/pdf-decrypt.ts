@@ -12,7 +12,7 @@
  */
 
 import { pdfMd5, pdfSha256, pdfSha384, pdfSha512 } from "@pdf/core/pdf-kdf";
-import { PdfStructureError } from "@pdf/errors";
+import { PdfStructureError, PdfUnsupportedFeatureError } from "@pdf/errors";
 import type { PdfCryptKind, PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfDictValue } from "@pdf/reader/pdf-parser";
 import {
@@ -65,7 +65,7 @@ export function initDecryption(doc: PdfDocument, password = ""): boolean {
 
   const filter = dictGetName(encryptDict, "Filter");
   if (filter !== "Standard") {
-    throw new PdfStructureError(`Unsupported encryption filter: ${filter}`);
+    throw new PdfUnsupportedFeatureError(`Unsupported encryption filter: ${filter}`);
   }
 
   const v = dictGetNumber(encryptDict, "V") ?? 0;
@@ -182,7 +182,7 @@ function initDecryptionV5(
   _fileId: Uint8Array
 ): boolean {
   if (revision !== 5 && revision !== 6) {
-    throw new PdfStructureError(`Unsupported revision ${revision} for V=5 encryption`);
+    throw new PdfUnsupportedFeatureError(`Unsupported revision ${revision} for V=5 encryption`);
   }
 
   const oeValue = dictGetBytes(encryptDict, "OE");
@@ -707,7 +707,7 @@ function cryptFilterMethod(
     case "AESV3":
       return "aesv3";
     default:
-      throw new PdfStructureError(`Unsupported crypt filter method: ${String(cfm)}`);
+      throw new PdfUnsupportedFeatureError(`Unsupported crypt filter method: ${String(cfm)}`);
   }
 }
 

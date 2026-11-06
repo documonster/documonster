@@ -1,5 +1,6 @@
 import type { AnchorData, AnchorInput, AnchorModel } from "@excel/core/anchor";
 import {
+  anchorAsInstance,
   anchorCol,
   anchorColWidth,
   anchorCreate,
@@ -24,11 +25,14 @@ import type { ArgumentChecks } from "@excel/utils/arguments";
 import { argumentChecks } from "@excel/utils/arguments";
 import { isRecordArgument } from "@utils/object";
 
-export {
-  anchorAsInstance as asInstance,
-  isAnchorData as isAnchor,
-  anchorClone as clone
-} from "@excel/core/anchor";
+export { isAnchorData as isAnchor, anchorClone as clone } from "@excel/core/anchor";
+
+/**
+ * @deprecated Test with {@link isAnchor} and build one with {@link create}`(undefined, input)`. This answered
+ * `null` for no input, where every other reader answers `undefined`, and turned anything else into an anchor
+ * unchecked. Removed in 1.0.
+ */
+export const asInstance = anchorAsInstance;
 
 // The sheet's grid, 0-based as an anchor counts it, with room for the edge past the last column and row.
 const MAX_COL = 16384;

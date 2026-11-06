@@ -5,19 +5,15 @@
  * Uses the archive module for ZIP reading and XML module for parsing.
  */
 
-import { unzip } from "@archive/read-archive";
+import { unzipZip } from "@archive/read-archive";
+import type { SchemaMatches } from "@utils/schema";
 import { RelType, ContentType } from "@word/constants";
 import { isFlatOpc } from "@word/convert/flat-opc";
-import {
-  WRITTEN,
-  checkBoolean,
-  checkBytes,
-  invalidArgument,
-  readToken
-} from "@word/core/argument-checks";
+import { WRITTEN, checkBytes, invalidArgument, readToken } from "@word/core/argument-checks";
 import { OOXML_TO_GALLERY } from "@word/core/glossary-galleries";
 import type { Mutable } from "@word/core/internal-utils";
 import { base64ToBytes, utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import {
   arrangeParagraphChildren,
   isRidingMarker,
@@ -81,6 +77,7 @@ import {
   checkPackageSize,
   checkReadOptions,
   createPartBudget,
+  readOptionsShape,
   flatOpcEntries
 } from "@word/reader/package-limits";
 import {
@@ -2961,6 +2958,11 @@ export function parseBodyChild(child: XmlElement, ctx: ReaderContext): BodyConte
 
 export { checkReadOptions } from "@word/reader/package-limits";
 
+const readDocxOptionsSchema = w.record(readOptionsShape);
+const base64OptionSchema = w.record({ base64: w.boolean().optional() }).optional();
+const _readDocxOptionsMatch: SchemaMatches<typeof readDocxOptionsSchema, ReadDocxOptions> = true;
+void _readDocxOptionsMatch;
+
 /** Options for reading a DOCX file. */
 export interface ReadDocxOptions {
   /** Password for decrypting an encrypted DOCX file. */
@@ -2985,28 +2987,28 @@ export interface ReadDocxOptions {
  * Read a DOCX file and parse it into a DocxDocument model. The file is given as its
  * bytes — a `Uint8Array` (a Node `Buffer` is one), any other `ArrayBufferView` (a
  * `DataView` or typed array, read as the bytes it views) or an `ArrayBuffer` — or as
- * text: the Flat OPC XML `Io.toFlatOpc` returns, or, with `{ base64: true }`, the
- * base64 `Io.toBase64` returns (as `Workbook.read` takes base64). `base64` applies to
+ * text: the Flat OPC XML `Document.toFlatOpc` returns, or, with `{ base64: true }`, the
+ * base64 `Document.toBase64` returns (as `Workbook.read` takes base64). `base64` applies to
  * a string only.
  *
  * If the file is encrypted (CFB format), provide a password via the options parameter
  * to decrypt it automatically. A Flat OPC document — the whole package as one XML file,
- * as `Io.toFlatOpc` writes it and Word saves an "XML Document" — is read as the package
+ * as `Document.toFlatOpc` writes it and Word saves an "XML Document" — is read as the package
  * it holds.
  */
 export async function readDocx(
   input: string | Uint8Array | ArrayBuffer | ArrayBufferView,
   options?: ReadDocxOptions & {
-    /** A string `input` is base64 (as `Io.toBase64` writes), not Flat OPC XML. */
+    /** A string `input` is base64 (as `Document.toBase64` writes), not Flat OPC XML. */
     readonly base64?: boolean;
   }
 ): Promise<DocxDocument> {
-  const where = "Io.read";
+  const where = "Document.read";
   // A number or `null` failed on `.length` with an untyped `TypeError`. An `ArrayBuffer` is recognised by its tag,
   // which one from another realm also carries.
   const bytes = typeof input === "string" ? undefined : checkBytes(input, "input", where);
   checkReadOptions(options, where);
-  checkBoolean(options?.base64, "options.base64", where, { optional: true });
+  checkSchema(base64OptionSchema, options, where);
   return readDocxBytes(
     bytes ?? textPackageBytes(input as string, options?.base64 === true),
     options
@@ -3015,12 +3017,12 @@ export async function readDocx(
 
 const BASE64_TEXT = /^[A-Za-z0-9+/_-]*={0,2}$/;
 
-/** The package bytes of a string given to `Io.read`: base64, or Flat OPC XML. */
+/** The package bytes of a string given to `Document.read`: base64, or Flat OPC XML. */
 function textPackageBytes(text: string, base64: boolean): Uint8Array {
   if (base64) {
     const compact = text.replace(/\s+/g, "");
     if (!BASE64_TEXT.test(compact)) {
-      invalidArgument("Io.read", "input", "base64 text", text);
+      invalidArgument("Document.read", "input", "base64 text", text);
     }
     return base64ToBytes(compact);
   }
@@ -3028,7 +3030,7 @@ function textPackageBytes(text: string, base64: boolean): Uint8Array {
     return utf8Encoder.encode(text);
   }
   return invalidArgument(
-    "Io.read",
+    "Document.read",
     "input",
     "bytes, Flat OPC XML text, or base64 text with { base64: true }",
     text
@@ -3049,7 +3051,7 @@ async function readDocxBytes(
   const buffer = await decryptIfEncrypted(input, options?.password, policy.maxPackageSize);
 
   try {
-    // A Flat OPC document (`Io.toFlatOpc`, Word's "XML Document") is the same
+    // A Flat OPC document (`Document.toFlatOpc`, Word's "XML Document") is the same
     // package as one XML file.
     if (isFlatOpc(buffer)) {
       return readDocxEntries(flatOpcEntries(buffer, policy), policy);
@@ -3069,7 +3071,7 @@ async function _readDocxInner(
   policy: Required<DocxSecurityPolicy>,
   checkCrc32?: boolean
 ): Promise<DocxDocument> {
-  const reader = unzip(buffer, { checkCrc32 });
+  const reader = unzipZip(buffer, { checkCrc32 });
   const entries = new Map<string, Uint8Array>();
 
   const budget = createPartBudget(policy);

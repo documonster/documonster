@@ -988,15 +988,42 @@ export function mathRun(
   return { type: "mathRun", text: mathText, properties };
 }
 
-/** Create a math fraction. */
+/** Options for `Build.mathFraction`. */
+export interface MathFractionOptions {
+  /** How the fraction is drawn (`m:type`). Default: a horizontal bar (`"bar"`). */
+  readonly fractionType?: "bar" | "skw" | "lin" | "noBar";
+}
+
+/** Create a math fraction: `mathFraction(numerator, denominator, { fractionType })`. */
 export function mathFraction(
   numerator: readonly MathContent[],
   denominator: readonly MathContent[],
-  fractionType?: "bar" | "skw" | "lin" | "noBar"
+  options?: MathFractionOptions
+): MathContent;
+/**
+ * @deprecated Pass the type in options: `mathFraction(numerator, denominator, { fractionType })`.
+ * Removed in 1.0.
+ */
+export function mathFraction(
+  numerator: readonly MathContent[],
+  denominator: readonly MathContent[],
+  fractionType: "bar" | "skw" | "lin" | "noBar" | undefined
+): MathContent;
+export function mathFraction(
+  numerator: readonly MathContent[],
+  denominator: readonly MathContent[],
+  typeOrOptions?: "bar" | "skw" | "lin" | "noBar" | MathFractionOptions
 ): MathContent {
-  checkMath("Build.mathFraction", { numerator, denominator });
-  checkMathFractionType(fractionType, "fractionType", "Build.mathFraction");
-  return { type: "mathFraction", fractionType, numerator, denominator };
+  const where = "Build.mathFraction";
+  checkMath(where, { numerator, denominator });
+  const fractionType = optionOrPositional(typeOrOptions, "fractionType");
+  checkMathFractionType(fractionType.value, fractionType.field, where);
+  return {
+    type: "mathFraction",
+    fractionType: fractionType.value as MathFractionOptions["fractionType"],
+    numerator,
+    denominator
+  };
 }
 
 /** Create a math square root. */
@@ -1274,15 +1301,36 @@ export function mathFunction(
   return { type: "mathFunction", name, content };
 }
 
-/** Create a math limit (upper or lower). */
+/** Options for `Build.mathLimit`. */
+export interface MathLimitOptions {
+  /** Whether the limit sits above (`"upper"`) or below (`"lower"`) the base. Default: `"lower"`. */
+  readonly limitType?: "upper" | "lower";
+}
+
+/** Create a math limit: `mathLimit(base, limit, { limitType })`. */
 export function mathLimit(
   base: readonly MathContent[],
   limit: readonly MathContent[],
-  limitType: "upper" | "lower" = "lower"
+  options?: MathLimitOptions
+): MathContent;
+/** @deprecated Pass the type in options: `mathLimit(base, limit, { limitType })`. Removed in 1.0. */
+export function mathLimit(
+  base: readonly MathContent[],
+  limit: readonly MathContent[],
+  limitType: "upper" | "lower" | undefined
+): MathContent;
+export function mathLimit(
+  base: readonly MathContent[],
+  limit: readonly MathContent[],
+  typeOrOptions?: "upper" | "lower" | MathLimitOptions
 ): MathContent {
-  checkMath("Build.mathLimit", { base, limit });
-  checkMathLimitType(limitType, "limitType", "Build.mathLimit");
-  return { type: "mathLimit", base, limit, limitType };
+  const where = "Build.mathLimit";
+  checkMath(where, { base, limit });
+  const given = optionOrPositional(typeOrOptions, "limitType");
+  // The default stands in for an absent value only: `null` is a wrong one, refused as before.
+  const limitType = given.value === undefined ? "lower" : given.value;
+  checkMathLimitType(limitType, given.field, where);
+  return { type: "mathLimit", base, limit, limitType: limitType as "upper" | "lower" };
 }
 
 /** Create a math matrix. */
@@ -1291,11 +1339,43 @@ export function mathMatrix(rows: readonly (readonly (readonly MathContent[])[])[
   return { type: "mathMatrix", rows };
 }
 
-/** Create a math accent (hat, tilde, etc.). */
-export function mathAccent(content: readonly MathContent[], char?: string): MathContent {
-  checkMath("Build.mathAccent", { content });
-  checkChar(char, "char", "Build.mathAccent", { optional: true });
-  return { type: "mathAccent", content, char };
+/** Options for `Build.mathAccent`. */
+export interface MathAccentOptions {
+  /** The accent character (`m:chr`). Default: a circumflex (`"\u0302"`), as Word draws one. */
+  readonly char?: string;
+}
+
+/** Create a math accent (hat, tilde, …): `mathAccent(content, { char })`. */
+export function mathAccent(
+  content: readonly MathContent[],
+  options?: MathAccentOptions
+): MathContent;
+/** @deprecated Pass the character in options: `mathAccent(content, { char })`. Removed in 1.0. */
+export function mathAccent(content: readonly MathContent[], char: string | undefined): MathContent;
+export function mathAccent(
+  content: readonly MathContent[],
+  charOrOptions?: string | MathAccentOptions
+): MathContent {
+  const where = "Build.mathAccent";
+  checkMath(where, { content });
+  const char = optionOrPositional(charOrOptions, "char");
+  checkChar(char.value, char.field, where, { optional: true });
+  return { type: "mathAccent", content, char: char.value as string | undefined };
+}
+
+/**
+ * The one setting of a builder that took it positionally before it took an options object: from
+ * `options[key]`, or the deprecated positional value as it is. Anything but an options object is
+ * the positional form, as {@link isRecordArgument} decides, and is checked under its old name.
+ */
+function optionOrPositional(
+  value: unknown,
+  key: string
+): { readonly value: unknown; readonly field: string } {
+  if (isRecordArgument(value)) {
+    return { value: (value as Record<string, unknown>)[key], field: `options.${key}` };
+  }
+  return { value, field: key };
 }
 
 /** Options for `Build.mathBar`. */
@@ -1317,18 +1397,12 @@ export function mathBar(
 ): MathContent {
   const where = "Build.mathBar";
   checkMath(where, { content });
-  let position: unknown = positionOrOptions;
-  if (positionOrOptions !== undefined && typeof positionOrOptions !== "string") {
-    checkRecord(positionOrOptions, "options", where);
-    position = positionOrOptions.position;
-    checkMathPosition(position, "options.position", where);
-  } else {
-    checkMathPosition(position, "position", where);
-  }
+  const position = optionOrPositional(positionOrOptions, "position");
+  checkMathPosition(position.value, position.field, where);
   return {
     type: "mathBar",
     content,
-    position: (position as "top" | "bottom" | undefined) ?? "top"
+    position: (position.value as "top" | "bottom" | undefined) ?? "top"
   };
 }
 

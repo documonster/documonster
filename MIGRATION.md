@@ -4,6 +4,247 @@ Breaking changes for `documonster` will be documented here as they occur.
 
 ## Unreleased
 
+### Names and returns made uniform before 1.0 (breaking)
+
+**`Workbook.toBuffer` resolves to a `Uint8Array` on Node, as everywhere else.** It used to resolve to a `Buffer`
+there. Node's own sinks (`fs.writeFile`, `res.end`, `Readable.from`) take the bytes unchanged, and the value is a
+view of the same memory, so nothing is copied. A call to a `Buffer`-only method is now a type error; wrap the bytes
+without copying where you need one: `Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)`. Note that
+`bytes.slice()` now copies, as `Uint8Array#slice` does; `subarray` is the view.
+
+**Absence is `undefined`, not `null`.** These now return `undefined` where they returned `null`:
+`ZipReader#get` / `bytes`, `TarReader#get` / `bytes`, `ArchiveFile#getEntry` / `readEntry` / `readEntrySync` /
+`readAsText` / `readAsTextSync` / `getZipEntryComment` / `sourcePath`, `RemoteZipReader#extract` /
+`getRawCompressedData` / `getRawCompressedStream` / `getRawEntry` / `getRawEntryStream` / `verifyCrc32`,
+`Fs.safeStats` / `safeStatsSync`, and Excel's `Watermark.get`. **TypeScript will not flag a strict `=== null` check
+against these results**, and it now never matches — search your code for `=== null` and `!== null` on them and use
+`=== undefined`, `== null` or a truthiness test. `RemoteZipReader#checkPassword` keeps its three-way `null`, and the
+Node-compatible stream API keeps Node's.
+
+**`Chart.copyTo` returns the copy's handle.** It returned the copy's part number; that number is now
+`handle.chartNumber` (`chartExNumber` for an Office 2016 chart). The deprecated `Chart.clone` still returns the
+number.
+
+**Incremental readers take the `Stream` suffix.** `Csv.parseRows` → `Csv.parseStream`, `Xml.parseSax` →
+`Xml.parseSaxStream`. The old names are deprecated forwards until 1.0; argument errors now name the new call.
+
+**Smaller startup bundles.** With a code-splitting bundler (rolldown, rspack, Vite, webpack), a write-only Excel
+export loads about 451 KB minified up front, down from 484 KB, and a Word one 319 KB, down from 372 KB. The ZIP AES
+cipher, the hash and block-cipher library, the compression worker pool, TAR, Word's chart serialiser and its font
+metrics now load only when a package needs them. `pnpm verify:treeshake` holds each of these out of the first chunk.
+
+**`Archive.randomBytes()` without a length throws `ArchiveArgumentError`.** It used to return an empty array in a
+browser and throw Node's `TypeError` on Node. In a browser it also accepts lengths above 65,536 now; it threw Web
+Crypto's `QuotaExceededError` for them.
+
+### Final pre-freeze consistency pass
+
+**Every configured read limit is a `…LimitExceededError` with `limit` and `allowed`.**
+
+- `ArchiveFileTooLargeError` is now a subclass of `ArchiveLimitExceededError`, and `ArchiveLimit` gains
+  `"maxEntrySize"`. Catching `ArchiveLimitExceededError` sees every archive limit; a `catch` of
+  `ArchiveFileTooLargeError` is unchanged.
+- An Excel read past a container limit (`zip.maxEntries`, `zip.maxTotalUncompressedSize`, `maxEntrySize`) throws
+  `ExcelLimitExceededError` — so `isExcelError` sees it — with the archive's error as `cause`. It threw the
+  `ArchiveLimitExceededError` / `ArchiveFileTooLargeError` itself. **A `catch` testing for the archive class no longer
+  matches; test for `ExcelLimitExceededError`, or read `error.cause`.**
+- `ExcelLimitExceededError` gains `limit` (`"maxRows"`, `"maxCols"` or the `zip` option) and `allowed`; `maxItems` is a
+  deprecated alias of `allowed`. New types `ExcelLimit`, `ExcelLimitExceededErrorOptions`.
+- `DocxLimitExceededError` gains `allowed`; `maximum` is a deprecated alias of it.
+- New `CsvLimitExceededError` (`limit: "maxRowBytes"`) for an oversized row, and `XmlLimitExceededError` for `maxDepth`
+  / `maxEntityExpansions` (`limit: "depth" | "entityExpansions"`, plus `allowed`). Each subclasses the class thrown
+  before (`CsvError`, `XmlParseError`), so existing `catch` blocks still match.
+
+**Other errors.**
+
+- New `PdfUnsupportedFeatureError` (a `PdfStructureError`) for an encryption filter, revision or crypt-filter method
+  the reader has no handler for.
+- `Streams.LowLevel.SinkAdapter#write` after `end()` rejects with `StreamStateError`, not a bare `Error`.
+- `DefinedNames.addFormula` with an `expression` that is not a string throws `ExcelArgumentError` (`field:
+"expression"`); an empty one is still `ExcelDefinedNameError`.
+- `Archive.ZipEditPlan.deserialize` with a `version` other than 1 throws `ArchiveArgumentError` (`field:
+"data.version"`), not a bare `ArchiveError`.
+- `DocxEncryptedError` takes `{ cause }`.
+
+**PDF: absence is `undefined` (breaking).** `PdfMetadata.creationDate`, `modDate`, `pageSize` and `xmpXml`,
+`PdfExtractedImage.alphaMask`, and `PdfBookmark.pageIndex` are optional fields: absent where they held `null` (or, for
+`pageIndex`, `-1`). **TypeScript will not flag `=== null` or `=== -1` against them**; test with `=== undefined`. The
+text fields of `PdfMetadata` and `PdfAnnotation` keep `""` for a missing entry, now documented: a PDF can carry an entry
+that is present and empty, and the reader cannot always tell the two apart.
+
+**Behaviour fixes.**
+
+- **A workbook read's options now hold on every path.** `zip.maxEntries`, `zip.maxTotalUncompressedSize`,
+  `zip.maxEntrySize`, `zip.checkCrc32`, `maxRows` and `maxCols` were applied by the buffered XLSX reader only. An XLSB
+  `read` / `readWithDiagnostics` / `readFile` accepted them and read the package anyway (`checkCrc32: false` was
+  ignored too), and a streamed XLSX `readStream` on Node applied no container limit at all; each now refuses with
+  `ExcelLimitExceededError` as the buffered XLSX reader does. The XLSB reader counts `maxRows` / `maxCols` as the XLSX
+  one does: row records per sheet, cell records per row. Format detection applies `zip.maxEntries` too, before it walks
+  the directory. **A file these used to accept past a limit is now refused.**
+- **`Workbook.readStream` in a browser takes every input it declares** — a Web `ReadableStream` and an (async) iterable
+  failed with a raw `TypeError` — and decrypts with `{ password }`, which it ignored.
+- **An XLSB write applies `zip`** (`level`, `modTime`, `timestamps`), for `toBuffer`, `toStream` and `writeStream`; it
+  ignored them. An unchanged package read from XLSB still comes back byte for byte, unless the write gives `zip`
+  settings, which the original bytes cannot honour.
+- `PdfMetadata.creationDate` / `modDate` are absent for a date the lenient XMP scan cannot read; that path handed out an
+  `Invalid Date`.
+- **`Column.setKey` on a streaming writer stays open until the sheet is committed.** A key is not written into the file
+  — it only says which property of a row object `addRow` reads — so refusing it once the first row was committed, as
+  the written column settings are, stopped later rows from being read by a new key.
+- **Word: the copy a shared document makes before a tree edit is structural.** After a derivation (`Security.protect`,
+  `Transform.*`, …) the first tree edit of either document (`replaceText`, accepting revisions, …) copies its nodes;
+  that copy used `structuredClone`, so it duplicated every image and font and failed with the platform's
+  `DataCloneError` on a value it cannot clone. It now shares bytes and anything that is not plain data. As before, a
+  node taken from the document through `Query.*` before that edit belongs to the copy's predecessor afterwards.
+- **Argument messages read alike across modules.** A boolean is `must be a boolean` everywhere (CSV and some Excel
+  options said `true or false`), and a whole-number range reads `an integer from 1 to 5` (Excel said
+  `a whole number from 1 to 5.`). A CSV `columns` entry that is an object names the field at fault
+  (`options.columns[0].key`) rather than the whole entry. Match on `field`, not on the message.
+
+- `RemoteZipReader#findEntries` matches by the shared glob rules `Fs.matchGlob` uses. `**/x` now includes a root-level
+  `x`, `?` no longer matches `/`, `[abc]` and `{a,b}` work, and letters match without regard to case.
+- `Compression.Workers.getDefaultPool(options)` refuses `options` with `ArchiveArgumentError` when the default pool
+  already exists; it used to ignore them. The deprecated flat `getDefaultWorkerPool` keeps the old behaviour.
+- `BasicRasterCanvas#getUncoveredCodePoints()` returns a sorted copy. The `uncoveredCodePoints` field is deprecated and
+  now returns a copy too: clearing it no longer changes what the render reports.
+
+**Renames (old names are deprecated forwards until 1.0).**
+
+| Old                                                     | New                                                               |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| `PdfRect` (`documonster/pdf`)                           | `PdfAnnotationRect`                                               |
+| `Archive.ZipEditor#getEntries`                          | `getSourceEntries` (the source's entries, ignoring pending edits) |
+| `PositionErrorOptions`, `InvalidValueTypeErrorOptions`  | `ExcelPositionErrorOptions`, `ExcelInvalidValueTypeErrorOptions`  |
+| `Compression.Workers.WorkerPool` (unreleased)           | `Compression.Workers.Pool`                                        |
+| `UnrecognizedValue`, `DiscardUnrecognizedValuesOptions` | `DocxUnrecognizedValue`, `DocxDiscardUnrecognizedValuesOptions`   |
+
+The last two rows were never released, so they have no forwards. `DocxLegacyTemplateOptions` is marked deprecated
+with the template functions it serves. `DocxCompiledTemplate._doc` and `PdfContentStream#deferred` / `#preflight` are
+deprecated: they are implementation details and leave the public types in 1.0.
+
+**Limits and isolation, tightened at the edges.**
+
+- `Workbook.readStream` charges every byte of a part to the `zip` limits, including parts it skips without parsing,
+  as `Workbook.read` does; a limit crossed while draining such a part is now reported instead of ignored.
+- A ZIP `maxTotalUncompressedSize` never widens the per-entry bound: an entry is still held to `maxEntrySize`, or its
+  512 MiB default when unset.
+- A Word document's nodes built in another realm (an iframe, `node:vm`) are copied like any other when a shared
+  document is edited, so the edit no longer reaches a document derived from it.
+- `Xml.parseSaxStream` (and its deprecated `Xml.parseSax`) checks its arguments when called, not on the first
+  `next()`: a wrong argument now throws synchronously, so a `try` around only the `for await` no longer catches it.
+
+### API shape: one place to read and write, one vocabulary for streaming, one address argument
+
+**Word: `Document.*` no longer reaches a document that shares nodes with the one it edits (bug fix).** A function
+that returns a new document (`Template.fill`, `Transform.*`, `Security.protect` / `unprotect`, `Vba.add` / `remove`,
+`Font.addEmbedded`, `Ole.add`) may share unchanged arrays and nodes with its input, and `Document.*` used to edit
+those in place — `Document.addParagraph(await Security.protect(a, …), "x")` appended to `a.body` too. `Document.*`
+now copies whatever two such documents share before changing it (once; later edits are in place again), in both
+directions. `Document.clone` is no longer needed to keep them apart; keep it for a snapshot or before editing nodes
+by hand.
+
+**Word: reading and writing moved to `Document`.** `Io.read`, `Io.toBuffer`, `Io.toBase64`, `Io.toFlatOpc` and, on
+Node, `Io.readFile` / `Io.writeFile` are now `Document.read`, `Document.toBuffer`, `Document.toBase64`,
+`Document.toFlatOpc`, `Document.readFile`, `Document.writeFile`, beside `Document.create` — as Excel has
+`Workbook.create` / `read` / `toBuffer`. The `Io` names are deprecated forwards to the same functions; their argument
+errors now start with `Document.…:`.
+
+**Excel: a cell is one argument.** `Cell.*` takes `"A1"` or a `{ row, col }` position (`CellPosition`, now exported).
+The `(ws, row, col, …)` form is deprecated — `Cell.setValue(ws, 2, 3, v)` → `Cell.setValue(ws, { row: 2, col: 3 }, v)`
+— and keeps its behaviour until 1.0. The forms are told apart by the type of the second argument, not by argument
+count. A position outside the grid is `ExcelInvalidAddressError` with `field` `addr.row` / `addr.col`.
+
+**Excel: writing a range.** New `Range.setValues(ws, range, values)` writes a row-major matrix from the range's
+top-left cell (rows may be shorter; larger is refused; checked in full before anything is written), and
+`Range.setStyle`, `setFont`, `setFill`, `setBorder`, `setAlignment`, `setNumFmt`, `setProtection` apply a style to every
+cell of a range with the matching `Cell` setter's semantics.
+
+**Excel: a streaming writer takes the document model's functions.**
+
+- `Workbook.addWorksheet` / `getWorksheet` / `listWorksheets` / `eachWorksheet` / `protect` / `unprotect` /
+  `verifyPassword` / `getDefinedNames` / `addCellStyle` / `getCellStyle` / `listCellStyles` / `useBuiltInCellStyle`
+  accept a `Stream.WorkbookWriter`; `Worksheet.merge` / `mergeWithoutStyle` / `protect` / `unprotect`, `Column`
+  settings, `Cell.*`, `Row.*`, `Range.*`, `Image.add` / `place` / `list` / `remove` / `setBackground` /
+  `getBackground` / `removeBackground`, `Watermark.*`, `ConditionalFormatting.*` and `DataValidation.*` accept a
+  `Stream.WorksheetWriter`, addressing what the writer still holds and applying its own checks.
+- A committed workbook or sheet refuses an edit with `ExcelStreamStateError`; so does a row the writer has written,
+  for an edit **and** a read (`Row.setHeight` and the other `Row` setters threw `ExcelRowOutOfBoundsError` before), and
+  a column setting once the columns are written with the first committed row. A range write that reaches a written
+  row is refused whole.
+- What needs rows already written or the whole document refuses a writer with `ExcelUnsupportedFeatureError`:
+  `Worksheet.unmerge`, the `Image` shape functions, `Row.insert` / `insertMany` / `duplicate` / `splice` /
+  `getCount` / `getActualCount` / `getLast` / `each` / `autoFit`, `Column.getValues` / `setValues` / `splice` /
+  `each` / `eachAddress` / `has` / `getCount` / `getLast` / `getActualCount` / `autoFit`, `Workbook.removeWorksheet`,
+  chartsheets, `importWorksheet`, external links, persons, registered functions, `getModel` / `setModel`,
+  `removeCellStyle`, and `Workbook.toBuffer` / `toStream` / `writeFile` / `writeStream` (a writer finishes with its own
+  `commit()` / `toBuffer()`).
+- `Workbook.getWorksheet(writer)` with no id returns the first sheet; the deprecated `WorkbookWriter#getWorksheet()`
+  still returns `undefined`.
+- Deprecated, removed in 1.0: `WorksheetWriter#mergeCells` → `Worksheet.merge`, `#addImage` → `Image.place`,
+  `#getImages` → `Image.list`, `#addBackgroundImage` → `Image.setBackground`, `#getBackgroundImageId` →
+  `Image.getBackground` (the id as a string), `#addWatermark` / `#getWatermark` / `#removeWatermark` →
+  `Watermark.set` / `get` / `remove`, `#addConditionalFormatting` / `#removeConditionalFormatting` →
+  `ConditionalFormatting.add` / `remove` / `clear`, `#protect` / `#unprotect` → `Worksheet.protect` / `unprotect`;
+  `WorkbookWriter#addImage` → `Image.add`, `#addWorksheet` / `#getWorksheet` → `Workbook.addWorksheet` /
+  `getWorksheet`, `#protect` / `#unprotect` → `Workbook.protect` / `unprotect`, `#addCellStyle` /
+  `#defineCellStyle` → `Workbook.addCellStyle`, `#useBuiltInCellStyle` → `Workbook.useBuiltInCellStyle`,
+  `#definedNames` → `Workbook.getDefinedNames`.
+- `Stream.setCell*` / `Stream.setRow*` / `Stream.commitRow` stay: they take the handle `addRow` returns, where
+  `Cell` / `Row` / `Range` take a position.
+
+### Option checks are declared once, with one wording (behaviour change)
+
+Every module's options are now checked by a schema (`@utils/schema`) pinned to the public interface at compile time,
+so a wrong option reads the same everywhere: `<call>: <field> must be <expected>, got <value>`, where the value is
+described (`got 5`, `got an object`, `got NaN`) rather than given as its `typeof`, and there is no trailing period.
+Code that matched the old texts must be updated (`a boolean` is now `true or false`, `a whole number` is `an
+integer`, `of at least N` is `>= N`; Mermaid messages no longer end in `; got X.`). `field` paths are unchanged
+except where listed. Options that were accepted unchecked are now refused:
+
+- **CSV.** `columnMismatch` must be an object (an array was accepted); `Csv.format` / `FormatterStream` check
+  `firstRowIsHeader`; `Csv.generate*` check `headers`, `bom` and `objectMode`; `Csv.detectLinebreak` checks `quote`;
+  `Csv.applyDynamicTypingToRow` refuses an array as `row`. A line break in `delimitersToGuess[i]` is reported at
+  `options.delimitersToGuess[i]` (was `options.delimiter`); a bad `typeTransform.row` result at
+  `options.typeTransform.row` (was `… result for data[i]`).
+- **Markdown.** A `columns[i]` that is an array is refused at `options.columns[i]` (was `.header`).
+- **Archive, Stream.** An array is no longer accepted as an options object, nor — by `Archive.createZip` and
+  `Archive.packZip`, which let them through — `null` or a primitive. Archive checks `signal`, `onProgress`
+  and `progressIntervalMs` where given; `RemoteZipReader` checks `password`, `decodeStrings`, `checkCrc32` and
+  `signal`; `ZipArchive#add` refuses a `name` that is not a non-empty string. `StreamArgumentError.actualType` carries
+  the described value.
+  `Archive.createZip`, `Archive.packZip` and `Archive.packZipSync` now take `encryptionMethod` and `password`: they
+  had neither, and an unknown option is not an error, so an archive asked to be encrypted was written in the clear.
+  A `password` without an `encryptionMethod` — which would encrypt nothing — and a method without a password are
+  refused (`field: "options.password"`); AES is written by the asynchronous builders only, as it runs on Web Crypto.
+- **PDF, Mermaid.** A non-string entry of `lines` or `palette` is reported at its index (`lines[1]`,
+  `options.palette[1]`); an array given as a Mermaid `box` / `style` or a PDF watermark `position` is reported at
+  that field. `new Pdf.Builder` no longer checks `options.onWarning`, which it never had — use
+  `Pdf.Builder#onWarning(handler)`.
+- **Word.** The `include*` flags of `Transform.map`, `Query.each` and `Query.listTables` (`topLevelOnly`),
+  `Convert.toSemantic`'s options, every option of `WordHtml.fromDocx` and `WordMarkdown.fromDocx`,
+  `Validation.validate`'s `maxSeverity` / `maxErrors` / `compatibilityMode` / `strict`, and `Font.createHyphenator`'s
+  `hyphenChar` are checked; a non-string `WordHtml.fromDocx` `title` or `classPrefix` is a `DocxArgumentError`, not a
+  `TypeError`. A `WordHtml.toDocx` `options.classStyles` entry is reported as `options.classStyles["name"]`.
+  `Document.toFlatOpc` no longer checks `modTime`, which it never used. `Build.mathFraction`, `mathLimit` and
+  `mathAccent` take their setting in options (`{ fractionType }`, `{ limitType }`, `{ char }`), as `mathBar` does;
+  for all four, a value that is not an options object is the deprecated positional setting, so `mathBar(c, 5)` is
+  refused at `position` (was `options`).
+- **Excel.** `Worksheet.protect` / `Workbook.protect` report a flag at `options.<flag>` and the password at
+  `options.password` (was the bare key). `Stream.WorkbookWriter` checks every option — dates, booleans, `format`,
+  `stream`, `filename`, and `zip.zlib.level` / `zip.compressionOptions.level` (0–9; it clamped silently).
+  `WorkbookReader` reports `maxEntrySize` as `ExcelArgumentError` (was a bare `RangeError`) and checks
+  `maxBufferedWorksheetBytes` and `checkCrc32`. `Workbook.addChartsheet` / `addPivotChartsheet` check their options as
+  the `Chartsheet` setters do. `Column.autoFit({ start, end })` refuses a column outside A–XFD with
+  `ExcelColumnOutOfBoundsError` (a huge `end` looped until it got there). `Workbook.toStream` checks
+  `highWaterMark`; `Worksheet.toJson` checks `raw`, `blankRows` and `dateFormat`; `ExcelCsv` reads check
+  `decimalSeparator`, `requestHeaders` and `signal`; `Sparkline.add` refuses an entry with no `cellRef`.
+  `Workbook.toBuffer` / `writeStream` / `writeFile` accept `null` options as none (they threw a `TypeError`).
+  A data-validation rule of `type: "any"` no longer checks `operator` / `formulae`, which neither writer writes
+  for it; `DataValidationBase.showDropDown` is now in the published type (it was checked and written, but
+  untyped — note that `true` hides the in-cell list).
+
+When one call has several wrong options, which is reported first may differ from before.
+
 ### Every public function checks its arguments (behaviour change)
 
 A wrong argument to a public function is now the module's own `…ArgumentError`, naming the parameter as the
@@ -160,6 +401,8 @@ first.
 | `Csv.formatNumber(v, sep)`, `Csv.parseNumber(v, sep)`                                       | `Csv.formatNumber(v, { decimalSeparator })`, `Csv.parseNumber(v, { decimalSeparator })`  |
 | `Csv.applyDynamicTypingToRow(row, typing, castDate)`                                        | `Csv.applyDynamicTypingToRow(row, typing, { castDate })` (also takes `decimalSeparator`) |
 | `Csv.createGenerator(…).asyncRows()`                                                        | `rowsAsync()`                                                                            |
+| `Build.mathFraction(n, d, type)`, `mathLimit(b, l, type)`, `mathAccent(c, char)`            | `{ fractionType }`, `{ limitType }`, `{ char }` as the last argument                     |
+| `Anchor.asInstance(input)` (answered `null` for no input)                                   | `Anchor.isAnchor(x) ? x : Anchor.create(undefined, x)`                                   |
 | `Xml.Writer#save()`                                                                         | `Xml.Writer#snapshot()` (`commit` / `rollback` are unchanged)                            |
 | `SaxTag`, `SaxEvent`, `SaxEventAny`, `SaxHandlers`, `SaxOptions`                            | `XmlSaxTag`, `XmlSaxEvent`, `XmlSaxEventAny`, `XmlSaxHandlers`, `XmlSaxOptions`          |
 | `Token`, `AstNode`, `TokenType`, `NodeType` (`documonster/formula`)                         | `FormulaToken`, `FormulaAstNode`, `FormulaTokenType`, `FormulaNodeType`                  |
@@ -177,15 +420,15 @@ an index the table has no column at.
 `PdfCellCommentMode`; `DrawRasterTextOptions`, `DrawRasterTextRotation`, `DrawRasterStrokeOptions`,
 `DrawRasterLineOptions`, `DrawGlyphPoint`.
 
-### File-system errors are typed; Word's `Io` has no file-path members in the browser
+### File-system errors are typed; Word's `Document` has no file-path members in the browser
 
-- **`Io.readFile` / `Io.writeFile` wrap a file-system failure in `DocxFileError`** (new, a `DocxError`, with `path`
+- **`Document.readFile` / `Document.writeFile` wrap a file-system failure in `DocxFileError`** (new, a `DocxError`, with `path`
   and `operation`). It was the platform's own error, which `isDocxError` did not recognise; its code is now
   `error.cause.code`, as for `ExcelFileError`. A file that was read but is not a document is still a `DocxParseError`.
 - **`Workbook.writeFile`, `ExcelCsv.writeFile` and `ExcelMarkdown.writeFile` wrap a file-system failure in
   `ExcelFileError`** (`operation: "write"`, system error as `cause`), as their `readFile` counterparts already did.
-- **The browser build of `documonster/word` publishes no `Io.readFile` / `Io.writeFile`.** They threw at runtime
-  there; read the bytes yourself and use `Io.read`, and persist the bytes of `Io.toBuffer`.
+- **The browser build of `documonster/word` publishes no `Document.readFile` / `Document.writeFile`.** They threw at runtime
+  there; read the bytes yourself and use `Document.read`, and persist the bytes of `Document.toBuffer`.
 - Renamed: `InvalidZipSignatureError` → `ZipInvalidSignatureError` (`documonster/archive`) and
   `UnsupportedStreamTypeError` → `StreamUnsupportedTypeError` (`documonster/stream`). The old names are deprecated
   aliases of the same class, removed in 1.0; the error's `name` is now the new one.
@@ -204,6 +447,55 @@ an index the table has no column at.
   `Document.clone` returns.
 - `Anchor.setCol` / `Anchor.setRow` name their second parameter `value`, matching the `field` their argument
   errors report.
+
+### Excel: values, notes and models are the caller's own (behaviour change); one note API
+
+Completes the facet-reader change above for everything else a reader hands out.
+
+- **What a reader returns is a copy (behaviour change).** `Cell.getValue`, `Cell.getResult`, `Row.getValues`,
+  `Column.getValues`, `Range.getValues`, `Worksheet.getValues`, `Worksheet.toAoa`, `Worksheet.toJson` and
+  `Stream.getCellValue` / `getRowValues` used to return a rich-text value, a `Date`, an error value or a
+  formula's cached `Date` result as the object the cell stores — editing it changed the cell with none of
+  `Cell.setValue`'s checks — while a hyperlink, formula or checkbox value was already a fresh object. Every kind is
+  a copy now. Change a value with `Cell.setValue` / `Range.setValues`. A test that compared a returned `Date` with
+  `toBe` compares with `toEqual`.
+- **`Cell.getModel` and `Worksheet.getModel` return a copy (behaviour change).** `Cell.getModel` returned the
+  cell's live model and `Worksheet.getModel` shared the cells' value records, views and page setup with the sheet,
+  so an edit to either changed the workbook unchecked; `Row`, `Table` and `Image` already returned copies. Apply a
+  changed model with `Cell.setModel` / `Worksheet.setModel`.
+- **`Cell.getNote` returns a copy (behaviour change).** A note configuration it returned was the cell's own.
+- **A value given to a setter is copied (behaviour change).** A rich-text value, a `Date`, an error value, a formula's
+  cached result, a JSON value, or a note configuration passed to `Cell.setValue` / `Cell.setNote` used to become the
+  cell's, so editing your object afterwards — or giving one object to two cells — changed what the cells wrote.
+- **Fixed: a removed note came back.** Reading a cell's model — which every save does — stored the note into the
+  cell's value model, and a note removed afterwards was written into the next file from there.
+- **One note API.** A cell's note is written with `Cell.setNote(ws, addr, note, { author })`, read with
+  `Cell.getNote` and the new `Cell.getNoteAuthor`, and removed with the new `Cell.removeNote`, which answers
+  whether there was one. On a stream, `Stream.setCellNote(cell, note, { author })` and `Stream.removeCellNote`.
+  Deprecated, removed in 1.0:
+
+  | Deprecated                                           | Use                                                                                                                 |
+  | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+  | `Cell.getComment(ws, a)?.note` / `.author`           | `Cell.getNote(ws, a)` / `Cell.getNoteAuthor(ws, a)`                                                                 |
+  | `Cell.setComment(ws, a, Note.create(n, { author }))` | `Cell.setNote(ws, a, n, { author })`                                                                                |
+  | `Cell.setComment(ws, a, undefined)`                  | `Cell.removeNote(ws, a)`                                                                                            |
+  | `Stream.setCellComment(c, …)`                        | `Stream.setCellNote(c, n, { author })` / `Stream.removeCellNote(c)`                                                 |
+  | the `Note` namespace                                 | the `Cell` members above; a note's round-trip model is `Cell.getModel(ws, a).comment`, applied with `Cell.setModel` |
+
+  The deprecated members behave as before, including `Cell.getComment` returning the cell's own record.
+
+- Deprecated: calling `Worksheet.getValues(ws)` without `options`. It answers 1-based, where `Row.getValues` and
+  `Column.getValues` answer 0-based; state the base — `{ base: 1 }` for the same result.
+
+### Word: image size in the options; paper sizes; header-row formatting
+
+- Deprecated: `Document.addImage(doc, data, mediaType, width, height, options?)` and the same form of
+  `Document.addFloatingImage` — pass `Document.addImage(doc, data, { type, width, height, … })`. The width and height
+  are EMU, as before; convert with `Units.cmToEmu` / `inchesToEmu` / `pxToEmu`. Behaviour and return values are
+  unchanged.
+- New: `PageSizes` (`A3`, `A4`, `A5`, `LETTER`, `LEGAL`, `TABLOID`, in twips) for `SectionProperties.pageSize`.
+- New: `SimpleTableOptions.headerRunProperties` formats the header row's text (`{ bold: true }`). `headerRow` still
+  only marks the row as the table's header — repeated on every page — and does not change how it looks.
 
 ### Excel: inserting, deleting and renaming keep references consistent (behaviour change)
 
@@ -288,17 +580,17 @@ PowerPoint write for "Encrypt with Password" — are read and written by both mo
 internal module of `archive`, beside the ZIP code; it has no public namespace).
 
 - **Excel reads them**: `Workbook.read`, `readFile`, `readStream`, `readWithDiagnostics` and `Stream.WorkbookReader`
-  take `password` — the option name Word's `Io.read` uses — for XLSX and XLSB, the decrypted package's format detected
+  take `password` — the option name Word's `Document.read` uses — for XLSX and XLSB, the decrypted package's format detected
   as usual. Without it: `ExcelEncryptedError` (now pointing at the option). With a wrong one: the new
   `ExcelDecryptionError` (an `ExcelFileError`) with `reason: "password"`; other reasons are `"unsupported"`,
   `"malformed"`, `"integrity"`, `"limit"`. The decrypted package is bounded by `zip.maxTotalUncompressedSize`
   (default 2 GiB). An encrypted workbook cannot be streamed — it is one encrypted stream — so the streamed readers
   decrypt it whole first.
 - **Both write them**: Excel `Workbook.toBuffer`, `writeFile`, `writeStream`, `toStream` (XLSX and XLSB) and Word
-  `Io.toBuffer`, `toBase64`, `writeFile` take `password` (1–255 characters) and `encryption` (`EncryptOptions`:
+  `Document.toBuffer`, `toBase64`, `writeFile` take `password` (1–255 characters) and `encryption` (`EncryptOptions`:
   `keyBits`, `hashAlgorithm`, `spinCount` — the type `WordCrypto.encrypt` takes, now exported by
   `documonster/excel` too). Defaults are Office's: AES-256, SHA-512, 100,000 iterations. Excel 16 and Word 16 open the
-  output with the password (AES-128/192/256, SHA-256/512 checked). **Word D7 is reversed: `Io.toBuffer` encrypts when
+  output with the password (AES-128/192/256, SHA-256/512 checked). **Word D7 is reversed: `Document.toBuffer` encrypts when
   given a password**; it wrote an unencrypted package and the TSDoc sent callers to `WordCrypto.encrypt`, which keeps
   working unchanged. `Package.*` keep `password` as a read option: their result is not encrypted. The encryption code
   loads only when a password is given (`import()`), so a consumer that never encrypts does not bundle it; there is no
@@ -306,9 +598,9 @@ internal module of `archive`, beside the ZIP code; it has no public namespace).
 - **Only Agile Encryption** (version 4.4) is implemented, in both modules. Standard Encryption (Office 2007), RC4
   CryptoAPI and Extensible Encryption are refused with `reason: "unsupported"`, the message naming the scheme.
 
-Bug fixes in what Word already had (`WordCrypto.*`, `Io.read` with `password`):
+Bug fixes in what Word already had (`WordCrypto.*`, `Document.read` with `password`):
 
-- **Files Office encrypted decrypt.** `WordCrypto.decrypt`, `Io.read`, `Streaming.createReader` and
+- **Files Office encrypted decrypt.** `WordCrypto.decrypt`, `Document.read`, `Streaming.createReader` and
   `WordCrypto.Agile.decryptPackage` verified the password of a Word-, Excel- or third-party-encrypted file and then
   returned garbage (reported as a corrupt package): the package segments were keyed with the password key encryptor's
   salt instead of the key data's. Only files this library wrote, which used one salt for both, decrypted. It now writes
@@ -318,7 +610,7 @@ Bug fixes in what Word already had (`WordCrypto.*`, `Io.read` with `password`):
 - **The data-integrity HMAC is checked** on decryption, as Office does: an altered package is a
   `DocxDecryptionError` (`reason: "integrity"`), not a silently damaged document.
 - `DocxDecryptionError.reason` (new, optional): the same values as `ExcelDecryptionError.reason`.
-- **A compound file that is not an encrypted package** (a legacy `.doc`) read by `Io.read` / `Streaming.createReader` is a
+- **A compound file that is not an encrypted package** (a legacy `.doc`) read by `Document.read` / `Streaming.createReader` is a
   `DocxParseError` saying so; it was a `DocxEncryptedError` asking for a password that could not help.
 - **`keyBits: 192`** encrypts and decrypts; it failed with `RangeError: Invalid key length` on Node (the AES layer named
   every non-128-bit key AES-256).
@@ -957,17 +1249,17 @@ WorkbookCreateOptions)`. `Workbook.removeChartsheet` / `copyChartsheet` / `repla
   `text1` / `background1` / `text2` / `background2` resolve through the default mapping (dk1 / lt1 / dk2 / lt2);
   they were unresolvable.
 - Bytes may be any `ArrayBufferView` everywhere Word takes bytes: a `DataView` or `Uint16Array` is read as the bytes it
-  views, as `Workbook.read` does (they failed inside or were read element by element). `Io.read`'s input type is
-  widened to match. Every function that takes a package or file also takes an `ArrayBuffer`, as `Io.read` did:
+  views, as `Workbook.read` does (they failed inside or were read element by element). `Document.read`'s input type is
+  widened to match. Every function that takes a package or file also takes an `ArrayBuffer`, as `Document.read` did:
   `Package.*`, `Streaming.createReader`, `WordCrypto.isEncrypted` / `decrypt` / `verifyPassword` / `encrypt` /
   `Cfb.read` / `Agile.decryptPackage`, `Convert.fromOdt` / `isFlatOpc` / `flatOpcToParts`.
-- `Streaming.createReader` (`StreamingDocxReader`) reads Flat OPC, as `Io.read` does; it failed as a corrupt ZIP. It
+- `Streaming.createReader` (`StreamingDocxReader`) reads Flat OPC, as `Document.read` does; it failed as a corrupt ZIP. It
   decrypts an encrypted file with `{ password }`, which `StreamingReadOptions` always carried, and refuses one without
   a password with `DocxEncryptedError` (a `DocxError`); every encrypted file was a plain `DocxError`. A package over
   `maxPackageSize` is a `DocxLimitExceededError` (a `DocxParseError`, as before).
 - `Package.listParts` / `readPart` / `edit` (and the deprecated `Io.listDocxParts` / `readDocxPart` /
   `editDocxIncremental`) apply the security policy's `maxPartCount` / `maxPartSize` / `maxPackageSize` (they applied
-  none), read Flat OPC as `Io.read` does, and refuse an encrypted file with `DocxEncryptedError`; it was a
+  none), read Flat OPC as `Document.read` does, and refuse an encrypted file with `DocxEncryptedError`; it was a
   `DocxParseError` saying "End of Central Directory not found".
 - `Package.fillTemplate` / `patch` / `compileTemplate` (and the deprecated `Io.patchDocument` / `compileTemplate`)
   honor `password`, `securityPolicy` and `checkCrc32` on the read, and `modTime` / `securityPolicy` on the write.
@@ -977,7 +1269,7 @@ WorkbookCreateOptions)`. `Workbook.removeChartsheet` / `copyChartsheet` / `repla
 - The writer names the node path: a hand-built node it cannot write (an unknown `type`, a list that is not an array, a
   number with no XML form) is refused with `DocxArgumentError` whose `field` is the exact property path from the
   document (`body[3].children[0].content[1].type`); it was dropped, or failed with `TypeError` or `XmlError` (now the
-  `cause`). The same holds for `Io.toBuffer`, `Io.writeFile`, `Package.*` and the streaming writer, whose `add` /
+  `cause`). The same holds for `Document.toBuffer`, `Document.writeFile`, `Package.*` and the streaming writer, whose `add` /
   `addAsync` name the path from `element` (`addMany` / `addManyAsync`: `elements[i]`). Paths name the model's
   properties, not element names: `body[0].properties.alignment` (was `body[0].paragraph.alignment`),
   `body[0].children[0].properties.underline`, `body[0].rows[0].properties.height.rule`,
@@ -1000,8 +1292,8 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
 - `Document.addStyle` with a `styleId` the document has replaces that style in place — the way to customize a style
   `useDefaultStyles` added. `Document.addCustomProperty` with an existing name replaces it. Both wrote a duplicate.
 - `Ole.add` gives an embedding whose relationship id or part path is taken unused ones (read the result's
-  `oleObjects`). `Io.toBuffer` failed with `Relationship ID "rIdOle1" already exists`.
-- `Io.read` reads a Flat OPC document (what `Io.toFlatOpc` writes) passed as bytes or as the string itself, under the
+  `oleObjects`). `Document.toBuffer` failed with `Relationship ID "rIdOle1" already exists`.
+- `Document.read` reads a Flat OPC document (what `Document.toFlatOpc` writes) passed as bytes or as the string itself, under the
   same security limits; it failed with "End of Central Directory not found". With `{ base64: true }` it reads base64
   text, as `Workbook.read` does.
 - Glossaries read from a file list their entries in `glossary.blocks`, so `Glossary.findBlock` / `listBlocks` /
@@ -1016,7 +1308,7 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
   styles the document defines; `getTableStyle(doc, "Nope").chain` was `["Nope"]`.
 - `Template.createXmlDataSource`'s `rootTag` names the element whose content is the data, as its TSDoc always said.
 - `Security.DEFAULT_SECURITY_POLICY` / `STRICT_SECURITY_POLICY` are frozen; assigning to them changed the defaults
-  of every later `Io.read`.
+  of every later `Document.read`.
 - Error messages name the live API: `DocxEncryptedError` names every reader that takes `{ password }`, and
   `WordCrypto.encrypt`'s errors say `WordCrypto.encrypt`.
 - A chart read from a file and written back loses nothing. Every element of the chart part comes back — what `Chart`
@@ -1055,7 +1347,7 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
 - Dates must be an `xsd:dateTime` (`new Date().toISOString()` gives one): `Document.addComment`,
   `Build.insertedRun` / `deletedRun` / `movedFromRun` / `movedToRun`, `Build.moveFromRangeStart` /
   `moveToRangeStart`. `"not a date"` was written as `w:date="not a date"`. `Document.setCoreProperties` needs string
-  text fields and valid `created` / `modified` dates; an invalid date failed inside `Io.toBuffer` with `ArchiveError`.
+  text fields and valid `created` / `modified` dates; an invalid date failed inside `Document.toBuffer` with `ArchiveError`.
 - `Build.chart` checks `type`, each series' `name`, `categories`, `values` (finite numbers), colors and `chartType`.
 - `Template.bindChartData` checks every binding before applying any: finite values, and a `chartRef` of the right
   shape (`-1`, `0.5`, `NaN`, `""` are refused). A series/categories length mismatch is now this class, still a
@@ -1073,10 +1365,10 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
 - `Package.edit` with an unknown edit type or missing fields (ignored or a raw `TypeError`); `Package.patch` /
   `patchTemplate` with malformed patches.
 - `Security.resolvePolicy` and every `securityPolicy` option: a limit must be a number ≥ 0 (`Infinity` lifts it;
-  `NaN` switched it off), flags booleans, `rawXmlPolicy` one of its values. A bad `securityPolicy` given to `Io.read`,
-  `Io.toBuffer` and the rest is reported by that call (`Io.read: options.securityPolicy.maxEntries …`, field
+  `NaN` switched it off), flags booleans, `rawXmlPolicy` one of its values. A bad `securityPolicy` given to `Document.read`,
+  `Document.toBuffer` and the rest is reported by that call (`Document.read: options.securityPolicy.maxEntries …`, field
   `options.securityPolicy.maxEntries`), not as `Security.resolvePolicy: policy.maxEntries`.
-- `compressionLevel` outside 0–9 or an invalid `modTime` in `Io.toBuffer` / `toBase64` / `writeFile` / `toFlatOpc`,
+- `compressionLevel` outside 0–9 or an invalid `modTime` in `Document.toBuffer` / `toBase64` / `writeFile` / `toFlatOpc`,
   `Package.edit` / `patch` / `patchTemplate` / `fillTemplate` and `Streaming.createWriter`. These failed later with
   `ArchiveError`, the streaming writer only at `finalize()`. `StreamingDocxWriter#add` / `addText` refuse a non-block
   and a non-string; an unknown block was dropped. `addMany` / `addManyAsync` check the whole batch before writing any
@@ -1110,14 +1402,14 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
   `addEndnote`, `addComment` and `addTextBox`.
 - Watermarks with `fontSize`, `widthPt` or `heightPt` of zero or less, or empty `text` (they drew nothing visible).
 - Decryption (`WordCrypto.decrypt`, `verifyPassword`, `Agile.decryptPackage`, `Agile.verifyPassword`,
-  `Io.read({ password })`): a password that is not a string, and a `maxDecryptedSize` that is `NaN`, negative or not a
+  `Document.read({ password })`): a password that is not a string, and a `maxDecryptedSize` that is `NaN`, negative or not a
   number (`NaN` switched the cap off; `Infinity` is still "no limit"). `Font.obfuscate` / `deobfuscate` refuse a key
   that is not 32 hex digits (fields `data`, `fontKey`); non-hex digits were XOR'd as `0`, and the error was a plain
   `DocxError`. `WordCrypto.Agile.deriveKey` / `verifyPassword` / `decryptPackage` and `WordCrypto.Cfb.read` /
   `write` check their arguments; the deprecated flat `deriveEncryptionKey` and `readCfb` stay unchecked.
 - `Streaming.createWriter` checks every option as the matching `Document.set*` does, when the writer is created
   rather than at `finalize()`, plus `onProgress` and `addText(…, properties)`; `Streaming.createReader` checks its
-  source and options. A non-object `options` is refused by `Io.read`, `Validation.validate`, `WordHtml.fromDocx`,
+  source and options. A non-object `options` is refused by `Document.read`, `Validation.validate`, `WordHtml.fromDocx`,
   `WordMarkdown.fromDocx`, `Convert.toSemantic` and `Query.listTables`.
 - Unknown keys in a security policy (`{ maxEntries: 1 }`), where a typo left the real limit at its default. Unknown
   keys elsewhere are still accepted, because callers spread objects read from files.
@@ -1129,7 +1421,7 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
 - Error classes that changed: a duplicate `numId` in `Document.addListDefinition` (was `RangeError`); an unknown key
   in `Document.setDocDefaults` (was a plain `DocxError`); non-OLE2 bytes to `Vba.add` (was a plain `Error`).
   `Package.listParts` / `readPart` / `edit` and `Convert.fromOdt` report non-bytes as `DocxArgumentError` and
-  non-ZIP bytes as `DocxParseError` (cause: the archive error), as `Io.read` does; they threw `ArchiveError`.
+  non-ZIP bytes as `DocxParseError` (cause: the archive error), as `Document.read` does; they threw `ArchiveError`.
   `Convert.flatOpcToParts` reports non-XML input as `DocxParseError` (cause: the `XmlParseError`).
   `DocxInvalidImageError` extends `DocxArgumentError` and has a `field`.
 - `field` is the path from the parameter name throughout Word: `Build.chart`, `Build.floatingImage` and `Build.shape`
@@ -1137,7 +1429,7 @@ body[0].type)`, `thumbnail.contentType must be one of …`); they began `write:`
   `Build.rect` and its siblings say `Build.rect: …` and `options.outline.width` (were `Build.shape: …` and
   `outline.width`); `Build.table(rows, options)` names `options.layout`, `options.columnWidths[0]` (were
   `properties.layout`, `columnWidths[0]`; the deprecated three-argument form is unchanged);
-  `Document.addFloatingImage` and `addTextBox` name `options.wrap`, `options.width`; `Io.read` names `input` (was
+  `Document.addFloatingImage` and `addTextBox` name `options.wrap`, `options.width`; `Document.read` names `input` (was
   `buffer`); `Transform.fillFormFields` names `values["x"]` (was `values.get("x")`); the streaming writer's
   `addText` says `Streaming.StreamingDocxWriter#addText: …` and names `content`; an image media type from
   `WordMarkdown.toDocx`'s `resolveImage` says `WordMarkdown.toDocx: …` (field `options.resolveImage`), and one from
@@ -1161,7 +1453,7 @@ element is ignored by `createXmlDataSource`; fields missing from `mailMerge` dat
 - `WordExcel.toChartSvg` and `WordExcel.toChartXlsx` (it returns `.xlsx` bytes) are the names of the Word-chart
   renderers; the deprecated `renderWordChartSvg` and `generateChartEmbeddedXlsx` forward to them.
 - `WordCrypto.Agile.decryptPackage(pkg, info, password, { maxDecryptedSize })` takes the cap in `DecryptOptions`, as
-  `WordCrypto.decrypt` does. Both default to `DEFAULT_SECURITY_POLICY.maxPackageSize` (500 MiB), the cap `Io.read`
+  `WordCrypto.decrypt` does. Both default to `DEFAULT_SECURITY_POLICY.maxPackageSize` (500 MiB), the cap `Document.read`
   applies; the deprecated `decryptDocx` keeps 512 MiB.
 - `Convert.flatOpcToParts`, the inverse of `Convert.partsToFlatOpc`; the deprecated `Convert.parseFlatOpc` forwards
   to it.
@@ -1171,7 +1463,7 @@ element is ignored by `createXmlDataSource`; fields missing from `mailMerge` dat
   `isDocxError`). `documonster/word/html`, `/word/markdown` and `/word/excel` export `DocxError`,
   `DocxArgumentError`, `isDocxError` and `BaseErrorOptions` (markdown also `DocxInvalidImageError`).
   `DiscardUnrecognizedValuesOptions` is a flat type export, as in Excel.
-- `DocxWriteOptions` (the options of `Io.toBuffer` / `toBase64` / `writeFile`), `Build.SimpleTableOptions`,
+- `DocxWriteOptions` (the options of `Document.toBuffer` / `toBase64` / `writeFile`), `Build.SimpleTableOptions`,
   `PreservedLink`, `PreservedLinkRId`, `HtmlBodyResult`, and `DocxRawXmlPolicyError`, which was thrown but could not
   be imported. `FillFromSourceOptions` and `LegacyTemplateOptions` are exported, deprecated, for the deprecated
   functions that take them; `mergeArrays` never had an effect — pass it to `createCompositeDataSource`.
@@ -1215,7 +1507,7 @@ element is ignored by `createXmlDataSource`; fields missing from `mailMerge` dat
 - `DigitalSignatureInfo.claimedSigner` holds the signature's display name (`SignatureText`), the name PDF's report
   uses for an unverified identity; `signer` is deprecated and holds the same value until 1.0.
 - New: `Document.listUnrecognizedValues(doc)` lists the values a read kept outside their vocabulary, as they are kept
-  now, each an `UnrecognizedValue` (`{ path, value }`, exported); `Document.discardUnrecognizedValues`'s `filter`
+  now, each a `DocxUnrecognizedValue` (`{ path, value }`, exported); `Document.discardUnrecognizedValues`'s `filter`
   takes the same type.
 - Argument errors describe a `Date` that holds no time as `an invalid Date` (they read "must be a valid Date, got a
   Date").
@@ -1569,7 +1861,7 @@ match?, projection?, strokeColor? }`, each checked. `drawChartExPdf` needs a sur
   whenever the DOS fields alone would not read back as `modTime` — the repeated hour of a DST change too — so every
   `modTime` from 1970 to 2106 reads back as written, to two seconds (such entries are 9 bytes larger). In UT modes a
   date only the DOS fields hold gets no UT field. A time taken from a file on disk is clamped to the DOS range, and
-  Word's `Io.toBuffer` and the XLSB writer move the document's date to the nearest one a ZIP can store.
+  Word's `Document.toBuffer` and the XLSB writer move the document's date to the nearest one a ZIP can store.
 - `ZipEditor` keeps untouched entries readable by other tools: a copied ZipCrypto entry keeps its data-descriptor
   flag exactly as it had it (Info-ZIP, 7-Zip and Windows refused the password), and untouched entries keep their raw
   DOS date and time, which were recomputed in the editing machine's time zone.
@@ -1621,10 +1913,10 @@ match?, projection?, strokeColor? }`, each checked. `drawChartExPdf` needs a sur
   `unpackTar` and `tar -x` do; they returned the first. `RemoteZipReader#listFiles` lists one path per file entry,
   directories excluded, so its length is `getFileCount()`; it listed directories and folded duplicates. An unedited
   `editZip` writes every entry of a duplicated name back (it dropped all but one); editing the name leaves one.
-  `ZipEditor#getEntries` lists every entry.
+  `ZipEditor#getSourceEntries` lists every entry.
 - `ZipEditor.apply(plan)` changes nothing when it throws; it applied every operation before the refused one.
 - Readers hand out frozen data: `RemoteZipReader.getEntries()` / `getEntry()` / `filterEntries()` / `findEntries()`
-  and `ZipEditor.getEntries()` (mutating them corrupted the reader); `ZipEditPlan.getOperations()` returns a frozen
+  and `ZipEditor.getSourceEntries()` (mutating them corrupted the reader); `ZipEditPlan.getOperations()` returns a frozen
   copy, and `new ZipEditPlan(ops)` copies `ops`.
 - `pipeline(…, callback)` returns the last stage and `finished(stream, [options], callback)` a cleanup function, as
   `node:stream`'s do _(owner decision)_, on both entries; they returned a promise. Without a callback both still
@@ -2033,7 +2325,7 @@ password)` (as `Worksheet.verifyPassword`), `Stream.applyCellStyle(cell, name)` 
   as a cell value or formula result (`InvalidValueTypeError`; the write failed on it), `Workbook.removeWorksheet`
   with no sheet (it removed the first one), `ExcelCsv.read` / `addWorksheet` with input that is not text, bytes, a URL,
   a Blob or a stream (it read `String(input)` — `42` became a one-cell sheet), `Csv.parse` with input that is not a
-  string (`CsvError`), `Io.read` with input that is not bytes (`DocxArgumentError`; an `ArrayBuffer` is still
+  string (`CsvError`), `Document.read` with input that is not bytes (`DocxArgumentError`; an `ArrayBuffer` is still
   read), and `DataValidation.*` with a target that is neither a worksheet nor a rule collection.
 - `Chart.createOptionsFromRows` checks its start cell, that the rows fit on the sheet, and every value before it
   writes any cell, so a call that throws leaves the sheet as it was; it used to leave the header and the rows before
@@ -2068,7 +2360,7 @@ password)` (as `Worksheet.verifyPassword`), `Stream.applyCellStyle(cell, name)` 
   needed an index signature) in a readonly array; the `Build.*` content builders, `Document.addHeading` /
   `addTable` / `addFootnote` / `addEndnote` / `addComment` / `addMath` / `addTextBox` / `addBulletList` /
   `addNumberedList`, `Template.bindChartData`, `Worksheet.addJson` / `addAoa`, `Table.addRow` / `addColumn`,
-  `Csv.format` and the PDF `drawPath` / `splitPages` take readonly arrays, which they only read; `Io.read` declares
+  `Csv.format` and the PDF `drawPath` / `splitPages` take readonly arrays, which they only read; `Document.read` declares
   the `ArrayBuffer` it has always read.
 - `Table.create` and `Form.createCheckbox` are deprecated: each built an object for a sheet without adding it
   (a table that was never written; a checkbox that took a shape id another one could also take). Use
@@ -2414,7 +2706,7 @@ through):
 | `untargz`                                    | Use `Archive.unpackTarGz`.                                                                                                                                                      |
 | `unzlib`                                     | Use `Compression.unzlib`.                                                                                                                                                       |
 | `unzlibSync`                                 | Use `Compression.unzlibSync`.                                                                                                                                                   |
-| `WorkerPool`                                 | Use `Compression.Workers.WorkerPool`.                                                                                                                                           |
+| `WorkerPool`                                 | Use `Compression.Workers.Pool`.                                                                                                                                                 |
 | `writeFileBytes`                             | Use `Fs.writeFileBytes`.                                                                                                                                                        |
 | `writeFileBytesSync`                         | Use `Fs.writeFileBytesSync`.                                                                                                                                                    |
 | `writeFileText`                              | Use `Fs.writeFileText`.                                                                                                                                                         |
@@ -2728,97 +3020,97 @@ through):
 <details>
 <summary><code>documonster/word</code> — 90 names</summary>
 
-| Deprecated                         | Use instead                                                                                                                                                             |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Build.checkBox`                   | Use `Build.checkbox`.                                                                                                                                                   |
-| `Build.createArrow`                | Use `Build.arrow`.                                                                                                                                                      |
-| `Build.createCallout`              | Use `Build.callout`.                                                                                                                                                    |
-| `Build.createEllipse`              | Use `Build.ellipse`.                                                                                                                                                    |
-| `Build.createFlowchartShape`       | Use `Build.flowchartShape`.                                                                                                                                             |
-| `Build.createLine`                 | Use `Build.line`.                                                                                                                                                       |
-| `Build.createRect`                 | Use `Build.rect`.                                                                                                                                                       |
-| `Build.createRoundRect`            | Use `Build.roundRect`.                                                                                                                                                  |
-| `Build.createShape`                | Use `Build.shape`.                                                                                                                                                      |
-| `Build.createStar`                 | Use `Build.star`.                                                                                                                                                       |
-| `Build.mathPreSubSuperScript`      | Use `Build.mathPreSubSuperscript`.                                                                                                                                      |
-| `Build.mathSubScript`              | Use `Build.mathSubscript`.                                                                                                                                              |
-| `Build.mathSubSuperScript`         | Use `Build.mathSubSuperscript`.                                                                                                                                         |
-| `Build.mathSuperScript`            | Use `Build.mathSuperscript`.                                                                                                                                            |
-| `Convert.docxToSemantic`           | Use `Convert.toSemantic`.                                                                                                                                               |
-| `Convert.mapDocument`              | Use `Transform.map`.                                                                                                                                                    |
-| `Convert.mathMLToOmml`             | Use `Convert.mathMlToOmml`.                                                                                                                                             |
-| `Convert.ommlToMathML`             | Use `Convert.ommlToMathMl`.                                                                                                                                             |
-| `Convert.parseFlatOpc`             | Use `Convert.flatOpcToParts`, the inverse of `Convert.partsToFlatOpc`, or `Io.read`, which now reads Flat OPC bytes as a document.                                      |
-| `Convert.readOdt`                  | Use `Convert.fromOdt`.                                                                                                                                                  |
-| `Convert.toFlatOpc`                | Use `Convert.partsToFlatOpc` — this wraps a part map, not a document; `Io.toFlatOpc(doc)` is the document form.                                                         |
-| `Convert.writeOdt`                 | Use `Convert.toOdt`.                                                                                                                                                    |
-| `Diff.documents`                   | Use `Diff.compare`.                                                                                                                                                     |
-| `Document.addParagraphElement`     | Use `Document.addParagraph`.                                                                                                                                            |
-| `Document.addTableElement`         | Use `Document.addTable`.                                                                                                                                                |
-| `Document.build`                   | A document needs no build step: pass the document itself to `Io.toBuffer`, `Layout.*`, `WordHtml.fromDocx` or `Pdf.fromDocx`, which apply the same write-time defaults. |
-| `Document.DocumentHandle`          | Use `DocxDocument`.                                                                                                                                                     |
-| `Document.insertContentAt`         | Use `Document.insertContent`.                                                                                                                                           |
-| `Document.nextBookmarkId`          | Use `Document.allocateBookmarkId`.                                                                                                                                      |
-| `DocumentHandle`                   | Use `DocxDocument`.                                                                                                                                                     |
-| `Glossary.autoTextEntries`         | Use `Glossary.listAutoTextEntries`.                                                                                                                                     |
-| `Glossary.quickParts`              | Use `Glossary.listQuickParts`.                                                                                                                                          |
-| `Io.compileTemplate`               | Use `Package.compileTemplate`.                                                                                                                                          |
-| `Io.editDocxIncremental`           | Use `Package.edit`.                                                                                                                                                     |
-| `Io.fillTemplateFromBuffer`        | Use `Package.fillTemplate`.                                                                                                                                             |
-| `Io.listDocxParts`                 | Use `Package.listParts`.                                                                                                                                                |
-| `Io.merge`                         | Use `Transform.merge`.                                                                                                                                                  |
-| `Io.patchDocument`                 | Use `Package.patch`.                                                                                                                                                    |
-| `Io.patchTemplate`                 | Use `Package.patchTemplate`.                                                                                                                                            |
-| `Io.readDocxPart`                  | Use `Package.readPart`.                                                                                                                                                 |
-| `Io.split`                         | Use `Transform.split`.                                                                                                                                                  |
-| `Io.toFlatOpcFromDoc`              | Use `Io.toFlatOpc`, which takes an options object (`{ compressionLevel }`).                                                                                             |
-| `Io.updateFields`                  | Use `Transform.updateFields`.                                                                                                                                           |
-| `Io.updateTableOfContents`         | Use `Transform.updateTableOfContents`.                                                                                                                                  |
-| `Layout.document`                  | Use `Layout.getPageMap`.                                                                                                                                                |
-| `Layout.documentFull`              | Use `Layout.compute`.                                                                                                                                                   |
-| `Layout.renderDocumentToSvg`       | Use `Layout.toSvg`.                                                                                                                                                     |
-| `Layout.renderPageFromLayout`      | Use `Layout.computedPageToSvg`.                                                                                                                                         |
-| `Layout.renderPageToSvg`           | Use `Layout.pageToSvg`.                                                                                                                                                 |
-| `Query.acceptAllRevisions`         | Use `Document.acceptAllRevisions`.                                                                                                                                      |
-| `Query.acceptRevision`             | Use `Document.acceptRevision`.                                                                                                                                          |
-| `Query.collectParagraphs`          | Use `Query.listParagraphs`.                                                                                                                                             |
-| `Query.collectRuns`                | Use `Query.listRuns`.                                                                                                                                                   |
-| `Query.collectTables`              | Use `Query.listTables`, passing the parts to include — `listTables` searches only the body unless asked.                                                                |
-| `Query.countByFormat`              | Use `Query.getCountByFormat`.                                                                                                                                           |
-| `Query.countWords`                 | Use `Query.getWordCount`.                                                                                                                                               |
-| `Query.extractFormFields`          | Use `Query.listFormFields`.                                                                                                                                             |
-| `Query.extractText`                | Use `Query.getText`.                                                                                                                                                    |
-| `Query.fillFormFields`             | Use `Transform.fillFormFields`.                                                                                                                                         |
-| `Query.findBookmark`               | Use `Query.getBookmark`.                                                                                                                                                |
-| `Query.findComment`                | Use `Query.getComment`.                                                                                                                                                 |
-| `Query.getHeadings`                | Use `Query.listHeadings`.                                                                                                                                               |
-| `Query.getUsedFormats`             | Use `Query.listUsedFormats`.                                                                                                                                            |
-| `Query.indexStyles`                | Use `Query.createStyleIndex`.                                                                                                                                           |
-| `Query.mailMerge`                  | Use `Document.mailMerge`.                                                                                                                                               |
-| `Query.paragraphCount`             | Use `Query.getParagraphCount`.                                                                                                                                          |
-| `Query.rejectAllRevisions`         | Use `Document.rejectAllRevisions`.                                                                                                                                      |
-| `Query.rejectRevision`             | Use `Document.rejectRevision`.                                                                                                                                          |
-| `Query.replaceText`                | Use `Document.replaceText`.                                                                                                                                             |
-| `Query.resolveDataBindings`        | Use `Transform.resolveDataBindings`.                                                                                                                                    |
-| `Query.resolveNumberingLevel`      | Use `Query.getNumberingLevel`.                                                                                                                                          |
-| `Query.resolveRunStyle`            | Use `Query.getRunStyle`.                                                                                                                                                |
-| `Query.resolveStyle`               | Use `Query.getParagraphStyle`.                                                                                                                                          |
-| `Query.resolveTableStyle`          | Use `Query.getTableStyle`.                                                                                                                                              |
-| `Query.setCompatibilityMode`       | Use `Document.setCompatibilityMode`.                                                                                                                                    |
-| `Query.tableCount`                 | Use `Query.getTableCount`.                                                                                                                                              |
-| `Query.walkBlocks`                 | Use `Query.eachBlock`.                                                                                                                                                  |
-| `Query.walkDocument`               | Use `Query.each`.                                                                                                                                                       |
-| `Security.encrypt`                 | Use `WordCrypto.encrypt` from `documonster/word/crypto`, beside `decrypt` and `verifyPassword`.                                                                         |
-| `Security.resolveSecurityPolicy`   | Use `Security.resolvePolicy`.                                                                                                                                           |
-| `Streaming.createDocxStream`       | Use `Streaming.createWriter`.                                                                                                                                           |
-| `Streaming.createDocxStreamReader` | Use `Streaming.createReader`.                                                                                                                                           |
-| `Template.fillTemplate`            | Use `Template.fill`, which returns a new document.                                                                                                                      |
-| `Template.fillTemplateEnhanced`    | Use `Template.fill` with `{ richPlaceholders: true }`.                                                                                                                  |
-| `Template.fillTemplateFromSource`  | Use `Template.fillFromSource`.                                                                                                                                          |
-| `Template.isTemplateChart`         | Use `Template.isChart`.                                                                                                                                                 |
-| `Template.listTemplateTags`        | Use `Template.listTags`.                                                                                                                                                |
-| `Template.TemplateError`           | Import `TemplateError` from `documonster/word` directly.                                                                                                                |
-| `Validation.document`              | Use `Validation.validate`.                                                                                                                                              |
+| Deprecated                         | Use instead                                                                                                                                                                   |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Build.checkBox`                   | Use `Build.checkbox`.                                                                                                                                                         |
+| `Build.createArrow`                | Use `Build.arrow`.                                                                                                                                                            |
+| `Build.createCallout`              | Use `Build.callout`.                                                                                                                                                          |
+| `Build.createEllipse`              | Use `Build.ellipse`.                                                                                                                                                          |
+| `Build.createFlowchartShape`       | Use `Build.flowchartShape`.                                                                                                                                                   |
+| `Build.createLine`                 | Use `Build.line`.                                                                                                                                                             |
+| `Build.createRect`                 | Use `Build.rect`.                                                                                                                                                             |
+| `Build.createRoundRect`            | Use `Build.roundRect`.                                                                                                                                                        |
+| `Build.createShape`                | Use `Build.shape`.                                                                                                                                                            |
+| `Build.createStar`                 | Use `Build.star`.                                                                                                                                                             |
+| `Build.mathPreSubSuperScript`      | Use `Build.mathPreSubSuperscript`.                                                                                                                                            |
+| `Build.mathSubScript`              | Use `Build.mathSubscript`.                                                                                                                                                    |
+| `Build.mathSubSuperScript`         | Use `Build.mathSubSuperscript`.                                                                                                                                               |
+| `Build.mathSuperScript`            | Use `Build.mathSuperscript`.                                                                                                                                                  |
+| `Convert.docxToSemantic`           | Use `Convert.toSemantic`.                                                                                                                                                     |
+| `Convert.mapDocument`              | Use `Transform.map`.                                                                                                                                                          |
+| `Convert.mathMLToOmml`             | Use `Convert.mathMlToOmml`.                                                                                                                                                   |
+| `Convert.ommlToMathML`             | Use `Convert.ommlToMathMl`.                                                                                                                                                   |
+| `Convert.parseFlatOpc`             | Use `Convert.flatOpcToParts`, the inverse of `Convert.partsToFlatOpc`, or `Document.read`, which now reads Flat OPC bytes as a document.                                      |
+| `Convert.readOdt`                  | Use `Convert.fromOdt`.                                                                                                                                                        |
+| `Convert.toFlatOpc`                | Use `Convert.partsToFlatOpc` — this wraps a part map, not a document; `Document.toFlatOpc(doc)` is the document form.                                                         |
+| `Convert.writeOdt`                 | Use `Convert.toOdt`.                                                                                                                                                          |
+| `Diff.documents`                   | Use `Diff.compare`.                                                                                                                                                           |
+| `Document.addParagraphElement`     | Use `Document.addParagraph`.                                                                                                                                                  |
+| `Document.addTableElement`         | Use `Document.addTable`.                                                                                                                                                      |
+| `Document.build`                   | A document needs no build step: pass the document itself to `Document.toBuffer`, `Layout.*`, `WordHtml.fromDocx` or `Pdf.fromDocx`, which apply the same write-time defaults. |
+| `Document.DocumentHandle`          | Use `DocxDocument`.                                                                                                                                                           |
+| `Document.insertContentAt`         | Use `Document.insertContent`.                                                                                                                                                 |
+| `Document.nextBookmarkId`          | Use `Document.allocateBookmarkId`.                                                                                                                                            |
+| `DocumentHandle`                   | Use `DocxDocument`.                                                                                                                                                           |
+| `Glossary.autoTextEntries`         | Use `Glossary.listAutoTextEntries`.                                                                                                                                           |
+| `Glossary.quickParts`              | Use `Glossary.listQuickParts`.                                                                                                                                                |
+| `Io.compileTemplate`               | Use `Package.compileTemplate`.                                                                                                                                                |
+| `Io.editDocxIncremental`           | Use `Package.edit`.                                                                                                                                                           |
+| `Io.fillTemplateFromBuffer`        | Use `Package.fillTemplate`.                                                                                                                                                   |
+| `Io.listDocxParts`                 | Use `Package.listParts`.                                                                                                                                                      |
+| `Io.merge`                         | Use `Transform.merge`.                                                                                                                                                        |
+| `Io.patchDocument`                 | Use `Package.patch`.                                                                                                                                                          |
+| `Io.patchTemplate`                 | Use `Package.patchTemplate`.                                                                                                                                                  |
+| `Io.readDocxPart`                  | Use `Package.readPart`.                                                                                                                                                       |
+| `Io.split`                         | Use `Transform.split`.                                                                                                                                                        |
+| `Io.toFlatOpcFromDoc`              | Use `Document.toFlatOpc`, which takes an options object (`{ compressionLevel }`).                                                                                             |
+| `Io.updateFields`                  | Use `Transform.updateFields`.                                                                                                                                                 |
+| `Io.updateTableOfContents`         | Use `Transform.updateTableOfContents`.                                                                                                                                        |
+| `Layout.document`                  | Use `Layout.getPageMap`.                                                                                                                                                      |
+| `Layout.documentFull`              | Use `Layout.compute`.                                                                                                                                                         |
+| `Layout.renderDocumentToSvg`       | Use `Layout.toSvg`.                                                                                                                                                           |
+| `Layout.renderPageFromLayout`      | Use `Layout.computedPageToSvg`.                                                                                                                                               |
+| `Layout.renderPageToSvg`           | Use `Layout.pageToSvg`.                                                                                                                                                       |
+| `Query.acceptAllRevisions`         | Use `Document.acceptAllRevisions`.                                                                                                                                            |
+| `Query.acceptRevision`             | Use `Document.acceptRevision`.                                                                                                                                                |
+| `Query.collectParagraphs`          | Use `Query.listParagraphs`.                                                                                                                                                   |
+| `Query.collectRuns`                | Use `Query.listRuns`.                                                                                                                                                         |
+| `Query.collectTables`              | Use `Query.listTables`, passing the parts to include — `listTables` searches only the body unless asked.                                                                      |
+| `Query.countByFormat`              | Use `Query.getCountByFormat`.                                                                                                                                                 |
+| `Query.countWords`                 | Use `Query.getWordCount`.                                                                                                                                                     |
+| `Query.extractFormFields`          | Use `Query.listFormFields`.                                                                                                                                                   |
+| `Query.extractText`                | Use `Query.getText`.                                                                                                                                                          |
+| `Query.fillFormFields`             | Use `Transform.fillFormFields`.                                                                                                                                               |
+| `Query.findBookmark`               | Use `Query.getBookmark`.                                                                                                                                                      |
+| `Query.findComment`                | Use `Query.getComment`.                                                                                                                                                       |
+| `Query.getHeadings`                | Use `Query.listHeadings`.                                                                                                                                                     |
+| `Query.getUsedFormats`             | Use `Query.listUsedFormats`.                                                                                                                                                  |
+| `Query.indexStyles`                | Use `Query.createStyleIndex`.                                                                                                                                                 |
+| `Query.mailMerge`                  | Use `Document.mailMerge`.                                                                                                                                                     |
+| `Query.paragraphCount`             | Use `Query.getParagraphCount`.                                                                                                                                                |
+| `Query.rejectAllRevisions`         | Use `Document.rejectAllRevisions`.                                                                                                                                            |
+| `Query.rejectRevision`             | Use `Document.rejectRevision`.                                                                                                                                                |
+| `Query.replaceText`                | Use `Document.replaceText`.                                                                                                                                                   |
+| `Query.resolveDataBindings`        | Use `Transform.resolveDataBindings`.                                                                                                                                          |
+| `Query.resolveNumberingLevel`      | Use `Query.getNumberingLevel`.                                                                                                                                                |
+| `Query.resolveRunStyle`            | Use `Query.getRunStyle`.                                                                                                                                                      |
+| `Query.resolveStyle`               | Use `Query.getParagraphStyle`.                                                                                                                                                |
+| `Query.resolveTableStyle`          | Use `Query.getTableStyle`.                                                                                                                                                    |
+| `Query.setCompatibilityMode`       | Use `Document.setCompatibilityMode`.                                                                                                                                          |
+| `Query.tableCount`                 | Use `Query.getTableCount`.                                                                                                                                                    |
+| `Query.walkBlocks`                 | Use `Query.eachBlock`.                                                                                                                                                        |
+| `Query.walkDocument`               | Use `Query.each`.                                                                                                                                                             |
+| `Security.encrypt`                 | Use `WordCrypto.encrypt` from `documonster/word/crypto`, beside `decrypt` and `verifyPassword`.                                                                               |
+| `Security.resolveSecurityPolicy`   | Use `Security.resolvePolicy`.                                                                                                                                                 |
+| `Streaming.createDocxStream`       | Use `Streaming.createWriter`.                                                                                                                                                 |
+| `Streaming.createDocxStreamReader` | Use `Streaming.createReader`.                                                                                                                                                 |
+| `Template.fillTemplate`            | Use `Template.fill`, which returns a new document.                                                                                                                            |
+| `Template.fillTemplateEnhanced`    | Use `Template.fill` with `{ richPlaceholders: true }`.                                                                                                                        |
+| `Template.fillTemplateFromSource`  | Use `Template.fillFromSource`.                                                                                                                                                |
+| `Template.isTemplateChart`         | Use `Template.isChart`.                                                                                                                                                       |
+| `Template.listTemplateTags`        | Use `Template.listTags`.                                                                                                                                                      |
+| `Template.TemplateError`           | Import `TemplateError` from `documonster/word` directly.                                                                                                                      |
+| `Validation.document`              | Use `Validation.validate`.                                                                                                                                                    |
 
 </details>
 

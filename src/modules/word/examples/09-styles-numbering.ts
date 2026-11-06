@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { StyleDef, AbstractNumbering, NumberingInstance } from "../index";
 
 const outDir = path.resolve(
@@ -263,6 +263,6 @@ const final = {
   ]
 };
 
-const buf = await Io.toBuffer(final);
+const buf = await Document.toBuffer(final);
 fs.writeFileSync(path.join(outDir, "09-styles-numbering.docx"), buf);
 console.log(`  → 09-styles-numbering.docx (${buf.length} bytes)`);

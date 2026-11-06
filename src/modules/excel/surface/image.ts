@@ -10,6 +10,9 @@
  * Two collections share the namespace: the workbook's media (`add` registers, by id) and a
  * sheet's placements of it (`place`, `list`, `remove`). Removing a placement leaves the media
  * registered, so its id can be placed again.
+ *
+ * A streaming writer is accepted wherever it can do the same thing: `add` takes a `Stream.WorkbookWriter`, and `place`,
+ * `list`, `remove` and the background functions a `Stream.WorksheetWriter`. Shapes are refused for one.
  */
 import { checkWorksheetImage } from "@excel/core/feature-handles";
 import type { ImageModel, ImageModelInput, WorksheetImage } from "@excel/core/image";
@@ -35,9 +38,17 @@ import {
   getSheetWorkbook
 } from "@excel/core/worksheet-core";
 import { ExcelImageError } from "@excel/errors";
+import type { WriterImageModel } from "@excel/stream/worksheet-writer";
 import { checkListTarget } from "@excel/surface/argument-checks";
+import type { StreamWorkbook, StreamWorksheet } from "@excel/surface/stream-targets";
+import {
+  asStreamWorkbook,
+  asStreamWorksheet,
+  refuseStreamWorksheet
+} from "@excel/surface/stream-targets";
 import type { AddImageRange, AddShapeOptions, ImageData, ShapeModel } from "@excel/types";
 import { argumentChecks } from "@excel/utils/arguments";
+import { copyPlain } from "@excel/utils/copy-plain";
 import { checkDrawingRange, checkShapeOptions } from "@excel/utils/drawing-checks";
 
 /**
@@ -46,7 +57,11 @@ import { checkDrawingRange, checkShapeOptions } from "@excel/utils/drawing-check
  * @throws {ExcelImageError} when the image has no extension of the supported kinds (`png`, `jpeg`, `jpg`, `gif`), or no
  * bytes — `buffer`, `base64` or `filename` — and no `link`.
  */
-export function add(wb: WorkbookData, image: ImageData): number {
+export function add(wb: WorkbookData | StreamWorkbook, image: ImageData): number {
+  const writer = asStreamWorkbook(wb);
+  if (writer) {
+    return writer._addImage("Image.add", image);
+  }
   checkWorkbook(wb);
   return addWorkbookImage(wb, image);
 }
@@ -71,7 +86,30 @@ export function place(
   ws: WorksheetData,
   imageId: string | number,
   range: AddImageRange
-): WorksheetImage {
+): WorksheetImage;
+/** Place the image on a streamed sheet, and return the placed image as {@link list} lists it there. */
+export function place(
+  ws: StreamWorksheet,
+  imageId: string | number,
+  range: AddImageRange
+): WriterImageModel;
+// The document model's signature again, last: `ReturnType<typeof …>` reads the last overload, and code that names a
+// placed image that way must keep meaning the document model's. (It is also first, which is what an `any` argument picks.)
+export function place(
+  ws: WorksheetData,
+  imageId: string | number,
+  range: AddImageRange
+): WorksheetImage;
+export function place(
+  ws: WorksheetData | StreamWorksheet,
+  imageId: string | number,
+  range: AddImageRange
+): WorksheetImage | WriterImageModel {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    checkDrawingRange("Image.place", "range", range);
+    return writer._placeImage("Image.place", imageId, range);
+  }
   checkWorksheet(ws);
   checkImageId("Image.place", ws, imageId);
   // A range that is none was accepted and failed only at write ("Image has no range", or `NaN` in the drawing); a
@@ -81,14 +119,29 @@ export function place(
 }
 
 /** Use the workbook image `imageId` as the sheet's background. @throws {ExcelImageError} when there is no such image. */
-export function setBackground(ws: WorksheetData, imageId: string | number): void {
+export function setBackground(ws: WorksheetData | StreamWorksheet, imageId: string | number): void {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    writer._setBackground("Image.setBackground", imageId);
+    return;
+  }
   checkWorksheet(ws);
   checkImageId("Image.setBackground", ws, imageId);
   addBackgroundImage(ws, imageId);
 }
 
 /** The sheet's placed images, in the order they were placed: the handles {@link remove} and {@link setModel} take. */
-export function list(ws: WorksheetData): WorksheetImage[] {
+export function list(ws: WorksheetData): WorksheetImage[];
+/** A streamed sheet's placed images — the entries {@link remove} takes there. */
+export function list(ws: StreamWorksheet): WriterImageModel[];
+// The document model's signature again, last: `ReturnType<typeof …>` reads the last overload, and code that names a
+// placed image that way must keep meaning the document model's. (It is also first, which is what an `any` argument picks.)
+export function list(ws: WorksheetData): WorksheetImage[];
+export function list(ws: WorksheetData | StreamWorksheet): WorksheetImage[] | WriterImageModel[] {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    return writer._listImages();
+  }
   checkWorksheet(ws);
   return getImages(ws);
 }
@@ -97,13 +150,23 @@ export function list(ws: WorksheetData): WorksheetImage[] {
  * The workbook image id of the sheet's background picture, or `undefined` when it has none — as the string the sheet
  * stores it as (`"0"`); `Number(id)` is the id {@link add} returned.
  */
-export function getBackground(ws: WorksheetData): string | undefined {
+export function getBackground(ws: WorksheetData | StreamWorksheet): string | undefined {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    // The writer keeps a number; answered as a string, as a worksheet's background id is.
+    const id = writer.getBackgroundImageId();
+    return id === undefined ? undefined : String(id);
+  }
   checkWorksheet(ws);
   return getBackgroundImageId(ws);
 }
 
 /** Remove the sheet's background picture. Returns `true` if it had one. */
-export function removeBackground(ws: WorksheetData): boolean {
+export function removeBackground(ws: WorksheetData | StreamWorksheet): boolean {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    return writer._removeBackground();
+  }
   checkWorksheet(ws);
   return removeBackgroundImage(ws);
 }
@@ -112,10 +175,24 @@ export function removeBackground(ws: WorksheetData): boolean {
  * Remove a placed image — the handle {@link list} returned, or its index in that list. Returns `true` if one was
  * removed. The picture stays registered in the workbook, so its id can still be placed elsewhere.
  */
-export function remove(ws: WorksheetData, image: WorksheetImage | number): boolean {
+export function remove(ws: WorksheetData, image: WorksheetImage | number): boolean;
+/** Remove a picture placed on a streamed sheet — an entry {@link list} returned there, or its index. */
+export function remove(ws: StreamWorksheet, image: WriterImageModel | number): boolean;
+// The document model's signature again, last: `ReturnType<typeof …>` reads the last overload, and code that names a
+// placed image that way must keep meaning the document model's. (It is also first, which is what an `any` argument picks.)
+export function remove(ws: WorksheetData, image: WorksheetImage | number): boolean;
+export function remove(
+  ws: WorksheetData | StreamWorksheet,
+  image: WorksheetImage | WriterImageModel | number
+): boolean {
+  const writer = asStreamWorksheet(ws);
+  if (writer) {
+    checkListTarget("Image.remove", "image", image, "a placed image");
+    return writer._removeImage(image as WriterImageModel | number);
+  }
   checkWorksheet(ws);
   checkListTarget("Image.remove", "image", image, "a placed image");
-  return removeImage(ws, image);
+  return removeImage(ws, image as WorksheetImage | number);
 }
 
 /**
@@ -125,6 +202,11 @@ export function remove(ws: WorksheetData, image: WorksheetImage | number): boole
  * not hex, the line width is outside 0–1584 points, or the range covers no area.
  */
 export function addShape(ws: WorksheetData, options: AddShapeOptions): ShapeModel {
+  refuseStreamWorksheet(
+    ws,
+    "Image.addShape",
+    "has no shapes: draw them on a worksheet of a workbook built in memory"
+  );
   checkWorksheet(ws);
   checkShapeOptions("Image.addShape", options);
   return addWorksheetShape(ws, options);
@@ -132,21 +214,32 @@ export function addShape(ws: WorksheetData, options: AddShapeOptions): ShapeMode
 
 /** Remove a shape — one {@link listShapes} listed, or its index in that list. Returns `true` if one was removed. */
 export function removeShape(ws: WorksheetData, shape: ShapeModel | number): boolean {
+  refuseStreamWorksheet(
+    ws,
+    "Image.removeShape",
+    "has no shapes: draw them on a worksheet of a workbook built in memory"
+  );
   checkWorksheet(ws);
   checkListTarget("Image.removeShape", "shape", shape, "a shape");
   return removeWorksheetShape(ws, shape);
 }
 
-/** The sheet's shapes, in the order they were drawn. */
+/** The sheet's shapes, in the order they were drawn: the shapes themselves, which {@link removeShape} takes. */
 export function listShapes(ws: WorksheetData): ShapeModel[] {
+  refuseStreamWorksheet(
+    ws,
+    "Image.listShapes",
+    "has no shapes: draw them on a worksheet of a workbook built in memory"
+  );
   checkWorksheet(ws);
   return listWorksheetShapes(ws);
 }
 
-/** A copy of the image's model: what it shows, where, and how. */
+/** A copy of the image's model: what it shows, where, and how. Changing it changes nothing; {@link setModel} does. */
 export function getModel(image: WorksheetImage): ImageModel {
   checkWorksheetImage(image);
-  return imageModel(image);
+  // `imageModel` is also what the writer serialises, and shares the placement's own `ext`, `pos` and hyperlinks.
+  return copyPlain(imageModel(image));
 }
 
 const IMAGE_TYPES = ["image", "background", "watermark", "headerImage"];
@@ -174,7 +267,7 @@ export function setModel(image: WorksheetImage, model: ImageModelInput): void {
   if (!image.worksheet._media.includes(image)) {
     check.fail("image", "an image on its sheet (from Image.list)", image);
   }
-  setImageModel(image, model);
+  setImageModel(image, copyPlain(model));
 }
 
 /** An image handle. */

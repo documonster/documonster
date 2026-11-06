@@ -25,10 +25,10 @@
  *
  * @example
  * ```typescript
- * import { Io } from "documonster/word";
+ * import { Document } from "documonster/word";
  * import { Pdf } from "documonster/pdf";
  *
- * const doc = await Io.read(docxBytes);
+ * const doc = await Document.read(docxBytes);
  * const pdfBytes = await Pdf.fromDocx(doc);
  * ```
  */
@@ -160,7 +160,7 @@ export interface DocxToPdfOptions extends PdfDocumentOptions {
 /**
  * Convert a `DocxDocument` to PDF bytes.
  *
- * @param doc - The document (from `Io.read` or `Document.create()`).
+ * @param doc - The document (from `Document.read` or `Document.create()`).
  * @param options - Page geometry, fonts, optional chart renderer, …
  * @returns PDF bytes ready to write to disk or stream over HTTP.
  */

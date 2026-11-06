@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { streamBothFormats } from "@excel/examples/utils/stream-both";
-import { Stream } from "@excel/index";
+import { Cell, Column, Row, Stream, Workbook, Worksheet } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -20,7 +20,7 @@ const outDir = path.resolve(
 const filename = process.argv[2] ?? path.join(outDir, "streaming-writer-basic.xlsx");
 
 await streamBothFormats(filename, { useSharedStrings: false, useStyles: false }, wb => {
-  const ws = wb.addWorksheet("blort");
+  const ws = Workbook.addWorksheet(wb, "blort");
 
   const fonts = {
     arialBlackUI14: {
@@ -177,7 +177,7 @@ await streamBothFormats(filename, { useSharedStrings: false, useStyles: false },
     }
   };
 
-  ws.columns = [
+  Column.setDefinitions(ws, [
     { header: "Col 1", key: "key", width: 25 },
     { header: "Col 2", key: "name", width: 32 },
     { header: "Col 3", key: "age", width: 21 },
@@ -190,78 +190,78 @@ await streamBothFormats(filename, { useSharedStrings: false, useStyles: false },
       width: 8,
       style: { font: fonts.comicSansUdB16, alignment: alignments[1].alignment }
     }
-  ];
+  ]);
 
-  Stream.setCellValue(ws.getCell("A2"), 7);
-  Stream.setCellValue(ws.getCell("B2"), "Hello, World!");
-  Stream.setCellFont(ws.getCell("B2"), fonts.comicSansUdB16);
-  Stream.setCellBorder(ws.getCell("B2"), borders.thin);
+  Cell.setValue(ws, "A2", 7);
+  Cell.setValue(ws, "B2", "Hello, World!");
+  Cell.setFont(ws, "B2", fonts.comicSansUdB16);
+  Cell.setBorder(ws, "B2", borders.thin);
 
-  Stream.setCellValue(ws.getCell("C2"), -5.55);
-  Stream.setCellNumFmt(ws.getCell("C2"), "'£'#,##0.00;[Red]-'£'#,##0.00");
-  Stream.setCellFont(ws.getCell("C2"), fonts.arialBlackUI14);
+  Cell.setValue(ws, "C2", -5.55);
+  Cell.setNumFmt(ws, "C2", "'£'#,##0.00;[Red]-'£'#,##0.00");
+  Cell.setFont(ws, "C2", fonts.arialBlackUI14);
 
-  Stream.setCellValue(ws.getCell("D2"), 3.14);
-  Stream.setCellValue(ws.getCell("D2"), new Date());
-  Stream.setCellNumFmt(ws.getCell("D2"), "d-mmm-yyyy");
-  Stream.setCellFont(ws.getCell("D2"), fonts.comicSansUdB16);
-  Stream.setCellBorder(ws.getCell("D2"), borders.doubleRed);
+  Cell.setValue(ws, "D2", 3.14);
+  Cell.setValue(ws, "D2", new Date());
+  Cell.setNumFmt(ws, "D2", "d-mmm-yyyy");
+  Cell.setFont(ws, "D2", fonts.comicSansUdB16);
+  Cell.setBorder(ws, "D2", borders.doubleRed);
 
-  Stream.setCellValue(ws.getCell("E2"), `${["Hello", "World"].join(", ")}!`);
+  Cell.setValue(ws, "E2", `${["Hello", "World"].join(", ")}!`);
   Stream.commitRow(ws.getRow(2));
 
-  Stream.setCellValue(ws.getCell("A3"), {
+  Cell.setValue(ws, "A3", {
     text: "www.google.com",
     hyperlink: "http://www.google.com"
   });
-  Stream.setCellValue(ws.getCell("A4"), "Boo!");
-  Stream.setCellValue(ws.getCell("C4"), "Hoo!");
-  ws.mergeCells("A4", "C4");
+  Cell.setValue(ws, "A4", "Boo!");
+  Cell.setValue(ws, "C4", "Hoo!");
+  Worksheet.merge(ws, "A4", "C4");
   Stream.commitRow(ws.getRow(4));
 
-  Stream.setCellValue(ws.getCell("A5"), 1);
-  Stream.setCellValue(ws.getCell("B5"), 2);
-  Stream.setCellValue(ws.getCell("C5"), { formula: "A5+B5", result: 3 });
+  Cell.setValue(ws, "A5", 1);
+  Cell.setValue(ws, "B5", 2);
+  Cell.setValue(ws, "C5", { formula: "A5+B5", result: 3 });
   Stream.commitRow(ws.getRow(5));
 
-  Stream.setCellValue(ws.getCell("A6"), "Hello");
-  Stream.setCellValue(ws.getCell("B6"), "World");
-  Stream.setCellValue(ws.getCell("C6"), {
+  Cell.setValue(ws, "A6", "Hello");
+  Cell.setValue(ws, "B6", "World");
+  Cell.setValue(ws, "C6", {
     formula: 'CONCATENATE(A6,", ",B6,"!")',
     result: "Hello, World!"
   });
-  Stream.setCellBorder(ws.getCell("C6"), borders.thickRainbow);
+  Cell.setBorder(ws, "C6", borders.thickRainbow);
   Stream.commitRow(ws.getRow(6));
 
-  Stream.setCellValue(ws.getCell("A7"), 1);
-  Stream.setCellValue(ws.getCell("B7"), 2);
-  Stream.setCellValue(ws.getCell("C7"), { formula: "A7+B7" });
+  Cell.setValue(ws, "A7", 1);
+  Cell.setValue(ws, "B7", 2);
+  Cell.setValue(ws, "C7", { formula: "A7+B7" });
   Stream.commitRow(ws.getRow(7));
 
   const now = new Date();
-  Stream.setCellValue(ws.getCell("A8"), now);
-  Stream.setCellValue(ws.getCell("B8"), 0);
-  Stream.setCellValue(ws.getCell("C8"), { formula: "A8+B8", result: now });
+  Cell.setValue(ws, "A8", now);
+  Cell.setValue(ws, "B8", 0);
+  Cell.setValue(ws, "C8", { formula: "A8+B8", result: now });
   Stream.commitRow(ws.getRow(8));
 
-  Stream.setCellValue(ws.getCell("A9"), 1.6);
-  Stream.setCellNumFmt(ws.getCell("A9"), "# ?/?");
-  Stream.setCellValue(ws.getCell("B9"), 1.6);
-  Stream.setCellNumFmt(ws.getCell("B9"), "h:mm:ss");
-  Stream.setCellValue(ws.getCell("C9"), 0.016);
-  Stream.setCellNumFmt(ws.getCell("C9"), "0.00%");
-  Stream.setCellValue(ws.getCell("D9"), 1.6);
-  Stream.setCellNumFmt(ws.getCell("D9"), "[Green]#,##0 ;[Red](#,##0)");
-  Stream.setCellValue(ws.getCell("E9"), 1.6);
-  Stream.setCellNumFmt(ws.getCell("E9"), "#0.000");
-  Stream.setCellValue(ws.getCell("F9"), 0.016);
-  Stream.setCellNumFmt(ws.getCell("F9"), "# ?/?%");
+  Cell.setValue(ws, "A9", 1.6);
+  Cell.setNumFmt(ws, "A9", "# ?/?");
+  Cell.setValue(ws, "B9", 1.6);
+  Cell.setNumFmt(ws, "B9", "h:mm:ss");
+  Cell.setValue(ws, "C9", 0.016);
+  Cell.setNumFmt(ws, "C9", "0.00%");
+  Cell.setValue(ws, "D9", 1.6);
+  Cell.setNumFmt(ws, "D9", "[Green]#,##0 ;[Red](#,##0)");
+  Cell.setValue(ws, "E9", 1.6);
+  Cell.setNumFmt(ws, "E9", "#0.000");
+  Cell.setValue(ws, "F9", 0.016);
+  Cell.setNumFmt(ws, "F9", "# ?/?%");
   Stream.commitRow(ws.getRow(9));
 
-  Stream.setCellValue(ws.getCell("A10"), "<");
-  Stream.setCellValue(ws.getCell("B10"), ">");
-  Stream.setCellValue(ws.getCell("C10"), "<a>");
-  Stream.setCellValue(ws.getCell("D10"), "><");
+  Cell.setValue(ws, "A10", "<");
+  Cell.setValue(ws, "B10", ">");
+  Cell.setValue(ws, "C10", "<a>");
+  Cell.setValue(ws, "D10", "><");
   Stream.commitRow(ws.getRow(10));
 
   ws.getRow(11).height = 40;
@@ -286,12 +286,12 @@ await streamBothFormats(filename, { useSharedStrings: false, useStyles: false },
   Stream.setCellFill(Stream.getRowCell(row12, 4), fills.rgbPathGrad);
 
   // row and column styles
-  Stream.setRowFont(ws.getRow(13), fonts.arialBlackUI14);
-  Stream.setCellValue(ws.getCell("H12"), "Foo");
-  Stream.setCellValue(ws.getCell("G13"), "Foo");
-  Stream.setCellValue(ws.getCell("H13"), "Bar");
-  Stream.setCellValue(ws.getCell("I13"), "Baz");
-  Stream.setCellValue(ws.getCell("H14"), "Baz");
+  Row.setFont(ws, 13, fonts.arialBlackUI14);
+  Cell.setValue(ws, "H12", "Foo");
+  Cell.setValue(ws, "G13", "Foo");
+  Cell.setValue(ws, "H13", "Bar");
+  Cell.setValue(ws, "I13", "Baz");
+  Cell.setValue(ws, "H14", "Baz");
   // Stream.commitRow(ws.getRow(13));
 
   ws.commit();

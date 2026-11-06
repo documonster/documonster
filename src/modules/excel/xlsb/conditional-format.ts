@@ -953,9 +953,6 @@ function encodeCfFormula(
   }
 }
 
-/** Colours a `BrtDXF` carries, for the styles table. */
-export type CfDxfColor = Partial<Color>;
-
 // =============================================================================
 // Reading
 // =============================================================================

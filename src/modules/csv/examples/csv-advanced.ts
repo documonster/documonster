@@ -2,7 +2,7 @@
  * Example: CSV Module — Advanced / Streaming APIs
  *
  * Complements `csv-complete.ts` by covering the branch APIs it skips:
- * - Csv.parseRows: true streaming async generator (one row at a time)
+ * - Csv.parseStream: true streaming async generator (one row at a time)
  * - Csv.parseAsync + onProgress: buffered parse with a progress callback
  * - Csv.generateRows: sync row-string iterator (memory efficient)
  * - Csv.generateRowsAsync: async row-string iterator (supports delay)
@@ -26,10 +26,10 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 // =============================================================================
-// 1. Csv.parseRows — true streaming async generator
+// 1. Csv.parseStream — true streaming async generator
 // =============================================================================
 
-console.log("=== 1. Csv.parseRows (streaming async generator) ===");
+console.log("=== 1. Csv.parseStream (streaming async generator) ===");
 
 const csv1 = `id,name,score
 1,Alice,95
@@ -39,7 +39,7 @@ const csv1 = `id,name,score
 
 // Yields one row at a time — never buffers the whole result.
 const collected: Record<string, unknown>[] = [];
-for await (const row of Csv.parseRows(csv1, { headers: true, dynamicTyping: true })) {
+for await (const row of Csv.parseStream(csv1, { headers: true, dynamicTyping: true })) {
   collected.push(row as Record<string, unknown>);
 }
 console.log("Streamed rows:", collected.length);
@@ -47,7 +47,7 @@ console.log("First row:", collected[0]);
 
 // With per-row validation — only rows passing the predicate are yielded.
 const passing: Record<string, unknown>[] = [];
-for await (const row of Csv.parseRows(csv1, {
+for await (const row of Csv.parseStream(csv1, {
   headers: true,
   dynamicTyping: true,
   validate: r => ((r as Record<string, unknown>).score as number) >= 50

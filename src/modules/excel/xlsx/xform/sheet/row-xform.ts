@@ -330,7 +330,7 @@ class RowXform extends BaseXform<RowModel> {
       this.model!.cells.push(cellModel);
     }
     if (this.maxItems && this.model!.cells.length > this.maxItems) {
-      throw new ExcelLimitExceededError("column", this.maxItems);
+      throw new ExcelLimitExceededError("column", this.maxItems, { limit: "maxCols" });
     }
     this.parser = undefined;
   }

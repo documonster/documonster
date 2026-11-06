@@ -247,19 +247,11 @@ export function createFormatConfig(options: CsvFormatOptions, where = "Csv.forma
     typeTransform
   } = options;
 
-  // Validate decimalSeparator - only "." or "," are valid
-  if (decimalSeparator !== "." && decimalSeparator !== ",") {
-    throw new CsvArgumentError(
-      "options.decimalSeparator",
-      `${where}: decimalSeparator must be "." or ",", got ${JSON.stringify(decimalSeparator)}`
-    );
-  }
-
   // Prevent silent data corruption when decimalSeparator is part of the delimiter
   if (delimiter.includes(decimalSeparator)) {
     throw new CsvArgumentError(
       "options.decimalSeparator",
-      `${where}: decimalSeparator cannot be the same as delimiter`
+      `${where}: options.decimalSeparator cannot be the same as options.delimiter`
     );
   }
 

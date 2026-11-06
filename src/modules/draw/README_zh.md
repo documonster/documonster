@@ -52,7 +52,8 @@ const list: DrawList = {
 };
 
 const svg = Draw.toSvg(list); // 标记
-const image = Draw.toRgba(list, { scale: 2 }); // { width, height, data }
+const { png } = Draw.toPng(list, { scale: 2 }); // PNG 文件
+const image = Draw.toRgba(list, { scale: 2 }); // { width, height, data } —— 原始像素
 ```
 
 同一份列表画到 PDF 页面上 —— 第三个后端,它住在拥有"页面"这一概念的模块里:
@@ -146,31 +147,29 @@ const lines = Draw.wrapText("A longer label that has to fit", style, 120);
 
 ## 后端
 
-| 表面     | 位置                                       | 输出                                  |
-| -------- | ------------------------------------------ | ------------------------------------- |
-| SVG      | `documonster/draw`(`Draw.toSvg`)           | 标记                                  |
-| 光栅     | `documonster/draw`(`Draw.toRgba`)          | 经 `BasicRasterCanvas` 得到 RGBA 像素 |
-| PDF 矢量 | `documonster/pdf`(`Pdf.createDrawSurface`) | 页面算子;Y 轴翻转由它独家负责         |
+| 表面     | 位置                                            | 输出                                               |
+| -------- | ----------------------------------------------- | -------------------------------------------------- |
+| SVG      | `documonster/draw`(`Draw.toSvg`)                | 标记                                               |
+| 光栅     | `documonster/draw`(`Draw.toPng`、`Draw.toRgba`) | PNG 文件,或经 `BasicRasterCanvas` 得到的 RGBA 像素 |
+| PDF 矢量 | `documonster/pdf`(`Pdf.createDrawSurface`)      | 页面算子;Y 轴翻转由它独家负责                      |
 
 当一个表面只需要显示列表时,它与引擎住在一起;当它要画到引擎无从知晓的东西上时,它就住在目标旁边 —— 这就是 PDF 那个表面在 PDF 模块里的原因。
 
 再写一个后端就是实现 `DrawSurface`。遍历器负责变换合成、描边与虚线缩放、文本旋转,所以表面只管落笔。`pushClip` / `popClip` 是可选的;省略它们会导致不裁剪地绘制,而不是丢弃内容。
 
-### 是像素,不是 PNG
+### PNG,或者像素
 
-`Draw.toRgba` 返回 `DrawRgbaImage` —— `{ width, height, data }`,`width * height * 4` 字节的直通 alpha RGBA —— 而不是编码后的文件。编码 PNG 需要 DEFLATE,它位于本模块之上一层;把压缩库拉下来会让绘图引擎的每个使用者都为此付费。
-
-所以接缝定在图像上,而配对只有两行。`documonster/archive` 拥有 DEFLATE 和 CRC-32,而 PNG 就是这两样东西:
+`Draw.toPng` 返回 PNG 文件,以及光栅化器的报告 —— `uncoveredCodePoints` 和 `textWarnings`,与 `Draw.toRgba` 给出的完全一样,因为某种文字的字形处留了空洞的 PNG,看上去和正确的没有区别:
 
 ```typescript
 import { Draw } from "documonster/draw";
-import { Archive } from "documonster/archive";
 
-const image = Draw.toRgba(list, { scale: 2 });
-const png = Archive.encodePng(image.data, image.width, image.height, { dpi: 192 });
+const { png, uncoveredCodePoints } = Draw.toPng(list, { scale: 2, dpi: 192 });
 ```
 
-在浏览器里你可能更愿意用平台自带的编码器 —— 用 `putImageData` 把像素放进 canvas,再调 `toBlob`。无论哪种方式,绘图引擎都不参与。
+`Draw.toRgba` 返回 `DrawRgbaImage` —— `{ width, height, data }`,`width * height * 4` 字节的直通 alpha RGBA —— 供任意其他编码器使用。在浏览器里你可能更愿意用平台自带的编码器:用 `putImageData` 把像素放进 canvas,再调 `toBlob`。
+
+使用 rolldown 或 rspack 时,只有 `Draw.toPng` 会把 DEFLATE 带进打包产物;`Draw.toSvg` 和 `Draw.toRgba` 不会。esbuild 会保留所导入命名空间的全部成员,所以在 esbuild 下,无论调用哪个成员,`Draw` 命名空间都会带上编码器。
 
 ### 字体,以及中日韩文字是怎么画出来的
 

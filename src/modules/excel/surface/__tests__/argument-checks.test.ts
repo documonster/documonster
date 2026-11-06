@@ -131,6 +131,10 @@ describe("defined names", () => {
     expect(() => DefinedNames.add(dn, "not a ref", "Good")).toThrow(ExcelDefinedNameError);
     expect(() => DefinedNames.add(dn, "S!$A$1:$A$99999999", "Good")).toThrow(ExcelDefinedNameError);
     expect(() => DefinedNames.addFormula(dn, "Good", "")).toThrow(ExcelDefinedNameError);
+    // An expression that is not a string is the caller's argument error, naming it.
+    expect(() => DefinedNames.addFormula(dn, "Good", 42 as never)).toThrow(
+      expect.objectContaining({ name: "ExcelArgumentError", field: "expression" })
+    );
     expect(DefinedNames.list(dn)).toEqual([]);
   });
 

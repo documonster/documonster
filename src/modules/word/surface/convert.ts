@@ -31,13 +31,13 @@ export {
 } from "@word/advanced/math-convert";
 
 /**
- * @deprecated Use {@link flatOpcToParts} for the part map, or `Io.read` for the
+ * @deprecated Use {@link flatOpcToParts} for the part map, or `Document.read` for the
  * document a Flat OPC file holds. Removed in 1.0.
  */
 export const parseFlatOpc = parseFlatOpcImpl;
 /**
  * @deprecated Use {@link partsToFlatOpc} — this wraps a part map, not a
- * document; `Io.toFlatOpc(doc)` is the document form. Removed in 1.0.
+ * document; `Document.toFlatOpc(doc)` is the document form. Removed in 1.0.
  */
 export const toFlatOpc = toFlatOpcImpl;
 /** @deprecated Use {@link fromOdt}. Removed in 1.0. */

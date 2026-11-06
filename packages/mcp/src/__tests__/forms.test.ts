@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Pdf } from "documonster/pdf";
-import { Build, Document, Io, Query } from "documonster/word";
+import { Build, Document, Query } from "documonster/word";
 import { WordMarkdown } from "documonster/word/markdown";
 import { vi } from "vitest";
 
@@ -75,7 +75,7 @@ async function makeWordForm(fx: Fixture, name = "form.docx"): Promise<string> {
       Build.formCheckboxField({ name: "agreeTerms", default: false })
     ]
   });
-  await Io.writeFile(doc, path.join(fx.root, name));
+  await Document.writeFile(doc, path.join(fx.root, name));
   return name;
 }
 
@@ -150,7 +150,7 @@ describe("form_fill — Word", () => {
       JSON.stringify({ applicantName: "From File", company: "Acme", agreeTerms: true })
     );
     await run(formFillTool, fx, { path: file, valuesFrom: "values.json" });
-    const fields = Query.listFormFields(await Io.readFile(path.join(fx.root, file)));
+    const fields = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(Object.fromEntries(fields.map(f => [f.name, f.value]))).toEqual({
       applicantName: "From File",
       company: "Acme",
@@ -166,7 +166,7 @@ describe("form_fill — Word", () => {
       values: { applicantName: "Jane Doe", company: "Acme Pty Ltd", agreeTerms: true }
     });
 
-    const fields = Query.listFormFields(await Io.readFile(path.join(fx.root, file)));
+    const fields = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(Object.fromEntries(fields.map(f => [f.name, f.value]))).toEqual({
       applicantName: "Jane Doe",
       company: "Acme Pty Ltd",
@@ -179,7 +179,7 @@ describe("form_fill — Word", () => {
     const file = await makeWordForm(fx);
     await run(formFillTool, fx, { path: file, values: { applicantName: "Only me" } });
 
-    const fields = Query.listFormFields(await Io.readFile(path.join(fx.root, file)));
+    const fields = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(fields.find(f => f.name === "applicantName")?.value).toBe("Only me");
     expect(fields.find(f => f.name === "company")?.value).toBe("");
   });
@@ -212,9 +212,11 @@ describe("form_fill — Word", () => {
       out: "out/filled.docx"
     });
 
-    const original = Query.listFormFields(await Io.readFile(path.join(fx.root, file)));
+    const original = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(original.find(f => f.name === "applicantName")?.value).toBe("");
-    const filled = Query.listFormFields(await Io.readFile(path.join(fx.root, "out/filled.docx")));
+    const filled = Query.listFormFields(
+      await Document.readFile(path.join(fx.root, "out/filled.docx"))
+    );
     expect(filled.find(f => f.name === "applicantName")?.value).toBe("Jane");
   });
 
@@ -229,7 +231,7 @@ describe("form_fill — Word", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "No fields here.");
-    await Io.writeFile(doc, path.join(fx.root, "plain.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "plain.docx"));
 
     const text = await run(formFillTool, fx, { path: "plain.docx" });
     expect(text).toContain("no legacy form fields");

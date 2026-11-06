@@ -16,7 +16,7 @@ describe("Cell.removeName / clearNames", () => {
     Cell.addName(ws, "B2", "Here");
     expect(Cell.removeName(ws, "B2", "Nope")).toBe(false);
     expect(Cell.removeName(ws, "C3", "Here")).toBe(false);
-    expect(Cell.removeName(ws, 2, 2, "Here")).toBe(true);
+    expect(Cell.removeName(ws, { row: 2, col: 2 }, "Here")).toBe(true);
     expect(Cell.removeName(ws, "B2", "Here")).toBe(false);
     expect(Cell.getNames(ws, "B2")).toEqual([]);
   });

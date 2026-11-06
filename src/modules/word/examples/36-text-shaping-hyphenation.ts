@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Font, Io } from "../index";
+import { Document, Build, Font } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -106,6 +106,6 @@ Document.addParagraph(doc, Build.paragraph([Build.text(hyphenated)]));
 Document.addHeading(doc, "Same paragraph without hyphenation", 2);
 Document.addParagraph(doc, Build.paragraph([Build.text(sample)]));
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "36-shaping.docx"), buf);
 console.log(`\n  → 36-shaping.docx (${buf.length} bytes)`);

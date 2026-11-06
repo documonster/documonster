@@ -114,11 +114,11 @@ describe("deep data", () => {
     expect(rows.length).toBeLessThanOrEqual(502); // header + ~500 remaining
   });
 
-  it("iterates with Csv.parseRows and early exit", async () => {
+  it("iterates with Csv.parseStream and early exit", async () => {
     const csv = generateLargeCsv(5000, 3);
     let count = 0;
 
-    for await (const _row of Csv.parseRows(csv)) {
+    for await (const _row of Csv.parseStream(csv)) {
       count++;
       if (count >= 1000) {
         break;
@@ -202,7 +202,7 @@ describe("performance", () => {
     const csv = generateLargeCsv(10000, 5);
 
     let streamCount = 0;
-    for await (const _row of Csv.parseRows(csv)) {
+    for await (const _row of Csv.parseStream(csv)) {
       streamCount++;
       if (streamCount >= 100) {
         break;

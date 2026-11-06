@@ -234,6 +234,9 @@ export interface CsvParseOptions extends CsvBaseOptions {
    * Maximum number of data rows to parse (excludes header row).
    * Counts only actual data rows that pass validation.
    * Example: maxRows: 10 returns at most 10 data rows.
+   *
+   * **A preview, not a guard:** the rows past it are left unread and `meta.truncated` says so; nothing
+   * is thrown. (Excel's `XlsxReadOptions.maxRows` is the opposite — it refuses a sheet that is longer.)
    */
   maxRows?: number;
   /**
@@ -296,7 +299,7 @@ export interface CsvParseOptions extends CsvBaseOptions {
    */
   castDate?: CastDateConfig;
   /**
-   * Chunk callback for batch processing. Only {@link Csv.parseRows} and the parser stream
+   * Chunk callback for batch processing. Only {@link Csv.parseStream} and the parser stream
    * hand rows over while parsing; `Csv.parse` and `Csv.parseAsync` refuse it.
    */
   chunk?: (rows: Row[], meta: ChunkMeta) => boolean | void | Promise<boolean | void>;
@@ -321,7 +324,7 @@ export interface CsvParseOptions extends CsvBaseOptions {
   skipRecordsWithEmptyValues?: boolean;
   /**
    * Called for every record left out because of an error, by every parser. It is the only
-   * report a streaming consumer (`Csv.parseRows`) gets.
+   * report a streaming consumer (`Csv.parseStream`) gets.
    */
   onSkip?: OnSkipCallback;
 }

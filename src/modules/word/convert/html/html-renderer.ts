@@ -6,12 +6,16 @@
  * headings, comments, footnotes/endnotes, and more.
  */
 
+import { isRecordArgument } from "@utils/object";
+import type { SchemaMatches } from "@utils/schema";
+import { s } from "@utils/schema";
 import { finalizeDocument } from "@word/builder/document-finalize";
-import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { checkHandle } from "@word/core/argument-checks";
 import { resolveThemeColor } from "@word/core/color-utils";
 import { withDisplayFields } from "@word/core/field-view";
 import { indexImagesByKey } from "@word/core/image-keys";
 import { bytesToBase64, sanitizeUrl } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import { extractMathText, hyperlinkContent, isRun, symbolText } from "@word/core/text-utils";
 import { isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
@@ -79,6 +83,28 @@ export interface HtmlRenderOptions {
   /** Optional ChartEx renderer callback. When provided, chartEx blocks are rendered as inline SVG. */
   readonly chartExRenderer?: (chartEx: ChartExContent) => string;
 }
+
+const htmlRenderOptionsSchema = w.record({
+  includeStyles: w.boolean().optional(),
+  fullDocument: w.boolean().optional(),
+  title: w.string().optional(),
+  imageMode: w.oneOf(["dataUrl", "filename", "none"]).optional(),
+  includeComments: w.boolean().optional(),
+  includeRevisions: w.boolean().optional(),
+  includeNotes: w.boolean().optional(),
+  classPrefix: w.string().optional(),
+  styleMap: s
+    .custom<ReadonlyMap<string, string> | Record<string, string>>(
+      v => v instanceof Map || isRecordArgument(v),
+      "a Map or an object"
+    )
+    .optional(),
+  chartRenderer: w.function<NonNullable<HtmlRenderOptions["chartRenderer"]>>().optional(),
+  chartExRenderer: w.function<NonNullable<HtmlRenderOptions["chartExRenderer"]>>().optional()
+});
+const _htmlRenderOptionsMatch: SchemaMatches<typeof htmlRenderOptionsSchema, HtmlRenderOptions> =
+  true;
+void _htmlRenderOptionsMatch;
 
 /** The result of HTML rendering. */
 export interface HtmlRenderResult {
@@ -162,7 +188,7 @@ interface RunDefaultsCss {
  */
 export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): HtmlRenderResult {
   checkHandle(doc, "document", "doc", "WordHtml.fromDocx");
-  checkRecord(options, "options", "WordHtml.fromDocx", { optional: true });
+  checkSchema(htmlRenderOptionsSchema.optional(), options, "WordHtml.fromDocx");
   doc = withDisplayFields(finalizeDocument(doc));
   const opts: ResolvedHtmlRenderOptions = {
     includeStyles: options?.includeStyles ?? true,

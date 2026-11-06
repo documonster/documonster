@@ -121,7 +121,7 @@ describe("DocxSecurityPolicy: maxXmlDepth", () => {
     );
     expect(error).toBeInstanceOf(DocxLimitExceededError);
     expect((error as DocxLimitExceededError).limit).toBe("xmlDepth");
-    expect((error as DocxLimitExceededError).maximum).toBe(40);
+    expect((error as DocxLimitExceededError).allowed).toBe(40);
   });
 
   it("reads the same document under a policy that allows its depth", async () => {

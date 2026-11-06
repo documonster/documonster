@@ -4,12 +4,12 @@
  * Aggregated edge-case scenarios that don't fit cleanly into any single
  * topic above:
  *   - Reading a document that uses ISO-29500 Strict namespaces
- *     (auto-normalized by Io.read)
+ *     (auto-normalized by Document.read)
  *   - Round-trip preservation: opaque parts survive untouched
  *   - Reading an encrypted document (DocxEncryptedError)
  *   - Package.patch across runs and inside hyperlinks
  *   - Validation.validate finds dangling references
- *   - Io.read tolerates malformed XML in non-essential parts (warnings)
+ *   - Document.read tolerates malformed XML in non-essential parts (warnings)
  *   - Buffer / Uint8Array / base64 input variants
  *   - Very small (one paragraph) and very large (many paragraphs) docs
  *
@@ -31,7 +31,6 @@ import {
   DocxParseError,
   DocxUnsupportedFeatureError,
   DocxWriteError,
-  Io,
   isDocxError,
   Package,
   Validation
@@ -51,8 +50,8 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "Round trip");
-  const buf = await Io.toBuffer(d);
-  const b64 = await Io.toBase64(d);
+  const buf = await Document.toBuffer(d);
+  const b64 = await Document.toBase64(d);
   console.log(`  toBuffer: ${buf.length} bytes, toBase64: ${b64.length} chars`);
 }
 
@@ -63,12 +62,12 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "secret content");
-  const plain = await Io.toBuffer(d);
+  const plain = await Document.toBuffer(d);
   const encrypted = await WordCrypto.encrypt(plain, "shibboleth");
   fs.writeFileSync(path.join(outDir, "encrypted.docx"), encrypted);
 
   try {
-    await Io.read(encrypted);
+    await Document.read(encrypted);
     console.log("  ERROR: expected DocxEncryptedError to be thrown");
   } catch (err) {
     if (err instanceof DocxEncryptedError) {
@@ -98,7 +97,7 @@ fs.mkdirSync(outDir, { recursive: true });
   );
   Document.addParagraph(d, "Total: $" + "{TOTAL}");
 
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   const patched = await Package.patch(buf, [
     { placeholder: "{NAME}", content: { type: "text", text: "Alice" } },
     { placeholder: "{ANCHOR}", content: { type: "text", text: "here" } },
@@ -138,10 +137,10 @@ fs.mkdirSync(outDir, { recursive: true });
 {
   const d = Document.create();
   // do not add any content
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "empty.docx"), buf);
   // and re-read it without errors
-  const reread = await Io.read(buf);
+  const reread = await Document.read(buf);
   console.log(`  empty doc: ${buf.length} bytes, body length after re-read: ${reread.body.length}`);
 }
 
@@ -155,7 +154,7 @@ fs.mkdirSync(outDir, { recursive: true });
   for (let i = 0; i < 2000; i++) {
     Document.addParagraph(d, `Paragraph ${i + 1}: ${"Lorem ipsum ".repeat(10)}`);
   }
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "stress.docx"), buf);
   console.log(`  stress.docx: ${(buf.length / 1024).toFixed(1)} KB (2000 paragraphs)`);
 }
@@ -173,24 +172,24 @@ fs.mkdirSync(outDir, { recursive: true });
     runs = [Build.text("("), ...runs, Build.text(")")];
   }
   Document.addParagraph(d, Build.paragraph(runs));
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "deep.docx"), buf);
   console.log(`  deep.docx: ${buf.length} bytes`);
 }
 
 // ---------------------------------------------------------------------------
-// 8. Corrupted/truncated docx → Io.read must reject cleanly
+// 8. Corrupted/truncated docx → Document.read must reject cleanly
 // ---------------------------------------------------------------------------
 {
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "valid");
-  const ok = await Io.toBuffer(d);
+  const ok = await Document.toBuffer(d);
 
   // Truncate to 200 bytes (after the ZIP local file header but before EOCD)
   const corrupted = ok.slice(0, 200);
   try {
-    await Io.read(corrupted);
+    await Document.read(corrupted);
     console.log("  ERROR: expected truncated docx to reject");
   } catch (err) {
     console.log(
@@ -204,7 +203,7 @@ fs.mkdirSync(outDir, { recursive: true });
     random[i] = (i * 31) & 0xff;
   }
   try {
-    await Io.read(random);
+    await Document.read(random);
     console.log("  ERROR: expected random bytes to reject");
   } catch (err) {
     console.log(
@@ -238,7 +237,7 @@ fs.mkdirSync(outDir, { recursive: true });
     };
   }
   Document.addTable(d, inner);
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "nested-tables.docx"), buf);
   console.log(`  nested-tables.docx: ${buf.length} bytes (5-level nesting)`);
 }
@@ -260,7 +259,7 @@ fs.mkdirSync(outDir, { recursive: true });
       ])
     );
   }
-  const buf = await Io.toBuffer(d);
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "many-bookmarks.docx"), buf);
   console.log(`  many-bookmarks.docx: ${buf.length} bytes (1 000 bookmarks)`);
 }
@@ -311,6 +310,6 @@ fs.mkdirSync(outDir, { recursive: true });
   // can branch on without parsing the message.
   const limit = new DocxLimitExceededError("partCount", 1000, 1500);
   console.log(
-    `  DocxLimitExceededError fields: limit=${limit.limit} max=${limit.maximum} actual=${limit.actual}`
+    `  DocxLimitExceededError fields: limit=${limit.limit} allowed=${limit.allowed} actual=${limit.actual}`
   );
 }

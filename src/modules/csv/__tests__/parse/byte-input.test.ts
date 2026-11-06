@@ -15,13 +15,13 @@ async function* chunksOf(value: Uint8Array): AsyncGenerator<Uint8Array> {
 
 async function rows(input: CsvAsyncInput): Promise<unknown[]> {
   const out: unknown[] = [];
-  for await (const row of Csv.parseRows(input)) {
+  for await (const row of Csv.parseStream(input)) {
     out.push(row);
   }
   return out;
 }
 
-describe("Csv.parseAsync / Csv.parseRows take bytes and a Blob", () => {
+describe("Csv.parseAsync / Csv.parseStream take bytes and a Blob", () => {
   const expected = Csv.parse(text);
 
   it.each([

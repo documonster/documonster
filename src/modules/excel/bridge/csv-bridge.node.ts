@@ -105,11 +105,11 @@ export async function writeCsvFile(
       `ExcelCsv.writeFile: options.encoding must be a text encoding Node can write — "utf8", "utf16le", "latin1", "ascii" — got ${JSON.stringify(encoding)}.`
     );
   }
-  const existing = options?.append ? await safeStats(filename) : null;
+  const existing = options?.append ? await safeStats(filename) : undefined;
   // A line break first, unless the file already ends with one or holds nothing but a byte-order mark: otherwise its
   // last row and our first would join.
   const breakFirst =
-    existing !== null &&
+    existing !== undefined &&
     existing.size > 0 &&
     (await needsLineBreak(filename, existing.size, encoding));
 

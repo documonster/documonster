@@ -27,8 +27,8 @@ import { getDictStringValue } from "@pdf/reader/reader-utils";
 export interface PdfBookmark {
   /** Bookmark title text */
   title: string;
-  /** 0-based page index the bookmark points to (-1 if unresolvable) */
-  pageIndex: number;
+  /** 0-based page index the bookmark points to; absent when its destination does not resolve to a page */
+  pageIndex?: number;
   /** Child bookmarks (nested outline items) */
   children: PdfBookmark[];
 }
@@ -179,7 +179,7 @@ function parseOutlineItem(
   // Collect children (nested bookmarks)
   const children = collectSiblings(dict, doc, pageMap, visited, depth + 1);
 
-  return { title, pageIndex, children };
+  return pageIndex >= 0 ? { title, pageIndex, children } : { title, children };
 }
 
 // =============================================================================

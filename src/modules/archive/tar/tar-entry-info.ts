@@ -4,9 +4,10 @@
  * Represents metadata about a single entry in a TAR archive.
  */
 
-import { ArchiveArgumentError } from "@archive/core/errors";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import type { TarType } from "@archive/tar/tar-constants";
 import { TAR_TYPE } from "@archive/tar/tar-constants";
+import { s } from "@utils/schema";
 
 export interface TarEntryInfo {
   /** File path/name */
@@ -54,12 +55,12 @@ export interface TarEntryInfo {
  */
 /** A predicate's argument: a TarEntryInfo-shaped object. */
 function checkEntryInfo(where: string, entry: unknown): void {
-  if (typeof entry !== "object" || entry === null) {
-    throw new ArchiveArgumentError(
-      "entry",
-      `Archive.${where}: entry must be a TarEntryInfo, got ${entry === null ? "null" : typeof entry}`
-    );
-  }
+  checkArchiveArgument(
+    s.custom(v => typeof v === "object" && v !== null, "a TarEntryInfo"),
+    entry,
+    `Archive.${where}`,
+    "entry"
+  );
 }
 
 export function isFile(entry: TarEntryInfo): boolean {

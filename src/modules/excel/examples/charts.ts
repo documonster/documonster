@@ -33,7 +33,7 @@
  *      `removeUserShapes` / `mutateChartEx`.
  * 15.  Low-level builders — `ChartClassic.createModel` / `ChartClassic.createComboModel` /
  *      `ChartEx.createModel` invoked directly for programmatic workflows.
- * 16.  `workbook.addImage` + picture fill via `workbookImageId`.
+ * 16.  `Image.add` + picture fill via `workbookImageId`.
  * 17.  Full preset catalogue — all 99 classic presets on one sheet so
  *      you can see what each name produces.
  * 18.  Custom chartsheet page setup + `replaceChart`.
@@ -2217,7 +2217,7 @@ async function main(): Promise<void> {
   );
 
   // ---------------------------------------------------------------------------
-  // 16. Picture fill via `workbook.addImage` — referring to a shared
+  // 16. Picture fill via `Image.add` — referring to a shared
   //     workbook media entry by id so multiple charts can reuse the same
   //     image without re-embedding it.
   // ---------------------------------------------------------------------------
@@ -2268,8 +2268,12 @@ async function main(): Promise<void> {
     const endRow = startRow + chartH - 1;
 
     // Write the preset name above the chart.
-    Cell.setValue(catalogue, startRow - 1, startCol + 1, name);
-    Cell.setStyle(catalogue, startRow - 1, startCol + 1, { font: { bold: true, size: 10 } });
+    Cell.setValue(catalogue, { row: startRow - 1, col: startCol + 1 }, name);
+    Cell.setStyle(
+      catalogue,
+      { row: startRow - 1, col: startCol + 1 },
+      { font: { bold: true, size: 10 } }
+    );
 
     // Pick series inputs compatible with every preset family — surface
     // needs a 2-D matrix, stock needs OHLC, scatter/bubble need xValues.
@@ -2644,19 +2648,19 @@ async function main(): Promise<void> {
   const copyDest = Workbook.addWorksheet(wb, "20b-Copy Destination");
   Row.add(copyDest, ["Copies of the chart on the previous sheet"]);
   Cell.setStyle(copyDest, "A1", { font: { bold: true } });
-  const copy1Num = Chart.copyTo(sourceChart, copyDest, "A3:L22");
-  const copy2Num = Chart.copyTo(sourceChart, copyDest, {
+  const copy1 = Chart.copyTo(sourceChart, copyDest, "A3:L22");
+  const copy2 = Chart.copyTo(sourceChart, copyDest, {
     tl: { col: 1, row: 24 },
     ext: { cx: 5 * 914400, cy: 3 * 914400 },
     editAs: "oneCell"
   });
   console.log(
-    `Copied chart to sheet '${Worksheet.getName(copyDest)}' as #${copy1Num} and #${copy2Num}`
+    `Copied chart to sheet '${Worksheet.getName(copyDest)}' as #${copy1.chartNumber} and #${copy2.chartNumber}`
   );
 
   // Modify the copy without touching the source — prove the clone is detached.
-  Chart.setTitle(Chart.list(copyDest)[0], "Copy (independent from source)");
-  Chart.updateSeries(Chart.list(copyDest)[0], 0, { fill: "70AD47" });
+  Chart.setTitle(copy1, "Copy (independent from source)");
+  Chart.updateSeries(copy1, 0, { fill: "70AD47" });
 
   // --- 20.2 vendor extensions (`c15:` / `cx14:`) round-trip
   const extSheet = Workbook.addWorksheet(wb, "20c-Vendor Extensions");

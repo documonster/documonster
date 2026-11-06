@@ -10,9 +10,14 @@ import { addSparklineGroup, getSparklineGroups, removeSparklineGroup } from "@ex
 import { checkWorksheet } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { checkListTarget } from "@excel/surface/argument-checks";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
-/** The sheet's sparkline groups, in the order they were added. */
+/**
+ * The sheet's sparkline groups, in the order they were added: the groups themselves, not copies, which {@link remove}
+ * takes. An edit made to one directly is not checked as {@link add} checks a group.
+ */
 export function list(ws: WorksheetData): SparklineGroupModel[] {
   checkWorksheet(ws);
   return getSparklineGroups(ws);
@@ -25,18 +30,54 @@ export function remove(ws: WorksheetData, groupOrIndex: SparklineGroupModel | nu
   return removeSparklineGroup(ws, groupOrIndex);
 }
 
-const COLOR_OPTIONS = [
-  "lineColor",
-  "negativeColor",
-  "axisColor",
-  "markerColor",
-  "highColor",
-  "lowColor",
-  "firstColor",
-  "lastColor"
-] as const;
-const AXIS_TYPES = ["individual", "group", "custom"];
-const HEX_COLOR = /^#?(?:[0-9A-Fa-f]{2})?[0-9A-Fa-f]{6}$/;
+const flag = () => s.boolean().optional();
+// An empty string has always meant "no colour" here.
+const color = () =>
+  s
+    .custom<string>(
+      v => v === "" || (typeof v === "string" && /^#?(?:[0-9A-Fa-f]{2})?[0-9A-Fa-f]{6}$/.test(v)),
+      'a hex colour such as "#FF0000" or "FFFF0000"'
+    )
+    .optional();
+const axisType = () => s.literal("individual", "group", "custom").optional();
+
+const addOptionsSchema = s.object({
+  type: s.literal("line", "column", "stacked"),
+  sparklines: s.array(
+    s.object({
+      // A range or a defined name, so only its type is checked.
+      dataRef: s.string({ nonEmpty: true }),
+      // Checked as a reference below, refused with an `ExcelInvalidAddressError`.
+      cellRef: s.custom<string>(v => v !== undefined && v !== null, "given")
+    }),
+    { minLength: 1, expected: "an array of at least 1 item(s)" }
+  ),
+  lineWeight: s.number({ finite: true, min: 0 }).optional(),
+  markers: flag(),
+  high: flag(),
+  low: flag(),
+  first: flag(),
+  last: flag(),
+  negative: flag(),
+  lineColor: color(),
+  negativeColor: color(),
+  axisColor: color(),
+  markerColor: color(),
+  highColor: color(),
+  lowColor: color(),
+  firstColor: color(),
+  lastColor: color(),
+  minAxisType: axisType(),
+  maxAxisType: axisType(),
+  manualMin: s.number({ finite: true }).optional(),
+  manualMax: s.number({ finite: true }).optional(),
+  displayXAxis: flag(),
+  rightToLeft: flag(),
+  displayEmptyCellsAs: s.literal("gap", "zero", "span").optional(),
+  dateAxis: s.string().optional()
+});
+const _addOptionsMatch: SchemaMatches<typeof addOptionsSchema, SparklineAddOptions> = true;
+void _addOptionsMatch;
 
 /**
  * Add a group of sparklines to the sheet, and return it.
@@ -51,59 +92,11 @@ const HEX_COLOR = /^#?(?:[0-9A-Fa-f]{2})?[0-9A-Fa-f]{6}$/;
  */
 export function add(ws: WorksheetData, options: SparklineAddOptions): SparklineGroupModel {
   checkWorksheet(ws);
+  checkSchema("Sparkline.add", "options", addOptionsSchema, options);
   const check = argumentChecks("Sparkline.add");
-  check.required("options", options);
-  if (check.record("options", options)) {
-    check.required("options.type", options.type);
-    check.oneOf("options.type", options.type, ["line", "column", "stacked"]);
-    check.required("options.sparklines", options.sparklines);
-    if (check.array("options.sparklines", options.sparklines, { min: 1 })) {
-      options.sparklines.forEach((item, i) => {
-        check.required(`options.sparklines[${i}]`, item);
-        if (check.record(`options.sparklines[${i}]`, item)) {
-          check.required(`options.sparklines[${i}].dataRef`, item.dataRef);
-          // A range or a defined name, so only its type is checked.
-          check.string(`options.sparklines[${i}].dataRef`, item.dataRef, { nonEmpty: true });
-          check.required(`options.sparklines[${i}].cellRef`, item.cellRef);
-          check.reference(`options.sparklines[${i}].cellRef`, item.cellRef);
-        }
-      });
-    }
-    check.number("options.lineWeight", options.lineWeight, { min: 0 });
-    for (const flag of [
-      "markers",
-      "high",
-      "low",
-      "first",
-      "last",
-      "negative",
-      "displayXAxis",
-      "rightToLeft"
-    ] as const) {
-      check.boolean(`options.${flag}`, options[flag]);
-    }
-    for (const color of COLOR_OPTIONS) {
-      const value = options[color];
-      // An empty string has always meant "no colour" here.
-      if (
-        value !== undefined &&
-        value !== "" &&
-        (typeof value !== "string" || !HEX_COLOR.test(value))
-      ) {
-        check.fail(`options.${color}`, 'a hex colour such as "#FF0000" or "FFFF0000"', value);
-      }
-    }
-    check.oneOf("options.minAxisType", options.minAxisType, AXIS_TYPES);
-    check.oneOf("options.maxAxisType", options.maxAxisType, AXIS_TYPES);
-    check.number("options.manualMin", options.manualMin);
-    check.number("options.manualMax", options.manualMax);
-    check.oneOf("options.displayEmptyCellsAs", options.displayEmptyCellsAs, [
-      "gap",
-      "zero",
-      "span"
-    ]);
-    check.string("options.dateAxis", options.dateAxis);
-  }
+  options.sparklines.forEach((item, i) =>
+    check.reference(`options.sparklines[${i}].cellRef`, item.cellRef)
+  );
   return addSparklineGroup(ws, options);
 }
 

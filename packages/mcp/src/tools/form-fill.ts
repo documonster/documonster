@@ -19,7 +19,7 @@
 import { readFile } from "node:fs/promises";
 
 import { Pdf, PdfSignatureInvalidationError, PdfXfaFormError } from "documonster/pdf";
-import { Io, Query, Transform } from "documonster/word";
+import { Document, Query, Transform } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -226,7 +226,7 @@ async function fillWordFields(
     new Map(supplied.map(([name, value]) => [name, value as string | boolean | number]))
   );
   const backupPath = write.takeBackup ? await backupOnce(write.target) : undefined;
-  await replaceAtomically(write.target.path, temporary => Io.writeFile(filled, temporary));
+  await replaceAtomically(write.target.path, temporary => Document.writeFile(filled, temporary));
 
   const after = Query.listFormFields(filled);
   const untouched = after.filter(
@@ -416,7 +416,7 @@ function stringifyPdfValue(value: unknown): string {
 }
 
 async function readWord(resolved: string, displayPath: string) {
-  return await Io.readFile(resolved).catch((cause: unknown) => {
+  return await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${displayPath} as a Word document`,
       "Run doc_inspect to check the real file type.",

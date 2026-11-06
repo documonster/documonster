@@ -80,6 +80,31 @@ export class XmlParseError extends XmlError {
   }
 }
 
+/**
+ * Error thrown when parsing stopped because a configured resource limit was hit — `maxDepth`
+ * (`limit: "depth"`) or `maxEntityExpansions` (`limit: "entityExpansions"`) — rather than because
+ * the input is malformed. `allowed` is the configured value, as on the other modules'
+ * `…LimitExceededError` classes. A subclass of {@link XmlParseError}, so a `catch` that matched
+ * before still matches, and `.limit` reads as it always did.
+ */
+export class XmlLimitExceededError extends XmlParseError {
+  override name = "XmlLimitExceededError";
+  declare readonly limit: XmlParseLimit;
+  /** The configured value of the limit that was hit. */
+  readonly allowed: number;
+
+  constructor(
+    message: string,
+    limit: XmlParseLimit,
+    allowed: number,
+    context?: { line?: number; column?: number; fileName?: string },
+    options?: BaseErrorOptions
+  ) {
+    super(message, { ...context, limit }, options);
+    this.allowed = allowed;
+  }
+}
+
 // =============================================================================
 // Write Errors
 // =============================================================================

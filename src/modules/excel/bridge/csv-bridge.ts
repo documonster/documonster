@@ -37,12 +37,15 @@ import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
 import { ExcelArgumentError, ExcelDownloadError } from "@excel/errors";
 import type { CellValue, CellValueInput } from "@excel/types";
+import { argumentFailure, checkSchema } from "@excel/utils/arguments";
 import { finished, pipeline } from "@stream";
 import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/core/stream-helpers";
 import type { IReadable, IWritable } from "@stream/types";
 import type { DateFormat } from "@utils/datetime";
 import { createDateFormatter, createIsoDateFormatter, isDateFormat } from "@utils/datetime";
 import { describeValue as describeInput } from "@utils/describe-value";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // =============================================================================
 // Public CSV option / input types
@@ -485,10 +488,7 @@ function buildFormatterOptions(
 
 /** The bridge's argument error: `where` is the function called (`"ExcelCsv.read"`), `field` the argument at fault. */
 function fail(where: string, field: string, expected: string, value: unknown): never {
-  throw new ExcelArgumentError(
-    field,
-    `${where}: ${field} must be ${expected}, got ${describeInput(value)}.`
-  );
+  throw argumentFailure(where, field, expected, value);
 }
 
 /**
@@ -507,16 +507,6 @@ function asBridgeError(where: string, check: () => void): void {
   }
 }
 
-/** Refuse an options argument that is not an object — `42` used to be read as "no options". */
-function checkCsvOptions(where: string, options: unknown): void {
-  if (
-    options !== undefined &&
-    (options === null || typeof options !== "object" || Array.isArray(options))
-  ) {
-    fail(where, "options", "an object", options);
-  }
-}
-
 /**
  * The worksheet a write names: `sheetName`, else `sheetId`, else the first. `undefined` only for a workbook with no
  * sheets. A name or id the workbook does not have is refused — it used to write an empty CSV, so a misspelt name
@@ -530,15 +520,9 @@ function selectWorksheet(
   if (!isReadTarget(workbook)) {
     fail(where, "workbook", "a workbook", workbook);
   }
-  checkCsvOptions(where, options);
+  checkSchema(where, "options", writeOptionsSchema.optional(), options);
   const sheetName = options?.sheetName;
   const sheetId = options?.sheetId;
-  if (sheetName !== undefined && typeof sheetName !== "string") {
-    fail(where, "options.sheetName", "a string", sheetName);
-  }
-  if (sheetId !== undefined && (typeof sheetId !== "number" || !Number.isInteger(sheetId))) {
-    fail(where, "options.sheetId", "a whole number", sheetId);
-  }
   const key = sheetName || sheetId;
   const worksheet = getWorksheet(workbook, key);
   if (worksheet === undefined && key !== undefined) {
@@ -550,6 +534,56 @@ function selectWorksheet(
   return worksheet;
 }
 
+// The bridge's own options. Those it hands to the CSV parser or formatter are checked there (`asBridgeError`).
+const flag = () => s.boolean().optional();
+// The file and stream settings both directions share: a chunk size is a whole number of bytes, at least 1.
+const highWaterMark = () => s.number({ integer: true, min: 1 }).optional();
+
+const readOptionsSchema = s.object({
+  sheetName: s.string().optional(),
+  // An unknown format was dropped in silence, so a column of dates read as text; checked below with the default.
+  dateFormats: s.unknown<readonly DateFormat[]>().optional(),
+  decimalSeparator: s.literal(".", ",").optional(),
+  map: s.function<(text: string, column: number) => CellValueInput>().optional(),
+  requestHeaders: s.record(s.string()).optional(),
+  requestBody: s.unknown<NonNullable<RequestInit["body"]>>().optional(),
+  withCredentials: flag(),
+  signal: s
+    .custom<AbortSignal>(
+      v => typeof v === "object" && v !== null && typeof (v as AbortSignal).aborted === "boolean",
+      "an AbortSignal"
+    )
+    .optional(),
+  encoding: s.string({ expected: 'a TextDecoder label such as "utf-8"' }).optional(),
+  onProgress: s.function<(loaded: number, total: number) => void>().optional(),
+  stream: flag(),
+  highWaterMark: highWaterMark()
+});
+const _readOptionsMatch: SchemaMatches<
+  typeof readOptionsSchema,
+  Omit<ExcelCsvReadOptions, keyof CsvReadParseFields>
+> = true;
+void _readOptionsMatch;
+
+const writeOptionsSchema = s.object({
+  writeHeaders: flag(),
+  sheetName: s.string().optional(),
+  sheetId: s.number({ integer: true }).optional(),
+  append: flag(),
+  // A format that is not a string wrote every date cell empty.
+  dateFormat: s.string({ expected: 'a format string such as "YYYY-MM-DD"' }).optional(),
+  dateUTC: flag(),
+  map: s.function<(value: CellValue, index: number) => CellValue>().optional(),
+  includeEmptyRows: flag(),
+  encoding: s.string().optional(),
+  highWaterMark: highWaterMark()
+});
+const _writeOptionsMatch: SchemaMatches<
+  typeof writeOptionsSchema,
+  Omit<ExcelCsvWriteOptions, keyof CsvWriteFormatFields>
+> = true;
+void _writeOptionsMatch;
+
 /**
  * Check a read's options, and say how it turns text into cell values: `map`, or the default reading with `dateFormats`
  * checked. Everything a read is given is checked here, before anything is read or added.
@@ -558,26 +592,10 @@ function readValueMapper(
   where: string,
   options: ExcelCsvReadOptions | undefined
 ): (text: string, column: number) => CellValueInput {
-  checkCsvOptions(where, options);
-  if (options?.map !== undefined && typeof options.map !== "function") {
-    fail(where, "options.map", "a function", options.map);
-  }
-  if (options?.sheetName !== undefined && typeof options.sheetName !== "string") {
-    fail(where, "options.sheetName", "a string", options.sheetName);
-  }
+  checkSchema(where, "options", readOptionsSchema.optional(), options);
   if (options?.encoding !== undefined) {
     decoderFor(where, options.encoding);
   }
-  if (options?.onProgress !== undefined && typeof options.onProgress !== "function") {
-    fail(where, "options.onProgress", "a function", options.onProgress);
-  }
-  for (const key of ["stream", "withCredentials"] as const) {
-    const value = options?.[key];
-    if (value !== undefined && typeof value !== "boolean") {
-      fail(where, `options.${key}`, "a boolean", value);
-    }
-  }
-  checkTransportOptions(where, options);
   const dateFormats = options?.dateFormats ?? DEFAULT_DATE_FORMATS;
   // An unknown format was dropped in silence, so a column of dates read as text.
   if (!Array.isArray(dateFormats) || !dateFormats.every(isDateFormat)) {
@@ -614,20 +632,6 @@ export function decoderFor(where: string, encoding: unknown): TextDecoder {
   }
 }
 
-/** The file and stream settings both directions share: a chunk size is a whole number of bytes, at least 1. */
-function checkTransportOptions(
-  where: string,
-  options: { highWaterMark?: unknown } | undefined
-): void {
-  const highWaterMark = options?.highWaterMark;
-  if (
-    highWaterMark !== undefined &&
-    (typeof highWaterMark !== "number" || !Number.isInteger(highWaterMark) || highWaterMark < 1)
-  ) {
-    fail(where, "options.highWaterMark", "a whole number of bytes, at least 1", highWaterMark);
-  }
-}
-
 /** The UTF-8 spellings a writer that only produces UTF-8 accepts for `encoding`. */
 const UTF8_LABELS = new Set(["utf8", "utf-8"]);
 
@@ -641,36 +645,15 @@ function writeValueMapper(
   options: ExcelCsvWriteOptions | undefined,
   fileEncoding = false
 ): (value: CellValue, index: number) => CellValue {
-  for (const key of ["append", "includeEmptyRows", "writeHeaders"] as const) {
-    const value = options?.[key];
-    if (value !== undefined && typeof value !== "boolean") {
-      fail(where, `options.${key}`, "a boolean", value);
-    }
-  }
+  checkSchema(where, "options", writeOptionsSchema.optional(), options);
   const encoding = options?.encoding;
-  if (encoding !== undefined) {
-    if (typeof encoding !== "string") {
-      fail(where, "options.encoding", "a string", encoding);
-    }
-    if (!fileEncoding && !UTF8_LABELS.has(encoding.toLowerCase())) {
-      fail(
-        where,
-        "options.encoding",
-        `"utf-8" — ${where} produces UTF-8; options.encoding chooses the encoding of ExcelCsv.writeFile only`,
-        encoding
-      );
-    }
-  }
-  checkTransportOptions(where, options);
-  if (options?.map !== undefined && typeof options.map !== "function") {
-    fail(where, "options.map", "a function", options.map);
-  }
-  // A format that is not a string wrote every date cell empty.
-  if (options?.dateFormat !== undefined && typeof options.dateFormat !== "string") {
-    fail(where, "options.dateFormat", 'a format string such as "YYYY-MM-DD"', options.dateFormat);
-  }
-  if (options?.dateUTC !== undefined && typeof options.dateUTC !== "boolean") {
-    fail(where, "options.dateUTC", "a boolean", options.dateUTC);
+  if (encoding !== undefined && !fileEncoding && !UTF8_LABELS.has(encoding.toLowerCase())) {
+    fail(
+      where,
+      "options.encoding",
+      `"utf-8" — ${where} produces UTF-8; options.encoding chooses the encoding of ExcelCsv.writeFile only`,
+      encoding
+    );
   }
   asBridgeError(where, () =>
     checkFormatOptions(buildFormatterOptions(options) as CsvFormatOptions)

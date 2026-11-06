@@ -22,15 +22,13 @@
  * - `queryAll(el, path)` — all matches
  */
 
-import { checkElement } from "@xml/arguments";
+import { checkElement, checkStringArgument } from "@xml/arguments";
 import { XmlArgumentError } from "@xml/errors";
 import type { XmlElement } from "@xml/types";
 
 function checkQueryArguments(where: string, element: unknown, path: unknown): void {
   checkElement(where, element);
-  if (typeof path !== "string") {
-    throw new XmlArgumentError("path", `${where}: path must be a string, got ${typeof path}`);
-  }
+  checkStringArgument(where, "path", path);
 }
 
 // =============================================================================

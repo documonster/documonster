@@ -9,12 +9,14 @@
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
 import { ConditionalFormatting, ExcelUnsupportedFeatureError, Workbook, Worksheet } from "@excel";
+import { getSheetModel } from "@excel/core/worksheet";
 import { describe, expect, it } from "vitest";
 
 type Block = { ref: string; rules: Record<string, unknown>[] };
 
 function blocksOf(workbook: ReturnType<typeof Workbook.create>, sheet = "S"): Block[] {
-  return Worksheet.getModel(Workbook.getWorksheet(workbook, sheet)!)
+  // The sheet's own model, not `Worksheet.getModel`'s copy: the tests edit it to reach the writers unchecked.
+  return getSheetModel(Workbook.getWorksheet(workbook, sheet)!)
     .conditionalFormattings as unknown as Block[];
 }
 

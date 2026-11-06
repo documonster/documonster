@@ -45,18 +45,18 @@ Output is written to `tmp/word-examples/`.
 
 ### 15–24 Editing, querying & document features
 
-| File                          | Topic                                                                                    |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| `15-track-changes.ts`         | Insertion / deletion / move + accept/reject helpers                                      |
-| `16-templates.ts`             | `Template.fill` + JSON / XML / CSV data sources, custom delim, `Template.isChart`        |
-| `17-forms-sdt.ts`             | Legacy form fields + SDT (content controls) + data binding                               |
-| `18-read-modify.ts`           | `Io.read`, `Query.getText`, `Query.searchText`, `Document.replaceText` (in 9 containers) |
-| `19-merge-split-diff.ts`      | `Transform.merge` / `Transform.split` / `Diff.compare`                                   |
-| `20-protection-encryption.ts` | `Security.protect` + `WordCrypto.encrypt`                                                |
-| `21-validation.ts`            | `Validation.validate` (clean / malformed / strict / compat)                              |
-| `22-streaming.ts`             | `Stream.DocumentWriter` for huge documents                                               |
-| `23-fonts.ts`                 | `Font.embed` (subsetting & ODTTF obfuscation) + `Font.obfuscate`                         |
-| `24-watermark-bg.ts`          | Text & image watermark, page background, custom theme                                    |
+| File                          | Topic                                                                                          |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `15-track-changes.ts`         | Insertion / deletion / move + accept/reject helpers                                            |
+| `16-templates.ts`             | `Template.fill` + JSON / XML / CSV data sources, custom delim, `Template.isChart`              |
+| `17-forms-sdt.ts`             | Legacy form fields + SDT (content controls) + data binding                                     |
+| `18-read-modify.ts`           | `Document.read`, `Query.getText`, `Query.searchText`, `Document.replaceText` (in 9 containers) |
+| `19-merge-split-diff.ts`      | `Transform.merge` / `Transform.split` / `Diff.compare`                                         |
+| `20-protection-encryption.ts` | `Security.protect` + `WordCrypto.encrypt`                                                      |
+| `21-validation.ts`            | `Validation.validate` (clean / malformed / strict / compat)                                    |
+| `22-streaming.ts`             | `Stream.DocumentWriter` for huge documents                                                     |
+| `23-fonts.ts`                 | `Font.embed` (subsetting & ODTTF obfuscation) + `Font.obfuscate`                               |
+| `24-watermark-bg.ts`          | Text & image watermark, page background, custom theme                                          |
 
 ### 25–30 Conversions & edge cases
 
@@ -66,7 +66,7 @@ Output is written to `tmp/word-examples/`.
 | `26-markdown-conversion.ts` | `Markdown.toDocx` / `Markdown.fromDocx`                                                 |
 | `27-excel-conversion.ts`    | `WordExcel.toDocx` / `WordExcel.extractTables` / chart bridge (`toChartSvg`, …)         |
 | `28-pdf-conversion.ts`      | `Pdf.fromDocx` (custom page size, custom chart renderer)                                |
-| `29-flat-opc-odt.ts`        | `Io.toFlatOpc` / `Convert.flatOpcToParts` / `Convert.fromOdt` / `Convert.toOdt`         |
+| `29-flat-opc-odt.ts`        | `Document.toFlatOpc` / `Convert.flatOpcToParts` / `Convert.fromOdt` / `Convert.toOdt`   |
 | `30-edge-cases.ts`          | Encryption rejection, empty / large / nested-table docs, corrupted ZIP, 1 000 bookmarks |
 
 ### 31–47 Advanced internals & low-level surface
@@ -76,7 +76,7 @@ Output is written to `tmp/word-examples/`.
 | `31-walker-mapper.ts`            | `Query.each` / `Query.eachBlock` / `Transform.map` / `Query.list*`                                                           |
 | `32-style-resolve-themes.ts`     | `Query.getParagraphStyle` / `Query.getRunStyle` / `Query.getTableStyle` / `Theme.resolveColor` / `Styles.parse`              |
 | `33-incremental-edit.ts`         | `Package.edit` / `Package.listParts` / `Package.readPart`                                                                    |
-| `34-decrypt-roundtrip.ts`        | `WordCrypto.isEncrypted` / `WordCrypto.decrypt` / `Io.read` with password                                                    |
+| `34-decrypt-roundtrip.ts`        | `WordCrypto.isEncrypted` / `WordCrypto.decrypt` / `Document.read` with password                                              |
 | `35-mathml-conversion.ts`        | `Convert.ommlToMathMl` / `Convert.mathMlToOmml` + `ruby` + `mathPhantom`                                                     |
 | `36-text-shaping-hyphenation.ts` | `Font.shapeText` / `Font.detectScript` / `Font.detectDirection` / `Font.hyphenateText`                                       |
 | `37-svg-render.ts`               | `Layout.getPageMap` / `Layout.compute` / `Layout.pageToSvg` / `Layout.computedPageToSvg` / `Layout.toSvg`                    |

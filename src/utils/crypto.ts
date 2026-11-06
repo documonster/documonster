@@ -203,12 +203,7 @@ export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
 // Random bytes
 // =============================================================================
 
-/**
- * Generate cryptographically secure random bytes.
- */
-export function randomBytes(length: number): Uint8Array {
-  return new Uint8Array(crypto.randomBytes(length));
-}
+export { randomBytes } from "./random-bytes";
 
 // =============================================================================
 // Generic hash

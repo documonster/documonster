@@ -49,8 +49,10 @@ import type {
   UnzlibStream,
   ZlibStream
 } from "@archive/compression/streaming-compress";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import { checkBytes, checkLevel } from "@archive/core/entry-checks";
-import { ArchiveArgumentError, ArchiveError, isAbortError } from "@archive/core/errors";
+import { ArchiveError, isAbortError } from "@archive/core/errors";
+import { s } from "@utils/schema";
 
 // Every member checks its arguments as the archive builders do and reports damaged input
 // as an `ArchiveError` — the codecs below throw their own errors (zlib's on Node, the JS
@@ -157,9 +159,12 @@ export function detectFormat(data: Uint8Array): "zlib" | "gzip" | "deflate-raw" 
 
 /** Stream options: an object or `undefined`; a compressor's `level` 0–9. */
 function checkStreamOptions(where: string, options: unknown, compressor: boolean): void {
-  if (options !== undefined && (typeof options !== "object" || options === null)) {
-    throw new ArchiveArgumentError("options", `Compression.${where}: options must be an object`);
-  }
+  checkArchiveArgument(
+    s.object({}, { expected: "an object" }).optional(),
+    options,
+    `Compression.${where}`,
+    "options"
+  );
   if (compressor) {
     checkLevel(
       `Compression.${where}`,
@@ -214,5 +219,5 @@ export {
 
 export { hasDeflateRaw } from "@archive/compression/streaming-compress";
 
-/** The browser Web Worker pool: `Compression.Workers.deflate(bytes)`, `new Compression.Workers.WorkerPool(options)`, … */
+/** The browser Web Worker pool: `Compression.Workers.deflate(bytes)`, `new Compression.Workers.Pool(options)`, … */
 export * as Workers from "@archive/surface/compression-workers";

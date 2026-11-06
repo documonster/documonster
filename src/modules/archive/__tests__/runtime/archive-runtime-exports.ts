@@ -202,6 +202,7 @@ export const ARCHIVE_BROWSER_EXPORTS = [
   "ZipEocdNotFoundError",
   "ZipCrc32MismatchError",
   "ZipEntrySizeMismatchError",
+  "ArchiveLimitExceededError",
   "ArchiveLimitError",
   "ArchiveWorkerStreamStartError",
   "ArchiveWorkerUnsupportedError",

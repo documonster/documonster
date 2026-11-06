@@ -73,7 +73,7 @@ export interface CreateParseConfigOptions {
   options: CsvParseOptions;
   /** Override delimiter (for streaming after detection) */
   detectedDelimiter?: string;
-  /** The public call an argument error names (`Csv.parseRows`). Defaults to `Csv.parse`. */
+  /** The public call an argument error names (`Csv.parseStream`). Defaults to `Csv.parse`. */
   where?: string;
 }
 

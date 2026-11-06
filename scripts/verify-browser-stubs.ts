@@ -84,6 +84,10 @@ const REQUIRE_BROWSER_STUB: readonly { readonly module: string; readonly why: st
   {
     module: "src/modules/word/surface/io.ts",
     why: "the Node `Io` adds `readFile` / `writeFile`, which can only throw in a browser"
+  },
+  {
+    module: "src/modules/word/surface/document.ts",
+    why: "the Node `Document` adds `readFile` / `writeFile`, which can only throw in a browser"
   }
 ];
 

@@ -10,11 +10,7 @@
  * order, which is stable across runs for the same input.
  */
 
-import type {
-  OoxmlProblemKind,
-  OoxmlProblemSeverity,
-  OoxmlValidationProblem
-} from "@excel/utils/ooxml-validator/types";
+import type { OoxmlProblemKind, OoxmlValidationProblem } from "@excel/utils/ooxml-validator/types";
 
 export interface ReporterOptions {
   maxProblems?: number;
@@ -64,24 +60,5 @@ export class Reporter {
       return;
     }
     this.problems.push(problem);
-  }
-}
-
-/**
- * Convenience alias for the legacy `severity` argument used in the old
- * flat API. Kept for internal checker code that wants to produce a
- * problem with a runtime-chosen severity.
- */
-export function reportWithSeverity(
-  reporter: Reporter,
-  severity: OoxmlProblemSeverity,
-  kind: OoxmlProblemKind,
-  message: string,
-  file?: string
-): void {
-  if (severity === "error") {
-    reporter.error(kind, message, file);
-  } else {
-    reporter.warning(kind, message, file);
   }
 }

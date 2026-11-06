@@ -19,7 +19,7 @@ function snapshot(wb: Book): { name: string; rows: unknown[][] }[] {
   return Workbook.listWorksheets(wb).map(ws => {
     const rows: unknown[][] = [];
     for (let r = 1; r <= 3; r++) {
-      rows.push([Cell.getValue(ws, r, 1), Cell.getValue(ws, r, 2)]);
+      rows.push([Cell.getValue(ws, { row: r, col: 1 }), Cell.getValue(ws, { row: r, col: 2 })]);
     }
     return { name: Worksheet.getName(ws), rows };
   });

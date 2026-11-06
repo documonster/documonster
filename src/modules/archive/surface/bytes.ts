@@ -8,6 +8,7 @@ import {
   crc32Finalize as crc32FinalizeImpl,
   crc32Update as crc32UpdateImpl
 } from "@archive/compression/crc32";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import { checkBytes, checkString, checkUint } from "@archive/core/entry-checks";
 import { ArchiveArgumentError } from "@archive/core/errors";
 import {
@@ -15,6 +16,7 @@ import {
   stringToUint8Array as stringToUint8ArrayImpl,
   uint8ArrayToString as uint8ArrayToStringImpl
 } from "@utils/binary";
+import { s } from "@utils/schema";
 import {
   base64ToUint8Array as base64ToUint8ArrayImpl,
   uint8ArrayToBase64 as uint8ArrayToBase64Impl
@@ -75,12 +77,12 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
  * the sum, it does not truncate or pad.
  */
 export function concatUint8Arrays(arrays: readonly Uint8Array[], totalLength?: number): Uint8Array {
-  if (!Array.isArray(arrays)) {
-    throw new ArchiveArgumentError(
-      "arrays",
-      "Archive.concatUint8Arrays: arrays must be an array of Uint8Array"
-    );
-  }
+  checkArchiveArgument(
+    s.array(s.unknown(), { expected: "an array of Uint8Array" }),
+    arrays,
+    "Archive.concatUint8Arrays",
+    "arrays"
+  );
   let sum = 0;
   for (let i = 0; i < arrays.length; i++) {
     checkBytes("Archive.concatUint8Arrays", `arrays[${i}]`, arrays[i]);

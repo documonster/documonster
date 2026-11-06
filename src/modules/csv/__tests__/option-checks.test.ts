@@ -126,3 +126,106 @@ describe("Csv.generate option checks", () => {
     );
   });
 });
+
+/** Refusals that changed when the checks moved to `@utils/schema`. */
+describe("Csv option checks declared as schemas", () => {
+  function refusal(call: () => unknown): { field: string; message: string } {
+    try {
+      call();
+    } catch (err) {
+      return { field: (err as { field: string }).field, message: (err as Error).message };
+    }
+    throw new Error("expected a refusal");
+  }
+
+  it("names the delimiter guess that holds a line break, not `delimiter`", () => {
+    expect(refusal(() => Csv.parse("a", { delimiter: "", delimitersToGuess: ["\n"] }))).toEqual({
+      field: "options.delimitersToGuess[0]",
+      message:
+        'Csv.parse: options.delimitersToGuess[0] must be a string without line breaks, got "\\n"'
+    });
+  });
+
+  it("refuses an array as columnMismatch", () => {
+    expect(refusal(() => Csv.parse("a", { columnMismatch: [] as never })).field).toBe(
+      "options.columnMismatch"
+    );
+  });
+
+  it("checks firstRowIsHeader", () => {
+    expect(refusal(() => Csv.format([["a"]], { firstRowIsHeader: 1 as never })).message).toBe(
+      "Csv.format: options.firstRowIsHeader must be a boolean, got 1"
+    );
+  });
+
+  it("describes a refused decimalSeparator as every other option does", () => {
+    expect(refusal(() => Csv.format([["a"]], { decimalSeparator: NaN as never })).message).toBe(
+      'Csv.format: options.decimalSeparator must be "." or ",", got NaN'
+    );
+  });
+
+  it("checks headers, bom and objectMode of the generators, and describes values", () => {
+    expect(refusal(() => Csv.generate({ rows: 1, headers: [1] as never }))).toEqual({
+      field: "options.headers[0]",
+      message: "Csv.generate: options.headers[0] must be a string, got 1"
+    });
+    expect(refusal(() => Csv.generateData({ bom: 1 as never })).field).toBe("options.bom");
+    expect(refusal(() => Csv.generateData({ objectMode: 1 as never })).field).toBe(
+      "options.objectMode"
+    );
+    expect(refusal(() => Csv.generate({ seed: {} as never })).message).toBe(
+      "Csv.generate: options.seed must be a finite number, got an object"
+    );
+    expect(refusal(() => Csv.generate(5 as never)).message).toBe(
+      "Csv.generate: options must be an options object, got 5"
+    );
+  });
+
+  it("refuses a row of applyDynamicTypingToRow that is not a column map, saying what it got", () => {
+    expect(refusal(() => Csv.applyDynamicTypingToRow(5 as never, true))).toEqual({
+      field: "row",
+      message: "Csv.applyDynamicTypingToRow: row must be an object of column values, got 5"
+    });
+    expect(refusal(() => Csv.applyDynamicTypingToRow(["1"] as never, true)).field).toBe("row");
+  });
+
+  it("still accepts an undefined entry in quoteColumns", () => {
+    expect(Csv.format([["a"]], { quoteColumns: [undefined as never] })).toBe("a");
+  });
+});
+
+describe("Csv argument checks completed with schemas", () => {
+  function refusal(call: () => unknown): { field: string; message: string } {
+    try {
+      call();
+    } catch (err) {
+      return { field: (err as { field: string }).field, message: (err as Error).message };
+    }
+    throw new Error("expected a refusal");
+  }
+
+  it("checks the quote of Csv.detectLinebreak", () => {
+    expect(refusal(() => Csv.detectLinebreak("a\nb", { quote: 1 as never }))).toEqual({
+      field: "options.quote",
+      message: "Csv.detectLinebreak: options.quote must be a string, got 1"
+    });
+  });
+
+  it("describes a refused row or header list by its value", () => {
+    expect(refusal(() => Csv.getRowValues({} as never)).message).toBe(
+      "Csv.getRowValues: row must be an array, got an object"
+    );
+    expect(refusal(() => Csv.deduplicateHeaders("a" as never)).message).toBe(
+      'Csv.deduplicateHeaders: headers must be an array, got "a"'
+    );
+  });
+
+  it("reports a wrong typeTransform.row result at the option", () => {
+    expect(
+      refusal(() => Csv.format([["a"]], { typeTransform: { row: () => 5 as never } }))
+    ).toEqual({
+      field: "options.typeTransform.row",
+      message: "Csv.format: typeTransform.row must return an array or an object for data[0], got 5"
+    });
+  });
+});

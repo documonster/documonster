@@ -16,3 +16,11 @@ export const DEFAULT_ZIP_TIMESTAMPS: ZipTimestampMode = "dos";
  * Shared to ensure consistent reproducible output across all ZIP creation paths.
  */
 export const REPRODUCIBLE_ZIP_MOD_TIME = new Date(1980, 0, 1, 0, 0, 0);
+
+/**
+ * Default bound on one entry's uncompressed size when a reader is given no `maxEntrySize`: 512 MiB.
+ *
+ * Enforced twice: against the *declared* size before anything is inflated, and as the inflater's output bound, so an
+ * entry that lies about its size is stopped as soon as it overruns rather than after it has been materialised.
+ */
+export const DEFAULT_MAX_ENTRY_SIZE = 512 * 1024 * 1024;

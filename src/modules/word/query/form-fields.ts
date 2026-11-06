@@ -10,6 +10,7 @@ import {
   invalidArgument,
   namedValueField
 } from "@word/core/argument-checks";
+import { markDerived } from "@word/core/ownership";
 import { isHyperlink, isRun } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type { DocxVisitor } from "@word/core/walker";
@@ -132,8 +133,8 @@ function collectFormFields(doc: DocxDocument): FieldContent[] {
  * that lack some of the fields. Every value is checked against the fields of
  * its name before anything is filled.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to fill (returns a new copy with filled values).
  * @param values - Field name → new value, as a `Map` or a plain object.
@@ -245,15 +246,18 @@ export function fillFormFields(
       )
     : undefined;
 
-  return {
-    ...doc,
-    body: newBody,
-    ...(newHeaders ? { headers: newHeaders } : {}),
-    ...(newFooters ? { footers: newFooters } : {}),
-    ...(newFootnotes ? { footnotes: newFootnotes } : {}),
-    ...(newEndnotes ? { endnotes: newEndnotes } : {}),
-    ...(newComments ? { comments: newComments } : {})
-  };
+  return markDerived(
+    {
+      ...doc,
+      body: newBody,
+      ...(newHeaders ? { headers: newHeaders } : {}),
+      ...(newFooters ? { footers: newFooters } : {}),
+      ...(newFootnotes ? { footnotes: newFootnotes } : {}),
+      ...(newEndnotes ? { endnotes: newEndnotes } : {}),
+      ...(newComments ? { comments: newComments } : {})
+    },
+    doc
+  );
 }
 
 // =============================================================================

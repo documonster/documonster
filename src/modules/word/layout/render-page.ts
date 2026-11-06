@@ -9,17 +9,18 @@
  */
 
 import { checkBackgroundWith } from "@utils/background-check";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { isNoPaintColor, parseSvgAttributes, parseSvgNumberList } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
 import {
-  checkFinite,
   checkHandle,
   checkInteger,
   checkRecord,
-  checkString,
   invalidArgument
 } from "@word/core/argument-checks";
 import { bytesToBase64 } from "@word/core/internal-utils";
+import { checkSchema, model, w } from "@word/core/option-schema";
 import { SCRIPT_BASELINE_SHIFT_FACTOR } from "@word/layout/layout-constants";
 import { layoutDocumentFull } from "@word/layout/layout-full";
 import type {
@@ -123,24 +124,24 @@ function checkBackground(value: unknown, field: string, where: string): void {
   }
 }
 
+const positive = () => w.finite({ positive: true }).optional();
+
+const renderOptionsSchema = w.record({
+  width: positive(),
+  height: positive(),
+  fonts: s.custom<ReadonlyMap<string, string>>(v => v instanceof Map, "a Map").optional(),
+  // Checked by `checkBackground`, in the words every renderer uses.
+  background: model<string | Rgba01>(),
+  backgroundColor: w.string().optional(),
+  scale: positive(),
+  renderChart: w.function<NonNullable<RenderOptions["renderChart"]>>().optional()
+});
+const _renderOptionsMatch: SchemaMatches<typeof renderOptionsSchema, RenderOptions> = true;
+void _renderOptionsMatch;
+
 function checkRenderOptions(options: unknown, where: string): void {
-  if (options === undefined) {
-    return;
-  }
-  checkRecord(options, "options", where);
-  const o = options as RenderOptions;
-  const positive = { optional: true, positive: true } as const;
-  checkFinite(o.width, "options.width", where, positive);
-  checkFinite(o.height, "options.height", where, positive);
-  checkFinite(o.scale, "options.scale", where, positive);
-  checkBackground(o.background, "options.background", where);
-  checkString(o.backgroundColor, "options.backgroundColor", where, { optional: true });
-  if (o.fonts !== undefined && !(o.fonts instanceof Map)) {
-    invalidArgument(where, "options.fonts", "a Map", o.fonts);
-  }
-  if (o.renderChart !== undefined && typeof o.renderChart !== "function") {
-    invalidArgument(where, "options.renderChart", "a function", o.renderChart);
-  }
+  checkSchema(renderOptionsSchema.optional(), options, where);
+  checkBackground(options?.background, "options.background", where);
 }
 
 /** Sanitize a string into a valid 6-digit hex color, or undefined. */

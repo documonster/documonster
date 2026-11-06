@@ -22,7 +22,7 @@ import {
 import type { TemporalKind, TemporalPlainValue } from "@excel/core/temporal";
 import type { Workbook } from "@excel/core/workbook";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ExcelError, ExcelInvalidValueTypeError } from "@excel/errors";
+import { ExcelArgumentError, ExcelError, ExcelInvalidValueTypeError } from "@excel/errors";
 import type {
   Style,
   DecodedAddress,
@@ -46,8 +46,10 @@ import type {
 import type { DateFormatKind } from "@excel/utils/cell-format";
 import { dateFormatKind, getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache } from "@excel/utils/col-cache";
+import { copyPlain } from "@excel/utils/copy-plain";
 import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
 import { slideFormula } from "@excel/utils/shared-formula";
+import { isStoredOrdinaryFormula, markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import type { ExcelDateTimeParts } from "@utils/excel-serial";
 import {
   isExcelPhantomDay,
@@ -549,6 +551,21 @@ export function cellGetValue(c: CellData): CellValue {
 }
 
 /**
+ * The cell's value as a public reader hands it out — the caller's own copy. {@link cellGetValue} is the stored value
+ * itself, for the library's own reads; handing that out let an edit to a returned rich-text run, `Date` or error
+ * object change the cell with none of `Cell.setValue`'s checks, while a hyperlink, formula or checkbox value was
+ * already a fresh object — so whether an edit reached the cell depended on the kind of value.
+ */
+export function cellReadValue(c: CellData): CellValue {
+  return ownValue(c._value.value);
+}
+
+/** `value`, or a copy of it when it is an object. */
+export function ownValue<T>(value: T): T {
+  return typeof value === "object" && value !== null ? copyPlain(value) : value;
+}
+
+/**
  * The default number format for a date cell of a known kind.
  *
  * **The number format is where the kind is stored.** A cell holding a `Date` with no `numFmt` is written with
@@ -707,6 +724,41 @@ export function checkCellValue(v: unknown, at?: CellValueSite): void {
   if (typeof v === "object" && v !== null && "result" in v) {
     checkResult((v as { result?: unknown }).result, at, "result");
   }
+}
+
+/**
+ * One row's values for an append — a list (by column), an object (by column key), or nothing for an empty row — each
+ * value checked as {@link checkCellValue} checks it, before the row exists. A bare number or string used to add an
+ * empty row and lose the value, and a refused value used to leave a half-written row behind. `Row.add` and the
+ * streaming writer's `addRow` share it, so both refuse the same rows with the same words.
+ */
+export function checkRowValues(where: string, values: unknown, argument = "values"): void {
+  if (values === null || values === undefined) {
+    return;
+  }
+  if (typeof values !== "object" || values instanceof Date) {
+    throw new ExcelArgumentError(
+      argument,
+      `${where}: ${argument} must be an array of cell values, an object keyed by column key, or nothing; got ${typeof values}.`
+    );
+  }
+  for (const [key, value] of Object.entries(values)) {
+    checkCellValue(value, {
+      where,
+      field: Array.isArray(values) ? `${argument}[${key}]` : `${argument}.${key}`
+    });
+  }
+}
+
+/** A list of rows for a batch append, every row checked by {@link checkRowValues} before the first is added. */
+export function checkRowList(where: string, list: unknown): asserts list is readonly unknown[] {
+  if (!Array.isArray(list)) {
+    throw new ExcelArgumentError(
+      "values",
+      `${where}: values must be an array of rows; got ${typeof list}.`
+    );
+  }
+  list.forEach((values, i) => checkRowValues(where, values, `values[${i}]`));
 }
 
 /**
@@ -1161,8 +1213,10 @@ export function cellNote(c: CellData): string | NoteConfig | undefined {
   return c._comment.note;
 }
 
-export function cellSetNote(c: CellData, note: string | NoteConfig): void {
-  c._comment = noteCreate(note);
+export function cellSetNote(c: CellData, note: string | NoteConfig, author?: string): void {
+  // A copy, as a validation rule is: the caller's configuration used to become the cell's, so editing it afterwards
+  // changed the note.
+  c._comment = noteCreate(ownValue(note), author);
 }
 
 export function cellComment(c: CellData): NoteData | undefined {
@@ -1351,10 +1405,6 @@ export function cellRemoveName(c: CellData, name: string): boolean {
   return definedNamesRemoveEx(cellWorkbook(c)._definedNames, cellFullAddress(c), name);
 }
 
-export function cellRemoveAllNames(c: CellData): void {
-  definedNamesRemoveAllNames(cellWorkbook(c)._definedNames, cellFullAddress(c));
-}
-
 export function cellDataValidation(c: CellData): DataValidationRule | undefined {
   return dataValidationFind(cellWorksheet(c).dataValidations, c.address);
 }
@@ -1363,13 +1413,26 @@ export function cellSetDataValidation(c: CellData, value: DataValidationRule): v
   dataValidationAdd(cellWorksheet(c).dataValidations, c.address, value);
 }
 
+/**
+ * The cell's round-trip model: its value model with the cell's style and note.
+ *
+ * A new outer object, so reading writes nothing into the cell. It used to assign `style` and `comment` onto the
+ * stored value model, and a note removed after that — or after the first save, which reads every cell's model —
+ * stayed behind in it and came back in the next file.
+ */
 export function cellGetModel(c: CellData): CellModel {
-  const { model } = c._value;
-  model.style = c.style;
+  const stored = c._value.model as CellModel;
+  const { comment: _stale, ...model } = stored;
+  const out: CellModel = { ...model, style: c.style };
   if (c._comment) {
-    model.comment = noteModel(c._comment);
+    out.comment = noteModel(c._comment);
   }
-  return model;
+  // What is known about the stored model by identity is known about this one: the writers ask it of the model they
+  // are handed.
+  if (isStoredOrdinaryFormula(stored)) {
+    markStoredOrdinaryFormula(out);
+  }
+  return out;
 }
 
 export function cellSetModel(c: CellData, value: CellModel): void {
@@ -1570,14 +1633,16 @@ class StringValue {
 
 class RichTextValue {
   declare public model: RichTextValueModel;
+  // Stored as a copy: the caller's object used to be the cell's, so editing it afterwards — or giving it to two
+  // cells — changed what the cell wrote.
   constructor(cell: CellData, value: CellRichTextValue) {
-    this.model = { address: cell.address, type: Types.String, value };
+    this.model = { address: cell.address, type: Types.String, value: ownValue(value) };
   }
   get value(): CellRichTextValue {
     return this.model.value;
   }
   set value(value: CellRichTextValue) {
-    this.model.value = value;
+    this.model.value = ownValue(value);
   }
   toString(): string {
     return this.model.value.richText.map(t => t.text).join("");
@@ -1612,14 +1677,15 @@ class DateValue {
     this.model = {
       address: cell.address,
       type: Types.Date,
-      value: toCivilDate(value, cellDate1904(cell))
+      // A Date is mutable: stored as given, the caller's later `setDate` changed the cell.
+      value: ownValue(toCivilDate(value, cellDate1904(cell)))
     };
   }
   get value(): Date {
     return this.model.value;
   }
   set value(value: Date) {
-    this.model.value = value;
+    this.model.value = ownValue(value);
   }
   get type(): ValueType {
     return Types.Date;
@@ -1830,7 +1896,7 @@ class FormulaValue {
       ref: value ? value.ref : undefined,
       formula: value ? value.formula : undefined,
       sharedFormula: value ? value.sharedFormula : undefined,
-      result: value ? value.result : undefined,
+      result: value ? ownValue(value.result) : undefined,
       isDynamicArray: value ? value.isDynamicArray : undefined
     };
   }
@@ -1864,7 +1930,7 @@ class FormulaValue {
       this.model.formula = value.formula;
     }
     if (value.result !== undefined) {
-      this.model.result = value.result;
+      this.model.result = ownValue(value.result);
     }
     if (value.ref) {
       this.model.ref = value.ref;
@@ -2101,13 +2167,13 @@ class CheckboxValue {
 class ErrorValue {
   declare public model: ErrorValueModel;
   constructor(cell: CellData, value: CellErrorValue) {
-    this.model = { address: cell.address, type: Types.Error, value };
+    this.model = { address: cell.address, type: Types.Error, value: ownValue(value) };
   }
   get value(): CellErrorValue {
     return this.model.value;
   }
   set value(value: CellErrorValue) {
-    this.model.value = value;
+    this.model.value = ownValue(value);
   }
   get type(): ValueType {
     return Types.Error;
@@ -2160,7 +2226,7 @@ class JSONValue {
       address: cell.address,
       type: Types.String,
       value: jsonText(value),
-      rawValue: value
+      rawValue: ownValue(value)
     };
   }
   get value(): unknown {
@@ -2168,7 +2234,7 @@ class JSONValue {
   }
   set value(value: unknown) {
     this.model.value = jsonText(value);
-    this.model.rawValue = value;
+    this.model.rawValue = ownValue(value);
   }
   get type(): ValueType {
     return Types.String;

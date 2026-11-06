@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -87,14 +87,23 @@ Document.addHeading(doc, "Word Module — Images", 1);
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "1. Inline images (PNG / JPEG / SVG)", 2);
 Document.addParagraph(doc, "Each image is inline — flows with text.");
-Document.addImage(doc, redPixelPng, "png", Units.cmToEmu(2), Units.cmToEmu(2), {
+Document.addImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(2),
+  height: Units.cmToEmu(2),
   altText: "A red square (PNG)",
   name: "RedSquare"
 });
-Document.addImage(doc, yellowPixelPng, "png", Units.cmToEmu(2), Units.cmToEmu(2), {
+Document.addImage(doc, yellowPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(2),
+  height: Units.cmToEmu(2),
   altText: "A yellow square (JPEG)"
 });
-Document.addImage(doc, sampleSvg, "svg", Units.cmToEmu(2), Units.cmToEmu(2), {
+Document.addImage(doc, sampleSvg, {
+  type: "svg",
+  width: Units.cmToEmu(2),
+  height: Units.cmToEmu(2),
   altText: "A blue SVG icon"
 });
 
@@ -102,7 +111,10 @@ Document.addImage(doc, sampleSvg, "svg", Units.cmToEmu(2), Units.cmToEmu(2), {
 // 2. Floating image with square wrap (text flows around)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "2. Floating image — square wrap", 2);
-Document.addFloatingImage(doc, redPixelPng, "png", Units.cmToEmu(4), Units.cmToEmu(4), {
+Document.addFloatingImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(4),
+  height: Units.cmToEmu(4),
   altText: "Floating logo",
   horizontalPosition: { align: "right", relativeTo: "margin" },
   verticalPosition: { align: "top", relativeTo: "paragraph" },
@@ -127,7 +139,10 @@ Document.addParagraph(
 // section 2's text.
 Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "3. Floating image — behind text", 2);
-Document.addFloatingImage(doc, watermarkPng, "png", Units.cmToEmu(8), Units.cmToEmu(8), {
+Document.addFloatingImage(doc, watermarkPng, {
+  type: "png",
+  width: Units.cmToEmu(8),
+  height: Units.cmToEmu(8),
   altText: "Background mark",
   horizontalPosition: { align: "center", relativeTo: "page" },
   verticalPosition: { align: "center", relativeTo: "page" },
@@ -159,7 +174,10 @@ Document.addParagraph(
     "page, sitting on top of these words. " +
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(6)
 );
-Document.addFloatingImage(doc, yellowPixelPng, "png", Units.cmToEmu(2), Units.cmToEmu(2), {
+Document.addFloatingImage(doc, yellowPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(2),
+  height: Units.cmToEmu(2),
   altText: "Sticker overlay",
   horizontalPosition: { align: "left", relativeTo: "page", offset: Units.cmToEmu(1) },
   verticalPosition: { align: "bottom", relativeTo: "page", offset: -Units.cmToEmu(2) },
@@ -172,14 +190,20 @@ Document.addFloatingImage(doc, yellowPixelPng, "png", Units.cmToEmu(2), Units.cm
 // ---------------------------------------------------------------------------
 Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "5. Rotation / flip", 2);
-Document.addFloatingImage(doc, redPixelPng, "png", Units.cmToEmu(3), Units.cmToEmu(3), {
+Document.addFloatingImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(3),
+  height: Units.cmToEmu(3),
   altText: "Rotated 30°",
   rotation: 30 * 60_000, // OOXML stores rotation in 1/60_000 degrees
   horizontalPosition: { align: "center", relativeTo: "margin" },
   verticalPosition: { align: "top", relativeTo: "paragraph" },
   wrap: { style: "topAndBottom" }
 });
-Document.addFloatingImage(doc, redPixelPng, "png", Units.cmToEmu(3), Units.cmToEmu(3), {
+Document.addFloatingImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(3),
+  height: Units.cmToEmu(3),
   altText: "Flipped horizontally",
   flipHorizontal: true,
   horizontalPosition: { align: "right", relativeTo: "margin" },
@@ -192,9 +216,17 @@ Document.addFloatingImage(doc, redPixelPng, "png", Units.cmToEmu(3), Units.cmToE
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "6. Multiple inline images in one paragraph", 2);
 const imgInfo1 = (() =>
-  Document.addImage(doc, redPixelPng, "png", Units.cmToEmu(1), Units.cmToEmu(1)))();
+  Document.addImage(doc, redPixelPng, {
+    type: "png",
+    width: Units.cmToEmu(1),
+    height: Units.cmToEmu(1)
+  }))();
 const imgInfo2 = (() =>
-  Document.addImage(doc, yellowPixelPng, "png", Units.cmToEmu(1), Units.cmToEmu(1)))();
+  Document.addImage(doc, yellowPixelPng, {
+    type: "png",
+    width: Units.cmToEmu(1),
+    height: Units.cmToEmu(1)
+  }))();
 void imgInfo1;
 void imgInfo2;
 
@@ -204,16 +236,12 @@ void imgInfo2;
 Document.addHeading(doc, "7. Image inside a table cell", 2);
 // Build the image first so the rId is available, then place it via a nested
 // paragraph in a table cell. We build the inline image content directly.
-const imgResult = Document.addImage(
-  doc,
-  redPixelPng,
-  "png",
-  Units.cmToEmu(1.5),
-  Units.cmToEmu(1.5),
-  {
-    altText: "Cell logo"
-  }
-);
+const imgResult = Document.addImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(1.5),
+  height: Units.cmToEmu(1.5),
+  altText: "Cell logo"
+});
 // Document.addImage auto-appends a paragraph holding the drawing — pop it
 // off so the image only appears inside the cell below (otherwise we'd render
 // the image twice: once free-floating, once inside the cell).
@@ -263,7 +291,10 @@ Document.addTable(
 Document.addHeading(doc, "Edge cases", 2);
 
 // Page-wide oversize: width close to A4 portrait usable width (16cm)
-Document.addImage(doc, redPixelPng, "png", Units.cmToEmu(16), Units.cmToEmu(8), {
+Document.addImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(16),
+  height: Units.cmToEmu(8),
   altText: "Oversized — fills the printable width"
 });
 
@@ -271,11 +302,22 @@ Document.addImage(doc, redPixelPng, "png", Units.cmToEmu(16), Units.cmToEmu(8), 
 // underlying image part, but Document.addImage assigns a fresh rId each
 // time. The packager will write two separate parts; that is acceptable
 // behaviour. We simply verify no error.
-Document.addImage(doc, redPixelPng, "png", Units.cmToEmu(0.5), Units.cmToEmu(0.5));
-Document.addImage(doc, redPixelPng, "png", Units.cmToEmu(0.5), Units.cmToEmu(0.5));
+Document.addImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(0.5),
+  height: Units.cmToEmu(0.5)
+});
+Document.addImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(0.5),
+  height: Units.cmToEmu(0.5)
+});
 
 // 1x1 transparent
-Document.addImage(doc, watermarkPng, "png", Units.cmToEmu(0.3), Units.cmToEmu(0.3), {
+Document.addImage(doc, watermarkPng, {
+  type: "png",
+  width: Units.cmToEmu(0.3),
+  height: Units.cmToEmu(0.3),
   altText: "1×1 transparent (decorative)"
 });
 
@@ -294,16 +336,12 @@ Document.addParagraph(
     "cropping is invisible to the eye but the srcRect attributes are still " +
     "written into the underlying drawing XML."
 );
-const sharedImage = Document.addImage(
-  doc,
-  redPixelPng,
-  "png",
-  Units.cmToEmu(0.5),
-  Units.cmToEmu(0.5),
-  {
-    altText: "shared source"
-  }
-);
+const sharedImage = Document.addImage(doc, redPixelPng, {
+  type: "png",
+  width: Units.cmToEmu(0.5),
+  height: Units.cmToEmu(0.5),
+  altText: "shared source"
+});
 // Re-use the rId for two more floating placements with different crops
 Document.addContent(
   doc,
@@ -335,6 +373,6 @@ Document.addContent(
   })
 );
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "07-images.docx"), buf);
 console.log(`  → 07-images.docx (${buf.length} bytes)`);

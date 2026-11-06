@@ -95,7 +95,7 @@ function spilled(wb: ReturnType<typeof Workbook.create>, i: number): boolean {
   const ws = Workbook.getWorksheet(wb, `S${i + 1}`)!;
   for (let row = 6; row <= 12; row++) {
     for (let col = 5; col <= 10; col++) {
-      if ((row !== 6 || col !== 5) && Cell.getValue(ws, row, col) !== null) {
+      if ((row !== 6 || col !== 5) && Cell.getValue(ws, { row, col }) !== null) {
         return true;
       }
     }

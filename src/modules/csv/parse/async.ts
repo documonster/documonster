@@ -337,7 +337,7 @@ export async function parseCsvAsync(
   if (onProgress !== undefined && typeof onProgress !== "function") {
     throw new CsvArgumentError(
       "options.onProgress",
-      `${where}: onProgress must be a function, got ${describeValue(onProgress)}`
+      `${where}: options.onProgress must be a function, got ${describeValue(onProgress)}`
     );
   }
   if (onProgress) {
@@ -360,12 +360,12 @@ export async function parseCsvAsync(
  * @example
  * ```ts
  * // Process large file row by row
- * for await (const row of Csv.parseRows(fileStream, { headers: true })) {
+ * for await (const row of Csv.parseStream(fileStream, { headers: true })) {
  *   console.log(row);
  * }
  *
  * // With validation
- * for await (const row of Csv.parseRows(input, {
+ * for await (const row of Csv.parseStream(input, {
  *   headers: true,
  *   validate: (row) => row.id !== ""
  * })) {
@@ -377,7 +377,7 @@ export async function* parseCsvRows(
   input: CsvAsyncInput,
   options: CsvParseOptions = {}
 ): AsyncGenerator<ParsedRow, void, unknown> {
-  const where = "Csv.parseRows";
+  const where = "Csv.parseStream";
   checkAsyncInput(input, where);
   checkParserStreamOptions(options, where);
   // A record left out because of an error is reported to `onSkip`; without one, a generator

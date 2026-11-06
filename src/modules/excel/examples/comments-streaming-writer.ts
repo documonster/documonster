@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { streamBothFormats } from "@excel/examples/utils/stream-both";
-import { Stream } from "@excel/index";
+import { Cell, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -24,9 +24,9 @@ const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 await streamBothFormats(filename, {}, wb => {
-  const ws = wb.addWorksheet("Foo");
-  Stream.setCellValue(ws.getCell("B2"), 5);
-  Stream.setCellNote(ws.getCell("B2"), {
+  const ws = Workbook.addWorksheet(wb, "Foo");
+  Cell.setValue(ws, "B2", 5);
+  Cell.setNote(ws, "B2", {
     texts: [
       {
         font: {
@@ -110,8 +110,8 @@ await streamBothFormats(filename, {}, wb => {
     ]
   });
 
-  Stream.setCellValue(ws.getCell("D2"), "Zoo");
-  Stream.setCellNote(ws.getCell("D2"), "Plain Text Comment");
+  Cell.setValue(ws, "D2", "Zoo");
+  Cell.setNote(ws, "D2", "Plain Text Comment");
 
   ws.commit();
 });

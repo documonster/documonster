@@ -51,7 +51,7 @@ import type { DigitalSignatureInfo as DocxDigitalSignatureInfo } from "@word/sec
 export type { DocxDigitalSignatureInfo };
 
 // The errors this entry's functions throw (also exported from the main entry):
-// `Io.read` → `DocxEncryptedError`, `WordCrypto.decrypt` → `DocxDecryptionError`,
+// `Document.read` → `DocxEncryptedError`, `WordCrypto.decrypt` → `DocxDecryptionError`,
 // a file that is not a readable compound file (`WordCrypto.Cfb.read`, `WordCrypto.decrypt`)
 // → `DocxParseError`, a wrong argument → `DocxArgumentError`; all of them are a `DocxError`.
 export {

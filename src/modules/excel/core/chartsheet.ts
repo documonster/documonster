@@ -10,7 +10,11 @@ import {
 import type { WorkbookData } from "@excel/core/workbook-core";
 import type { ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
 import type { HeaderFooter } from "@excel/types";
+import { checkSchema } from "@excel/utils/arguments";
+import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 export type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
@@ -58,6 +62,90 @@ export interface AddChartsheetOptions extends ChartsheetOptions {
 export interface AddPivotChartsheetOptions extends ChartsheetOptions {
   /** Classic chart or combo chart to place on the chartsheet as a pivot chart. */
   chart: AddChartOptions | AddComboChartOptions;
+}
+
+const margin = () => s.number({ finite: true }).optional();
+/** `pageMargins`: a key the margins do not have was kept and never written. */
+export const chartsheetMarginsSchema = s.object(
+  {
+    l: margin(),
+    r: margin(),
+    t: margin(),
+    b: margin(),
+    left: margin(),
+    right: margin(),
+    top: margin(),
+    bottom: margin(),
+    header: margin(),
+    footer: margin()
+  },
+  { unknownKeys: "reject" }
+);
+const _marginsMatch: SchemaMatches<
+  typeof chartsheetMarginsSchema,
+  NonNullable<ChartsheetModel["pageMargins"]>
+> = true;
+void _marginsMatch;
+
+const viewOptionsShape = {
+  tabSelected: s.boolean().optional(),
+  zoomScale: s.number({ integer: true, min: 0 }).optional(),
+  workbookViewId: s.number({ integer: true, min: 0 }).optional(),
+  zoomToFit: s.boolean().optional()
+};
+const viewOptionsSchema = s.object(viewOptionsShape);
+const _viewOptionsMatch: SchemaMatches<typeof viewOptionsSchema, ChartsheetViewOptions> = true;
+void _viewOptionsMatch;
+
+const chartsheetOptionsShape = {
+  ...viewOptionsShape,
+  state: s.literal("visible", "hidden", "veryHidden").optional(),
+  pageMargins: chartsheetMarginsSchema.optional(),
+  // Checked with a worksheet's settings by `checkSheetSettings`, below.
+  pageSetup: s.unknown<ChartsheetModel["pageSetup"]>().optional(),
+  headerFooter: s.unknown<Partial<HeaderFooter>>().optional()
+};
+const chartsheetOptionsSchema = s.object(chartsheetOptionsShape);
+const _chartsheetOptionsMatch: SchemaMatches<typeof chartsheetOptionsSchema, ChartsheetOptions> =
+  true;
+void _chartsheetOptionsMatch;
+
+// The chart is checked by the chart validator, which names the series at fault.
+const addChartsheetOptionsSchema = s.object({
+  ...chartsheetOptionsShape,
+  chart: s.unknown<AddChartOptions | AddComboChartOptions | AddChartExOptions>()
+});
+const _addChartsheetOptionsMatch: SchemaMatches<
+  typeof addChartsheetOptionsSchema,
+  AddChartsheetOptions
+> = true;
+void _addChartsheetOptionsMatch;
+const addPivotChartsheetOptionsSchema = s.object({
+  ...chartsheetOptionsShape,
+  chart: s.unknown<AddChartOptions | AddComboChartOptions>()
+});
+const _addPivotChartsheetOptionsMatch: SchemaMatches<
+  typeof addPivotChartsheetOptionsSchema,
+  AddPivotChartsheetOptions
+> = true;
+void _addPivotChartsheetOptionsMatch;
+
+/** Check `Workbook.addChartsheet`'s or `Workbook.addPivotChartsheet`'s options, before anything is added. */
+export function checkChartsheetOptions(where: string, options: unknown, pivot: boolean): void {
+  checkSchema(
+    where,
+    "options",
+    pivot ? addPivotChartsheetOptionsSchema : addChartsheetOptionsSchema,
+    options
+  );
+  const { pageSetup, headerFooter } = options as ChartsheetOptions;
+  checkSheetSettings(where, { pageSetup, headerFooter }, path => `options.${path}`);
+  checkSchema(
+    where,
+    "options.pageSetup",
+    s.object({ paperHeight: s.string().optional(), paperWidth: s.string().optional() }).optional(),
+    pageSetup
+  );
 }
 
 /**

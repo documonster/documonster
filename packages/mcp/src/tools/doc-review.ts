@@ -14,7 +14,7 @@
  * make.
  */
 
-import { Diff, Document, Io, Query } from "documonster/word";
+import { Diff, Document, Query } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -246,10 +246,10 @@ async function reviewRevisions(
   const backupPath = inPlace && (args.backup ?? true) ? await backupOnce(writeTarget) : undefined;
 
   if (inPlace) {
-    await replaceAtomically(writeTarget.path, temporary => Io.writeFile(fresh, temporary));
+    await replaceAtomically(writeTarget.path, temporary => Document.writeFile(fresh, temporary));
   } else {
     await writeWithPolicy(writeTarget.path, args.overwrite === true, temporary =>
-      Io.writeFile(fresh, temporary)
+      Document.writeFile(fresh, temporary)
     );
   }
 
@@ -273,7 +273,7 @@ async function reviewRevisions(
  * isolation. Whatever the cause, a verification step must not be able to fail
  * the write that already succeeded.
  */
-function countRevisions(doc: Awaited<ReturnType<typeof Io.readFile>>): string {
+function countRevisions(doc: Awaited<ReturnType<typeof Document.readFile>>): string {
   try {
     return String(Query.listRevisions(doc).length);
   } catch {
@@ -290,7 +290,9 @@ function countRevisions(doc: Awaited<ReturnType<typeof Io.readFile>>): string {
  * because a malformed revision arrangement has been seen to break the walker and
  * a listing must not fail for want of an annotation.
  */
-function collectRevisionText(doc: Awaited<ReturnType<typeof Io.readFile>>): Map<number, string> {
+function collectRevisionText(
+  doc: Awaited<ReturnType<typeof Document.readFile>>
+): Map<number, string> {
   const found = new Map<number, string>();
 
   const runText = (run: { readonly content?: readonly { readonly text?: string }[] }): string =>
@@ -327,7 +329,7 @@ function quote(text: string | undefined): string {
 }
 
 async function readWord(resolved: string, displayPath: string) {
-  return await Io.readFile(resolved).catch((cause: unknown) => {
+  return await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${displayPath} as a Word document`,
       "doc_review works with .docx only. Run doc_inspect to check the real file type.",

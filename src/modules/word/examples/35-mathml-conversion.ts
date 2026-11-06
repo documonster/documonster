@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Convert, Io } from "../index";
+import { Document, Build, Convert } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -76,7 +76,7 @@ Document.addParagraph(
 // ---------------------------------------------------------------------------
 // 4. Save the doc & extract its math blocks for MathML conversion
 // ---------------------------------------------------------------------------
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "35-math-extras.docx"), buf);
 console.log(`  → 35-math-extras.docx (${buf.length} bytes)`);
 
@@ -111,7 +111,7 @@ const docFromMathml = Document.create();
 Document.useDefaultStyles(docFromMathml);
 Document.addHeading(docFromMathml, "Imported from MathML", 1);
 Document.addMath(docFromMathml, omml);
-const buf2 = await Io.toBuffer(docFromMathml);
+const buf2 = await Document.toBuffer(docFromMathml);
 fs.writeFileSync(path.join(outDir, "imported-from-mathml.docx"), buf2);
 console.log(`  → imported-from-mathml.docx (${buf2.length} bytes)`);
 

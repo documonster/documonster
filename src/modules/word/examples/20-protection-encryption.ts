@@ -7,8 +7,8 @@
  *   - With and without a password (different hash algorithms / spin counts)
  *   - isDocumentProtected, getProtectionState, verifyPassword
  *   - unprotectDocument
- *   - Io.toBuffer({ password }) — write the DOCX with MS-Agile encryption (the file
- *     can only be opened by clients that know the password), and Io.read({ password })
+ *   - Document.toBuffer({ password }) — write the DOCX with MS-Agile encryption (the file
+ *     can only be opened by clients that know the password), and Document.read({ password })
  *   - WordCrypto.encrypt — the same for package bytes you already have
  *
  * Output: tmp/word-examples/20-protection/...
@@ -18,7 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WordCrypto } from "../crypto";
-import { Document, Io, Security } from "../index";
+import { Document, Security } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -65,13 +65,13 @@ console.log(
   "  verifyPassword('wrong'):",
   await Security.verifyPassword(readOnlyProtected, "wrong")
 );
-fs.writeFileSync(path.join(outDir, "01-readonly.docx"), await Io.toBuffer(readOnlyProtected));
+fs.writeFileSync(path.join(outDir, "01-readonly.docx"), await Document.toBuffer(readOnlyProtected));
 
 // ---------------------------------------------------------------------------
 // 2. Comments-only restriction (no password — anyone can disable in Word)
 // ---------------------------------------------------------------------------
 const commentsOnly = await Security.protect(makeDoc(), { edit: "comments" });
-fs.writeFileSync(path.join(outDir, "02-comments-only.docx"), await Io.toBuffer(commentsOnly));
+fs.writeFileSync(path.join(outDir, "02-comments-only.docx"), await Document.toBuffer(commentsOnly));
 
 // ---------------------------------------------------------------------------
 // 3. Tracked-changes-only with SHA-512
@@ -83,28 +83,31 @@ const tracked = await Security.protect(makeDoc(), {
   spinCount: 50_000,
   formatting: true
 });
-fs.writeFileSync(path.join(outDir, "03-tracked-changes.docx"), await Io.toBuffer(tracked));
+fs.writeFileSync(path.join(outDir, "03-tracked-changes.docx"), await Document.toBuffer(tracked));
 
 // ---------------------------------------------------------------------------
 // 4. Forms only — typical for "fillable form" DOCX
 // ---------------------------------------------------------------------------
 const formsOnly = await Security.protect(makeDoc(), { edit: "forms", password: "fill" });
-fs.writeFileSync(path.join(outDir, "04-forms-only.docx"), await Io.toBuffer(formsOnly));
+fs.writeFileSync(path.join(outDir, "04-forms-only.docx"), await Document.toBuffer(formsOnly));
 
 // ---------------------------------------------------------------------------
 // 5. Unprotect
 // ---------------------------------------------------------------------------
 const noLongerProtected = Security.unprotect(readOnlyProtected);
 console.log("  after unprotect, isProtected =", Security.isProtected(noLongerProtected));
-fs.writeFileSync(path.join(outDir, "05-unprotected.docx"), await Io.toBuffer(noLongerProtected));
+fs.writeFileSync(
+  path.join(outDir, "05-unprotected.docx"),
+  await Document.toBuffer(noLongerProtected)
+);
 
 // ---------------------------------------------------------------------------
 // 6. Agile encryption — the whole DOCX is encrypted, not just settings.
 //    The output is an OLE2 (CFB) container that Word opens with the password.
 // ---------------------------------------------------------------------------
-const plainBuf = await Io.toBuffer(makeDoc());
+const plainBuf = await Document.toBuffer(makeDoc());
 fs.writeFileSync(path.join(outDir, "06-plain.docx"), plainBuf);
-const encrypted = await Io.toBuffer(makeDoc(), {
+const encrypted = await Document.toBuffer(makeDoc(), {
   password: "topsecret",
   encryption: { keyBits: 256, hashAlgorithm: "SHA-512", spinCount: 100_000 }
 });
@@ -112,7 +115,7 @@ fs.writeFileSync(path.join(outDir, "06-encrypted.docx"), encrypted);
 console.log(
   `  → 06-plain.docx (${plainBuf.length} bytes), 06-encrypted.docx (${encrypted.length} bytes)`
 );
-const reread = await Io.read(encrypted, { password: "topsecret" });
+const reread = await Document.read(encrypted, { password: "topsecret" });
 console.log("  read back with the password:", reread.body.length, "block(s)");
 // The same encryption for package bytes you already have.
 const alsoEncrypted = await WordCrypto.encrypt(plainBuf, "topsecret");

@@ -6,9 +6,11 @@
  * footnotes, code spans, horizontal rules, and more.
  */
 
-import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle } from "@word/core/argument-checks";
 import { withDisplayFields } from "@word/core/field-view";
 import { imageKeys } from "@word/core/image-keys";
+import { checkSchema, w } from "@word/core/option-schema";
 import { extractMathText, hyperlinkContent, isRun, symbolText } from "@word/core/text-utils";
 import { finalViewRun, isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
@@ -42,6 +44,17 @@ export interface MarkdownRenderOptions {
   readonly headingStyle?: "atx" | "setext";
 }
 
+const markdownRenderOptionsSchema = w.record({
+  includeImages: w.boolean().optional(),
+  includeNotes: w.boolean().optional(),
+  headingStyle: w.oneOf(["atx", "setext"]).optional()
+});
+const _markdownRenderOptionsMatch: SchemaMatches<
+  typeof markdownRenderOptionsSchema,
+  MarkdownRenderOptions
+> = true;
+void _markdownRenderOptionsMatch;
+
 /**
  * Convert a DocxDocument to a GFM-compatible Markdown string.
  *
@@ -51,7 +64,7 @@ export interface MarkdownRenderOptions {
  */
 export function renderToMarkdown(doc: DocxDocument, options?: MarkdownRenderOptions): string {
   checkHandle(doc, "document", "doc", "WordMarkdown.fromDocx");
-  checkRecord(options, "options", "WordMarkdown.fromDocx", { optional: true });
+  checkSchema(markdownRenderOptionsSchema.optional(), options, "WordMarkdown.fromDocx");
   // What a field's instruction holds is not shown.
   doc = withDisplayFields(doc);
   // Not finalized (`finalizeDocument`): all it adds is a proofing language and

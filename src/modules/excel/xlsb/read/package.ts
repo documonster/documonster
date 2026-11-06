@@ -52,7 +52,8 @@ import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/s
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
 import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
 import { decodeRange, encodeCol } from "@excel/utils/address";
-import { containerReadError } from "@excel/utils/container-errors";
+import { containerReadError, containerReadLimits } from "@excel/utils/container-errors";
+import type { ContainerReadOptions } from "@excel/utils/container-errors";
 import { mediaFromDrawingAnchors } from "@excel/utils/drawing-utils";
 import {
   attrByLocalName,
@@ -244,11 +245,15 @@ export interface XlsbReadOptions {
    */
   readonly formulas?: "preserve" | "cached" | "error";
   /**
-   * Container options. Every part is checked against the CRC-32 the package records for
-   * it, failing with an `ExcelFileError` whose `cause` is the archive's `ZipCrc32MismatchError`;
-   * `checkCrc32: false` reads a damaged package as far as it goes.
+   * Container limits and integrity checking — the `zip` options of `Workbook.read`, applied as the XLSX reader applies
+   * them ({@link containerReadLimits}). A limit hit is an `ExcelLimitExceededError`; a part that fails its CRC-32 an
+   * `ExcelFileError` whose `cause` is the archive's `ZipCrc32MismatchError`, unless `checkCrc32: false`.
    */
-  readonly zip?: { readonly checkCrc32?: boolean };
+  readonly zip?: ContainerReadOptions;
+  /** Refuse a worksheet with more rows than this, as the XLSX reader does (`ExcelLimitExceededError`). */
+  readonly maxRows?: number;
+  /** Refuse a worksheet with more columns than this, as the XLSX reader does (`ExcelLimitExceededError`). */
+  readonly maxCols?: number;
 }
 
 export async function parseXlsbPackage(
@@ -311,7 +316,7 @@ async function readInto(
 ): Promise<XlsbReadDiagnostics> {
   let entries: Awaited<ReturnType<typeof extractAll>>;
   try {
-    entries = await extractAll(bytes, { checkCrc32: options.zip?.checkCrc32 });
+    entries = await extractAll(bytes, containerReadLimits(options.zip));
   } catch (error) {
     // A damaged package, or bytes that are not one, reported as the XLSX reader reports them.
     throw containerReadError(error, source, "XLSB", bytes);
@@ -802,7 +807,11 @@ async function readInto(
       options.formulas === "cached" ? "cached" : "preserve",
       // The same epoch the cells are read against, so a date bound and the cells it constrains agree.
       date1904,
-      dynamicArrayCellMetadata
+      dynamicArrayCellMetadata,
+      {
+        ...(options.maxRows === undefined ? {} : { maxRows: options.maxRows }),
+        ...(options.maxCols === undefined ? {} : { maxCols: options.maxCols })
+      }
     );
     // **`"error"` is enforced per sheet, as soon as that sheet is read.** Checking the accumulated diagnostics at the
     // end would work, but it would first build the whole workbook the caller has just said they do not want, and the

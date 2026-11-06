@@ -69,7 +69,7 @@ import type {
   LayoutBorder,
   LayoutRichTextRun,
   PdfBordersData,
-  PdfRect
+  PdfLayoutRect
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
 import { emuToPt, charWidthToPixel } from "@utils/units";
@@ -1848,7 +1848,7 @@ interface LayoutCellInput {
   styleCell: PdfCellData | undefined;
   /** Supplies text, rich text and the hyperlink. */
   valueCell: PdfCellData | undefined;
-  rect: PdfRect;
+  rect: PdfLayoutRect;
   colSpan: number;
   rowSpan: number;
   /**

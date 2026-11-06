@@ -30,6 +30,9 @@ const svg = Mermaid.toSvg(`flowchart TD
   A[Start] --> B{Ready?}
   B -->|yes| C[Ship it]
   B -->|no| A`);
+
+// A PNG file directly, with the code points no font could draw
+const { png, uncoveredCodePoints } = Mermaid.toPng("flowchart LR\n  A --> B", { scale: 2 });
 ```
 
 ### Any backend, from the same list

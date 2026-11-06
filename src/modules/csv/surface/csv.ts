@@ -10,7 +10,7 @@
  * `export * as Csv`, tree-shaken per-member on rolldown / rspack.
  */
 
-import { parseCsvWithProgress } from "@csv/parse/async";
+import { parseCsvRows, parseCsvWithProgress } from "@csv/parse/async";
 import {
   CsvFormatterStream as CsvFormatterStreamImpl,
   CsvParserStream as CsvParserStreamImpl
@@ -29,7 +29,7 @@ export { isFormattedValue, quoted as forceQuote, unquoted as preventQuote } from
 
 // Parsing
 export { parseCsv as parse } from "@csv/parse/sync";
-export { parseCsvAsync as parseAsync, parseCsvRows as parseRows } from "@csv/parse/async";
+export { parseCsvAsync as parseAsync, parseCsvRows as parseStream } from "@csv/parse/async";
 
 // Formatting
 export { formatCsv as format } from "@csv/format/index";
@@ -95,6 +95,11 @@ export const generateAsync = csvGenerateAsync;
  * @deprecated Use {@link parseAsync} with `{ onProgress }`. Removed in 1.0.
  */
 export const parseWithProgress = parseCsvWithProgress;
+/**
+ * @deprecated Use {@link parseStream}. An incremental reader takes the `Stream` suffix, as
+ * `Xml.parseSaxStream` and `Workbook.readStream` do. Removed in 1.0.
+ */
+export const parseRows = parseCsvRows;
 /** @deprecated Use {@link forceQuote}. Removed in 1.0. */
 export const quoted = quotedImpl;
 /** @deprecated Use {@link preventQuote}. Removed in 1.0. */

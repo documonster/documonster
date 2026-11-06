@@ -4,7 +4,7 @@
  * stored as the `EncryptedPackage` stream of a CFB container beside its `EncryptionInfo` and the `\x06DataSpaces`
  * structure Office requires.
  *
- * One implementation for every module that reads or writes an Office package: Word (`Io.read`/`Io.toBuffer` and the
+ * One implementation for every module that reads or writes an Office package: Word (`Document.read`/`Document.toBuffer` and the
  * published `WordCrypto`) and Excel (`Workbook.read`/`toBuffer` and their siblings). Internal — each module checks its
  * own arguments, loads this module only when a password is involved, and reports {@link OfficeCryptoError} and
  * `CfbError` as its own errors.

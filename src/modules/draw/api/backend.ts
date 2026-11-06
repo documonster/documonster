@@ -8,14 +8,7 @@
  * one call.
  */
 
-import {
-  checkMatrix,
-  checkNode,
-  checkOptionalObject,
-  checkRasterCanvas,
-  checkSurface,
-  fail
-} from "@draw/arguments";
+import { at, checkMatrix, checkNode, checkRasterCanvas, checkSurface, fail } from "@draw/arguments";
 import type { BasicRasterCanvas } from "@draw/raster/canvas";
 import { fontHasGlyph as fontHasGlyphImpl } from "@draw/raster/glyph-outline";
 import type { RasterFont } from "@draw/raster/glyph-outline";
@@ -28,6 +21,8 @@ import type { RasterSurfaceOptions } from "@draw/raster/surface";
 import { renderNode as renderNodeImpl } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import type { DrawMatrix, DrawNode } from "@draw/types";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 export { SvgSurface } from "@draw/svg";
 export { BasicRasterCanvas } from "@draw/raster/canvas";
@@ -49,6 +44,21 @@ export function fontHasGlyph(font: RasterFont, codePoint: number): boolean {
   return fontHasGlyphImpl(font, codePoint);
 }
 
+const rasterSurfaceOptionsSchema = s.object(
+  {
+    scale: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional()
+  },
+  { expected: "an object" }
+);
+const _rasterSurfaceOptionsMatch: SchemaMatches<
+  typeof rasterSurfaceOptionsSchema,
+  { -readonly [K in keyof RasterSurfaceOptions]: RasterSurfaceOptions[K] }
+> = true;
+void _rasterSurfaceOptionsMatch;
+
 function checkPositiveInteger(where: string, field: string, value: unknown): void {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     fail(where, field, "a positive integer", value);
@@ -64,11 +74,11 @@ export function createRasterSurface(
   options?: RasterSurfaceOptions
 ): DrawSurface {
   checkRasterCanvas("Draw.Backend.createRasterSurface", canvas);
-  checkOptionalObject("Draw.Backend.createRasterSurface", "options", options);
-  const scale = options?.scale;
-  if (scale !== undefined && (typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0)) {
-    fail("Draw.Backend.createRasterSurface", "options.scale", "a finite number > 0", scale);
-  }
+  check(
+    rasterSurfaceOptionsSchema.optional(),
+    options,
+    at("Draw.Backend.createRasterSurface", "options")
+  );
   return createRasterSurfaceImpl(canvas, options);
 }
 

@@ -135,7 +135,7 @@ describe("Worksheet.addSparklineGroup", () => {
     // Populate data
     for (let r = 1; r <= 3; r++) {
       for (let c = 1; c <= 6; c++) {
-        Cell.setValue(ws, r, c, r * c);
+        Cell.setValue(ws, { row: r, col: c }, r * c);
       }
     }
     addSparklineGroup(ws, {
@@ -209,7 +209,7 @@ describe("Worksheet.addSparklineGroup", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let c = 1; c <= 6; c++) {
-      Cell.setValue(ws, 1, c, c * 10);
+      Cell.setValue(ws, { row: 1, col: c }, c * 10);
     }
     addSparklineGroup(ws, {
       type: "line",
@@ -229,8 +229,8 @@ describe("Worksheet.addSparklineGroup", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let c = 1; c <= 6; c++) {
-      Cell.setValue(ws, 1, c, c * 10);
-      Cell.setValue(ws, 2, c, c * 5);
+      Cell.setValue(ws, { row: 1, col: c }, c * 10);
+      Cell.setValue(ws, { row: 2, col: c }, c * 5);
     }
     addSparklineGroup(ws, {
       type: "column",
@@ -412,9 +412,9 @@ describe("Sparkline edge cases", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let c = 1; c <= 6; c++) {
-      Cell.setValue(ws, 1, c, c * 10);
-      Cell.setValue(ws, 2, c, c * 5);
-      Cell.setValue(ws, 3, c, c * -2);
+      Cell.setValue(ws, { row: 1, col: c }, c * 10);
+      Cell.setValue(ws, { row: 2, col: c }, c * 5);
+      Cell.setValue(ws, { row: 3, col: c }, c * -2);
     }
     addSparklineGroup(ws, {
       type: "line",

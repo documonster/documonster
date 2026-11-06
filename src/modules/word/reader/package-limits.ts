@@ -1,29 +1,36 @@
 /**
  * The limits a {@link DocxSecurityPolicy} sets on a package, applied the same
- * way by every reader of one — `Io.read`, the `Package` functions — so a
+ * way by every reader of one — `Document.read`, the `Package` functions — so a
  * limit cannot hold in one and not in the other.
  */
 
 import { parseFlatOpc } from "@word/convert/flat-opc";
-import { checkBoolean, checkRecord, checkString } from "@word/core/argument-checks";
+import { checkSchema, model, w } from "@word/core/option-schema";
 import { DocxLimitExceededError } from "@word/errors";
 import { checkSecurityPolicy } from "@word/security/policy";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 
 /**
- * The read options every reader of a package takes (`Io.read`, the `Package`
+ * The keys of `ReadDocxOptions`, which every reader of a package takes. `securityPolicy` is
+ * checked by {@link checkSecurityPolicy}, after them: `null` has always read as the default policy.
+ */
+export const readOptionsShape = {
+  password: w.string().optional(),
+  securityPolicy: model<DocxSecurityPolicy>(),
+  checkCrc32: w.boolean().optional()
+};
+
+const readOptionsSchema = w.record(readOptionsShape).optional();
+
+/**
+ * The read options every reader of a package takes (`Document.read`, the `Package`
  * functions, the streaming reader), checked in the name of `where`.
  */
 export function checkReadOptions(options: unknown, where: string): void {
-  checkRecord(options, "options", where, { optional: true });
-  const o = options as
-    | { password?: unknown; checkCrc32?: unknown; securityPolicy?: unknown }
-    | undefined;
-  checkString(o?.password, "options.password", where, { optional: true });
-  checkBoolean(o?.checkCrc32, "options.checkCrc32", where, { optional: true });
-  // `null` has always read as the default policy.
-  if (o?.securityPolicy != null) {
-    checkSecurityPolicy(o.securityPolicy, "options.securityPolicy", where);
+  checkSchema(readOptionsSchema, options, where);
+  const policy = options?.securityPolicy;
+  if (policy != null) {
+    checkSecurityPolicy(policy, "options.securityPolicy", where);
   }
 }
 

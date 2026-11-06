@@ -62,6 +62,9 @@ export interface MarkdownParseOptions {
   /**
    * Maximum number of data rows to parse (excludes header).
    * Useful for previewing large tables.
+   *
+   * **A preview, not a guard:** the rows past it are left unread; nothing is thrown. (Excel's
+   * `XlsxReadOptions.maxRows` is the opposite — it refuses a sheet that is longer.)
    */
   maxRows?: number;
 

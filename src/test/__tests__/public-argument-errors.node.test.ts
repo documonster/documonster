@@ -111,7 +111,6 @@ const EXEMPT: Record<string, string> = {
   "Xml.walk": DEPRECATED,
   "Archive.editZip": DEPRECATED,
   "Archive.editZipUrl": DEPRECATED,
-  "Archive.randomBytes": DEPRECATED,
   "Archive.unzip": DEPRECATED,
   "Archive.zip": DEPRECATED,
   "Archive.zipCryptoDecrypt": DEPRECATED,
@@ -186,7 +185,11 @@ function faultOf(error: unknown, owns: ErrorGuard): string | undefined {
   return undefined;
 }
 
-/** Settle what a call returned, as far as a wrong argument would show: a rejection, or a throw on first pull. */
+/**
+ * Settle what a call returned, as far as a wrong argument would show: a rejection, or a throw on
+ * first pull — of an async iterable, or of a synchronous iterator such as a generator's, whose body
+ * (and so any check in it) runs only when it is pulled. A pulled iterator is closed again.
+ */
 async function settle(result: unknown): Promise<void> {
   if (result instanceof Promise) {
     // A promise still pending after a moment is not a leak: an argument check rejects at once.
@@ -197,6 +200,13 @@ async function settle(result: unknown): Promise<void> {
   ) {
     const it = (result as AsyncIterable<unknown>)[Symbol.asyncIterator]();
     await Promise.race([it.next(), new Promise(resolve => setTimeout(resolve, 10))]);
+  } else if (result && typeof (result as { next?: unknown }).next === "function") {
+    const it = result as Iterator<unknown>;
+    try {
+      it.next();
+    } finally {
+      it.return?.();
+    }
   }
 }
 
@@ -268,6 +278,18 @@ describe("a wrong argument to a public function is the module's own error", () =
     },
     120_000
   );
+
+  it("reaches a check a generator runs only when it is first pulled", async () => {
+    function* checksLate(value?: unknown): Generator<number> {
+      if (typeof value !== "number") {
+        throw new TypeError("not checked");
+      }
+      yield value;
+    }
+    expect((await leakOf(checksLate, false, () => true))?.fault).toBe(
+      "not one of the library's errors"
+    );
+  });
 
   it("every exemption still names a member, and that member still needs it", () => {
     const stale = Object.keys(EXEMPT).filter(name => !seen.has(name) || !leaksByName.has(name));

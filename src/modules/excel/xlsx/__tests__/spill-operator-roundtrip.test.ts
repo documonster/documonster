@@ -40,12 +40,14 @@ const FORMULAS = [
 describe.each(["xlsx", "xlsb"] as const)("the spill-range operator through %s", format => {
   it("round-trips a cell formula exactly", async () => {
     const { wb, ws } = book();
-    FORMULAS.forEach((formula, i) => Cell.setValue(ws, i + 1, 3, { formula: `=${formula}` }));
+    FORMULAS.forEach((formula, i) =>
+      Cell.setValue(ws, { row: i + 1, col: 3 }, { formula: `=${formula}` })
+    );
     const back = Workbook.getWorksheet(
       await Workbook.read(await Workbook.toBuffer(wb, { format })),
       "S"
     )!;
-    expect(FORMULAS.map((_, i) => Cell.getFormula(back, i + 1, 3))).toEqual(FORMULAS);
+    expect(FORMULAS.map((_, i) => Cell.getFormula(back, { row: i + 1, col: 3 }))).toEqual(FORMULAS);
   });
 
   it("round-trips a defined name, a conditional format and a validation", async () => {

@@ -24,6 +24,7 @@
  */
 
 import { checkHandle, checkString, invalidArgument } from "@word/core/argument-checks";
+import { ownTree } from "@word/core/ownership";
 import { hyperlinkContent, isHyperlink, isRun } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type {
@@ -72,6 +73,7 @@ export function replaceText(
     invalidArgument(where, "search", "a string or a RegExp", search);
   }
   checkString(replacement, "replacement", where);
+  ownTree(doc);
   let totalCount = 0;
 
   walkDocument(

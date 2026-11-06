@@ -2,7 +2,7 @@ import {
   AbortError,
   Archive,
   ArchiveError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   ZipCrc32MismatchError,
   ZipDecryptionError,
   ZipEntrySizeMismatchError,
@@ -39,7 +39,7 @@ describe("isArchiveError", () => {
       new ArchiveFileTooLargeError("a.txt", "too big"),
       new ZipUnsupportedCompressionError(99),
       new ZipEntrySizeMismatchError("a.txt", 1, 2, "too-many-bytes"),
-      new ArchiveLimitError("maxEntries", 1)
+      new ArchiveLimitExceededError("maxEntries", 1)
     ];
     for (const error of errors) {
       expect(isArchiveError(error), error.name).toBe(true);

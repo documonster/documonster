@@ -9,13 +9,7 @@
  * bytes the caller has located, and the DER decoder used to read a CMS structure back.
  */
 
-import {
-  checkOptionalObject,
-  checkOptionalString,
-  isByteArray,
-  pdfBytes as readPdfBytes,
-  readerBytes
-} from "@pdf/core/arguments";
+import { at, isByteArray, pdfBytes as readPdfBytes, readerBytes } from "@pdf/core/arguments";
 import { checkSigningMaterial } from "@pdf/core/asn1";
 import type { Asn1Node } from "@pdf/core/asn1";
 import {
@@ -25,16 +19,45 @@ import {
   verifyPdfSignature
 } from "@pdf/core/digital-signature";
 import type { PdfSignatureCheck, SignPdfOptions } from "@pdf/core/digital-signature";
-import { PdfArgumentError, PdfSignaturePlaceholderMissingError } from "@pdf/errors";
+import { PdfSignaturePlaceholderMissingError } from "@pdf/errors";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
-function checkBytes(where: string, field: string, value: unknown): void {
-  if (!isByteArray(value)) {
-    throw new PdfArgumentError(
-      field,
-      `${where}: ${field} must be a Uint8Array, got ${value === null ? "null" : typeof value}`
-    );
-  }
-}
+const derBytes = () => s.custom<Uint8Array>(isByteArray, "a Uint8Array");
+
+const signerSchema = s.object(
+  {
+    name: s.string().optional(),
+    reason: s.string().optional(),
+    location: s.string().optional(),
+    contactInfo: s.string().optional()
+  },
+  { expected: "an options object" }
+);
+const _signerMatch: SchemaMatches<
+  typeof signerSchema,
+  NonNullable<Parameters<typeof buildDictPlaceholder>[0]>
+> = true;
+void _signerMatch;
+
+const signPdfOptionsSchema = s.object(
+  { certificate: derBytes(), privateKey: derBytes() },
+  { expected: "an options object" }
+);
+const _signPdfOptionsMatch: SchemaMatches<typeof signPdfOptionsSchema, SignPdfOptions> = true;
+void _signPdfOptionsMatch;
+
+const SIGNATURE_HEX = "the hex string of /Contents, without its angle brackets";
+const signatureHexSchema = s
+  .string({ expected: SIGNATURE_HEX })
+  .refine(v => /^[0-9a-f]*$/i.test(v), SIGNATURE_HEX);
+
+// A `NaN` offset used to be reported as "PDF content was modified after signing".
+const byteRangeSchema = s.custom<readonly [number, number, number, number]>(
+  v =>
+    Array.isArray(v) && v.length === 4 && v.every(value => Number.isInteger(value) && value >= 0),
+  "four integers >= 0, [offset1, length1, offset2, length2]"
+);
 
 /**
  * The signature dictionary — `/Contents` zero-filled placeholder and a `/ByteRange` to patch —
@@ -49,10 +72,7 @@ export function buildDictPlaceholder(options?: {
   contactInfo?: string;
 }): { dictString: string; placeholder: string } {
   const where = "Pdf.Signature.buildDictPlaceholder";
-  checkOptionalObject(where, "options", options);
-  for (const field of ["name", "reason", "location", "contactInfo"] as const) {
-    checkOptionalString(where, `options.${field}`, options?.[field]);
-  }
+  check(signerSchema.optional(), options, at(where, "options"));
   return buildSignatureDictPlaceholder(options);
 }
 
@@ -86,23 +106,8 @@ export async function verify(
 ): Promise<PdfSignatureCheck> {
   const where = "Pdf.Signature.verify";
   const data = readPdfBytes(where, "pdfData", pdfData);
-  if (typeof signatureHex !== "string" || !/^[0-9a-f]*$/i.test(signatureHex)) {
-    throw new PdfArgumentError(
-      "signatureHex",
-      `${where}: signatureHex must be the hex string of /Contents, without its angle brackets`
-    );
-  }
-  if (
-    !Array.isArray(byteRange) ||
-    byteRange.length !== 4 ||
-    !byteRange.every(value => Number.isInteger(value) && value >= 0)
-  ) {
-    // A `NaN` offset used to be reported as "PDF content was modified after signing".
-    throw new PdfArgumentError(
-      "byteRange",
-      `${where}: byteRange must be four integers >= 0, [offset1, length1, offset2, length2]`
-    );
-  }
+  check(signatureHexSchema, signatureHex, at(where, "signatureHex"));
+  check(byteRangeSchema, byteRange, at(where, "byteRange"));
   const result = await verifyPdfSignature(
     data,
     signatureHex,
@@ -137,9 +142,7 @@ export async function fillPlaceholder(
 ): Promise<Uint8Array> {
   const where = "Pdf.Signature.fillPlaceholder";
   const data = readPdfBytes(where, "pdfBytes", pdfBytes);
-  checkOptionalObject(where, "options", options ?? null);
-  checkBytes(where, "options.certificate", options.certificate);
-  checkBytes(where, "options.privateKey", options.privateKey);
+  check(signPdfOptionsSchema, options, at(where, "options"));
   checkSigningMaterial(where, options.certificate, options.privateKey);
   try {
     return await signPdf(data, options.certificate, options.privateKey);

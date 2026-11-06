@@ -14,7 +14,7 @@
 import { readFile } from "node:fs/promises";
 
 import { Pdf } from "documonster/pdf";
-import { Io, Query } from "documonster/word";
+import { Document, Query } from "documonster/word";
 import { WordMarkdown } from "documonster/word/markdown";
 import { z } from "zod";
 
@@ -97,7 +97,7 @@ export const docReadTool = defineTool({
 });
 
 async function readWord(resolved: string, args: DocReadArgs): Promise<string> {
-  const doc = await Io.readFile(resolved).catch((cause: unknown) => {
+  const doc = await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${args.path} as a Word document`,
       "If it is password-protected, that is not supported here yet. Run doc_inspect to confirm the container type — a CFB file is either a legacy .doc or an encrypted .docx.",

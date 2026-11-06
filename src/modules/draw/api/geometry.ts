@@ -8,12 +8,11 @@
  */
 
 import {
+  at,
   checkBox,
   checkFinite,
   checkNonNegative,
   checkOptionalNonNegative,
-  checkOptionalObject,
-  checkOptionalPositive,
   checkPaint,
   checkPathCommands,
   checkPoint,
@@ -35,6 +34,8 @@ import type {
   DrawPoint,
   DrawSubpath
 } from "@draw/types";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 function checkBoolean(where: string, field: string, value: unknown): void {
   if (typeof value !== "boolean") {
@@ -71,6 +72,21 @@ export function arcToCubics(
   return arcToCubicsImpl(from, rx, ry, rotationDegrees, largeArc, sweep, to);
 }
 
+const flattenPathOptionsSchema = s.object(
+  {
+    scale: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional()
+  },
+  { expected: "an object" }
+);
+const _flattenPathOptionsMatch: SchemaMatches<
+  typeof flattenPathOptionsSchema,
+  { -readonly [K in keyof DrawFlattenPathOptions]: DrawFlattenPathOptions[K] }
+> = true;
+void _flattenPathOptionsMatch;
+
 /**
  * Flatten a path to polylines, one per subpath, keeping whether each closed.
  * `options.scale` multiplies the output points (default 1), so a supersampling backend
@@ -81,12 +97,14 @@ export function flattenPath(
   options?: DrawFlattenPathOptions
 ): DrawSubpath[] {
   checkPathCommands("Draw.Geometry.flattenPath", "commands", commands);
-  checkOptionalObject("Draw.Geometry.flattenPath", "options", options);
-  checkOptionalPositive("Draw.Geometry.flattenPath", "options.scale", options?.scale);
+  check(flattenPathOptionsSchema.optional(), options, at("Draw.Geometry.flattenPath", "options"));
   return flattenPathImpl(commands, options?.scale);
 }
 
-/** A rect node from a box, with an optional corner radius. */
+/**
+ * A rect node from a box, with an optional corner radius — the `rx` of SVG's `<rect>` and of the
+ * `rect` node itself, kept positional for the same reason {@link arcToCubics} keeps its flags.
+ */
 export function createRectNode(box: DrawBox, paint: DrawPaint, rx?: number): DrawNode {
   checkBox("Draw.Geometry.createRectNode", "box", box);
   checkPaint("Draw.Geometry.createRectNode", "paint", paint);

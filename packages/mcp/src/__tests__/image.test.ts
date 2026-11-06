@@ -15,7 +15,7 @@ import path from "node:path";
 
 import { Archive, Compression } from "documonster/archive";
 import { Image, Workbook } from "documonster/excel";
-import { Build, Document, Io, Query, Template } from "documonster/word";
+import { Build, Document, Query, Template } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { formatToolError } from "../errors.js";
@@ -675,7 +675,7 @@ describe("template_fill images", () => {
     Document.addParagraph(doc, "Invoice for {{client}}");
     Document.addParagraph(doc, "{{%logo}}");
     Document.addParagraph(doc, "{{%flow}}");
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
   }
 
   it("fills an image placeholder from a file and from a diagram", async () => {
@@ -694,7 +694,7 @@ describe("template_fill images", () => {
     expect(text).toContain("flowchart — 3 node(s), 2 edge(s)");
     expect(text).toContain("every placeholder was filled");
 
-    const filled = await Io.readFile(path.join(fx.root, "filled.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "filled.docx"));
     // Two real media parts, not two lines of JSON where the pictures should be.
     expect(filled.images).toHaveLength(2);
     const body = Query.getText(filled);
@@ -717,7 +717,7 @@ describe("template_fill images", () => {
       data: { client: "Acme" },
       images: { logo: { from: "logo.png" }, flow: { source: FLOW } }
     });
-    const filled = await Io.readFile(path.join(fx.root, "filled.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "filled.docx"));
     expect(Query.getText(filled)).not.toContain("{{");
   });
 
@@ -725,7 +725,7 @@ describe("template_fill images", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Hello {{name}}");
-    await Io.writeFile(doc, path.join(fx.root, "text.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "text.docx"));
 
     const text = await run(templateFillTool, fx, {
       template: "text.docx",
@@ -733,7 +733,7 @@ describe("template_fill images", () => {
       data: { name: "World" }
     });
     expect(text).toContain("every placeholder was filled");
-    expect(Query.getText(await Io.readFile(path.join(fx.root, "out.docx")))).toContain(
+    expect(Query.getText(await Document.readFile(path.join(fx.root, "out.docx")))).toContain(
       "Hello World"
     );
   });
@@ -758,7 +758,7 @@ describe("template_fill images", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Hello {{name}}");
-    await Io.writeFile(doc, path.join(fx.root, "text.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "text.docx"));
     await writePng(fx, "logo.png", 96, 48);
     await expectToolError(
       run(templateFillTool, fx, {
@@ -783,7 +783,7 @@ describe("template_fill images", () => {
     });
     // 2000 px → 1500 pt natural, capped to the 468 pt text column.
     expect(text).toContain("468×117 pt");
-    const filled = await Io.readFile(path.join(fx.root, "capped.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "capped.docx"));
     const widths = filled.body
       .flatMap(block => ("children" in block ? block.children : []))
       .flatMap(run_ => ("content" in run_ ? run_.content : []))
@@ -799,7 +799,7 @@ describe("template_inspect", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Invoice for {{client}}");
     Document.addParagraph(doc, "{{%logo}}");
-    await Io.writeFile(doc, path.join(fx.root, "tpl.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "tpl.docx"));
 
     const text = await run(templateInspectTool, fx, { path: "tpl.docx" });
     expect(text).toContain("image placeholders: 1");
@@ -923,7 +923,7 @@ describe("reading images back", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Invoice for {{client}}");
     Document.addParagraph(doc, "{{%logo}}");
-    await Io.writeFile(doc, path.join(fx.root, "tpl.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "tpl.docx"));
     await writePng(fx, "logo.png", 96, 48);
     await run(templateFillTool, fx, {
       template: "tpl.docx",
@@ -949,7 +949,7 @@ describe("template images that cannot be filled", () => {
     for (const paragraph of paragraphs) {
       Document.addParagraph(doc, paragraph);
     }
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
   }
 
   it("refuses a placeholder scoped to a {{#each}} item, and says why", async () => {
@@ -1012,7 +1012,9 @@ describe("template images that cannot be filled", () => {
     });
     expect(off).toContain("**not in the output**");
     expect(off).toContain("Do not report it as added");
-    expect(Query.getText(await Io.readFile(path.join(fx.root, "off.docx")))).not.toContain("{{");
+    expect(Query.getText(await Document.readFile(path.join(fx.root, "off.docx")))).not.toContain(
+      "{{"
+    );
 
     const on = await run(templateFillTool, fx, {
       template: "cond.docx",
@@ -1030,7 +1032,7 @@ describe("template images that cannot be filled", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addTable(doc, [["{{%logo}}", "Acme Ltd"]]);
-    await Io.writeFile(doc, path.join(fx.root, "table.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "table.docx"));
     await writePng(fx, "logo.png", 96, 48);
 
     const text = await run(templateFillTool, fx, {
@@ -1040,7 +1042,7 @@ describe("template images that cannot be filled", () => {
       images: { logo: { from: "logo.png" } }
     });
     expect(text).not.toContain("could not be verified");
-    expect((await Io.readFile(path.join(fx.root, "out.docx"))).images).toHaveLength(1);
+    expect((await Document.readFile(path.join(fx.root, "out.docx"))).images).toHaveLength(1);
   });
 
   it("fills a placeholder in a header, and does not then prune it", async () => {
@@ -1051,7 +1053,7 @@ describe("template images that cannot be filled", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Body text");
     Document.setHeader(doc, "default", { children: [Build.textParagraph("{{%logo}}")] });
-    await Io.writeFile(doc, path.join(fx.root, "header.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "header.docx"));
     await writePng(fx, "logo.png", 96, 48);
 
     const text = await run(templateFillTool, fx, {
@@ -1078,7 +1080,7 @@ describe("template images that cannot be filled", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Body");
     Document.setHeader(doc, "default", { children: [Build.textParagraph("{{%logo}}")] });
-    await Io.writeFile(doc, path.join(fx.root, "hdr.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "hdr.docx"));
     await writePng(fx, "logo.png", 96, 48);
     await run(templateFillTool, fx, {
       template: "hdr.docx",
@@ -1087,7 +1089,7 @@ describe("template images that cannot be filled", () => {
       images: { logo: { from: "logo.png" } }
     });
 
-    const reopened = await Io.readFile(path.join(fx.root, "out.docx"));
+    const reopened = await Document.readFile(path.join(fx.root, "out.docx"));
     const headerRun = [...(reopened.headers?.values() ?? [])]
       .flatMap(part => part.content.children)
       .flatMap(block => ("children" in block ? block.children : []))
@@ -1113,7 +1115,7 @@ describe("template images that cannot be filled", () => {
       images: { logo: { from: "logo.png" } }
     });
     expect(text).not.toContain("not in the output");
-    expect((await Io.readFile(path.join(fx.root, "out.docx"))).images).toHaveLength(1);
+    expect((await Document.readFile(path.join(fx.root, "out.docx"))).images).toHaveLength(1);
   });
 });
 
@@ -1131,7 +1133,7 @@ describe("template media integrity", () => {
     for (const paragraph of paragraphs) {
       Document.addParagraph(doc, paragraph);
     }
-    await Io.writeFile(doc, path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
   }
 
   it("refuses a name that is both a text field and an image", async () => {
@@ -1166,7 +1168,7 @@ describe("template media integrity", () => {
       data: {},
       images: { "client.logo": { from: "logo.png" } }
     });
-    const filled = await Io.readFile(path.join(fx.root, "out.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "out.docx"));
     expect(filled.images).toHaveLength(1);
     expect(Query.getText(filled)).not.toContain("{{");
   });
@@ -1181,7 +1183,7 @@ describe("template media integrity", () => {
       data: { client: { name: "Acme" } },
       images: { "client.logo": { from: "logo.png" } }
     });
-    const filled = await Io.readFile(path.join(fx.root, "out.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "out.docx"));
     expect(Query.getText(filled)).toContain("Acme");
     expect(filled.images).toHaveLength(1);
   });
@@ -1203,7 +1205,7 @@ describe("template media integrity", () => {
     });
     expect(text).not.toContain("could not be verified");
 
-    const filled = await Io.readFile(path.join(fx.root, "out.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "out.docx"));
     expect(filled.images).toHaveLength(2);
     const names = (filled.images ?? []).map(entry => entry.fileName);
     expect(new Set(names).size, `media names collided: ${names.join(", ")}`).toBe(2);
@@ -1224,7 +1226,7 @@ describe("template media integrity", () => {
       457200
     );
     Document.addParagraph(doc, "{{%logo}}");
-    await Io.writeFile(doc, path.join(fx.root, "has-media.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "has-media.docx"));
 
     await run(templateFillTool, fx, {
       template: "has-media.docx",
@@ -1232,7 +1234,7 @@ describe("template media integrity", () => {
       data: {},
       images: { logo: { from: "logo.png" } }
     });
-    const filled = await Io.readFile(path.join(fx.root, "out.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "out.docx"));
     const names = (filled.images ?? []).map(entry => entry.fileName);
     expect(new Set(names).size).toBe(names.length);
     expect(names.length).toBe(2);
@@ -1293,7 +1295,7 @@ describe("template media integrity", () => {
     expect(text).not.toContain("could not be verified");
 
     // And the relationship really resolves in the package.
-    const filled = await Io.readFile(path.join(fx.root, "out.docx"));
+    const filled = await Document.readFile(path.join(fx.root, "out.docx"));
     const rIds = new Set((filled.images ?? []).map(entry => entry.rId));
     const referenced = filled.body
       .flatMap(block => ("children" in block ? block.children : []))
@@ -1379,7 +1381,7 @@ describe("markdown fence scanning corrections", () => {
       markdown: "Intro\r\n\r\n```mermaid\r\nflowchart LR\r\n  A --> B\r\n```\r\n\r\nEnd\r\n"
     });
     expect(text).toContain("1 mermaid diagram(s) rendered");
-    expect((await Io.readFile(path.join(fx.root, "crlf.docx"))).images).toHaveLength(1);
+    expect((await Document.readFile(path.join(fx.root, "crlf.docx"))).images).toHaveLength(1);
   });
 
   it("treats a fence inside another fenced block as the example it is", async () => {
@@ -1401,7 +1403,7 @@ describe("markdown fence scanning corrections", () => {
     ].join("\n");
     const text = await run(docWriteTool, fx, { path: "doc.docx", markdown });
     expect(text).not.toContain("mermaid diagram(s) rendered");
-    const doc = await Io.readFile(path.join(fx.root, "doc.docx"));
+    const doc = await Document.readFile(path.join(fx.root, "doc.docx"));
     expect(doc.images ?? []).toHaveLength(0);
     // The example survives as text, which is the whole point of writing it.
     expect(Query.getText(doc)).toContain("flowchart LR");
@@ -1655,7 +1657,7 @@ describe("image integrity", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "{{%logo}}");
-    await Io.writeFile(doc, path.join(fx.root, "tpl.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "tpl.docx"));
     await writePng(fx, "whole.png", 32, 32);
     const whole = new Uint8Array(await readFile(path.join(fx.root, "whole.png")));
     await writeFile(path.join(fx.root, "cut.png"), whole.subarray(0, whole.length - 20));

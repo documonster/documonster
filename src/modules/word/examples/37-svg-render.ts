@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Layout } from "../index";
+import { Document, Build, Layout } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -75,7 +75,7 @@ console.log(
 );
 
 // Save the source .docx so we can compare with the SVG visually
-const docxBuf = await Io.toBuffer(d);
+const docxBuf = await Document.toBuffer(d);
 fs.writeFileSync(path.join(outDir, "00-source.docx"), docxBuf);
 
 // ---------------------------------------------------------------------------

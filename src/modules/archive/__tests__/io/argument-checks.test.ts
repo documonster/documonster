@@ -92,6 +92,8 @@ describe("Archive.Crypto", () => {
   it("refuses a size that is not a non-negative integer", () => {
     expect(() => Archive.Crypto.getAesEncryptedSize(Number.NaN, 256)).toThrow(ArchiveError);
     expect(() => Archive.randomBytes(-1)).toThrow(ArchiveError);
+    // No length is not zero bytes.
+    expect(() => (Archive.randomBytes as () => Uint8Array)()).toThrow(ArchiveError);
   });
 
   it("refuses an AES version other than AE-1 or AE-2", () => {

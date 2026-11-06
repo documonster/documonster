@@ -271,7 +271,7 @@ async function buildSheet(
       createReadStream(source, "utf8"),
       spec.csvDelimiter === undefined ? undefined : { delimiter: spec.csvDelimiter }
     );
-    Worksheet.setModel(ws, { ...Worksheet.getModel(ws), name: spec.name });
+    Worksheet.setName(ws, spec.name);
     report.push(
       `- sheet ${JSON.stringify(spec.name)}: loaded ${Row.getActualCount(ws)} row(s) from ${spec.fromCsv} server-side`
     );
@@ -290,7 +290,7 @@ async function buildSheet(
     // previous value.
     for (const [rowOffset, row] of spec.rows.entries()) {
       for (const [columnOffset, value] of row.entries()) {
-        Cell.setValue(ws, rowOffset + 1, columnOffset + 1, value);
+        Cell.setValue(ws, { row: rowOffset + 1, col: columnOffset + 1 }, value);
       }
     }
   }
@@ -407,22 +407,30 @@ function applyStyle(ws: SheetHandle, range: string, style: z.infer<typeof styleS
   for (let row = window.top; row <= window.bottom; row += 1) {
     for (let column = window.left; column <= window.right; column += 1) {
       if (style.bold !== undefined || style.italic !== undefined || style.fontColor !== undefined) {
-        Cell.setFont(ws, row, column, {
-          ...(Cell.getFont(ws, row, column) ?? {}),
-          ...(style.bold === undefined ? {} : { bold: style.bold }),
-          ...(style.italic === undefined ? {} : { italic: style.italic }),
-          ...(style.fontColor === undefined ? {} : { color: { argb: toArgb(style.fontColor) } })
-        });
+        Cell.setFont(
+          ws,
+          { row, col: column },
+          {
+            ...(Cell.getFont(ws, { row, col: column }) ?? {}),
+            ...(style.bold === undefined ? {} : { bold: style.bold }),
+            ...(style.italic === undefined ? {} : { italic: style.italic }),
+            ...(style.fontColor === undefined ? {} : { color: { argb: toArgb(style.fontColor) } })
+          }
+        );
       }
       if (style.fillColor !== undefined) {
-        Cell.setFill(ws, row, column, {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: toArgb(style.fillColor) }
-        });
+        Cell.setFill(
+          ws,
+          { row, col: column },
+          {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: toArgb(style.fillColor) }
+          }
+        );
       }
       if (style.numFmt !== undefined) {
-        Cell.setNumFmt(ws, row, column, style.numFmt);
+        Cell.setNumFmt(ws, { row, col: column }, style.numFmt);
       }
     }
   }

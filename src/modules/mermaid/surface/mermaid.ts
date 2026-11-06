@@ -3,7 +3,7 @@
  * a laid-out graph.
  *
  * `import { Mermaid } from "documonster/mermaid"` →
- *   `Mermaid.toSvg(source)`, `Mermaid.toDrawList(source)`, `Mermaid.parse(source)`,
+ *   `Mermaid.toSvg(source)`, `Mermaid.toPng(source)`, `Mermaid.toDrawList(source)`, `Mermaid.parse(source)`,
  *   `Mermaid.layoutGraph(diagram)`, `Mermaid.resolveTheme(options)`,
  *   `Mermaid.createCenteredText(box, lines, style)`.
  *
@@ -15,13 +15,13 @@
 
 import type { DrawNode, DrawTextStyle } from "@draw/types";
 import { DEFAULT_TEXT_FAMILY } from "@draw/types";
-import { checkTextBox } from "@mermaid/arguments";
-import { MermaidArgumentError } from "@mermaid/errors";
+import { checkTextBox, checkTextStyleSize } from "@mermaid/arguments";
 import { centeredText } from "@mermaid/render/shared";
 
 export {
   layoutGraph,
   mermaidToDrawList as toDrawList,
+  mermaidToPng as toPng,
   mermaidToSvg as toSvg
 } from "@mermaid/diagram";
 export { parseMermaid as parse } from "@mermaid/parse/index";
@@ -45,15 +45,7 @@ export function createCenteredText(
 ): DrawNode {
   const where = "Mermaid.createCenteredText";
   checkTextBox(where, box, lines);
-  if (typeof style !== "object" || style === null) {
-    throw new MermaidArgumentError("style", `${where}: style must be a text style { size, … }.`);
-  }
-  if (typeof style.size !== "number" || !(style.size > 0) || style.size === Infinity) {
-    throw new MermaidArgumentError(
-      "style.size",
-      `${where}: style.size must be a finite number > 0; got ${String(style.size)}.`
-    );
-  }
+  checkTextStyleSize(where, style);
   const { size, family, fill, anchor: _anchor, ...extra } = style;
   return centeredText(box, lines, size, family ?? DEFAULT_TEXT_FAMILY, fill ?? BLACK, extra);
 }

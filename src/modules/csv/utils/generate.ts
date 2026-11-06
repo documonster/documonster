@@ -13,6 +13,9 @@
  */
 
 import { CsvArgumentError } from "@csv/errors";
+import { argumentError } from "@csv/utils/check-options";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { uuidV4 } from "@utils/uuid";
 
 // =============================================================================
@@ -571,85 +574,85 @@ function generateHeaderNames(
   return headerNames;
 }
 
+const finite = () => s.number({ finite: true }).optional();
+const count = () => s.number({ integer: true, min: 0 }).optional();
+
+const generateOptionsSchema = s.object(
+  {
+    columns: s
+      .union(
+        [
+          s.number({ integer: true, min: 0 }),
+          s.readonlyArray(
+            s.custom<ColumnDef>(
+              def => {
+                const type = columnType(def);
+                return typeof type === "function" || BUILTIN_COLUMN_TYPES.has(type as string);
+              },
+              "a built-in column type, a function or { type }",
+              { got: columnType }
+            )
+          )
+        ],
+        { expected: "a column count or an array of column definitions" }
+      )
+      .optional(),
+    rows: s
+      .custom<number>(
+        v => v === Infinity || v === -1 || (Number.isInteger(v) && (v as number) >= 0),
+        "an integer >= 0"
+      )
+      .optional(),
+    seed: finite(),
+    headers: s
+      .union([s.boolean(), s.readonlyArray(s.string())], {
+        expected: "true, false or an array of header names"
+      })
+      .optional(),
+    delimiter: s.string({ nonEmpty: true }).optional(),
+    lineEnding: s.string({ nonEmpty: true }).optional(),
+    eof: s.string().optional(),
+    bom: s.boolean().optional(),
+    objectMode: s.boolean().optional(),
+    transform: s.function<CsvGenerateOptions["transform"]>().optional(),
+    duration: finite(),
+    until: s
+      .custom<Date | number>(
+        v => (v instanceof Date ? Number.isFinite(v.getTime()) : Number.isFinite(v)),
+        "a valid Date or timestamp"
+      )
+      .optional(),
+    stringLength: count(),
+    intMin: finite(),
+    intMax: finite(),
+    floatMin: finite(),
+    floatMax: finite(),
+    // `toFixed` accepts 0 to 100 digits.
+    floatPrecision: s
+      .number({ integer: true, min: 0 })
+      .refine(v => v <= 100, "an integer from 0 to 100")
+      .optional(),
+    quote: s
+      .oneOf(["auto", "always", "never"], { expected: '"auto", "always" or "never"' })
+      .optional(),
+    skipRows: count()
+  },
+  { expected: "an options object" }
+);
+const _generateOptionsMatch: SchemaMatches<typeof generateOptionsSchema, CsvGenerateOptions> = true;
+void _generateOptionsMatch;
+
+/** The type a column definition names: itself, or the `type` of a `{ type }` object. */
+function columnType(def: unknown): unknown {
+  return typeof def === "object" && def !== null ? (def as GeneratorColumnConfig).type : def;
+}
+
 function checkGenerateOptions(options: CsvGenerateOptions, where: string): void {
-  if (typeof options !== "object" || options === null || Array.isArray(options)) {
-    throw new CsvArgumentError(
-      "options",
-      `${where}: options must be an options object, got ${options === null ? "null" : typeof options}`
-    );
-  }
-  const fail = (option: string, expected: string, value: unknown): never => {
-    throw new CsvArgumentError(
-      `options.${option}`,
-      `${where}: ${option} must be ${expected}, got ${typeof value === "string" ? JSON.stringify(value) : String(value)}`
-    );
-  };
-  const integer = (option: keyof CsvGenerateOptions, min: number): void => {
-    const value = options[option];
-    if (
-      value !== undefined &&
-      (typeof value !== "number" || !Number.isInteger(value) || value < min)
-    ) {
-      fail(option, `an integer >= ${min}`, value);
-    }
-  };
-  const finite = (option: keyof CsvGenerateOptions): void => {
-    const value = options[option];
-    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
-      fail(option, "a finite number", value);
-    }
-  };
-  if (typeof options.columns === "number") {
-    integer("columns", 0);
-  } else if (options.columns !== undefined && !Array.isArray(options.columns)) {
-    fail("columns", "a column count or an array of column definitions", options.columns);
-  } else if (options.columns !== undefined) {
-    options.columns.forEach((def, i) => {
-      const type =
-        typeof def === "object" && def !== null ? (def as GeneratorColumnConfig).type : def;
-      if (typeof type !== "function" && !BUILTIN_COLUMN_TYPES.has(type as string)) {
-        fail(`columns[${i}]`, "a built-in column type, a function or { type }", type);
-      }
-    });
-  }
-  if (options.rows !== Infinity && options.rows !== -1) {
-    integer("rows", 0);
-  }
-  for (const option of ["delimiter", "lineEnding"] as const) {
-    const value = options[option];
-    if (value !== undefined && (typeof value !== "string" || value === "")) {
-      fail(option, "a non-empty string", value);
-    }
-  }
-  if (options.eof !== undefined && typeof options.eof !== "string") {
-    fail("eof", "a string", options.eof);
-  }
-  if (options.quote !== undefined && !["auto", "always", "never"].includes(options.quote)) {
-    fail("quote", '"auto", "always" or "never"', options.quote);
-  }
-  finite("seed");
-  integer("skipRows", 0);
-  integer("stringLength", 0);
-  // `toFixed` accepts 0 to 100 digits.
-  integer("floatPrecision", 0);
-  if ((options.floatPrecision ?? 0) > 100) {
-    fail("floatPrecision", "an integer from 0 to 100", options.floatPrecision);
-  }
-  for (const option of ["intMin", "intMax", "floatMin", "floatMax"] as const) {
-    finite(option);
-  }
-  finite("duration");
-  if (
-    options.until !== undefined &&
-    !(options.until instanceof Date
-      ? Number.isFinite(options.until.getTime())
-      : Number.isFinite(options.until))
-  ) {
-    fail("until", "a valid Date or timestamp", options.until);
-  }
-  if (options.transform !== undefined && typeof options.transform !== "function") {
-    fail("transform", "a function", options.transform);
-  }
+  check(generateOptionsSchema, options, {
+    where,
+    field: "options",
+    error: argumentError
+  });
 }
 
 /**

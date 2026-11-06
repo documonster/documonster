@@ -755,11 +755,6 @@ export function canonicalNamespaceOf(prefix: string): string | undefined {
   return CANONICAL_NAMESPACE.get(prefix);
 }
 
-/** The prefix the reader gives namespace `uri` (`""`: unprefixed), or `undefined` for one it does not know. */
-export function canonicalPrefixOf(uri: string): string | undefined {
-  return CANONICAL_PREFIX.get(uri);
-}
-
 /** A namespace declaration, matched only at `lastIndex` — see `eachDeclaration`. */
 const DECLARATION_AT = /xmlns(?::([^\s=/>]+))?\s*=\s*(?:"([^"]*)"|'([^']*)')/y;
 

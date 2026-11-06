@@ -6,7 +6,7 @@
  */
 
 import { getUtf8ByteLength } from "@csv/constants";
-import { CsvArgumentError, CsvError } from "@csv/errors";
+import { CsvArgumentError, CsvError, CsvLimitExceededError } from "@csv/errors";
 import type { ParseConfig } from "@csv/parse/config";
 import { resolveParseConfig, toScannerConfig } from "@csv/parse/config";
 import { filterValidHeaders, textAfterQuoteError } from "@csv/parse/helpers";
@@ -159,7 +159,7 @@ export function* parseFastMode(
     if (config.maxRowBytes !== undefined) {
       const lineBytes = getUtf8ByteLength(line);
       if (lineBytes > config.maxRowBytes) {
-        throw new CsvError(`Row exceeds the maximum size of ${config.maxRowBytes} bytes`);
+        throw new CsvLimitExceededError("maxRowBytes", config.maxRowBytes);
       }
     }
 
@@ -296,7 +296,7 @@ export function* parseWithScanner(
       const rawRow = input.slice(scanResult.rawStart, rawEndPos);
       const rowBytes = getUtf8ByteLength(rawRow);
       if (rowBytes > config.maxRowBytes) {
-        throw new CsvError(`Row exceeds the maximum size of ${config.maxRowBytes} bytes`);
+        throw new CsvLimitExceededError("maxRowBytes", config.maxRowBytes);
       }
     }
 
@@ -655,7 +655,7 @@ export function parseCsvAt(
     if (!state.headerRow.includes(objname)) {
       throw new CsvArgumentError(
         "options.objname",
-        `${where}: objname ${JSON.stringify(objname)} is not a header`
+        `${where}: options.objname ${JSON.stringify(objname)} is not a header`
       );
     }
     const objResult: Record<

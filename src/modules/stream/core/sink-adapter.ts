@@ -27,7 +27,7 @@
  */
 
 import { createEventWaiter } from "@stream/core/event-utils";
-import { StreamUnsupportedTypeError } from "@stream/errors";
+import { StreamStateError, StreamUnsupportedTypeError } from "@stream/errors";
 import type { EventEmitterLike } from "@stream/types";
 
 /**
@@ -137,7 +137,7 @@ export class SinkAdapter {
   async write(chunk: Uint8Array): Promise<void> {
     this._throwIfErrored();
     if (this._ended) {
-      throw new Error("SinkAdapter: write after end");
+      throw new StreamStateError("write", "SinkAdapter has already ended");
     }
     if (chunk.length === 0) {
       return;

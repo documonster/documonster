@@ -41,8 +41,11 @@
 
 import { zlibSync } from "@archive/compression/compress";
 import { crc32 } from "@archive/compression/crc32";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import { ArchiveArgumentError } from "@archive/core/errors";
 import { concatUint8Arrays, textEncoder } from "@utils/binary";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** PNG file signature (\x89 P N G \r \n \x1a \n). */
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -64,6 +67,20 @@ export interface EncodePngOptions {
   readonly dpi?: number;
 }
 
+// A NaN or non-positive dpi would round to an invalid zero pixels-per-metre `pHYs`, and writing
+// none instead would hide the mistake.
+const encodePngOptionsSchema = s.object(
+  {
+    dpi: s
+      .number({ finite: true, expected: "a positive finite number" })
+      .refine(v => v > 0, "a positive finite number")
+      .optional()
+  },
+  { expected: "an object", readonly: true }
+);
+const _encodePngOptionsMatch: SchemaMatches<typeof encodePngOptionsSchema, EncodePngOptions> = true;
+void _encodePngOptionsMatch;
+
 /**
  * Encode 8-bit RGBA pixels as a PNG file. A wrong argument is an `ArchiveArgumentError`.
  *
@@ -81,35 +98,23 @@ export function encodePng(
   height: number,
   options: EncodePngOptions = {}
 ): Uint8Array {
-  if (
-    !ArrayBuffer.isView(rgba) ||
-    (rgba as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT !== 1
-  ) {
-    throw new ArchiveArgumentError(
-      "rgba",
-      "Archive.encodePng: rgba must be a Uint8Array or Uint8ClampedArray"
-    );
-  }
+  checkArchiveArgument(
+    s.custom(
+      v => ArrayBuffer.isView(v) && (v as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1,
+      "a Uint8Array or Uint8ClampedArray"
+    ),
+    rgba,
+    "Archive.encodePng",
+    "rgba"
+  );
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
     throw new ArchiveArgumentError(
       Number.isInteger(width) && width > 0 ? "height" : "width",
       `Archive.encodePng: width and height must be positive integers, got ${width}x${height}`
     );
   }
-  if (typeof options !== "object" || options === null) {
-    throw new ArchiveArgumentError("options", "Archive.encodePng: options must be an object");
-  }
+  checkArchiveArgument(encodePngOptionsSchema, options, "Archive.encodePng", "options");
   const { dpi } = options;
-  // A NaN or non-positive dpi would round to an invalid zero pixels-per-metre `pHYs`, and
-  // writing none instead would hide the mistake.
-  if (dpi !== undefined && (typeof dpi !== "number" || !Number.isFinite(dpi) || dpi <= 0)) {
-    throw new ArchiveArgumentError(
-      "options.dpi",
-      `Archive.encodePng: options.dpi must be a positive finite number, got ${
-        typeof dpi === "number" ? String(dpi) : dpi === null ? "null" : typeof dpi
-      }`
-    );
-  }
   const expected = width * height * 4;
   if (rgba.length !== expected) {
     throw new ArchiveArgumentError(

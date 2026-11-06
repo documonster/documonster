@@ -3,9 +3,12 @@
  * cannot hold is refused where it was given rather than written as `NaN`, a negative extent or an unknown geometry.
  */
 import { ExcelArgumentError } from "@excel/errors";
+import type { AddImageRange, AddShapeOptions, ShapeType } from "@excel/types";
 import type { ArgumentChecks } from "@excel/utils/arguments";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** ST_ShapeType of ECMA-376 `dml-main.xsd` (Transitional), in schema order. */
 const SHAPE_TYPES: ReadonlySet<string> = new Set([
@@ -289,34 +292,37 @@ export function checkDrawingRange(where: string, field: string, range: unknown):
   check.oneOf(`${field}.editAs`, range.editAs, ["oneCell", "twoCell", "absolute"]);
 }
 
+const hexColor = () =>
+  s
+    .custom<string>(
+      v => typeof v === "string" && HEX_COLOR.test(v),
+      'a hex colour such as "FF0000"'
+    )
+    .optional();
+
+const shapeOptionsSchema = s.object({
+  type: s
+    .custom<ShapeType>(
+      v => typeof v === "string" && SHAPE_TYPES.has(v),
+      'a DrawingML preset geometry such as "rect" or "ellipse"'
+    )
+    .optional(),
+  // Checked by `checkDrawingRange`, which an image's anchor shares.
+  range: s.unknown<AddImageRange>(),
+  fillColor: hexColor(),
+  lineColor: hexColor(),
+  lineWidth: s.number({ finite: true, min: 0, max: MAX_LINE_WIDTH_PT }).optional(),
+  text: s.string().optional(),
+  name: s.string().optional()
+});
+const _shapeOptionsMatch: SchemaMatches<typeof shapeOptionsSchema, AddShapeOptions> = true;
+void _shapeOptionsMatch;
+
 /**
  * Check a shape's options: a geometry from the DrawingML preset vocabulary, hex colours, a line width the format can
  * hold, and an area to sit in.
  */
 export function checkShapeOptions(where: string, options: unknown): void {
-  const check = argumentChecks(where);
-  check.required("options", options);
-  if (!check.record("options", options)) {
-    return;
-  }
-  if (
-    options.type !== undefined &&
-    (typeof options.type !== "string" || !SHAPE_TYPES.has(options.type))
-  ) {
-    check.fail(
-      "options.type",
-      'a DrawingML preset geometry such as "rect" or "ellipse"',
-      options.type
-    );
-  }
-  for (const color of ["fillColor", "lineColor"]) {
-    const value = options[color];
-    if (value !== undefined && (typeof value !== "string" || !HEX_COLOR.test(value))) {
-      check.fail(`options.${color}`, 'a hex colour such as "FF0000"', value);
-    }
-  }
-  check.number("options.lineWidth", options.lineWidth, { min: 0, max: MAX_LINE_WIDTH_PT });
-  check.string("options.text", options.text);
-  check.string("options.name", options.name);
-  checkDrawingRange(where, "options.range", options.range);
+  checkSchema(where, "options", shapeOptionsSchema, options);
+  checkDrawingRange(where, "options.range", (options as AddShapeOptions).range);
 }

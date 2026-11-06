@@ -104,7 +104,7 @@ describe("arguments of the wrong kind are refused by name", () => {
   it("parse, toSvg, toDrawList and layoutGraph throw MermaidError naming the function", () => {
     expect(() => Mermaid.parse(42 as never)).toThrow(MermaidError);
     expect(() => Mermaid.parse(null as never)).toThrow(
-      /^Mermaid\.parse: source must be Mermaid text; got null/
+      /^Mermaid\.parse: source must be Mermaid text, got null$/
     );
     expect(() => Mermaid.toSvg(42 as never)).toThrow(MermaidError);
     expect(() => Mermaid.toDrawList({} as never)).toThrow(/not a diagram/);

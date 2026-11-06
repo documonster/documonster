@@ -53,7 +53,7 @@ describe("Column.getValues with base 1", () => {
     const reddened: number[] = [];
     Column.getValues(ws, "C", { base: 1 }).forEach((value, rowNumber) => {
       if (typeof value === "number" && value < 0) {
-        Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
+        Cell.setFont(ws, { row: rowNumber, col: colNumber }, { color: { argb: "FFC00000" } });
         reddened.push(rowNumber);
       }
     });

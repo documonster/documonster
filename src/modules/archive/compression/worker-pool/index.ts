@@ -48,7 +48,7 @@ function rejectStub(operation: string): Promise<never> {
 export class WorkerPool {
   constructor(options?: WorkerPoolOptions) {
     void options;
-    throw new ArchiveWorkerUnsupportedError("Compression.Workers.WorkerPool");
+    throw new ArchiveWorkerUnsupportedError("Compression.Workers.Pool");
   }
 
   execute(
@@ -59,11 +59,11 @@ export class WorkerPool {
     void taskType;
     void data;
     void options;
-    return rejectStub("Compression.Workers.WorkerPool#execute");
+    return rejectStub("Compression.Workers.Pool#execute");
   }
 
   getStats(): WorkerPoolStats {
-    throwStubError("Compression.Workers.WorkerPool#getStats");
+    throwStubError("Compression.Workers.Pool#getStats");
   }
 
   terminate(): void {
@@ -86,7 +86,7 @@ export class WorkerPool {
   ): WorkerPoolStream {
     void taskType;
     void options;
-    throwStubError("Compression.Workers.WorkerPool#openStream");
+    throwStubError("Compression.Workers.Pool#openStream");
   }
 
   executeBatch(
@@ -97,11 +97,16 @@ export class WorkerPool {
     }>
   ): Promise<TaskResult[]> {
     void tasks;
-    return rejectStub("Compression.Workers.WorkerPool#executeBatch");
+    return rejectStub("Compression.Workers.Pool#executeBatch");
   }
 }
 
 export function getDefaultWorkerPool(options?: WorkerPoolOptions): WorkerPool {
+  void options;
+  throwStubError("Compression.Workers.getDefaultPool");
+}
+
+export function getDefaultPool(options?: WorkerPoolOptions): WorkerPool {
   void options;
   throwStubError("Compression.Workers.getDefaultPool");
 }

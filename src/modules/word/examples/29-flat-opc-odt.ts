@@ -2,8 +2,8 @@
  * Word Example 29 — Flat OPC & ODT
  *
  * Covers:
- *   - Io.toFlatOpc: serialize a DocxDocument as a single XML file.
- *   - Io.read reads it back as a document; Convert.flatOpcToParts / isFlatOpc
+ *   - Document.toFlatOpc: serialize a DocxDocument as a single XML file.
+ *   - Document.read reads it back as a document; Convert.flatOpcToParts / isFlatOpc
  *     give its parts.
  *   - Convert.fromOdt / writeOdt: round-trip an OpenDocument Text document.
  *   - Edge case: feeding a non-Flat-OPC string to isFlatOpc.
@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Convert, Io } from "../index";
+import { Document, Build, Convert } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -44,7 +44,7 @@ Document.addBulletList(d, ["Foo", "Bar", "Baz"]);
 // 1. Flat OPC
 // ---------------------------------------------------------------------------
 {
-  const flatXml = await Io.toFlatOpc(d);
+  const flatXml = await Document.toFlatOpc(d);
   console.log(`  Flat OPC output: ${flatXml.length} characters`);
   console.log(`  starts with: ${flatXml.slice(0, 80)}`);
   fs.writeFileSync(path.join(outDir, "01-document.xml"), flatXml);
@@ -53,9 +53,9 @@ Document.addBulletList(d, ["Foo", "Bar", "Baz"]);
   console.log(`  isFlatOpc(flatXml): ${Convert.isFlatOpc(flatXml)}`);
   console.log(`  isFlatOpc("hello"): ${Convert.isFlatOpc("hello")}`);
 
-  // Io.read takes the Flat OPC bytes as it takes a .docx's.
-  const readBack = await Io.read(new TextEncoder().encode(flatXml));
-  console.log(`  Io.read(Flat OPC): ${readBack.body.length} body blocks`);
+  // Document.read takes the Flat OPC bytes as it takes a .docx's.
+  const readBack = await Document.read(new TextEncoder().encode(flatXml));
+  console.log(`  Document.read(Flat OPC): ${readBack.body.length} body blocks`);
 
   // Re-parse — produces the same Map of part path → bytes that the writer
   // would emit into a ZIP.
@@ -83,7 +83,7 @@ Document.addBulletList(d, ["Foo", "Bar", "Baz"]);
   console.log(`  ODT re-read body length: ${reread.body.length}`);
 
   // Convert the round-tripped doc back to .docx
-  const buf = await Io.toBuffer(reread);
+  const buf = await Document.toBuffer(reread);
   fs.writeFileSync(path.join(outDir, "03-from-odt.docx"), buf);
   console.log(`  → 03-from-odt.docx`);
 }
@@ -93,8 +93,8 @@ Document.addBulletList(d, ["Foo", "Bar", "Baz"]);
 //    common path in the same file.
 // ---------------------------------------------------------------------------
 {
-  const docxBytes = await Io.toBuffer(d);
+  const docxBytes = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "04-original.docx"), docxBytes);
-  const reread = await Io.read(docxBytes);
+  const reread = await Document.read(docxBytes);
   console.log(`  re-read original .docx body length: ${reread.body.length}`);
 }

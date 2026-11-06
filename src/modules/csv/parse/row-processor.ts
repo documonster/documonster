@@ -274,7 +274,7 @@ export function processCompletedRow(
 
     if (!validationError.isValid) {
       // Every record left out because of an error reaches `onSkip`; it is the only way a
-      // streaming consumer (`Csv.parseRows`) learns a record was not returned.
+      // streaming consumer (`Csv.parseStream`) learns a record was not returned.
       config.invokeOnSkip?.(
         {
           code: validationError.errorCode,

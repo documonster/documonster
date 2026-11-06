@@ -23,7 +23,6 @@ import { encodeZipString } from "@archive/core/text";
 import type { ZipEncryptionMethod } from "@archive/crypto";
 import {
   zipCryptoEncrypt,
-  aesEncrypt,
   buildAesExtraField,
   randomBytes,
   isAesEncryption,
@@ -521,6 +520,8 @@ async function encryptData(
     // CRC violates the spec and causes strict readers (WinZip, 7-Zip,
     // pyzipper, …) to reject the entry with a CRC error.
     const keyStrength = getAesKeyStrength(encryptionMethod)!;
+    // Loaded only for an AES entry, so a package that encrypts nothing does not carry the cipher.
+    const { aesEncrypt } = await import("@archive/crypto/aes");
     const encrypted = await aesEncrypt(compressedData, password, keyStrength);
     const aesExtraField = buildAesExtraField(2, keyStrength, originalCompressionMethod);
     return {

@@ -14,8 +14,8 @@
  * @stability experimental
  */
 
-import { zip } from "@archive/create-archive";
-import { unzip } from "@archive/read-archive";
+import { createZip } from "@archive/create-archive";
+import { unzipZip } from "@archive/read-archive";
 import { finalizeDocument } from "@word/builder/document-finalize";
 import { checkBytes, checkHandle } from "@word/core/argument-checks";
 import { withDisplayFields } from "@word/core/field-view";
@@ -1467,13 +1467,13 @@ export async function readOdt(
   // Extract ZIP contents
   const entries = new Map<string, Uint8Array>();
   try {
-    for await (const entry of unzip(bytes).entries()) {
+    for await (const entry of unzipZip(bytes).entries()) {
       const data = await entry.bytes();
       const path = entry.path.replace(/^\//, "").replace(/\\/g, "/");
       entries.set(path, data);
     }
   } catch (e) {
-    // Bytes that are not a ZIP are a parse error, as `Io.read` reports them.
+    // Bytes that are not a ZIP are a parse error, as `Document.read` reports them.
     const msg = e instanceof Error ? e.message : String(e);
     throw new DocxParseError(`Failed to read ODT: ${msg}`, { cause: e });
   }
@@ -1776,7 +1776,7 @@ export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
   // the package and STORED (uncompressed) so the file type can be detected by
   // magic bytes. The default ZipArchive behaviour sorts entries alphabetically,
   // which would push `mimetype` after `content.xml` and break ODF detection.
-  const archive = zip({ noSort: true });
+  const archive = createZip({ noSort: true });
 
   // Mimetype MUST be the first entry in the ZIP, uncompressed (ODF spec requirement)
   archive.add("mimetype", encoder.encode("application/vnd.oasis.opendocument.text"), { level: 0 });

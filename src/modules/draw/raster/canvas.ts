@@ -427,10 +427,10 @@ export class BasicRasterCanvas {
       : { color: colorOrOptions, width: strokeWidth };
     const color = options.color;
     const lineWidth = options.width ?? 1;
-    this.drawLine(x, y, x + width, y, color, lineWidth);
-    this.drawLine(x + width, y, x + width, y + height, color, lineWidth);
-    this.drawLine(x + width, y + height, x, y + height, color, lineWidth);
-    this.drawLine(x, y + height, x, y, color, lineWidth);
+    this.line(x, y, x + width, y, color, lineWidth);
+    this.line(x + width, y, x + width, y + height, color, lineWidth);
+    this.line(x + width, y + height, x, y + height, color, lineWidth);
+    this.line(x, y + height, x, y, color, lineWidth);
   }
 
   /**
@@ -511,7 +511,7 @@ export class BasicRasterCanvas {
       // A hairline has no outline to speak of; the supersampled Bresenham run is
       // both cheaper and smoother than a one-pixel-wide polygon.
       for (let i = 1; i < points.length; i++) {
-        this.drawLine(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y, color, width);
+        this.line(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y, color, width);
       }
       return;
     }
@@ -729,7 +729,7 @@ export class BasicRasterCanvas {
     }
     const period = dash.reduce((sum, part) => sum + part, 0);
     if (period <= 0) {
-      this.drawLine(from.x, from.y, to.x, to.y, color, width);
+      this.line(from.x, from.y, to.x, to.y, color, width);
       return startPhase;
     }
     const dashRgba = parseSvgColor(color);
@@ -761,7 +761,7 @@ export class BasicRasterCanvas {
         const a = { x: from.x + ux * travelled, y: from.y + uy * travelled };
         const b = { x: from.x + ux * (travelled + step), y: from.y + uy * (travelled + step) };
         if (radius <= 0.5) {
-          this.drawLine(a.x, a.y, b.x, b.y, color, width);
+          this.line(a.x, a.y, b.x, b.y, color, width);
         } else {
           // Fill each dash's outline, like a solid stroke. Stamping a square brush
           // extended every dash by half the stroke width at both ends, so a 12-wide
@@ -780,17 +780,51 @@ export class BasicRasterCanvas {
     return startPhase + length;
   }
 
+  /**
+   * Draw a straight line from `(x1, y1)` to `(x2, y2)`.
+   *
+   * @param options - Colour and line width.
+   */
+  drawLine(x1: number, y1: number, x2: number, y2: number, options?: DrawRasterLineOptions): void;
+  /**
+   * @deprecated Pass `{ color, width }` as one options object, as {@link strokeRect} takes it. The
+   * positional form is removed in 1.0.
+   */
   drawLine(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
     color: string | undefined,
+    width?: number
+  ): void;
+  drawLine(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    colorOrOptions?: string | DrawRasterLineOptions,
     width = 1
   ): void {
     const where = "Draw.Backend.BasicRasterCanvas#drawLine";
-    checkNumbers(where, { x1, y1, x2, y2, width });
-    checkOptionalColorToken(where, "color", color);
+    checkNumbers(where, { x1, y1, x2, y2 });
+    checkStrokeArguments(where, colorOrOptions, width);
+    if (isRecordArgument(colorOrOptions)) {
+      this.line(x1, y1, x2, y2, colorOrOptions.color, colorOrOptions.width ?? 1);
+      return;
+    }
+    this.line(x1, y1, x2, y2, colorOrOptions, width);
+  }
+
+  /** {@link drawLine}, with its arguments checked. */
+  private line(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    color: string | undefined,
+    width: number
+  ): void {
     const rgba = parseSvgColor(color);
     if (!rgba) {
       return;
@@ -969,17 +1003,37 @@ export class BasicRasterCanvas {
     );
   }
 
-  strokeCircle(cx: number, cy: number, r: number, color: string | undefined, width = 1): void {
+  /**
+   * Stroke a circle.
+   *
+   * @param options - Colour and line width.
+   */
+  strokeCircle(cx: number, cy: number, r: number, options?: DrawRasterLineOptions): void;
+  /**
+   * @deprecated Pass `{ color, width }` as one options object, as {@link strokeEllipse} takes it.
+   * The positional form is removed in 1.0.
+   */
+  strokeCircle(cx: number, cy: number, r: number, color: string | undefined, width?: number): void;
+  strokeCircle(
+    cx: number,
+    cy: number,
+    r: number,
+    colorOrOptions?: string | DrawRasterLineOptions,
+    width = 1
+  ): void {
     const where = "Draw.Backend.BasicRasterCanvas#strokeCircle";
-    checkNumbers(where, { cx, cy, r, width });
-    checkOptionalColorToken(where, "color", color);
+    checkNumbers(where, { cx, cy, r });
+    checkStrokeArguments(where, colorOrOptions, width);
+    const options: DrawRasterLineOptions = isRecordArgument(colorOrOptions)
+      ? colorOrOptions
+      : { color: colorOrOptions, width };
     const points: RasterPoint[] = [];
     const steps = Math.max(12, Math.ceil(r * 2));
     for (let i = 0; i <= steps; i++) {
       const a = (i / steps) * Math.PI * 2;
       points.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
     }
-    this.drawPolyline(points, { color, width });
+    this.drawPolyline(points, { color: options.color, width: options.width ?? 1 });
   }
 
   /**
@@ -1294,7 +1348,7 @@ export class BasicRasterCanvas {
 
   /**
    * Every code point this canvas could not draw in any available face, accumulated
-   * across all {@link drawText} calls and never cleared.
+   * across all {@link drawText} calls and never cleared — in ascending order, a copy.
    *
    * Accumulated rather than per-call because the useful question is about the
    * finished picture, not the last label in it: `rasterizeToRgba` builds one canvas
@@ -1305,7 +1359,19 @@ export class BasicRasterCanvas {
    * lets a caller act on the gap (supply a font) instead of shipping a picture with
    * holes in it.
    */
-  readonly uncoveredCodePoints = new Set<number>();
+  getUncoveredCodePoints(): number[] {
+    return [...this.uncovered].sort((a, b) => a - b);
+  }
+
+  /**
+   * @deprecated Use {@link getUncoveredCodePoints}. This handed out the canvas's own set, so a
+   * caller could clear it and change what the render reports; it now returns a copy. Removed in 1.0.
+   */
+  get uncoveredCodePoints(): Set<number> {
+    return new Set(this.uncovered);
+  }
+
+  private readonly uncovered = new Set<number>();
 
   /**
    * Scripts and directionality this canvas cannot lay out, accumulated per canvas.
@@ -1520,7 +1586,7 @@ export class BasicRasterCanvas {
         // width without ink, and practically no font carries a glyph for it, so
         // reporting it would tell the caller to install a font that cannot help.
         if (code !== TAB) {
-          this.uncoveredCodePoints.add(code);
+          this.uncovered.add(code);
         }
         curX += this.missingAdvance(code, fontSize) * hScale;
         continue;
@@ -1591,7 +1657,7 @@ export class BasicRasterCanvas {
       // caller is told their CJK became punctuation rather than discovering it in
       // the image. Tab is exempt for the same reason as above.
       if (STROKE_FONT[code] === undefined && code !== TAB) {
-        this.uncoveredCodePoints.add(code);
+        this.uncovered.add(code);
       }
       if (code === TAB) {
         totalGlyphW += TAB_EM_WIDTH; // width, no ink
@@ -1621,7 +1687,7 @@ export class BasicRasterCanvas {
               const y1 = y - fontSize * 0.75 + stroke[j - 1][1] * fontSize;
               const x2 = cx + stroke[j][0] * fontSize * scale;
               const y2 = y - fontSize * 0.75 + stroke[j][1] * fontSize;
-              this.drawLine(x1, y1, x2, y2, color, strokeWidth);
+              this.line(x1, y1, x2, y2, color, strokeWidth);
             }
           }
           cx += glyph.w * fontSize * scale;
@@ -1659,7 +1725,7 @@ export class BasicRasterCanvas {
             const py2 = y - fontSize * 0.75 + stroke[j][1] * fontSize;
             const [rx1, ry1] = rotate(px1, py1);
             const [rx2, ry2] = rotate(px2, py2);
-            this.drawLine(rx1, ry1, rx2, ry2, color, strokeWidth);
+            this.line(rx1, ry1, rx2, ry2, color, strokeWidth);
           }
         }
         cx += glyph.w * fontSize * scale;

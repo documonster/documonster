@@ -13,20 +13,17 @@
  * iterative SHA-based hashing with salt.
  */
 
-import {
-  checkBoolean,
-  checkHandle,
-  checkInteger,
-  checkOneOf,
-  checkRecord,
-  checkString
-} from "@word/core/argument-checks";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle, checkString } from "@word/core/argument-checks";
 import {
   bytesToBase64,
   base64ToBytes,
   stringToUtf16LE,
   randomBytes
 } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import { HASH_ALGORITHM_NAMES, canonicalHashAlgorithm } from "@word/security/hash-names";
 import type { CompactHashAlgorithm } from "@word/security/hash-names";
 import type { DocxDocument, DocumentSettings } from "@word/types";
@@ -39,17 +36,21 @@ const EDIT_TYPES: ReadonlySet<string> = new Set<ProtectionEditType>([
   "forms"
 ]);
 
-function checkProtectionOptions(options: DocumentProtectionOptions, where: string): void {
-  checkRecord(options, "options", where);
-  checkOneOf(options.edit, EDIT_TYPES, "options.edit", where);
-  checkString(options.password, "options.password", where, { optional: true });
-  checkOneOf(options.hashAlgorithm, HASH_ALGORITHM_NAMES, "options.hashAlgorithm", where, {
-    optional: true
-  });
-  checkInteger(options.spinCount, "options.spinCount", where, { optional: true, min: 0 });
-  checkBoolean(options.enforcement, "options.enforcement", where, { optional: true });
-  checkBoolean(options.formatting, "options.formatting", where, { optional: true });
-}
+const protectionOptionsSchema = w.record({
+  edit: s.member<ProtectionEditType>(EDIT_TYPES),
+  password: w.string().optional(),
+  hashAlgorithm: s
+    .member<ProtectionHashAlgorithm | CompactHashAlgorithm>(HASH_ALGORITHM_NAMES)
+    .optional(),
+  spinCount: w.integer({ min: 0 }).optional(),
+  enforcement: w.boolean().optional(),
+  formatting: w.boolean().optional()
+});
+const _protectionOptionsMatch: SchemaMatches<
+  typeof protectionOptionsSchema,
+  DocumentProtectionOptions
+> = true;
+void _protectionOptionsMatch;
 
 // =============================================================================
 // Types
@@ -106,8 +107,8 @@ export interface ProtectionState {
  * Set document protection on a DocxDocument.
  * Returns a new document with protection settings applied.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to protect.
  * @param options - Protection options.
@@ -129,7 +130,7 @@ export async function protectDocument(
   options: DocumentProtectionOptions
 ): Promise<DocxDocument> {
   checkHandle(doc, "document", "doc", "Security.protect");
-  checkProtectionOptions(options, "Security.protect");
+  checkSchema(protectionOptionsSchema, options, "Security.protect");
   const protection = await buildProtectionSettings(options);
 
   const existingSettings = doc.settings ?? {};
@@ -138,17 +139,20 @@ export async function protectDocument(
     documentProtection: protection
   };
 
-  return {
-    ...doc,
-    settings: newSettings
-  };
+  return markDerived(
+    {
+      ...doc,
+      settings: newSettings
+    },
+    doc
+  );
 }
 
 /**
  * Remove document protection.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The protected document.
  * @returns A new document without protection.
@@ -160,10 +164,13 @@ export function unprotectDocument(doc: DocxDocument): DocxDocument {
   }
 
   const { documentProtection: _, ...rest } = doc.settings;
-  return {
-    ...doc,
-    settings: rest as DocumentSettings
-  };
+  return markDerived(
+    {
+      ...doc,
+      settings: rest as DocumentSettings
+    },
+    doc
+  );
 }
 
 /**

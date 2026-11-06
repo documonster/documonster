@@ -16,16 +16,14 @@
  */
 
 import { isForbiddenKey } from "@utils/object";
-import {
-  checkBoolean,
-  checkHandle,
-  checkNamedValues,
-  checkRecord,
-  invalidArgument
-} from "@word/core/argument-checks";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle, checkNamedValues, checkRecord } from "@word/core/argument-checks";
 import { imageKeys, isSamePicture } from "@word/core/image-keys";
 import { assertImageMediaType } from "@word/core/image-media";
 import { cloneModel, utf8Encoder } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived, ownTree } from "@word/core/ownership";
 import type { RangeAnchor } from "@word/core/range-markers";
 import {
   collectRangeAnchors,
@@ -229,6 +227,7 @@ export function fillTemplate(
   options?: LegacyTemplateOptions
 ): DocxDocument {
   checkFillArguments(data, options, "Template.fillTemplate");
+  ownTree(doc);
   return fillInPlace(doc, data, options, {
     where: "Template.fillTemplate",
     rich: false,
@@ -241,29 +240,31 @@ export function fillTemplate(
  * An empty one matches everywhere, and a pair that is one string cannot tell
  * where a tag ends.
  */
-function checkDelimiters(options: unknown, where: string): void {
-  checkRecord(options, "options", where, { optional: true });
-  const delimiters = (options as TemplateOptions | undefined)?.delimiters;
-  if (delimiters === undefined) {
-    return;
-  }
-  if (
-    !Array.isArray(delimiters) ||
-    delimiters.length !== 2 ||
-    typeof delimiters[0] !== "string" ||
-    typeof delimiters[1] !== "string" ||
-    delimiters[0] === "" ||
-    delimiters[1] === "" ||
-    delimiters[0] === delimiters[1]
-  ) {
-    invalidArgument(
-      where,
-      "options.delimiters",
-      "two different non-empty strings [open, close]",
-      delimiters
-    );
-  }
-}
+const delimitersSchema = s
+  .custom<readonly [string, string]>(
+    d =>
+      Array.isArray(d) &&
+      d.length === 2 &&
+      typeof d[0] === "string" &&
+      typeof d[1] === "string" &&
+      d[0] !== "" &&
+      d[1] !== "" &&
+      d[0] !== d[1],
+    "two different non-empty strings [open, close]"
+  )
+  .optional();
+
+export const templateOptionsShape = {
+  delimiters: delimitersSchema,
+  strict: w.boolean().optional(),
+  richPlaceholders: w.boolean().optional()
+};
+
+const templateOptionsSchema = w.record(templateOptionsShape);
+const _templateOptionsMatch: SchemaMatches<typeof templateOptionsSchema, TemplateOptions> = true;
+void _templateOptionsMatch;
+
+const delimiterOptionsSchema = w.record({ delimiters: delimitersSchema }).optional();
 
 /** What every fill takes: data to fill with, and options. */
 /**
@@ -280,10 +281,7 @@ export function fillData(data: unknown, where: string): Record<string, unknown> 
 
 function checkFillArguments(data: unknown, options: unknown, where: string): void {
   checkRecord(data, "data", where);
-  checkDelimiters(options, where);
-  const o = options as TemplateOptions | undefined;
-  checkBoolean(o?.strict, "options.strict", where, { optional: true });
-  checkBoolean(o?.richPlaceholders, "options.richPlaceholders", where, { optional: true });
+  checkSchema(templateOptionsSchema.optional(), options, where);
 }
 
 /** Which parts of the template language a fill resolves, beyond the basic one. */
@@ -1855,7 +1853,11 @@ function scanTemplateTags(
   options: Pick<TemplateOptions, "delimiters"> | undefined,
   includeComments: boolean
 ): TemplateTag[] {
-  checkDelimiters(options, includeComments ? "Template.listTags" : "Template.listTemplateTags");
+  checkSchema(
+    delimiterOptionsSchema,
+    options,
+    includeComments ? "Template.listTags" : "Template.listTemplateTags"
+  );
   const open = options?.delimiters?.[0] ?? "{{";
   const close = options?.delimiters?.[1] ?? "}}";
   const tags: TemplateTag[] = [];
@@ -2039,14 +2041,14 @@ function isTemplateHtmlChunk(v: unknown): v is TemplateHtmlChunk {
  * resolves no rich placeholder; `fillTemplateEnhanced` returns a new document
  * and always resolves them; neither fills comment bodies.
  *
- * Does not modify `doc`; the result may share unchanged nodes with it — see
- * `Document.clone`.
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @example
  * ```ts
- * import { Io, Template } from "documonster/word";
+ * import { Document, Template } from "documonster/word";
  *
- * const doc = await Io.read(bytes);
+ * const doc = await Document.read(bytes);
  * const filled = Template.fill(doc, { name: "Ada" });
  * ```
  */
@@ -2068,40 +2070,14 @@ export function fillDocument(
   checkHandle(doc, "document", "doc", where);
   const record = fillData(data, where);
   checkFillArguments(record, options, where);
-  return detachCollections(
+  return markDerived(
     fillInPlace(copyFillTargets(doc), record, options, {
       where,
       rich: options?.richPlaceholders === true,
       comments: true
-    })
+    }),
+    doc
   );
-}
-
-/**
- * Give a filled document its own copy of every top-level collection (styles,
- * images, numbering, comments, fonts, custom properties, headers, …), so the
- * `Document.*` helpers — which add to and replace entries in exactly those
- * collections, and assign top-level fields — reach the result alone.
- *
- * The nodes inside are shared with the template wherever the fill left them
- * unchanged (a style, an image's bytes, an untouched paragraph). Nothing in
- * this library edits a node in place, so sharing is invisible to its API; a
- * caller who mutates a node object directly (`filled.styles[0].name = …`
- * through a cast) reaches the template, as with any shallow copy. Copying the
- * collections is proportional to their length, not to the document; copying
- * every node would make each fill as expensive as a deep clone.
- */
-function detachCollections(filled: DocxDocument): DocxDocument {
-  const out: Record<string, unknown> = { ...filled };
-  for (const key in out) {
-    const value = out[key];
-    if (Array.isArray(value)) {
-      out[key] = [...value];
-    } else if (value instanceof Map) {
-      out[key] = new Map(value);
-    }
-  }
-  return out as unknown as DocxDocument;
 }
 
 /**
@@ -2144,11 +2120,14 @@ export function fillTemplateEnhanced(
   options?: LegacyTemplateOptions
 ): DocxDocument {
   checkFillArguments(data, options, "Template.fillTemplateEnhanced");
-  return fillInPlace(copyFillTargets(doc), data, options, {
-    where: "Template.fillTemplateEnhanced",
-    rich: true,
-    comments: false
-  });
+  return markDerived(
+    fillInPlace(copyFillTargets(doc), data, options, {
+      where: "Template.fillTemplateEnhanced",
+      rich: true,
+      comments: false
+    }),
+    doc
+  );
 }
 
 /**

@@ -14,9 +14,10 @@
  * - processColumns(): Process column configuration
  */
 
-// Re-export types from central types.ts to avoid duplication
-import { CsvArgumentError } from "@csv/errors";
 import type { ColumnConfig, HeaderArray, RowHashArray } from "@csv/types";
+// Re-export types from central types.ts to avoid duplication
+import { argumentError } from "@csv/utils/check-options";
+import { check, s } from "@utils/schema";
 export type { HeaderArray, RowHashArray } from "@csv/types";
 
 // =============================================================================
@@ -325,12 +326,7 @@ export function hasAllEmptyValues(row: string[]): boolean {
 // =============================================================================
 
 function checkArrayArgument(where: string, field: string, value: unknown): void {
-  if (!Array.isArray(value)) {
-    throw new CsvArgumentError(
-      field,
-      `${where}: ${field} must be an array, got ${value === null ? "null" : typeof value}`
-    );
-  }
+  check(s.array(s.unknown()), value, { where, field, error: argumentError });
 }
 
 /** `Csv.getRowValues`: the values of a `[key, value]` row, in order. */

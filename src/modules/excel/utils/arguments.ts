@@ -2,43 +2,81 @@
  * Argument checks for the public surface: a value that means nothing to the call is refused where it was passed,
  * naming the function and the argument, instead of being stored and then dropped or refused when the workbook is
  * written.
+ *
+ * An options object is checked against a schema (`@utils/schema`), pinned to its public interface with
+ * `SchemaMatches` — see {@link at}. The single-value checks below stay hand-written predicates, because several run
+ * once per row or column (`Stream.setRowHeight`, `Row.setHeight` in a loop) where building or walking a schema per
+ * call measured several times slower; they word a refusal through the schema's own `fail`, so both read alike.
  */
+import type { ProtectWorkbookOptions } from "@excel/core/workbook.browser";
+import type { ProtectSheetOptions } from "@excel/core/worksheet";
 import { ExcelArgumentError, ExcelInvalidAddressError } from "@excel/errors";
-import { describeValue as describe } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
+import { check as schemaCheck, expectedOf, fail as schemaFail, s } from "@utils/schema";
+import type { Schema, SchemaCheckOptions, SchemaMatches } from "@utils/schema";
 
 const MAX_ROW = 1048576;
 const MAX_COL = 16384;
+
+function argumentError(field: string, message: string): ExcelArgumentError {
+  return new ExcelArgumentError(field, message);
+}
+
+/** Where a checked value sits: the public call and the parameter path (`options`, `rule`, `options.zip`). */
+export function at(where: string, field: string): SchemaCheckOptions {
+  return { where, field, error: argumentError };
+}
+
+/** Check `value` against `schema` at `field` of `where`, throwing an {@link ExcelArgumentError}. */
+export function checkSchema<S extends Schema<unknown, boolean>>(
+  where: string,
+  field: string,
+  schema: S,
+  value: unknown
+): void {
+  schemaCheck(schema, value, at(where, field));
+}
+
+/** The {@link ExcelArgumentError} for `value` at `field`, worded as a schema words it. */
+export function argumentFailure(
+  where: string,
+  field: string,
+  expected: string,
+  value: unknown
+): Error {
+  return schemaFail(at(where, field), "", expected, value);
+}
+
+type NumberRange = { min?: number; max?: number; integer?: boolean };
+
+function isNumberIn(value: unknown, { min, max, integer }: NumberRange): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    (!integer || Number.isInteger(value)) &&
+    (min === undefined || value >= min) &&
+    (max === undefined || value <= max)
+  );
+}
 
 /** A finite number in `[min, max]` (and a whole number when `integer`). */
 export function checkNumber(
   where: string,
   argument: string,
   value: unknown,
-  { min, max, integer }: { min?: number; max?: number; integer?: boolean } = {}
+  range: NumberRange = {}
 ): asserts value is number {
-  const ok =
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    (!integer || Number.isInteger(value)) &&
-    (min === undefined || value >= min) &&
-    (max === undefined || value <= max);
-  if (!ok) {
-    const kind = integer ? "a whole number" : "a number";
-    const range =
-      min !== undefined && max !== undefined
-        ? ` from ${min} to ${max}`
-        : min !== undefined
-          ? ` of at least ${min}`
-          : max !== undefined
-            ? ` of at most ${max}`
-            : "";
-    throw new ExcelArgumentError(
-      argument,
-      `${where}: ${argument} must be ${kind}${range}, got ${describe(value)}.`
-    );
+  if (!isNumberIn(value, range)) {
+    // The predicate above is the fast path; a refusal takes the schema's wording.
+    throw argumentFailure(where, argument, expectedOf(s.number({ finite: true, ...range })), value);
   }
 }
+
+// The schemas whose wording the hand-written checks below refuse with.
+const BOOLEAN = s.boolean();
+const STRING = s.string();
+const NON_EMPTY_STRING = s.string({ nonEmpty: true });
+const OBJECT = s.object({});
 
 /** What a reference argument may be, beyond a single cell. */
 interface ReferenceShape {
@@ -84,10 +122,7 @@ export interface ArgumentChecks {
 export function argumentChecks(where: string): ArgumentChecks {
   const checks: ArgumentChecks = {
     fail(argument, expected, value) {
-      throw new ExcelArgumentError(
-        argument,
-        `${where}: ${argument} must be ${expected}, got ${describe(value)}.`
-      );
+      throw argumentFailure(where, argument, expected, value);
     },
     required(argument, value) {
       if (value === undefined || value === null) {
@@ -101,7 +136,7 @@ export function argumentChecks(where: string): ArgumentChecks {
     },
     boolean(argument, value) {
       if (value !== undefined && typeof value !== "boolean") {
-        checks.fail(argument, "a boolean", value);
+        checks.fail(argument, expectedOf(BOOLEAN), value);
       }
     },
     string(argument, value, options) {
@@ -109,12 +144,12 @@ export function argumentChecks(where: string): ArgumentChecks {
         value !== undefined &&
         (typeof value !== "string" || (options?.nonEmpty && value === ""))
       ) {
-        checks.fail(argument, options?.nonEmpty ? "a non-empty string" : "a string", value);
+        checks.fail(argument, expectedOf(options?.nonEmpty ? NON_EMPTY_STRING : STRING), value);
       }
     },
     oneOf(argument, value, allowed) {
       if (value !== undefined && (typeof value !== "string" || !allowed.includes(value))) {
-        checks.fail(argument, `one of ${allowed.map(a => JSON.stringify(a)).join(", ")}`, value);
+        checks.fail(argument, expectedOf(s.oneOf(allowed)), value);
       }
     },
     record(argument, value): value is Record<string, unknown> {
@@ -122,7 +157,7 @@ export function argumentChecks(where: string): ArgumentChecks {
         return false;
       }
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        checks.fail(argument, "an object", value);
+        checks.fail(argument, expectedOf(OBJECT), value);
       }
       return true;
     },
@@ -168,75 +203,90 @@ export function argumentChecks(where: string): ArgumentChecks {
   return checks;
 }
 
-/**
- * Check a `protect` call's password and options: each of `flags` is a boolean — a string such as `"yes"` was written
- * as the opposite of what it meant — and the hash fields are strings. `spinCount` is left to its documented coercion
- * to a whole number.
- */
-/** The flags of `<sheetProtection>`, which a sheet's `protect` takes as booleans. */
-export const SHEET_PROTECTION_FLAGS = [
-  "sheet",
-  "objects",
-  "scenarios",
-  "selectLockedCells",
-  "selectUnlockedCells",
-  "formatCells",
-  "formatColumns",
-  "formatRows",
-  "insertColumns",
-  "insertRows",
-  "insertHyperlinks",
-  "deleteColumns",
-  "deleteRows",
-  "sort",
-  "autoFilter",
-  "pivotTables"
-] as const;
+const flag = () => s.boolean().optional();
+// `spinCount` is left to its documented coercion to a whole number.
+const coercedCount = () => s.unknown<number>().optional();
 
-/** The flags of `<workbookProtection>`, which a workbook's `protect` takes as booleans. */
-export const WORKBOOK_PROTECTION_FLAGS = ["lockStructure", "lockWindows", "lockRevision"] as const;
+const sheetProtectionShape = {
+  sheet: flag(),
+  objects: flag(),
+  scenarios: flag(),
+  selectLockedCells: flag(),
+  selectUnlockedCells: flag(),
+  formatCells: flag(),
+  formatColumns: flag(),
+  formatRows: flag(),
+  insertColumns: flag(),
+  insertRows: flag(),
+  insertHyperlinks: flag(),
+  deleteColumns: flag(),
+  deleteRows: flag(),
+  sort: flag(),
+  autoFilter: flag(),
+  pivotTables: flag(),
+  algorithmName: s.string().optional(),
+  hashValue: s.string().optional(),
+  saltValue: s.string().optional(),
+  spinCount: coercedCount()
+};
+const sheetProtectionSchema = s.object({
+  ...sheetProtectionShape,
+  password: s.string().optional()
+});
+const _sheetProtectionMatch: SchemaMatches<typeof sheetProtectionSchema, ProtectSheetOptions> =
+  true;
+void _sheetProtectionMatch;
+
+const workbookProtectionShape = {
+  lockStructure: flag(),
+  lockWindows: flag(),
+  lockRevision: flag(),
+  spinCount: coercedCount()
+};
+const workbookProtectionSchema = s.object({
+  ...workbookProtectionShape,
+  password: s.string().optional()
+});
+const _workbookProtectionMatch: SchemaMatches<
+  typeof workbookProtectionSchema,
+  ProtectWorkbookOptions
+> = true;
+void _workbookProtectionMatch;
 
 /**
- * {@link checkProtectionOptions} for a `protect(passwordOrOptions, legacyOptions)` call: the options-object form, or
- * the deprecated positional one.
+ * Check a `protect(ws | wb, options)` call, or its deprecated `protect(…, password, options)` form: each flag is a
+ * boolean — a string such as `"yes"` was written as the opposite of what it meant — and the password and hash fields
+ * are strings.
  */
 export function checkProtectCall(
   where: string,
   passwordOrOptions: unknown,
   legacyOptions: unknown,
-  flags: readonly string[]
+  kind: "sheet" | "workbook"
 ): void {
   if (isRecordArgument(passwordOrOptions)) {
-    checkProtectionOptions(
+    checkSchema(
       where,
-      (passwordOrOptions as { password?: unknown }).password,
-      passwordOrOptions,
-      flags
+      "options",
+      kind === "sheet" ? sheetProtectionSchema : workbookProtectionSchema,
+      passwordOrOptions
     );
-  } else {
-    checkProtectionOptions(where, passwordOrOptions, legacyOptions, flags);
-  }
-}
-
-export function checkProtectionOptions(
-  where: string,
-  password: unknown,
-  options: unknown,
-  flags: readonly string[]
-): void {
-  const check = argumentChecks(where);
-  // `null` is a placeholder the positional form has always passed through.
-  check.string("password", password ?? undefined);
-  if (options === null || !check.record("options", options)) {
     return;
   }
-  for (const flag of flags) {
-    check.boolean(flag, options[flag]);
-  }
-  for (const text of ["algorithmName", "hashValue", "saltValue"]) {
-    check.string(text, options[text]);
-  }
+  // `null` is a placeholder the positional form has always passed through, for both arguments.
+  checkSchema(where, "password", legacyPasswordSchema, passwordOrOptions);
+  // Its options are the protection alone; the password is the argument before them.
+  checkSchema(
+    where,
+    "options",
+    kind === "sheet" ? legacySheetProtectionSchema : legacyWorkbookProtectionSchema,
+    legacyOptions
+  );
 }
+
+const legacyPasswordSchema = s.string().nullable().optional();
+const legacySheetProtectionSchema = s.object(sheetProtectionShape).nullable().optional();
+const legacyWorkbookProtectionSchema = s.object(workbookProtectionShape).nullable().optional();
 
 /**
  * `text` — a reference {@link ArgumentChecks.reference} accepted — with its column letters in capitals: `b2:c3` is

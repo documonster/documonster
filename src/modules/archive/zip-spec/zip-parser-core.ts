@@ -5,10 +5,14 @@
  * Used by both `ZipParser` (in-memory) and `RemoteZipReader` (random-access).
  */
 
-import { ArchiveError, ArchiveLimitError, ZipEocdNotFoundError } from "@archive/core/errors";
+import {
+  ArchiveError,
+  ArchiveLimitExceededError,
+  ZipEocdNotFoundError
+} from "@archive/core/errors";
 import type { ZipStringEncoding, ZipStringCodec } from "@archive/core/text";
 import { decodeZipPath, decodeZipComment, resolveZipStringCodec } from "@archive/core/text";
-import type { AesKeyStrength } from "@archive/crypto/aes";
+import type { AesKeyStrength } from "@archive/crypto/aes-format";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import { resolveZipLastModifiedDateFromUnixSeconds } from "@archive/zip-spec/timestamps";
 import type { ZipEntryRecord, ZipEntryEncryptionMethod } from "@archive/zip-spec/zip-entry-info";
@@ -102,7 +106,7 @@ export interface CentralDirectoryParseOptions {
   encoding?: ZipStringEncoding;
 
   /**
-   * Most entries the central directory may declare (`ArchiveLimitError`,
+   * Most entries the central directory may declare (`ArchiveLimitExceededError`,
    * limit `"maxEntries"`). Checked before any entry record is allocated.
    * Unbounded by default.
    */
@@ -470,7 +474,7 @@ export function parseCentralDirectoryAt(
   // strings and extra-field maps) per record, so the count needs its own bound.
   const maxEntries = options.maxEntries ?? Infinity;
   if (totalEntries > maxEntries) {
-    throw new ArchiveLimitError("maxEntries", maxEntries);
+    throw new ArchiveLimitExceededError("maxEntries", maxEntries);
   }
 
   const entries: ZipEntryRecord[] = new Array(totalEntries);

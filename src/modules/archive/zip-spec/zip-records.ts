@@ -256,13 +256,6 @@ export function writeEndOfCentralDirectoryInto(
   return ZIP_END_OF_CENTRAL_DIR_FIXED_SIZE + input.comment.length;
 }
 
-export function buildEndOfCentralDirectory(input: ZipEndOfCentralDirectoryInput): Uint8Array {
-  const record = new Uint8Array(ZIP_END_OF_CENTRAL_DIR_FIXED_SIZE + input.comment.length);
-  const view = new DataView(record.buffer, record.byteOffset, record.byteLength);
-  writeEndOfCentralDirectoryInto(record, view, 0, input);
-  return record;
-}
-
 export function buildDataDescriptor(
   crc32: number,
   compressedSize: number,
@@ -399,16 +392,6 @@ export function writeZip64EndOfCentralDirectoryInto(
   return ZIP64_END_OF_CENTRAL_DIR_FIXED_SIZE;
 }
 
-export function buildZip64EndOfCentralDirectory(
-  input: Zip64EndOfCentralDirectoryInput
-): Uint8Array {
-  const out = new Uint8Array(ZIP64_END_OF_CENTRAL_DIR_FIXED_SIZE);
-  const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
-  writeZip64EndOfCentralDirectoryInto(out, view, 0, input);
-
-  return out;
-}
-
 export interface Zip64EndOfCentralDirectoryLocatorInput {
   zip64EndOfCentralDirectoryDiskNumber?: number;
   zip64EndOfCentralDirectoryOffset: number;
@@ -430,13 +413,4 @@ export function writeZip64EndOfCentralDirectoryLocatorInto(
   view.setUint32(offset + 16, totalDisks, true);
 
   return ZIP64_END_OF_CENTRAL_DIR_LOCATOR_FIXED_SIZE;
-}
-
-export function buildZip64EndOfCentralDirectoryLocator(
-  input: Zip64EndOfCentralDirectoryLocatorInput
-): Uint8Array {
-  const out = new Uint8Array(ZIP64_END_OF_CENTRAL_DIR_LOCATOR_FIXED_SIZE);
-  const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
-  writeZip64EndOfCentralDirectoryLocatorInto(out, view, 0, input);
-  return out;
 }

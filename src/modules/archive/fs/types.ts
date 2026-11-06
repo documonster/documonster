@@ -612,7 +612,7 @@ export interface ArchiveFileOpenOptionsZip {
   maxEntrySize?: number;
 
   /**
-   * Most entries the archive may contain (`ArchiveLimitError`), checked when it is opened.
+   * Most entries the archive may contain (`ArchiveLimitExceededError`), checked when it is opened.
    * Unbounded by default.
    */
   maxEntries?: number;

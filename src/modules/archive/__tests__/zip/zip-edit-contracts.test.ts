@@ -104,11 +104,13 @@ describe("readers return copies", () => {
     await reader.close();
   });
 
-  it("ZipEditor.getEntries", async () => {
+  it("ZipEditor.getSourceEntries", async () => {
     const editor = await Archive.ZipEditor.open(zip);
     expect(() => {
-      (editor.getEntries()[0] as { path: string }).path = "zzz";
+      (editor.getSourceEntries()[0] as { path: string }).path = "zzz";
     }).toThrow(TypeError);
+    expect(editor.getSourceEntries().map(e => e.path)).toEqual(["a.txt", "b.txt"]);
+    // The deprecated name returns the same thing.
     expect(editor.getEntries().map(e => e.path)).toEqual(["a.txt", "b.txt"]);
   });
 });

@@ -380,12 +380,21 @@ export class ZipEditor {
   }
 
   /**
-   * Get a snapshot of the original parsed entries (ignores pending edits).
-   *
-   * Use this to inspect the archive before making changes.
+   * The entries of the archive as it was opened, ignoring pending edits — a copy. Use it to
+   * inspect the source before making changes; {@link has} answers for the archive the edits
+   * will produce.
+   */
+  getSourceEntries(): ZipEntryRecord[] {
+    return [...this._baseEntries];
+  }
+
+  /**
+   * @deprecated Use {@link getSourceEntries}. The name read as the archive the edits produce —
+   * which `ArchiveFile#getEntries` returns — while this has always returned the source's
+   * entries. Removed in 1.0.
    */
   getEntries(): ZipEntryRecord[] {
-    return [...this._baseEntries];
+    return this.getSourceEntries();
   }
 
   /**

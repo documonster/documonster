@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -191,6 +191,6 @@ Document.setSectionProperties(doc, {
 // Tell the document settings to enable evenAndOddHeaders globally.
 Document.setSettings(doc, { evenAndOddHeaders: true });
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "06-headers-footers.docx"), buf);
 console.log(`  → 06-headers-footers.docx (${buf.length} bytes)`);

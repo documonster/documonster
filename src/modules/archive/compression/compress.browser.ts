@@ -50,15 +50,11 @@ import {
   deflateRawCompressed,
   deflateRawStore
 } from "@archive/compression/deflate-fallback";
-import {
-  deflateWithPool,
-  inflateWithPool,
-  hasWorkerSupport
-} from "@archive/compression/worker-pool/index.browser";
+import { hasWorkerSupport } from "@archive/compression/worker-pool/pool.base";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
 import {
   ArchiveError,
-  ArchiveLimitError,
+  ArchiveLimitExceededError,
   createAbortError,
   isAbortError,
   throwIfAborted
@@ -128,6 +124,15 @@ function rethrowIfAborted(err: unknown, signal?: AbortSignal): void {
 // Unified Codec Strategy
 // =============================================================================
 
+/**
+ * The worker pool, loaded the first time a call goes to a worker. It is reached only from an asynchronous path, and
+ * most callers never take it — below the auto-worker threshold, or with `useWorker: false` — so a static import put
+ * its scheduler and worker script in every bundle that compresses anything.
+ */
+function loadWorkerPool() {
+  return import("@archive/compression/worker-pool/pool.browser");
+}
+
 interface CodecStrategy {
   hasNative: () => boolean;
   native: (data: Uint8Array, options: CompressOptions) => Promise<Uint8Array>;
@@ -138,8 +143,8 @@ interface CodecStrategy {
 const deflateStrategy: CodecStrategy = {
   hasNative: hasDeflateRawCompressionStream,
   native: data => compressWithStream(data),
-  worker: (data, { level, signal, allowTransfer }) =>
-    deflateWithPool(data, { level, signal, allowTransfer }),
+  worker: async (data, { level, signal, allowTransfer }) =>
+    (await loadWorkerPool()).deflateWithPool(data, { level, signal, allowTransfer }),
   jsFallback: (data, options) => deflateRawCompressed(data, options.level)
 };
 
@@ -147,9 +152,9 @@ const inflateStrategy: CodecStrategy = {
   hasNative: hasDeflateRawDecompressionStream,
   native: (data, options) => decompressWithStream(data, options.maxOutputLength),
   // The worker enforces the bound while it inflates and reports a hit as an
-  // ArchiveLimitError, exactly like the in-process paths.
-  worker: (data, { signal, allowTransfer, maxOutputLength }) =>
-    inflateWithPool(data, { signal, allowTransfer, maxOutputLength }),
+  // ArchiveLimitExceededError, exactly like the in-process paths.
+  worker: async (data, { signal, allowTransfer, maxOutputLength }) =>
+    (await loadWorkerPool()).inflateWithPool(data, { signal, allowTransfer, maxOutputLength }),
   jsFallback: (data, options) => inflateRaw(data, options.maxOutputLength)
 };
 
@@ -174,7 +179,7 @@ async function processWithStrategy(
       rethrowIfAborted(err, options.signal);
       // A limit hit is a verdict on the data; retrying elsewhere would only
       // reach the same one.
-      if (err instanceof ArchiveLimitError) {
+      if (err instanceof ArchiveLimitExceededError) {
         throw err;
       }
       // Fall through to best available in-process path.
@@ -189,7 +194,7 @@ async function processWithStrategy(
       // Respect aborts — never silently retry an aborted operation.
       rethrowIfAborted(err, options.signal);
       // A limit hit is a verdict on the data, not a spurious native failure.
-      if (err instanceof ArchiveLimitError) {
+      if (err instanceof ArchiveLimitExceededError) {
         throw err;
       }
       // Native CompressionStream / DecompressionStream can intermittently
@@ -511,7 +516,7 @@ export async function unzlib(data: Uint8Array, options: CompressOptions = {}): P
  * Decompress Zlib data (sync)
  *
  * @param options - `maxOutputLength` bounds the output; decoding stops with a
- *   `ArchiveLimitError` as soon as it is exceeded
+ *   `ArchiveLimitExceededError` as soon as it is exceeded
  */
 export function unzlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   assertLimitOption("maxOutputLength", options.maxOutputLength);

@@ -10,12 +10,7 @@
  * What it establishes is integrity, not trust: see {@link PdfSignatureReport.intact}.
  */
 
-import {
-  checkOptionalObject,
-  checkOptionalString,
-  isBlob,
-  pdfBytesOrBlob
-} from "@pdf/core/arguments";
+import { at, isBlob, pdfBytesOrBlob } from "@pdf/core/arguments";
 import {
   certificateCommonName,
   certificateValidity,
@@ -28,6 +23,8 @@ import { initDecryption, isEncrypted } from "@pdf/reader/pdf-decrypt";
 import { PdfDocument } from "@pdf/reader/pdf-document";
 import { decodePdfStringBytes, dictGetName, isPdfArray, isPdfRef } from "@pdf/reader/pdf-parser";
 import type { PdfDictValue, PdfObject } from "@pdf/reader/pdf-parser";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** Options for `Pdf.verifySignatures`. */
 export interface VerifySignaturesOptions {
@@ -112,6 +109,16 @@ export interface PdfSignatureReport {
   subFilter?: string;
 }
 
+const verifySignaturesOptionsSchema = s.object(
+  { password: s.string().optional() },
+  { expected: "an options object" }
+);
+const _verifySignaturesOptionsMatch: SchemaMatches<
+  typeof verifySignaturesOptionsSchema,
+  VerifySignaturesOptions
+> = true;
+void _verifySignaturesOptionsMatch;
+
 /**
  * Find every signature field in a PDF and check each one's integrity.
  *
@@ -132,8 +139,7 @@ export async function verifyPdfSignatures(
   options: VerifySignaturesOptions = {}
 ): Promise<PdfSignatureReport[]> {
   const source = pdfBytesOrBlob("Pdf.verifySignatures", "data", data);
-  checkOptionalObject("Pdf.verifySignatures", "options", options);
-  checkOptionalString("Pdf.verifySignatures", "options.password", options.password);
+  check(verifySignaturesOptionsSchema, options, at("Pdf.verifySignatures", "options"));
   const bytes = isBlob(source) ? new Uint8Array(await source.arrayBuffer()) : source;
   const doc = new PdfDocument(bytes);
   if (isEncrypted(doc) && !initDecryption(doc, options.password ?? "")) {

@@ -1,7 +1,8 @@
-import { ArchiveArgumentError } from "@archive/core/errors";
+import { checkArchiveArgument } from "@archive/core/arguments";
 import { createEventWaiter } from "@stream/core/event-utils";
 import { isWritableStream } from "@stream/core/type-guards";
 import { concatUint8Arrays } from "@utils/binary";
+import { s } from "@utils/schema";
 
 export type ArchiveSink =
   | WritableStream<Uint8Array>
@@ -32,19 +33,19 @@ export type ArchivePipeToOptions = {
  * a `write` method (a Node-style Writable or a duck-typed sink).
  */
 export function checkSinkArgument(where: string, sink: unknown): void {
-  if (
-    !isWritableStream(sink) &&
-    (typeof sink !== "object" ||
-      sink === null ||
-      typeof (sink as { write?: unknown }).write !== "function")
-  ) {
-    throw new ArchiveArgumentError(
-      "sink",
-      `${where}: sink must be a WritableStream or a writable with a write() method, got ${
-        sink === null ? "null" : typeof sink
-      }`
-    );
-  }
+  checkArchiveArgument(
+    s.custom(
+      v =>
+        isWritableStream(v) ||
+        (typeof v === "object" &&
+          v !== null &&
+          typeof (v as { write?: unknown }).write === "function"),
+      "a WritableStream or a writable with a write() method"
+    ),
+    sink,
+    where,
+    "sink"
+  );
 }
 
 export async function pipeIterableToSink(

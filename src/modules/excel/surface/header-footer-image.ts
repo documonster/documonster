@@ -20,14 +20,14 @@ import {
 import { checkWorksheet } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import {
-  checkHeaderImage,
+  headerFooterImageOptionsSchema,
   checkHeaderPosition,
   checkImageId
 } from "@excel/surface/argument-checks";
 import type { HeaderFooterImagePosition } from "@excel/types";
-import { argumentChecks } from "@excel/utils/arguments";
+import { checkSchema } from "@excel/utils/arguments";
 
-/** The images in the sheet's header and footer sections. */
+/** The images in the sheet's header and footer sections — new objects each call, so changing one changes nothing. */
 export function list(ws: WorksheetData): HeaderFooterImageEntry[] {
   checkWorksheet(ws);
   return getHeaderFooterImages(ws);
@@ -50,18 +50,8 @@ export function remove(ws: WorksheetData, position: HeaderFooterImagePosition): 
  */
 export function set(ws: WorksheetData, options: HeaderFooterImageOptions): void {
   checkWorksheet(ws);
-  const check = argumentChecks("HeaderFooterImage.set");
-  check.required("options", options);
-  if (check.record("options", options)) {
-    checkImageId("HeaderFooterImage.set", ws, options.imageId);
-    check.required("options.position", options.position);
-    checkHeaderImage(
-      check,
-      "options",
-      { position: "position", width: "width", height: "height", applyTo: "applyTo" },
-      options
-    );
-  }
+  checkSchema("HeaderFooterImage.set", "options", headerFooterImageOptionsSchema, options);
+  checkImageId("HeaderFooterImage.set", ws, options.imageId);
   setHeaderFooterImage(ws, options);
 }
 

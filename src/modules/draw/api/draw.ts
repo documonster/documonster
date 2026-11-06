@@ -3,7 +3,7 @@
  * and path construction.
  *
  * `import { Draw } from "documonster/draw"` →
- *   `Draw.toSvg(list)`, `Draw.toRgba(list)`, `Draw.render(list, surface)`,
+ *   `Draw.toSvg(list)`, `Draw.toPng(list)`, `Draw.toRgba(list)`, `Draw.render(list, surface)`,
  *   `Draw.parseColor("#3366cc")`, `Draw.measureText(text, style)`, …
  *
  * The matrix helpers live in their own `Matrix` namespace: `scale`, `rotate` and
@@ -19,16 +19,12 @@
  * already names the backend interface, and `@draw/surface` cannot mean both.
  */
 
+import { background, checkedRasterize, positive } from "@draw/api/rasterize";
 import {
+  at,
   checkBackground,
   checkColor,
   checkDrawList,
-  checkFinite,
-  checkOptionalBoolean,
-  checkOptionalObject,
-  checkOptionalPositive,
-  checkOptionalString,
-  checkPositive,
   checkString,
   checkSurface,
   checkTextStyle,
@@ -37,7 +33,6 @@ import {
 import { cssColor, relativeLuminance, translucent } from "@draw/colour";
 import { isByteSource, readRasterFont } from "@draw/raster/glyph-outline";
 import type { RasterFont } from "@draw/raster/glyph-outline";
-import { rasterizeToRgba } from "@draw/raster/surface";
 import type { RasterizedImage, RasterizeOptions } from "@draw/raster/surface";
 import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
@@ -47,7 +42,21 @@ import { measureText as measureTextImpl, widestText, wrapText as wrapTextImpl } 
 import type { DrawList, DrawTextStyle } from "@draw/types";
 import { isSimpleText as isSimpleTextImpl, textFeaturesOf } from "@utils/complex-text";
 import { isRecordArgument } from "@utils/object";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import type { Rgba01 } from "@utils/svg-lex";
+
+const toSvgOptionsSchema = s.object(
+  {
+    width: positive().optional(),
+    height: positive().optional(),
+    background: background(),
+    comment: s.string().optional()
+  },
+  { expected: "an object", readonly: true }
+);
+const _toSvgOptionsMatch: SchemaMatches<typeof toSvgOptionsSchema, ToSvgOptions> = true;
+void _toSvgOptionsMatch;
 
 // --- Backends ---
 
@@ -59,63 +68,28 @@ import type { Rgba01 } from "@utils/svg-lex";
  */
 export function toSvg(list: DrawList, options?: ToSvgOptions): string {
   checkDrawList("Draw.toSvg", list);
-  checkOptionalObject("Draw.toSvg", "options", options);
-  checkOptionalPositive("Draw.toSvg", "options.width", options?.width);
-  checkOptionalPositive("Draw.toSvg", "options.height", options?.height);
+  check(toSvgOptionsSchema.optional(), options, at("Draw.toSvg", "options"));
   if (options?.background !== undefined) {
     checkBackground("Draw.toSvg", "options.background", options.background);
   }
-  checkOptionalString("Draw.toSvg", "options.comment", options?.comment);
   return toSvgImpl(list, options);
 }
 
 /**
  * Render a display list to pixels: an RGBA image plus what could not be drawn.
  *
- * Pixels rather than a PNG — pair this with any encoder (`Archive.encodePng` from
- * `documonster/archive`).
+ * Pixels rather than a file: for a PNG use `Draw.toPng`; for another format, pair these pixels with its
+ * encoder.
  *
  * @throws {DrawArgumentError} the list or an option has no valid reading; a list with no
  *   area (`width` or `height` of 0) has nothing to rasterise.
  * @throws {DrawError} the output would exceed the 64-megapixel limit.
  */
 export function toRgba(list: DrawList, options?: RasterizeOptions): RasterizedImage {
-  checkDrawList("Draw.toRgba", list);
-  checkPositive("Draw.toRgba", "list.width", list.width);
-  checkPositive("Draw.toRgba", "list.height", list.height);
-  checkOptionalObject("Draw.toRgba", "options", options);
-  if (options !== undefined) {
-    checkOptionalPositive("Draw.toRgba", "options.width", options.width);
-    checkOptionalPositive("Draw.toRgba", "options.height", options.height);
-    checkOptionalPositive("Draw.toRgba", "options.scale", options.scale);
-    if (options.samples !== undefined) {
-      checkFinite("Draw.toRgba", "options.samples", options.samples);
-      if (options.samples < 1) {
-        fail("Draw.toRgba", "options.samples", "a finite number >= 1", options.samples);
-      }
-    }
-    if (options.background !== undefined) {
-      checkBackground("Draw.toRgba", "options.background", options.background);
-    }
-    if (options.fonts !== undefined) {
-      if (!Array.isArray(options.fonts)) {
-        fail("Draw.toRgba", "options.fonts", "an array of fonts", options.fonts);
-      }
-      options.fonts.forEach((font: unknown, i) => {
-        if (typeof font !== "object" || font === null) {
-          fail(
-            "Draw.toRgba",
-            `options.fonts[${i}]`,
-            "font bytes, a RasterFont or { data, collectionIndex }",
-            font
-          );
-        }
-      });
-    }
-    checkOptionalBoolean("Draw.toRgba", "options.useSystemFonts", options.useSystemFonts);
-  }
-  return rasterizeToRgba(list, options);
+  return checkedRasterize("Draw.toRgba", list, options);
 }
+
+export { toPng } from "@draw/api/png";
 
 // --- Walking ---
 

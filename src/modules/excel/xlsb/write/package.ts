@@ -133,6 +133,7 @@ import {
   resolveReachableOpaqueParts
 } from "@excel/xlsx/opaque-parts";
 import { RelType } from "@excel/xlsx/rel-type";
+import type { ZipWriterOptions } from "@excel/xlsx/types";
 import { collectChartExParts, renderChartWithLeadingComments } from "@excel/xlsx/write/charts";
 import {
   CHARTSHEET_DRAWING_EMU,
@@ -250,6 +251,11 @@ export interface XlsbWriteOptions {
    * produce identical bytes in both containers. Omitted means the current time.
    */
   readonly modTime?: Date;
+  /**
+   * ZIP settings of the default (buffered) sink — `Workbook.toBuffer`'s `zip` option: compression `level` and the
+   * `timestamps` mode. `zip.modTime` wins over {@link modTime}, as it does for XLSX.
+   */
+  readonly zip?: ZipWriterOptions;
   /** Work a streaming caller has already done. Omitted means "none of it". */
   readonly streamed?: {
     /** Sheet part paths already in the sink. This writer will not produce them again. */
@@ -1038,7 +1044,14 @@ export async function writeXlsbPackage(
    * a `PackageSink` is either, and nothing below this line knows which.
    */
   const sink: PackageSink =
-    options?.sink ?? new ArchiveSink(new ZipArchive({ modTime: fitZipModTime(options?.modTime) }));
+    options?.sink ??
+    new ArchiveSink(
+      new ZipArchive({
+        modTime: fitZipModTime(options?.zip?.modTime ?? options?.modTime),
+        ...(options?.zip?.level === undefined ? {} : { level: options.zip.level }),
+        ...(options?.zip?.timestamps === undefined ? {} : { timestamps: options.zip.timestamps })
+      })
+    );
   const partPaths = sink.paths;
   // **Every part goes through here, and a path may only be written once.**
   //

@@ -340,8 +340,8 @@ export type {
   // Document
   DocxDocument,
   DocxOptions,
-  DiscardUnrecognizedValuesOptions,
-  UnrecognizedValue
+  DocxDiscardUnrecognizedValuesOptions,
+  DocxUnrecognizedValue
 } from "@word/types";
 
 // --- Preserve-only API (round-trip preservation, no full editing support) ---
@@ -381,10 +381,15 @@ export {
 export type { DocxIdCollection } from "@word/errors";
 
 // --- Stable API ---
-
-// --- Stable API ---
 /** @stability stable */
-export * as Document from "@word/builder/document-handle";
+export * as Document from "@word/surface/document";
+/** @stability stable */
+export { PageSizes } from "@word/constants";
+export type { DocxPageSizeName } from "@word/constants";
+export type {
+  DocxAddImageOptions,
+  DocxAddFloatingImageOptions
+} from "@word/builder/document-handle";
 import type { DocxDocument } from "@word/types";
 /** @deprecated Use {@link DocxDocument}. Removed in 1.0. */
 export type DocumentHandle = DocxDocument;
@@ -398,6 +403,7 @@ export * as Build from "@word/surface/build";
 export * as Units from "@word/surface/units";
 export * as Theme from "@word/surface/theme";
 export * as Query from "@word/surface/query";
+/** @deprecated Use `Document` (`Document.read`, `Document.toBuffer`, …). Removed in 1.0. */
 export * as Io from "@word/surface/io";
 export * as Package from "@word/surface/package";
 export * as Transform from "@word/surface/transform";
@@ -525,7 +531,7 @@ import type {
   TemplateChart as DocxTemplateChart,
   TemplateHtmlChunk as DocxTemplateHtmlChunk,
   TemplateTag as DocxTemplateTag,
-  LegacyTemplateOptions as DocxLegacyTemplateOptions
+  LegacyTemplateOptions as DocxLegacyTemplateOptionsType
 } from "@word/template/template-engine";
 export type {
   DocxTemplateOptions,
@@ -534,9 +540,14 @@ export type {
   DocxTemplateSubDocument,
   DocxTemplateChart,
   DocxTemplateHtmlChunk,
-  DocxTemplateTag,
-  DocxLegacyTemplateOptions
+  DocxTemplateTag
 };
+/**
+ * @deprecated The options of the deprecated template entry points (`Template.fillTemplate`,
+ * `fillTemplateEnhanced` and their `…FromSource` / `…FromBuffer` forms); use
+ * {@link DocxTemplateOptions} with `Template.fill`. Removed in 1.0.
+ */
+export type DocxLegacyTemplateOptions = DocxLegacyTemplateOptionsType;
 /** @stability experimental */
 import type {
   DataSource as DocxDataSource,
@@ -951,8 +962,8 @@ export type TemplateChart = DocxTemplateChart;
 export type TemplateHtmlChunk = DocxTemplateHtmlChunk;
 /** @deprecated Use {@link DocxTemplateTag}. Removed in 1.0. */
 export type TemplateTag = DocxTemplateTag;
-/** @deprecated Use {@link DocxLegacyTemplateOptions}. Removed in 1.0. */
-export type LegacyTemplateOptions = DocxLegacyTemplateOptions;
+/** @deprecated Use {@link DocxTemplateOptions} with `Template.fill`. Removed in 1.0. */
+export type LegacyTemplateOptions = DocxLegacyTemplateOptionsType;
 /** @deprecated Use {@link DocxFillFromSourceOptions}. Removed in 1.0. */
 export type FillFromSourceOptions = DocxFillFromSourceOptions;
 /** @deprecated Use {@link DocxFlatOpcPart}. Removed in 1.0. */

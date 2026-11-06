@@ -16,7 +16,7 @@
  * each surviving run's properties.
  */
 
-import { Document, Io, Query } from "documonster/word";
+import { Document, Query } from "documonster/word";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -128,7 +128,10 @@ export const docSearchTool = defineTool({
   }
 });
 
-function searchByText(doc: Awaited<ReturnType<typeof Io.readFile>>, args: SearchArgs): string {
+function searchByText(
+  doc: Awaited<ReturnType<typeof Document.readFile>>,
+  args: SearchArgs
+): string {
   const query = buildQuery(args);
   const results = Query.searchText(doc, query);
 
@@ -163,7 +166,10 @@ function searchByText(doc: Awaited<ReturnType<typeof Io.readFile>>, args: Search
   ].join("\n");
 }
 
-function searchByFormat(doc: Awaited<ReturnType<typeof Io.readFile>>, args: SearchArgs): string {
+function searchByFormat(
+  doc: Awaited<ReturnType<typeof Document.readFile>>,
+  args: SearchArgs
+): string {
   const criteria = {
     ...args.format,
     ...(args.text === undefined ? {} : { textMatch: buildRegex(args) })
@@ -291,10 +297,10 @@ export const docEditTool = defineTool({
     const backupPath = inPlace && (args.backup ?? true) ? await backupOnce(writeTarget) : undefined;
 
     if (inPlace) {
-      await replaceAtomically(writeTarget.path, temporary => Io.writeFile(doc, temporary));
+      await replaceAtomically(writeTarget.path, temporary => Document.writeFile(doc, temporary));
     } else {
       await writeWithPolicy(writeTarget.path, args.overwrite === true, temporary =>
-        Io.writeFile(doc, temporary)
+        Document.writeFile(doc, temporary)
       );
     }
 
@@ -357,7 +363,7 @@ function escapeCell(text: string): string {
 }
 
 async function readWord(resolved: string, displayPath: string) {
-  return await Io.readFile(resolved).catch((cause: unknown) => {
+  return await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${displayPath} as a Word document`,
       "Run doc_inspect to check the real file type; a CFB container is either a legacy .doc or an encrypted .docx.",

@@ -127,12 +127,12 @@ describe("RemoteZipReader", () => {
       await reader.close();
     });
 
-    it("should return null for non-existent entry", async () => {
+    it("should return undefined for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "exists.txt": "data" }));
       const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.extract("not-exists.txt");
-      expect(result).toBeNull();
+      expect(result).toBeUndefined();
 
       await reader.close();
     });
@@ -379,6 +379,34 @@ describe("RemoteZipReader", () => {
         .map(e => e.path)
         .sort();
       expect(allTxt).toEqual(["data/a.txt", "data/b.txt", "data/sub/c.txt", "file.txt"]);
+
+      await reader.close();
+    });
+
+    it("matches globs by the shared rules: **/ includes the root, ? stays in one segment", async () => {
+      const zipData = await createZip(
+        toEntries({
+          "data.json": "1",
+          "a/data.json": "2",
+          "a/b/data.json": "3",
+          "ab/x": "4",
+          "a/x": "5",
+          ".hidden.txt": "6",
+          "q+(1).txt": "7"
+        })
+      );
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
+      const paths = (pattern: string) =>
+        reader
+          .findEntries(pattern)
+          .map(e => e.path)
+          .sort();
+
+      expect(paths("**/data.json")).toEqual(["a/b/data.json", "a/data.json", "data.json"]);
+      expect(paths("a?x")).toEqual([]);
+      expect(paths("a?/x")).toEqual(["ab/x"]);
+      expect(paths("*.txt")).toEqual([".hidden.txt", "q+(1).txt"]);
+      expect(paths("q+(1).txt")).toEqual(["q+(1).txt"]);
 
       await reader.close();
     });
@@ -673,7 +701,7 @@ describe("RemoteZipReader.open", () => {
       expect(result).toBe(true);
 
       const notFound = await reader.verifyCrc32("missing.txt");
-      expect(notFound).toBeNull();
+      expect(notFound).toBeUndefined();
 
       await reader.close();
     });
@@ -925,12 +953,12 @@ describe("RemoteZipReader.open", () => {
       await reader.close();
     });
 
-    it("should return null for non-existent entry", async () => {
+    it("should return undefined for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "content" }));
       const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.verifyCrc32("missing.txt");
-      expect(result).toBeNull();
+      expect(result).toBeUndefined();
 
       await reader.close();
     });

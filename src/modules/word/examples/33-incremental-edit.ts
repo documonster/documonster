@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Build, Document, Io, Package } from "../index";
+import { Build, Document, Package } from "../index";
 import type { BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -40,7 +40,7 @@ Document.addParagraph(seed, "Second paragraph.");
 Document.setHeader(seed, "default", { children: [Build.textParagraph("Header v1")] });
 Document.setFooter(seed, "default", { children: [Build.textParagraph("Footer v1")] });
 Document.setCoreProperties(seed, { title: "Original", creator: "OpenCode" });
-const baseBytes = await Io.toBuffer(seed);
+const baseBytes = await Document.toBuffer(seed);
 fs.writeFileSync(path.join(outDir, "00-base.docx"), baseBytes);
 console.log(`  base.docx: ${baseBytes.length} bytes`);
 

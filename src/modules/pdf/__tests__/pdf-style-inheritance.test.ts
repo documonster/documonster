@@ -311,14 +311,18 @@ describe("PDF style rendering", () => {
 
       // All cells have thin borders on all sides
       for (let col = 1; col <= 4; col++) {
-        Cell.setStyle(ws, 1, col, {
-          border: {
-            top: { style: "thin" },
-            right: { style: "thin" },
-            bottom: { style: "thin" },
-            left: { style: "thin" }
+        Cell.setStyle(
+          ws,
+          { row: 1, col },
+          {
+            border: {
+              top: { style: "thin" },
+              right: { style: "thin" },
+              bottom: { style: "thin" },
+              left: { style: "thin" }
+            }
           }
-        });
+        );
       }
       // D1 has text to block overflow
       Cell.setValue(ws, "D1", "STOP");
@@ -350,14 +354,18 @@ describe("PDF style rendering", () => {
       Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       for (let col = 1; col <= 2; col++) {
-        Cell.setStyle(ws, 1, col, {
-          border: {
-            top: { style: "thin" },
-            right: { style: "thin" },
-            bottom: { style: "thin" },
-            left: { style: "thin" }
+        Cell.setStyle(
+          ws,
+          { row: 1, col },
+          {
+            border: {
+              top: { style: "thin" },
+              right: { style: "thin" },
+              bottom: { style: "thin" },
+              left: { style: "thin" }
+            }
           }
-        });
+        );
       }
 
       const pdf = await excelToPdf(wb);

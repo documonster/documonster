@@ -3,16 +3,28 @@
  * streamed XLSX, `Stream.WorkbookReader` — reports it the same way: bytes that are not a ZIP package, and a part whose
  * bytes do not match the CRC-32 the package records for it, are an `ExcelFileError` (which `isExcelError` answers for)
  * with the archive's diagnosis as the cause — and an OLE compound file, an encrypted workbook (`ExcelEncryptedError`)
- * or a legacy `.xls`, is reported as what it is. A limit (`ArchiveLimitError`) and a ZIP password keep their archive
- * errors: they say what to change, not that the input is damaged.
+ * or a legacy `.xls`, is reported as what it is. A container limit is an `ExcelLimitExceededError` naming the `zip`
+ * option, with the archive's `ArchiveLimitExceededError` as its cause; a ZIP password keeps its archive error.
  *
  * An encrypted workbook read with its `password` is decrypted here ({@link openWorkbookPackage}), by the Office
  * encryption Word uses too (`@archive/office-crypto/agile`) — loaded only then, through `import()`.
  */
 import { hasEncryptedPackageStreams, isCfb } from "@archive/cfb/signature";
-import { ZipCrc32MismatchError, ZipParseError } from "@archive/core/errors";
+import { DEFAULT_MAX_ENTRY_SIZE } from "@archive/core/defaults";
+import {
+  ArchiveFileTooLargeError,
+  ArchiveLimitExceededError,
+  ZipCrc32MismatchError,
+  ZipParseError
+} from "@archive/core/errors";
 import type { EncryptOptions } from "@archive/office-crypto/agile";
-import { ExcelDecryptionError, ExcelEncryptedError, ExcelFileError } from "@excel/errors";
+import {
+  ExcelDecryptionError,
+  ExcelEncryptedError,
+  ExcelFileError,
+  ExcelLimitExceededError
+} from "@excel/errors";
+import type { ExcelLimit } from "@excel/errors";
 
 /** Whether `bytes` start with the compound-file signature. */
 export const isCompoundFile = isCfb;
@@ -231,8 +243,114 @@ function concat(chunks: readonly Uint8Array[], length: number): Uint8Array {
 }
 
 /**
+ * Document-level container defaults. The archive library leaves both bounds
+ * unbounded because what a process can afford is host-dependent; a workbook is
+ * a narrower thing. A part count of 10,000 mirrors the Word reader's
+ * `maxPartCount` and is far above real workbooks (each sheet adds ~2–6 parts:
+ * sheet XML, rels, drawing, comments, table), which reach the low hundreds.
+ * 2 GiB total sits above what Excel itself can open — sheet XML compresses
+ * ~10:1, so this admits a ~200 MB `.xlsx` — while rejecting the many-entries
+ * bombs a per-entry bound alone lets through. Pass `Infinity` to lift either.
+ */
+const DEFAULT_MAX_ENTRIES = 10_000;
+const DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024;
+
+/** The `zip` options of a workbook read, as every Excel reader takes them. */
+export interface ContainerReadOptions {
+  readonly maxEntrySize?: number;
+  readonly maxTotalUncompressedSize?: number;
+  readonly maxEntries?: number;
+  readonly checkCrc32?: boolean;
+}
+
+/**
+ * The container limits a read applies — its `zip` options with the workbook defaults filled in. One function so
+ * the buffered XLSX and XLSB readers, format detection and the streamed reader cannot disagree about a limit.
+ */
+export function containerReadLimits(zip: ContainerReadOptions | undefined): {
+  maxEntrySize: number;
+  maxTotalUncompressedSize: number;
+  maxEntries: number;
+  checkCrc32?: boolean;
+} {
+  return {
+    maxEntrySize: zip?.maxEntrySize ?? DEFAULT_MAX_ENTRY_SIZE,
+    maxTotalUncompressedSize: zip?.maxTotalUncompressedSize ?? DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE,
+    maxEntries: zip?.maxEntries ?? DEFAULT_MAX_ENTRIES,
+    ...(zip?.checkCrc32 === undefined ? {} : { checkCrc32: zip.checkCrc32 })
+  };
+}
+
+/**
+ * The limits of {@link containerReadLimits} applied to a package read as it streams, where sizes are not known up
+ * front: {@link enter} counts a part as it arrives and returns the meter its bytes go through as they inflate —
+ * every byte of the part, whether it is parsed or drained. Each refusal is the {@link containerLimitError} the
+ * buffered reader would give.
+ */
+export function createContainerBudget(zip: ContainerReadOptions | undefined): {
+  /** Count one more part, `path`, and return the meter its chunks are charged to. */
+  enter(path: string): (chunk: Uint8Array | string) => void;
+} {
+  const limits = containerReadLimits(zip);
+  let entries = 0;
+  let total = 0;
+  return {
+    enter(path) {
+      entries++;
+      if (entries > limits.maxEntries) {
+        throw containerLimitError(new ArchiveLimitExceededError("maxEntries", limits.maxEntries));
+      }
+      let partTotal = 0;
+      return chunk => {
+        // An entry's chunks are bytes; a string chunk is counted as the UTF-8 it stands for.
+        const size =
+          typeof chunk === "string" ? new TextEncoder().encode(chunk).length : chunk.byteLength;
+        partTotal += size;
+        if (partTotal > limits.maxEntrySize) {
+          throw containerLimitError(
+            new ArchiveFileTooLargeError(path, `holds more than ${limits.maxEntrySize} bytes`, {
+              allowed: limits.maxEntrySize
+            })
+          );
+        }
+        total += size;
+        if (total > limits.maxTotalUncompressedSize) {
+          throw containerLimitError(
+            new ArchiveLimitExceededError(
+              "maxTotalUncompressedSize",
+              limits.maxTotalUncompressedSize
+            )
+          );
+        }
+      };
+    }
+  };
+}
+
+/**
+ * The error a read reports for a container limit the archive enforced: an {@link ExcelLimitExceededError} naming the
+ * `zip` option and its value, with the archive's error — which names the part, for a part too large — as the cause.
+ */
+export function containerLimitError(error: ArchiveLimitExceededError): ExcelLimitExceededError {
+  const limit: ExcelLimit | undefined =
+    error.limit === "maxEntrySize" ||
+    error.limit === "maxTotalUncompressedSize" ||
+    error.limit === "maxEntries"
+      ? error.limit
+      : undefined;
+  const itemType =
+    error instanceof ArchiveFileTooLargeError
+      ? `part "${error.path}"`
+      : limit === "maxEntries"
+        ? "part"
+        : "package";
+  return new ExcelLimitExceededError(itemType, error.allowed, { limit, cause: error });
+}
+
+/**
  * The error a read reports for `error`: an `ExcelFileError` for a package that is damaged or not one — the
- * {@link compoundFileError} when `bytes`, the input read, are a compound file — else `error`.
+ * {@link compoundFileError} when `bytes`, the input read, are a compound file — an `ExcelLimitExceededError` for a
+ * container limit, else `error`.
  */
 export function containerReadError(
   error: unknown,
@@ -240,6 +358,9 @@ export function containerReadError(
   format = "XLSX",
   bytes?: Uint8Array
 ): unknown {
+  if (error instanceof ArchiveLimitExceededError) {
+    return containerLimitError(error);
+  }
   if (error instanceof ZipParseError && bytes !== undefined && isCompoundFile(bytes)) {
     return compoundFileError(bytes, source, format);
   }

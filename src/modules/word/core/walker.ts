@@ -13,7 +13,9 @@
  * - Options control which parts of the document are visited
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import { checkHandle } from "@word/core/argument-checks";
+import { w } from "@word/core/option-schema";
 import { hyperlinkContent, isRangeMarker, isRun } from "@word/core/text-utils";
 import type {
   DocxDocument,
@@ -89,6 +91,20 @@ export interface WalkOptions {
   /** Walk comment content. Default: false. */
   readonly includeComments?: boolean;
 }
+
+/** The keys of {@link WalkOptions}, which `Transform.map` and `Query.listTables` take too. */
+export const walkOptionsShape = {
+  includeHeaders: w.boolean().optional(),
+  includeFooters: w.boolean().optional(),
+  includeFootnotes: w.boolean().optional(),
+  includeEndnotes: w.boolean().optional(),
+  includeComments: w.boolean().optional()
+};
+
+/** {@link WalkOptions}, as `Query.each` takes them. */
+export const walkOptionsSchema = w.record(walkOptionsShape);
+const _walkOptionsMatch: SchemaMatches<typeof walkOptionsSchema, WalkOptions> = true;
+void _walkOptionsMatch;
 
 /**
  * Visitor interface for document traversal.

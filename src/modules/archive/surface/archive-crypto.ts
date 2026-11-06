@@ -2,8 +2,9 @@
  * `Archive.Crypto` — the low-level ZIP encryption primitives (traditional PKWARE
  * "ZipCrypto" and WinZip AES AE-1/AE-2) and their format constants.
  *
- * Reading and writing encrypted archives does not need any of this: pass `password`
- * (and `encryptionMethod`) to `Archive.createZip` / `Archive.openZip`. These are for
+ * Reading and writing encrypted archives does not need any of this: pass `encryptionMethod`
+ * and `password` to `Archive.createZip` / `Archive.packZip`, and `password` to
+ * `Archive.openZip` / `Archive.unpackZip`. These are for
  * callers that handle entry payloads themselves, e.g. through `getRawCompressedData`.
  *
  * Both decryptors throw an `ArchiveError` when the password does not verify.

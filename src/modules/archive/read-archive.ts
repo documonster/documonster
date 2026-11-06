@@ -23,6 +23,14 @@ export function unzip(
     });
   }
 
+  return unzipZip(source, options);
+}
+
+/**
+ * {@link unzip} for a ZIP, with the same defaults and limits, without the TAR reader beside it. For internal callers
+ * that only ever read ZIP packages (DOCX, ODT): reaching TAR through the format matrix put it in their bundles.
+ */
+export function unzipZip(source: ArchiveSource, options: UnzipOptionsZip = {}): ZipReader {
   return new ZipReader(source, { ...options, format: "zip" });
 }
 

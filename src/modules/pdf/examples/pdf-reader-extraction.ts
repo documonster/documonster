@@ -141,7 +141,9 @@ for (const page of result.pages) {
 console.log("\n--- Bookmarks ---");
 function printBookmarks(items: typeof result.bookmarks, depth: number): void {
   for (const b of items) {
-    console.log(`${"  ".repeat(depth + 1)}• ${b.title}  → page ${b.pageIndex + 1}`);
+    console.log(
+      `${"  ".repeat(depth + 1)}• ${b.title}  → ${b.pageIndex === undefined ? "no page" : `page ${b.pageIndex + 1}`}`
+    );
     if (b.children.length > 0) {
       printBookmarks(b.children, depth + 1);
     }

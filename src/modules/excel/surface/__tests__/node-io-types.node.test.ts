@@ -2,9 +2,9 @@
  * The Node entry's IO types must match what Node actually hands back, so callers
  * never wrap or cast to reach the Node stream ecosystem.
  *
- * `toBuffer` is declared `Promise<Buffer>` — these tests prove the runtime keeps
- * that promise across package sizes, so the declaration is a fact rather than an
- * optimistic label. `toStream` is declared as the platform `Readable`, so it must
+ * `toBuffer` is declared `Promise<Uint8Array>`, as on every platform — these tests
+ * prove the runtime hands back a plain `Uint8Array` (not a `Buffer` typed as one)
+ * across package sizes. `toStream` is declared as the platform `Readable`, so it must
  * be usable directly as a nominal `stream.Readable`.
  */
 import { createWriteStream } from "node:fs";
@@ -27,23 +27,24 @@ function buildWorkbook(rows: number): Workbook.Handle {
 
 describe("Workbook.toBuffer (Node)", () => {
   // A workbook large enough to span several internal buffers took the
-  // `StreamBuf` branch that concatenates, which is where a plain `Uint8Array`
-  // could leak out; the small cases take the single-buffer branch.
-  it.each([0, 1, 5000, 50000])("returns a Buffer for %i rows", async rows => {
+  // `StreamBuf` branch that concatenates; the small cases take the single-buffer
+  // branch. Both must hand back a plain `Uint8Array`, whose `slice` copies as the
+  // declared type says, rather than a `Buffer`, whose `slice` is a view.
+  it.each([0, 1, 5000, 50000])("returns a plain Uint8Array for %i rows", async rows => {
     const bytes = await Workbook.toBuffer(buildWorkbook(rows));
-    expect(Buffer.isBuffer(bytes)).toBe(true);
+    expect(Object.getPrototypeOf(bytes)).toBe(Uint8Array.prototype);
+    expect(Buffer.isBuffer(bytes)).toBe(false);
     expect(bytes.length).toBeGreaterThan(0);
   });
 
   it("returns bytes that still parse back into a workbook", async () => {
-    // The `Buffer.isBuffer` fallback wraps existing memory with an explicit
-    // `byteOffset` / `byteLength`. Getting either wrong would silently hand back
-    // a truncated or shifted package, so re-read what we produced.
+    // The view is built with an explicit `byteOffset` / `byteLength`. Getting
+    // either wrong would silently hand back a truncated or shifted package, so
+    // re-read what we produced.
     const bytes = await Workbook.toBuffer(buildWorkbook(500));
-    expect(bytes.subarray(0, 2).toString("latin1")).toBe("PK");
+    expect(new TextDecoder("latin1").decode(bytes.subarray(0, 2))).toBe("PK");
 
-    const reread = Workbook.create();
-    await Workbook.read(reread, bytes);
+    const reread = await Workbook.read(bytes);
     const ws = Workbook.getWorksheet(reread, "S");
     expect(ws).toBeDefined();
     expect(Row.getCount(ws!)).toBe(500);

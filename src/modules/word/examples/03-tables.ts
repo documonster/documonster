@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { TableCell, TableRow } from "../index";
 
 const outDir = path.resolve(
@@ -386,6 +386,6 @@ const standaloneTable = Build.simpleTable(
 );
 Document.addTable(doc, standaloneTable);
 
-const buf = await Io.toBuffer(doc);
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "03-tables.docx"), buf);
 console.log(`  → 03-tables.docx (${buf.length} bytes)`);
