@@ -1576,7 +1576,10 @@ try {
 ```
 
 `blankCells: "collapse"` is **lossless in both containers** — the rectangles describe exactly the
-cells they came from, so writing the workbook back reproduces them byte for byte. `formulas` has
+cells they came from, so writing the workbook back reproduces them byte for byte. Editing the sheet
+behaves as it would after a `"keep"` read: a cell inside a rectangle reads with its format, an edit
+that reaches its row gives that row's blanks their cells first, and row and column splices move the
+rectangles with the cells. Only `Cell.has`, the iterators and the row counts see fewer cells. `formulas` has
 three settings: `"preserve"` (the default) keeps every expression it can decode and the cached
 value where it cannot, listing the addresses under `diagnostics.undecodedFormulas`; `"cached"`
 decodes none of them, which makes it immune to a token stream this codec cannot read and means the

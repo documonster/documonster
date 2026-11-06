@@ -57,7 +57,8 @@ import {
   rowEachCell,
   rowGetCell,
   rowSetValues,
-  rowSplice
+  rowSplice,
+  settleStyledBlankRow
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { ExcelUnsupportedFeatureError } from "@excel/errors";
@@ -179,6 +180,16 @@ function editRow(
   checkStreamRowsOpen(ws, where, row);
   const sheet = ws as WorksheetData;
   return create ? getRow(sheet, row) : findRow(sheet, row);
+}
+
+/**
+ * Row `row` for an edit of its cells — its style, its values, a splice — with its collapsed styled blanks given back
+ * first, so the edit reaches them as it reaches every other cell of the row (see `settleStyledBlankRow`).
+ */
+function editRowCells(ws: WorksheetData | StreamWorksheet, where: string, row: number): RowData {
+  const r = editRow(ws, where, row);
+  settleStyledBlankRow(r);
+  return r;
 }
 
 /** Row `row` for a read, never created — refused once a streaming writer has written it, as it no longer holds it. */
@@ -338,7 +349,7 @@ export function spliceCells(
   checkNumber(where, "start", start, { min: 1, max: MAX_COL, integer: true });
   checkNumber(where, "count", count, { min: 0, integer: true });
   inserts.forEach((value, i) => checkCellValue(value, { where, field: `inserts[${i}]` }));
-  rowSplice(editRow(ws, where, row), start, count, ...(inserts as CellValue[]));
+  rowSplice(editRowCells(ws, where, row), start, count, ...(inserts as CellValue[]));
 }
 
 // --- counting / iteration ---
@@ -585,7 +596,7 @@ export function setStyle(
   style: Partial<Style>
 ): void {
   checkStyle("Row.setStyle", style);
-  rowSetStyle(editRow(ws, "Row.setStyle", row), style);
+  rowSetStyle(editRowCells(ws, "Row.setStyle", row), style);
 }
 
 /**
@@ -649,7 +660,7 @@ export function setValues(
   checkRowValues("Row.setValues", values);
   checkBase("Row.setValues", options);
   rowSetValues(
-    editRow(ws, "Row.setValues", row),
+    editRowCells(ws, "Row.setValues", row),
     (options && Array.isArray(values) ? numberedValues(values, options.base) : values) as RowValues
   );
 }
@@ -680,7 +691,7 @@ export function setNumFmt(
   value: string | NumFmt | undefined
 ): void {
   checkStyleFacet("Row.setNumFmt", "numFmt", value, "value");
-  rowSetNumFmt(editRow(ws, "Row.setNumFmt", row), value);
+  rowSetNumFmt(editRowCells(ws, "Row.setNumFmt", row), value);
 }
 /** Set the font of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setFont(
@@ -689,7 +700,7 @@ export function setFont(
   value: Partial<Font> | undefined
 ): void {
   checkStyleFacet("Row.setFont", "font", value, "value");
-  rowSetFont(editRow(ws, "Row.setFont", row), value);
+  rowSetFont(editRowCells(ws, "Row.setFont", row), value);
 }
 /** Set the alignment of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setAlignment(
@@ -698,7 +709,7 @@ export function setAlignment(
   value: Partial<Alignment> | undefined
 ): void {
   checkStyleFacet("Row.setAlignment", "alignment", value, "value");
-  rowSetAlignment(editRow(ws, "Row.setAlignment", row), value);
+  rowSetAlignment(editRowCells(ws, "Row.setAlignment", row), value);
 }
 /** Set the borders of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setBorder(
@@ -707,7 +718,7 @@ export function setBorder(
   value: Partial<Borders> | undefined
 ): void {
   checkStyleFacet("Row.setBorder", "border", value, "value");
-  rowSetBorder(editRow(ws, "Row.setBorder", row), value);
+  rowSetBorder(editRowCells(ws, "Row.setBorder", row), value);
 }
 /** Set the fill of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setFill(
@@ -716,7 +727,7 @@ export function setFill(
   value: Fill | undefined
 ): void {
   checkStyleFacet("Row.setFill", "fill", value, "value");
-  rowSetFill(editRow(ws, "Row.setFill", row), value);
+  rowSetFill(editRowCells(ws, "Row.setFill", row), value);
 }
 /** Set the protection of the row and of every cell it already has; `undefined` clears it. See {@link setNumFmt}. */
 export function setProtection(
@@ -725,7 +736,7 @@ export function setProtection(
   value: Partial<Protection> | undefined
 ): void {
   checkStyleFacet("Row.setProtection", "protection", value, "value");
-  rowSetProtection(editRow(ws, "Row.setProtection", row), value);
+  rowSetProtection(editRowCells(ws, "Row.setProtection", row), value);
 }
 
 /** A copy of one facet of row `row`'s own style. Creates nothing and shares nothing. */

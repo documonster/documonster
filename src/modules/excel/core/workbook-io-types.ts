@@ -74,6 +74,12 @@ export interface WorkbookReadOptions extends XlsxReadOptions {
    * column, all four combinations — `keep`/`collapse` read, written as XLSX/XLSB — come back with 300 formatted blanks and
    * the same fill on each. Both writers expand the rectangles; the XLSX one does it in `worksheet-xform`, the XLSB one in
    * `model-adapter`. There is no report owed because there is no loss.
+   *
+   * **Editing a collapsed sheet is editing the same sheet.** A cell inside a rectangle reads with its format
+   * (`Cell.getFill`, `Cell.findStyle`, …); an edit that reaches its row — a value, a style, a note, a row's style or
+   * values — first gives the row's blanks their cells; and a row or column splice moves the rectangles with the cells. So
+   * every edit, and the file written after it, is the one `"keep"` would have given. What differs is only what the option
+   * exists to change: the blanks are not cells to `Cell.has`, to the iterators, or to the row and column counts.
    */
   readonly blankCells?: "keep" | "collapse";
   /**

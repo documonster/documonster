@@ -30,7 +30,8 @@ import {
   columnFromModel,
   getSheetName,
   getSheetWorkbook,
-  rowSetModel
+  rowSetModel,
+  setStyledBlankRanges
 } from "@excel/core/worksheet-core";
 import type { HeaderFooter } from "@excel/types";
 import { excelNameKey } from "@utils/name-key";
@@ -39,14 +40,18 @@ import { excelNameKey } from "@utils/name-key";
 
 export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
   checkWorksheetAttached(ws);
-  if (value.styledBlankRanges !== undefined) {
-    (ws as { _styledBlankRanges?: readonly unknown[] })._styledBlankRanges =
-      value.styledBlankRanges;
-  }
+  // Off while the rows are applied — their cells are the model's, not cells a rectangle gives back — and replaced, not
+  // kept, when the model has none: the model is the sheet.
+  setStyledBlankRanges(ws, undefined);
   assignSheetName(ws, value.name);
   ws.state = value.state;
   ws._columns = columnFromModel(ws, value.cols ?? []);
   _parseRows(ws, value);
+  // Before the merges and tables, which give cells objects: one inside a rectangle is a styled blank of the model's.
+  setStyledBlankRanges(
+    ws,
+    value.styledBlankRanges === undefined ? undefined : [...value.styledBlankRanges]
+  );
   // The cached values of each dynamic array's stored spill are its own, not data blocking it.
   markStoredSpills(ws);
 

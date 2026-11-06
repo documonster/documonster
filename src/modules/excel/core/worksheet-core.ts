@@ -60,6 +60,8 @@ import {
 } from "@excel/core/row";
 import type { SparklineGroup } from "@excel/core/sparkline";
 import { invalidateSharedCellStyle, sharedCellFacet } from "@excel/core/style-sharing";
+import type { StyledBlankRangeModel, StyledBlankRun } from "@excel/core/styled-blanks";
+import { StyledBlankGrid } from "@excel/core/styled-blanks";
 import type { TableData } from "@excel/core/table";
 import { sanitizeTableName } from "@excel/core/table-name";
 import type { Workbook } from "@excel/core/workbook";
@@ -240,9 +242,8 @@ export interface WorksheetData {
    * Notes a *streaming* worksheet kept, because it releases `_rows` at `commit()`.
    *
    * `readonly unknown[]` because the element is the XLSB writer's `SheetComment` and this layer must not depend on that
-   * writer — the same reason `styledBlankRanges` is typed loosely on the model. Declared here rather than reached through
-   * a cast at both ends, which is how `_styledBlankRanges` is still handled and is a weaker guarantee: a rename would
-   * silently produce `undefined` instead of a compile error.
+   * writer. Declared here rather than reached through a cast at both ends: a rename then fails to compile instead of
+   * silently producing `undefined`.
    *
    * Absent on a random-access worksheet, whose rows are still there when the package is written.
    * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
@@ -253,6 +254,15 @@ export interface WorksheetData {
    * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _retainedHyperlinks?: readonly unknown[];
+  /**
+   * The styled blanks a `blankCells: "collapse"` read left as rectangles instead of cells — see `core/styled-blanks`.
+   *
+   * Read and replaced only through {@link getStyledBlankRanges} and {@link setStyledBlankRanges}: the blanks never
+   * cover a cell the sheet holds, and every edit that would put one there settles the row first
+   * ({@link settleStyledBlankRow}). Absent when there are none.
+   * @internal
+   */
+  _styledBlanks?: StyledBlankGrid;
   /**
    * Relationship id of the drawing this sheet already pointed at, from an XLSB read.
    *
@@ -739,34 +749,46 @@ export function resolveAddress(ws: WorksheetData, r: number | string, c?: number
 }
 
 /**
- * The number format an empty cell at `(row, col)` would inherit if it were
- * created — the row's, else the column's — read without creating the row, the
- * column record or the cell. Mirrors the `numFmt` precedence in `mergeCellStyle`.
+ * The number format an empty cell at `(row, col)` would have if it were
+ * created — a collapsed styled blank's own, else the row's, else the column's —
+ * read without creating the row, the column record or the cell. Mirrors the
+ * `numFmt` precedence in `mergeCellStyle`.
  */
 export function inheritedNumFmt(
   ws: WorksheetData,
   row: number,
   col: number
 ): Style["numFmt"] | undefined {
+  const blank = findStyledBlankAt(ws, row, col);
+  if (blank !== undefined) {
+    return blank.style.numFmt;
+  }
   return rowAt(ws, row)?.style.numFmt || ws._columns[col - 1]?.style.numFmt || undefined;
 }
 
 /**
  * The cell {@link getCell} would return, without attaching anything to the sheet: the existing cell, or a
- * new one built from the row's and column's styles exactly as {@link getCell} would build it, but held by
- * nothing. For a reader that must answer as for a materialised cell and may not change the sheet.
+ * new one built from the row's and column's styles exactly as {@link getCell} would build it — or from a
+ * collapsed styled blank's, as settling its row would — but held by nothing. For a reader that must answer
+ * as for a materialised cell and may not change the sheet.
  */
 export function previewCell(ws: WorksheetData, r: number | string, c?: number): CellData {
   const address = colCache.getAddress(r, c);
   const row = rowAt(ws, address.row);
-  return (
-    row?.cells[address.col - 1] ??
-    cellCreate(
-      row ?? rowCreate(ws, address.row),
-      ws._columns[address.col - 1] ?? columnCreate(ws, address.col),
-      address.address
-    )
+  const existing = row?.cells[address.col - 1];
+  if (existing !== undefined) {
+    return existing;
+  }
+  const cell = cellCreate(
+    row ?? rowCreate(ws, address.row),
+    ws._columns[address.col - 1] ?? columnCreate(ws, address.col),
+    address.address
   );
+  const blank = findStyledBlankAt(ws, address.row, address.col);
+  if (blank !== undefined) {
+    cellSetModel(cell, { address: address.address, type: CellTypes.Null, style: blank.style });
+  }
+  return cell;
 }
 
 export function getCell(ws: WorksheetData, r: number | string, c?: number): CellData {
@@ -781,6 +803,104 @@ export function getCell(ws: WorksheetData, r: number | string, c?: number): Cell
   checkCellAddress(typeof r === "string" ? r : address.address, address);
   const row = getRow(ws, address.row);
   return rowGetCellEx(row, address);
+}
+
+// =============================================================================
+// Styled blanks a collapsed read left as rectangles
+// =============================================================================
+
+/**
+ * The rectangles of styled blanks the sheet holds instead of cells, from a `blankCells: "collapse"` read.
+ *
+ * **They are part of the sheet, not a note about the file it came from.** A cell inside one is a cell with a format and
+ * no value, exactly as `"keep"` would have read it; it just has no object yet. So every reader of a cell's format asks
+ * the rectangles about a cell the sheet does not hold, and every edit that would give such a cell an object — or move,
+ * restyle or replace the cells of its row — settles the row first, turning its part of each rectangle back into cells.
+ * After that the row is an ordinary row and the edit does what it does under `"keep"`, which is the whole contract:
+ * editing a collapsed sheet must not tell it apart from one read with `"keep"`.
+ */
+export function getStyledBlankRanges(
+  ws: WorksheetData
+): readonly StyledBlankRangeModel[] | undefined {
+  const grid = ws._styledBlanks;
+  return grid === undefined || grid.isEmpty() ? undefined : grid.ranges();
+}
+
+/** Replace the sheet's rectangles. Nothing is checked against the cells: a caller handing these over owns that. */
+export function setStyledBlankRanges(
+  ws: WorksheetData,
+  ranges: readonly StyledBlankRangeModel[] | undefined
+): void {
+  ws._styledBlanks =
+    ranges === undefined || ranges.length === 0 ? undefined : StyledBlankGrid.from(ranges);
+}
+
+/** The styled blank run covering a cell the sheet does not hold (1-based), or `undefined`. */
+export function findStyledBlankAt(
+  ws: WorksheetData,
+  row: number,
+  col: number
+): StyledBlankRun | undefined {
+  return ws._styledBlanks?.at(row - 1, col - 1);
+}
+
+/** Whether row `r` (1-based) holds a collapsed styled blank. */
+export function hasStyledBlankInRow(ws: WorksheetData, r: number): boolean {
+  return (ws._styledBlanks?.runsAt(r - 1).length ?? 0) > 0;
+}
+
+/**
+ * Give a row's styled blanks their cells back, taking the row out of the grid — see {@link getStyledBlankRanges}.
+ *
+ * Each cell is built as the reader builds a styled blank it keeps, sharing the run's style, so the row is the row
+ * `"keep"` would have read. Cheap when there is nothing to do, which is the hot path that calls it: creating a cell.
+ */
+export function settleStyledBlankRow(r: RowData): void {
+  const grid = (r.worksheet as WorksheetData)._styledBlanks;
+  if (grid === undefined) {
+    return;
+  }
+  const runs = grid.takeRow(r.number - 1);
+  for (const run of runs) {
+    for (let col = run.firstColumn + 1; col <= run.lastColumn + 1; col++) {
+      if (r.cells[col - 1] !== undefined) {
+        continue;
+      }
+      const address = colCache.encodeAddress(r.number, col);
+      const cell = cellCreate(r, getColumn(r.worksheet, col), address);
+      cellSetModel(cell, { address, type: CellTypes.Null, style: run.style });
+      r.cells[col - 1] = cell;
+    }
+  }
+}
+
+/**
+ * Run a row or column splice's cell moves, and move the styled blanks with them.
+ *
+ * The blanks are taken off the sheet while the cells move — the moves create cells, and settling a row against blanks
+ * that have not moved yet would put the wrong row's format into it — and put back moved, as `StyledBlankGrid.splice`
+ * moves them, once the cells are in place. `start` is 1-based, as the splice's is.
+ */
+export function moveStyledBlankLines(
+  ws: WorksheetData,
+  axis: "row" | "column",
+  start: number,
+  deleted: number,
+  inserted: number,
+  move: () => void
+): void {
+  const grid = ws._styledBlanks;
+  if (grid === undefined) {
+    move();
+    return;
+  }
+  ws._styledBlanks = undefined;
+  try {
+    move();
+  } finally {
+    grid.splice(axis, start - 1, deleted, inserted, axis === "row" ? 1048575 : 16383);
+    ws._styledBlanks = grid.isEmpty() ? undefined : grid;
+  }
 }
 
 /**
@@ -898,6 +1018,14 @@ export function getRangeValues(ws: WorksheetData, range: string | RangeData): Ce
 export function rowGetCellEx(r: RowData, address: DecodedAddress): CellData {
   let cell = r.cells[address.col - 1];
   if (!cell) {
+    // A cell inside a collapsed styled blank is not new: it is given back with its row — see `settleStyledBlankRow`.
+    if ((r.worksheet as WorksheetData)._styledBlanks !== undefined) {
+      settleStyledBlankRow(r);
+      cell = r.cells[address.col - 1];
+      if (cell) {
+        return cell;
+      }
+    }
     const column = getColumn(r.worksheet, address.col);
     cell = cellCreate(r, column, address.address);
     r.cells[address.col - 1] = cell;
@@ -1415,6 +1543,8 @@ export function _copyStyle(
   styleEmpty: boolean = false
 ): void {
   const rSrc = getRow(ws, src);
+  // The source's styled blanks are among the cells whose style is copied, as they are under `"keep"`.
+  settleStyledBlankRow(rSrc);
   const rDst = getRow(ws, dest);
   rDst.style = (copyStyle(rSrc.style) as Partial<Style>) ?? {};
   rowEachCell(rSrc, { includeEmpty: styleEmpty }, (cell: CellData, colNumber: number) => {
@@ -1424,11 +1554,19 @@ export function _copyStyle(
 }
 
 export function _setStyleOption(ws: WorksheetData, pos: number, style: string = "n"): void {
-  if (style[0] === "o" && findRow(ws, pos + 1) !== undefined) {
+  if (style[0] === "o" && hasRowContent(ws, pos + 1)) {
     _copyStyle(ws, pos + 1, pos, style[1] === "+");
-  } else if (style[0] === "i" && findRow(ws, pos - 1) !== undefined) {
+  } else if (style[0] === "i" && hasRowContent(ws, pos - 1)) {
     _copyStyle(ws, pos - 1, pos, style[1] === "+");
   }
+}
+
+/**
+ * Whether row `r` is there to copy a style from: a row the sheet holds, or one whose only cells are collapsed styled
+ * blanks — which `"keep"` would have given a row, and an XLSB read with `"collapse"` does not.
+ */
+export function hasRowContent(ws: WorksheetData, r: number): boolean {
+  return findRow(ws, r) !== undefined || hasStyledBlankInRow(ws, r);
 }
 
 export function addRow(ws: WorksheetData, value: RowValues, style: string = "n"): RowData {

@@ -72,6 +72,7 @@ import { getCellStyle } from "@excel/core/workbook-core";
 import {
   checkWorksheet,
   checkWorksheetAttached,
+  findStyledBlankAt,
   getCell,
   getSheetWorkbook,
   inheritedNumFmt,
@@ -710,7 +711,13 @@ export function findStyle(
   col?: number
 ): Partial<Style> | undefined {
   const cell = peek(ws, "Cell.findStyle", addr, col);
-  return cell ? (copyStyle(cellGetStyle(cell)) as Partial<Style>) : undefined;
+  if (cell) {
+    return copyStyle(cellGetStyle(cell)) as Partial<Style>;
+  }
+  // A collapsed styled blank has a style record of its own, as it would have had under `"keep"`.
+  const { row, col: column } = addressOf(ws, "Cell.findStyle", addr, col);
+  const blank = findStyledBlankAt(ws as WorksheetData, row, column);
+  return blank === undefined ? undefined : (copyStyle(blank.style) as Partial<Style>);
 }
 /** Merge a partial style into the cell at "A1" address. */
 export function setStyle(

@@ -161,6 +161,252 @@ function carve<R extends StyledBlankArea>(
   }
 }
 
+/** A run of columns (zero-based, inclusive) in one band of a {@link StyledBlankGrid}, and the style its cells share. */
+export interface StyledBlankRun {
+  readonly firstColumn: number;
+  readonly lastColumn: number;
+  readonly style: Partial<Style>;
+}
+
+/** Rows `first`..`last` (zero-based, inclusive), all covering the same runs. Empty runs: the rows hold no blank. */
+interface StyledBlankBand {
+  readonly first: number;
+  readonly last: number;
+  readonly runs: readonly StyledBlankRun[];
+}
+
+/** Where lines `first`..`last` go in a splice of `deleted` lines at `start` replaced by `inserted`: none, one or two spans. */
+function spliceLines(
+  first: number,
+  last: number,
+  start: number,
+  deleted: number,
+  inserted: number,
+  lastLine: number
+): { readonly first: number; readonly last: number }[] {
+  const shift = inserted - deleted;
+  const out: { first: number; last: number }[] = [];
+  if (first < start) {
+    out.push({ first, last: Math.min(last, start - 1) });
+  }
+  const kept = Math.max(first, start + deleted);
+  if (kept <= last && kept + shift <= lastLine) {
+    out.push({ first: kept + shift, last: Math.min(last + shift, lastLine) });
+  }
+  return out;
+}
+
+/**
+ * The styled blanks of a sheet that holds them as rectangles, indexed for the questions the sheet asks of them.
+ *
+ * **Held as bands of rows, not as the rectangles.** A sheet asks by row — which blanks are in this row, so it can be
+ * given its cells; is this cell one — and a row is answered here by one binary search, where a list of rectangles has to
+ * be walked whole. That difference is the whole cost of a collapsed sheet: a manually banded region is one rectangle per
+ * row, and a walk per cell turned reading the format of every cell, or writing a value down a column, into
+ * rectangles × cells. The rectangles are what a model and the writers carry, so they are rebuilt on the way out.
+ *
+ * Bands are disjoint and in row order. Taking a row out of a band leaves it in place with no runs rather than splicing
+ * the array, so settling a sheet row by row, which is how a sheet is edited, costs nothing per row beyond the row.
+ */
+export class StyledBlankGrid {
+  private bands: StyledBlankBand[];
+  private cachedRanges: StyledBlankRangeModel[] | undefined;
+
+  private constructor(bands: StyledBlankBand[]) {
+    this.bands = bands;
+  }
+
+  /** The grid the rectangles describe. They are taken as exact: no cell in two of them. */
+  static from(ranges: readonly StyledBlankRangeModel[]): StyledBlankGrid {
+    const edges = [...new Set(ranges.flatMap(range => [range.firstRow, range.lastRow + 1]))].sort(
+      (left, right) => left - right
+    );
+    const starting = [...ranges].sort((left, right) => left.firstRow - right.firstRow);
+    const bands: StyledBlankBand[] = [];
+    let active: StyledBlankRangeModel[] = [];
+    let next = 0;
+    for (let index = 0; index + 1 < edges.length; index++) {
+      const first = edges[index];
+      const last = edges[index + 1] - 1;
+      active = active.filter(range => range.lastRow >= first);
+      while (next < starting.length && starting[next].firstRow === first) {
+        active.push(starting[next++]);
+      }
+      if (active.length > 0) {
+        const runs = active
+          .map(range => ({
+            firstColumn: range.firstColumn,
+            lastColumn: range.lastColumn,
+            style: range.style
+          }))
+          .sort((left, right) => left.firstColumn - right.firstColumn);
+        bands.push({ first, last, runs });
+      }
+    }
+    const grid = new StyledBlankGrid(bands);
+    grid.cachedRanges = [...ranges];
+    return grid;
+  }
+
+  /**
+   * The rectangles, rebuilt from the bands: runs that line up exactly across adjacent bands, with the same style, are
+   * one rectangle again. Cached until the grid changes.
+   */
+  ranges(): readonly StyledBlankRangeModel[] {
+    if (this.cachedRanges !== undefined) {
+      return this.cachedRanges;
+    }
+    const out: StyledBlankRangeModel[] = [];
+    let open: { index: number; run: StyledBlankRun }[] = [];
+    let previousLast = Number.NaN;
+    for (const band of this.bands) {
+      if (band.runs.length === 0) {
+        continue;
+      }
+      const continuing = band.first === previousLast + 1;
+      const nextOpen: { index: number; run: StyledBlankRun }[] = [];
+      for (const run of band.runs) {
+        const above = continuing
+          ? open.find(
+              candidate =>
+                candidate.run.firstColumn === run.firstColumn &&
+                candidate.run.lastColumn === run.lastColumn &&
+                candidate.run.style === run.style
+            )
+          : undefined;
+        if (above !== undefined) {
+          out[above.index] = { ...out[above.index], lastRow: band.last };
+          nextOpen.push(above);
+        } else {
+          out.push({
+            firstRow: band.first,
+            lastRow: band.last,
+            firstColumn: run.firstColumn,
+            lastColumn: run.lastColumn,
+            style: run.style
+          });
+          nextOpen.push({ index: out.length - 1, run });
+        }
+      }
+      open = nextOpen;
+      previousLast = band.last;
+    }
+    this.cachedRanges = out;
+    return out;
+  }
+
+  isEmpty(): boolean {
+    return this.ranges().length === 0;
+  }
+
+  /** The runs in a row (zero-based); empty when it holds no blank. */
+  runsAt(row: number): readonly StyledBlankRun[] {
+    const index = this.bandIndex(row);
+    return index === -1 ? [] : this.bands[index].runs;
+  }
+
+  /** The run covering a cell (zero-based), or `undefined`. */
+  at(row: number, column: number): StyledBlankRun | undefined {
+    const runs = this.runsAt(row);
+    let low = 0;
+    let high = runs.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (runs[middle].lastColumn < column) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    const run = runs[low];
+    return run !== undefined && run.firstColumn <= column ? run : undefined;
+  }
+
+  /** Take a row (zero-based) out of the grid, returning the runs it held. */
+  takeRow(row: number): readonly StyledBlankRun[] {
+    const index = this.bandIndex(row);
+    if (index === -1 || this.bands[index].runs.length === 0) {
+      return [];
+    }
+    const band = this.bands[index];
+    if (band.first === row && band.last === row) {
+      // Emptied in place: removing it would move every band after it.
+      this.bands[index] = { first: row, last: row, runs: [] };
+    } else if (band.first === row) {
+      this.bands[index] = { ...band, first: row + 1 };
+    } else if (band.last === row) {
+      this.bands[index] = { ...band, last: row - 1 };
+    } else {
+      this.bands.splice(index, 1, { ...band, last: row - 1 }, { ...band, first: row + 1 });
+    }
+    this.cachedRanges = undefined;
+    return band.runs;
+  }
+
+  /**
+   * Move the blanks as a row or column splice moves the cells: zero-based along `axis`, the `deleted` lines from `start`
+   * go, `inserted` new ones take their place, and every line after them moves by the difference. A band or run across
+   * the edit is cut rather than stretched, because the new lines are empty; one pushed past `lastLine`, the edge of the
+   * grid, loses what went past it, as the cells themselves would.
+   */
+  splice(
+    axis: "row" | "column",
+    start: number,
+    deleted: number,
+    inserted: number,
+    lastLine: number
+  ): void {
+    const bands: StyledBlankBand[] = [];
+    for (const band of this.bands) {
+      if (band.runs.length === 0) {
+        continue;
+      }
+      if (axis === "row") {
+        for (const lines of spliceLines(
+          band.first,
+          band.last,
+          start,
+          deleted,
+          inserted,
+          lastLine
+        )) {
+          bands.push({ first: lines.first, last: lines.last, runs: band.runs });
+        }
+        continue;
+      }
+      const runs = band.runs.flatMap(run =>
+        spliceLines(run.firstColumn, run.lastColumn, start, deleted, inserted, lastLine).map(
+          lines => ({
+            firstColumn: lines.first,
+            lastColumn: lines.last,
+            style: run.style
+          })
+        )
+      );
+      if (runs.length > 0) {
+        bands.push({ first: band.first, last: band.last, runs });
+      }
+    }
+    this.bands = bands;
+    this.cachedRanges = undefined;
+  }
+
+  /** The band holding a row (zero-based), or -1. */
+  private bandIndex(row: number): number {
+    let low = 0;
+    let high = this.bands.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (this.bands[middle].last < row) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low < this.bands.length && this.bands[low].first <= row ? low : -1;
+  }
+}
+
 /**
  * Styled blank cells, accumulated into as few rectangles as describe them exactly.
  *

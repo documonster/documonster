@@ -1,4 +1,4 @@
-import { StyledBlankRuns, takeStyledBlanks } from "@excel/core/styled-blanks";
+import { StyledBlankGrid, StyledBlankRuns, takeStyledBlanks } from "@excel/core/styled-blanks";
 import type { StyledBlankArea } from "@excel/core/styled-blanks";
 import { describe, expect, it } from "vitest";
 
@@ -97,6 +97,96 @@ describe("takeStyledBlanks", () => {
         expect(takenKeys.has(key), `seed ${seed}: ${key}`).toBe(before.has(key));
       }
       expect(after, `seed ${seed}`).toEqual(expected);
+    }
+  });
+});
+
+describe("StyledBlankGrid", () => {
+  const STYLES = [{ numFmt: "a" }, { numFmt: "b" }, { numFmt: "c" }];
+
+  /** The cells a grid covers, as `row:column` → the style's `numFmt`, failing on a cell covered twice. */
+  function cellsOf(grid: StyledBlankGrid): Map<string, string | undefined> {
+    const cells = new Map<string, string | undefined>();
+    for (const range of grid.ranges()) {
+      for (let row = range.firstRow; row <= range.lastRow; row++) {
+        for (let column = range.firstColumn; column <= range.lastColumn; column++) {
+          const key = `${row}:${column}`;
+          expect(cells.has(key), `${key} covered twice`).toBe(false);
+          cells.set(key, range.style.numFmt as string | undefined);
+        }
+      }
+    }
+    return cells;
+  }
+
+  /** The same edit on a plain map of cells, as the cells themselves would move. */
+  function spliceCells(
+    cells: Map<string, string | undefined>,
+    axis: "row" | "column",
+    start: number,
+    deleted: number,
+    inserted: number,
+    lastLine: number
+  ): Map<string, string | undefined> {
+    const out = new Map<string, string | undefined>();
+    for (const [key, style] of cells) {
+      const [row, column] = key.split(":").map(Number);
+      const line = axis === "row" ? row : column;
+      if (line >= start && line < start + deleted) {
+        continue;
+      }
+      const moved = line >= start + deleted ? line + inserted - deleted : line;
+      if (moved > lastLine) {
+        continue;
+      }
+      out.set(axis === "row" ? `${moved}:${column}` : `${row}:${moved}`, style);
+    }
+    return out;
+  }
+
+  it("answers, takes rows and splices exactly as the cells would", () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const next = random(seed);
+      const runs = new StyledBlankRuns();
+      for (let row = 0; row < 14; row++) {
+        for (let column = 0; column < 10; column++) {
+          if (next() < 0.75) {
+            runs.add(row, column, next() < 0.6 ? 0 : next() < 0.5 ? 1 : 2);
+          }
+        }
+      }
+      const grid = StyledBlankGrid.from(
+        runs.ranges().map(range => ({ ...range, style: STYLES[range.styleIndex] }))
+      );
+      let expected = cellsOf(grid);
+      for (let step = 0; step < 12; step++) {
+        const choice = next();
+        if (choice < 0.5) {
+          const row = Math.floor(next() * 16);
+          const taken = grid.takeRow(row);
+          for (const run of taken) {
+            for (let column = run.firstColumn; column <= run.lastColumn; column++) {
+              expect(expected.get(`${row}:${column}`), `seed ${seed}`).toBe(run.style.numFmt);
+              expected.delete(`${row}:${column}`);
+            }
+          }
+        } else {
+          const axis = choice < 0.75 ? "row" : "column";
+          const start = Math.floor(next() * 14);
+          const deleted = Math.floor(next() * 4);
+          const inserted = Math.floor(next() * 4);
+          grid.splice(axis, start, deleted, inserted, 20);
+          expected = spliceCells(expected, axis, start, deleted, inserted, 20);
+        }
+        expect(cellsOf(grid), `seed ${seed}, step ${step}`).toEqual(expected);
+        for (let row = 0; row < 22; row++) {
+          for (let column = 0; column < 22; column++) {
+            expect(grid.at(row, column)?.style.numFmt, `seed ${seed} ${row}:${column}`).toBe(
+              expected.get(`${row}:${column}`)
+            );
+          }
+        }
+      }
     }
   });
 });

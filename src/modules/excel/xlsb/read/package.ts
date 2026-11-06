@@ -46,7 +46,7 @@ import {
   setHeaderFooterImage
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
-import { getCell, type WorksheetData } from "@excel/core/worksheet-core";
+import { getCell, setStyledBlankRanges, type WorksheetData } from "@excel/core/worksheet-core";
 import { ExcelFileError, XlsbFormulaDecodeError } from "@excel/errors";
 import { getValue, setStyle, setValue } from "@excel/surface/cell";
 import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/surface/column";
@@ -998,16 +998,16 @@ async function readInto(
     // costs nothing in fidelity. The style is assembled here rather than carried as an index because the writer
     // works in style objects — and doing it per rectangle rather than per cell is the whole saving: one object for
     // a formatted column instead of one per row.
-    if (styledBlanks.length > 0) {
-      (worksheet as unknown as { _styledBlankRanges: unknown[] })._styledBlankRanges =
-        styledBlanks.map(range => ({
-          firstRow: range.firstRow,
-          lastRow: range.lastRow,
-          firstColumn: range.firstColumn,
-          lastColumn: range.lastColumn,
-          style: styleAt(styles, range.styleIndex)
-        }));
-    }
+    setStyledBlankRanges(
+      worksheet,
+      styledBlanks.map(range => ({
+        firstRow: range.firstRow,
+        lastRow: range.lastRow,
+        firstColumn: range.firstColumn,
+        lastColumn: range.lastColumn,
+        style: styleAt(styles, range.styleIndex) ?? {}
+      }))
+    );
 
     if (read.sparklineGroups.length > 0) {
       // Assigned onto the sheet so the next write emits them again. This is `_sparklineGroups`, the field

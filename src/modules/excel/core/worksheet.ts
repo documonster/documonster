@@ -125,7 +125,6 @@ import {
   columnSetDefn,
   eachRow,
   findCell,
-  findRow,
   getCell,
   getColumn,
   get_lastRowNumber,
@@ -134,10 +133,14 @@ import {
   getSheetName,
   getSheetWorkbook,
   getTable,
+  getStyledBlankRanges,
+  hasRowContent,
+  moveStyledBlankLines,
   rowEachCell,
   rowGetCell,
   rowSetValues,
-  rowSplice
+  rowSplice,
+  settleStyledBlankRow
 } from "@excel/core/worksheet-core";
 import {
   ExcelColumnOutOfBoundsError,
@@ -551,18 +554,22 @@ function _spliceColumnCells(
     // Every row the sheet has or an inserted column reaches, whether it exists yet or not: stopping at the sheet's last
     // row dropped the values below it — all of them on an empty sheet.
     const nRows = Math.max(ws._rows.length, ...inserts.map(insert => insert.length));
-    for (let i = 0; i < nRows; i++) {
-      const insertValues = inserts.map(insert => insert[i] ?? null);
-      const row = getRow(ws, i + 1);
-      rowSplice(row, start, count, ...insertValues);
-    }
-  } else {
-    // nothing to insert, so just splice all rows
-    ws._rows.forEach(r => {
-      if (r) {
-        rowSplice(r, start, count);
+    moveStyledBlankLines(ws, "column", start, count, inserts.length, () => {
+      for (let i = 0; i < nRows; i++) {
+        const insertValues = inserts.map(insert => insert[i] ?? null);
+        const row = getRow(ws, i + 1);
+        rowSplice(row, start, count, ...insertValues);
       }
     });
+  } else {
+    // nothing to insert, so just splice all rows
+    moveStyledBlankLines(ws, "column", start, count, 0, () =>
+      ws._rows.forEach(r => {
+        if (r) {
+          rowSplice(r, start, count);
+        }
+      })
+    );
   }
 
   // splice column definitions
@@ -609,9 +616,9 @@ export function insertRows(
   if (style !== "n") {
     // copy over the styles
     for (let i = 0; i < values.length; i++) {
-      if (style[0] === "o" && findRow(ws, values.length + pos + i) !== undefined) {
+      if (style[0] === "o" && hasRowContent(ws, values.length + pos + i)) {
         _copyStyle(ws, values.length + pos + i, pos + i, style[1] === "+");
-      } else if (style[0] === "i" && findRow(ws, pos - 1) !== undefined) {
+      } else if (style[0] === "i" && hasRowContent(ws, pos - 1)) {
         _copyStyle(ws, pos - 1, pos + i, style[1] === "+");
       }
     }
@@ -630,6 +637,8 @@ export function duplicateRow(
   checkNumber("Row.duplicate", "count", count, { min: 0, integer: true });
 
   const rSrc = getRow(ws, rowNum);
+  // The source's styled blanks are among the cells it copies, as they are under `"keep"`.
+  settleStyledBlankRow(rSrc);
   const inserts = Array.from<RowValues>({ length: count }).fill(rowValuesForStructuralCopy(rSrc));
 
   // Collect single-row merges from the source row before splicing
@@ -757,62 +766,65 @@ function _spliceRowCells(
 
   const nKeep = start + count;
   const nInserts = inserts.length;
-  const nExpand = nInserts - count;
-  const nEnd = ws._rows.length;
-  let i: number;
-  let rSrc: RowData | undefined;
-  if (nExpand < 0) {
-    // remove rows
-    // A block that reaches past the last row has nothing below it to move up, so the loop below never runs:
-    // clear what it deletes here. The rows it overwrites with `inserts` are written further down.
-    if (nKeep > nEnd) {
-      for (i = start + nInserts; i <= nEnd; i++) {
-        ws._rows[i - 1] = undefined!;
+  // The rows move below and the rectangles of styled blanks move with them — see `moveStyledBlankLines`.
+  moveStyledBlankLines(ws, "row", start, count, nInserts, () => {
+    const nExpand = nInserts - count;
+    const nEnd = ws._rows.length;
+    let i: number;
+    let rSrc: RowData | undefined;
+    if (nExpand < 0) {
+      // remove rows
+      // A block that reaches past the last row has nothing below it to move up, so the loop below never runs:
+      // clear what it deletes here. The rows it overwrites with `inserts` are written further down.
+      if (nKeep > nEnd) {
+        for (i = start + nInserts; i <= nEnd; i++) {
+          ws._rows[i - 1] = undefined!;
+        }
+      }
+      for (i = nKeep; i <= nEnd; i++) {
+        rSrc = ws._rows[i - 1];
+        if (rSrc) {
+          const rDst = getRow(ws, i + nExpand);
+          rowSetValues(rDst, rowValuesForStructuralCopy(rSrc));
+          rDst.style = (copyStyle(rSrc.style) as Partial<Style>) ?? {};
+          rDst.height = rSrc.height;
+          rowEachCell(rSrc, { includeEmpty: true }, (cell: CellData, colNumber: number) => {
+            const target = rowGetCell(rDst, colNumber);
+            target.style = (copyStyle(cell.style) as Partial<Style>) ?? {};
+            cellSetComment(target, cellComment(cell));
+          });
+          ws._rows[i - 1] = undefined!;
+        } else {
+          ws._rows[i + nExpand - 1] = undefined!;
+        }
+      }
+    } else if (nExpand > 0) {
+      // insert new cells
+      for (i = nEnd; i >= nKeep; i--) {
+        rSrc = ws._rows[i - 1];
+        if (rSrc) {
+          const rDst = getRow(ws, i + nExpand);
+          rowSetValues(rDst, rowValuesForStructuralCopy(rSrc));
+          rDst.style = (copyStyle(rSrc.style) as Partial<Style>) ?? {};
+          rDst.height = rSrc.height;
+          rowEachCell(rSrc, { includeEmpty: true }, (cell: CellData, colNumber: number) => {
+            const target = rowGetCell(rDst, colNumber);
+            target.style = (copyStyle(cell.style) as Partial<Style>) ?? {};
+            cellSetComment(target, cellComment(cell));
+          });
+        } else {
+          ws._rows[i + nExpand - 1] = undefined!;
+        }
       }
     }
-    for (i = nKeep; i <= nEnd; i++) {
-      rSrc = ws._rows[i - 1];
-      if (rSrc) {
-        const rDst = getRow(ws, i + nExpand);
-        rowSetValues(rDst, rowValuesForStructuralCopy(rSrc));
-        rDst.style = (copyStyle(rSrc.style) as Partial<Style>) ?? {};
-        rDst.height = rSrc.height;
-        rowEachCell(rSrc, { includeEmpty: true }, (cell: CellData, colNumber: number) => {
-          const target = rowGetCell(rDst, colNumber);
-          target.style = (copyStyle(cell.style) as Partial<Style>) ?? {};
-          cellSetComment(target, cellComment(cell));
-        });
-        ws._rows[i - 1] = undefined!;
-      } else {
-        ws._rows[i + nExpand - 1] = undefined!;
-      }
-    }
-  } else if (nExpand > 0) {
-    // insert new cells
-    for (i = nEnd; i >= nKeep; i--) {
-      rSrc = ws._rows[i - 1];
-      if (rSrc) {
-        const rDst = getRow(ws, i + nExpand);
-        rowSetValues(rDst, rowValuesForStructuralCopy(rSrc));
-        rDst.style = (copyStyle(rSrc.style) as Partial<Style>) ?? {};
-        rDst.height = rSrc.height;
-        rowEachCell(rSrc, { includeEmpty: true }, (cell: CellData, colNumber: number) => {
-          const target = rowGetCell(rDst, colNumber);
-          target.style = (copyStyle(cell.style) as Partial<Style>) ?? {};
-          cellSetComment(target, cellComment(cell));
-        });
-      } else {
-        ws._rows[i + nExpand - 1] = undefined!;
-      }
-    }
-  }
 
-  // now copy over the new values
-  for (i = 0; i < nInserts; i++) {
-    const rDst = getRow(ws, start + i);
-    rDst.style = {};
-    rowSetValues(rDst, inserts[i]);
-  }
+    // now copy over the new values
+    for (i = 0; i < nInserts; i++) {
+      const rDst = getRow(ws, start + i);
+      rDst.style = {};
+      rowSetValues(rDst, inserts[i]);
+    }
+  });
 
   // account for merges
   _spliceMerges(ws, "row", start, count, nInserts);
@@ -3145,8 +3157,7 @@ export function getSheetModel(ws: WorksheetData): WorksheetModel {
     // Hyperlinks a streamed sheet retained, for the same reason — see `hyperlinksFromModel`.
     retainedHyperlinks: ws._retainedHyperlinks,
     // Carried so the writer can put the same records back — see `styledBlankRanges` above.
-    styledBlankRanges: (ws as { _styledBlankRanges?: readonly StyledBlankRangeModel[] })
-      ._styledBlankRanges,
+    styledBlankRanges: getStyledBlankRanges(ws),
     dataValidations: ws.dataValidations.model,
     properties: ws.properties,
     state: ws.state,

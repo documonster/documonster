@@ -300,7 +300,7 @@ describe("collapse gives a styled blank with a hyperlink or a comment its cell b
   it("still collapses the rest of the block", async () => {
     const bytes = await blockWith(sheet => Cell.setNote(sheet, "B2", "a note"));
     const collapsed = await read(bytes, "collapse");
-    expect(Cell.getNumFmt(collapsed.sheet, "A1")).toBeUndefined();
+    expect(Cell.has(collapsed.sheet, "A1")).toBe(false);
     expect(
       Worksheet.getModel(collapsed.sheet).styledBlankRanges?.reduce(
         (cells, range) =>

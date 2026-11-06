@@ -11,6 +11,7 @@ import type { WorkbookData } from "@excel/core/workbook-core";
 import { getWorksheet } from "@excel/core/workbook.browser";
 import type { WorksheetData } from "@excel/core/worksheet";
 import { findCell, findRow, getCell } from "@excel/core/worksheet";
+import { findStyledBlankAt, getRow, settleStyledBlankRow } from "@excel/core/worksheet-core";
 import type { CellErrorValue } from "@excel/types";
 import type {
   CellSnapshot,
@@ -95,6 +96,11 @@ function captureWritebackJournal(wb: WorkbookData, plan: WritebackPlan): Journal
   }
   return [...targets.values()].map(target => {
     const ws = worksheetById(wb, target.sheetId)!;
+    // A target inside a collapsed styled blank is a cell with a format, which the write gives an object: settled here,
+    // so the journal records it and a rollback puts the format back rather than deleting the cell.
+    if (findStyledBlankAt(ws, target.row, target.col) !== undefined) {
+      settleStyledBlankRow(getRow(ws, target.row));
+    }
     const cell = findCell(ws, target.row, target.col);
     return {
       ...target,
