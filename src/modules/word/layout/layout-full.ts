@@ -31,7 +31,13 @@ import { withDisplayFields } from "@word/core/field-view";
 import { sectionReferences } from "@word/core/header-references";
 import { indexImagesByKey } from "@word/core/image-keys";
 import { checkSchema, w } from "@word/core/option-schema";
-import { extractMathText, isHyperlink, symbolText } from "@word/core/text-utils";
+import {
+  extractMathText,
+  hasRunTextControl,
+  isHyperlink,
+  splitRunText,
+  symbolText
+} from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import { faceExtents, faceLineExtents, measureFaceText } from "@word/layout/font-face";
 import { layoutDocument } from "@word/layout/layout";
@@ -6704,22 +6710,17 @@ function pushRunSegments(run: Run, out: ParagraphSegment[], properties: Run["pro
   };
   for (const item of run.content) {
     if (item.type === "text") {
-      // A line break inside text is one, as the writer writes it (`<w:br/>`),
-      // and so is a tab, as Word sets one kept in `<w:t>` — neither is a
-      // character a face has a glyph for.
-      if (!/[\t\n\r]/.test(item.text)) {
+      // A tab or a line break inside text is one — see `splitRunText`.
+      if (!hasRunTextControl(item.text)) {
         pending += item.text;
         continue;
       }
-      for (const piece of item.text.split(/(\r\n|\r|\n|\t)/)) {
-        if (piece === "\t") {
-          flush();
-          out.push({ type: "tab", properties });
-        } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
-          flush();
-          out.push({ type: "break", properties });
+      for (const piece of splitRunText(item.text)) {
+        if (piece.type === "text") {
+          pending += piece.text;
         } else {
-          pending += piece;
+          flush();
+          out.push({ type: piece.type, properties });
         }
       }
     } else if (item.type === "tab") {

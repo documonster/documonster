@@ -15,6 +15,7 @@ import {
   Template
 } from "../../index";
 import type { DocxDocument, TemplateOptions } from "../../index";
+import { localeFieldFormat } from "../template-format";
 
 function fillText(text: string, data: Record<string, unknown>, options?: TemplateOptions): string {
   const doc = Document.create();
@@ -97,6 +98,24 @@ describe("date pictures (\\@)", () => {
     }
     expect(fillText(pic, { d: "2026-12-31T24:00:00Z" })).toBe("2027-01-01 00:00:00");
     expect(fillText(pic, { d: "2026-11-07T12:30:00.5-14:00" })).toBe("2026-11-07 12:30:00");
+  });
+
+  it("names the Gregorian month the data holds, whatever calendar the locale uses", () => {
+    const pic = '{{d \\@ "d MMMM yyyy"}}';
+    for (const locale of ["fa-IR", "en-US-u-ca-islamic", "he-IL-u-ca-hebrew", "th-TH"]) {
+      const month = new Intl.DateTimeFormat(locale, {
+        calendar: "gregory",
+        day: "numeric",
+        month: "long",
+        timeZone: "UTC"
+      })
+        .formatToParts(Date.UTC(2026, 10, 7))
+        .find(part => part.type === "month")!.value;
+      expect(fillText(pic, { d: "2026-11-07" }, { locale }), locale).toBe(`7 ${month} 2026`);
+    }
+    expect(fillText(pic, { d: "2026-11-07" }, { locale: "en-US-u-ca-islamic" })).toBe(
+      "7 November 2026"
+    );
   });
 
   it("reads a year below 100 as written, and names its weekday", () => {
@@ -203,6 +222,16 @@ describe("format errors", () => {
         expect(Query.getText(doc)).toBe(before);
       }
     }
+  });
+
+  it("formats a locale tag as the locale it resolves to, and keeps one entry for all its spellings", () => {
+    // A private-use subtag is a new tag every time; caching by the tag grew without bound in a long-running server.
+    const tags = Array.from({ length: 50 }, (_, i) => `de-DE-x-run${i}`);
+    for (const locale of tags) {
+      expect(fillText('{{a \\# "#.##0,00"}}', { a: "1234.5" }, { locale })).toBe("1.234,50");
+    }
+    expect(new Set(tags.map(localeFieldFormat)).size).toBe(1);
+    expect(localeFieldFormat("de-DE-x-other")).toBe(localeFieldFormat("de-DE"));
   });
 
   it("refuses a locale this platform cannot format in", () => {

@@ -37,7 +37,7 @@ import {
   withParagraphChildren,
   withRangeMarkersBefore
 } from "@word/core/range-markers";
-import { isRun } from "@word/core/text-utils";
+import { isRun, splitRunText } from "@word/core/text-utils";
 import { DocxTemplateError } from "@word/errors";
 import {
   applySwitches,
@@ -56,6 +56,7 @@ import type {
   Table,
   TableRow,
   TableCell,
+  Twips,
   ImageDef,
   InlineImageContent,
   Chart,
@@ -85,7 +86,9 @@ export interface TemplateOptions {
    * `"en-IN"` — as Word writes in its regional settings: a `\#` picture is
    * written in the locale's symbols (`#.##0,00` in German) and groups digits
    * as it does (`12,34,567.00` in Indian English), and `\@` names months
-   * and days in its language. The data is read the same way in every locale:
+   * and days in its language — of the Gregorian calendar the data is in, also
+   * for a locale whose own calendar is another (`fa-IR`, `-u-ca-islamic`).
+   * The data is read the same way in every locale:
    * numbers with a decimal point, dates as ISO, XML Schema or `YYYYMMDD` write
    * them. Default: English pictures and names, as Word's `en-US`.
    */
@@ -1107,17 +1110,9 @@ function segmentTokens(
  * formatting, with each tab and line break as one.
  */
 function freeTextContent(c: RunContent, text: string): RunContent[] {
-  const out: RunContent[] = [];
-  for (const piece of text.split(/(\r\n|\r|\n|\t)/)) {
-    if (piece === "\t") {
-      out.push({ type: "tab" });
-    } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
-      out.push({ type: "break" });
-    } else if (piece !== "") {
-      out.push(c.type === "text" ? { ...c, text: piece } : { type: "text", text: piece });
-    }
-  }
-  return out;
+  return splitRunText(text).map(piece =>
+    piece.type === "text" && c.type === "text" ? { ...c, text: piece.text } : piece
+  );
 }
 
 /** `para` with its free text rewritten as `segments` say. */
@@ -2563,11 +2558,9 @@ function processTableColumnLoop(
     }
   }
 
-  const value = resolvePath(data, colsExpr);
-  if (value === undefined || value === null) {
-    return table;
-  }
-  const items = loopItems(value);
+  // Missing and `null` are no items, as for every other loop: returning the table left the directive in it, and
+  // strict mode then refused it as an unresolved variable.
+  const items = loopItems(resolvePath(data, colsExpr));
 
   const colsOpenRegex = new RegExp(
     escapeRegExp(open) +
@@ -2661,7 +2654,54 @@ function processTableColumnLoop(
     newRows.push({ ...row, cells: expandedCells });
   }
 
-  return { ...table, rows: newRows };
+  return {
+    ...table,
+    ...(table.columnWidths === undefined
+      ? {}
+      : {
+          columnWidths: repeatGridColumns(
+            table.columnWidths,
+            firstRow,
+            templateColIdx,
+            closeColIdx,
+            items.length
+          )
+        }),
+    rows: newRows
+  };
+}
+
+/**
+ * The table grid's widths with the grid columns cells `first`..`last` of `row` cover repeated `times` times — the grid
+ * of a table whose `{{#cols}}` columns were. Left as it was, the grid kept the template's column count while the rows
+ * gained or lost cells, and the writer wrote that grid as given. Counted in grid columns, not cells: a cell spans
+ * `gridSpan` of them and a row may skip `gridBefore` at its start.
+ */
+function repeatGridColumns(
+  widths: readonly Twips[],
+  row: TableRow,
+  first: number,
+  last: number,
+  times: number
+): Twips[] {
+  const span = (cell: TableCell): number => cell.properties?.gridSpan ?? 1;
+  let start = row.properties?.gridBefore ?? 0;
+  for (let c = 0; c < first; c++) {
+    start += span(row.cells[c]!);
+  }
+  let end = start;
+  for (let c = first; c <= last; c++) {
+    end += span(row.cells[c]!);
+  }
+  if (end > widths.length) {
+    // A grid narrower than its rows says nothing about these columns' widths; it is left to the writer as it was.
+    return [...widths];
+  }
+  const repeated: Twips[] = [];
+  for (let i = 0; i < times; i++) {
+    repeated.push(...widths.slice(start, end));
+  }
+  return [...widths.slice(0, start), ...repeated, ...widths.slice(end)];
 }
 
 // =============================================================================

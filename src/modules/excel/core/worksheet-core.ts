@@ -849,6 +849,17 @@ export function hasStyledBlankInRow(ws: WorksheetData, r: number): boolean {
   return (ws._styledBlanks?.runsAt(r - 1).length ?? 0) > 0;
 }
 
+/** The last column (1-based) of row `r` that holds a cell, a collapsed styled blank among them, or 0. */
+export function lastCellColumn(ws: WorksheetData, r: number): number {
+  const cells = rowAt(ws, r)?.cells ?? [];
+  let last = cells.length;
+  while (last > 0 && cells[last - 1] === undefined) {
+    last--;
+  }
+  const runs = ws._styledBlanks?.runsAt(r - 1) ?? [];
+  return runs.length === 0 ? last : Math.max(last, runs[runs.length - 1]!.lastColumn + 1);
+}
+
 /** The last row and column (1-based) a collapsed styled blank reaches, or `undefined`. */
 export function styledBlankExtent(
   ws: WorksheetData

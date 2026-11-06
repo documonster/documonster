@@ -58,10 +58,11 @@ import {
   rowGetCell,
   rowSetValues,
   rowSplice,
+  lastCellColumn,
   settleStyledBlankRow
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { ExcelUnsupportedFeatureError } from "@excel/errors";
+import { ExcelColumnOutOfBoundsError, ExcelUnsupportedFeatureError } from "@excel/errors";
 import type { StreamWorksheet } from "@excel/surface/stream-targets";
 import {
   asStreamWorksheet,
@@ -349,7 +350,43 @@ export function spliceCells(
   checkNumber(where, "start", start, { min: 1, max: MAX_COL, integer: true });
   checkNumber(where, "count", count, { min: 0, integer: true });
   inserts.forEach((value, i) => checkCellValue(value, { where, field: `inserts[${i}]` }));
+  checkRowSpliceFits(ws, where, row, start, count, inserts.length);
   rowSplice(editRowCells(ws, where, row), start, count, ...(inserts as CellValue[]));
+}
+
+/**
+ * Refuse a cell splice that would put a value, or move a cell, past column XFD — before the row is created, its styled
+ * blanks given back or a cell moved. Found while moving, the first cell past the edge threw with the cells before it
+ * already written. A collapsed styled blank in the row is a cell like any other here.
+ */
+function checkRowSpliceFits(
+  ws: WorksheetData | StreamWorksheet,
+  where: string,
+  row: number,
+  start: number,
+  count: number,
+  inserted: number
+): void {
+  checkStreamRowsOpen(ws, where, row);
+  if (inserted > 0 && start + inserted - 1 > MAX_COL) {
+    throw new ExcelColumnOutOfBoundsError(
+      start + inserted - 1,
+      `inserting ${inserted} at ${start} would reach past ${MAX_COL}, the last column`,
+      { where, field: "inserts" }
+    );
+  }
+  const shift = inserted - count;
+  if (shift <= 0) {
+    return;
+  }
+  const last = lastCellColumn(ws as WorksheetData, row);
+  if (last >= start + count && last + shift > MAX_COL) {
+    throw new ExcelColumnOutOfBoundsError(
+      last + shift,
+      `moving column ${last} by ${shift} would push it past ${MAX_COL}, the last one`,
+      { where, field: "start" }
+    );
+  }
 }
 
 // --- counting / iteration ---

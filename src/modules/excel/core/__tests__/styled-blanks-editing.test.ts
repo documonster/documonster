@@ -273,12 +273,17 @@ describe.each(["xlsx", "xlsb"] as const)("a collapsed %s sheet, an edit that fai
     );
     for (const splice of [
       (ws: Worksheet.Handle) => Row.insert(ws, 2, ["x"]),
-      (ws: Worksheet.Handle) => Column.splice(ws, 1, 0, ["y"])
+      (ws: Worksheet.Handle) => Column.splice(ws, 1, 0, ["y"]),
+      // Its source row is in the region: given back before the splice was checked, a refused duplicate had already
+      // turned the row's blanks into cells.
+      (ws: Worksheet.Handle) => Row.duplicate(ws, 5, 1, { insert: true })
     ]) {
       const outcomes = await Promise.all(
         (["keep", "collapse"] as const).map(async blankCells => {
           const { sheet: ws } = await readAs(bytes, blankCells);
           const before = cellsOf(ws);
+          const model = Worksheet.getModel(ws);
+          const shape = { rows: model.rows?.length, ranges: model.styledBlankRanges };
           let error: string | undefined;
           try {
             splice(ws);
@@ -286,6 +291,10 @@ describe.each(["xlsx", "xlsb"] as const)("a collapsed %s sheet, an edit that fai
             error = String(caught);
           }
           expect(cellsOf(ws), blankCells).toEqual(before);
+          const after = Worksheet.getModel(ws);
+          expect({ rows: after.rows?.length, ranges: after.styledBlankRanges }, blankCells).toEqual(
+            shape
+          );
           return error;
         })
       );

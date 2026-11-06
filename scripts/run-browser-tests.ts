@@ -38,8 +38,13 @@ for (let shard = 1; shard <= SHARDS; shard++) {
     { stdio: "inherit" }
   );
   if (result.status !== 0) {
+    // `error` is set when the shard never ran (Node not found, spawn refused); `status` is then null too.
     console.error(
-      `✗ browser tests, shard ${shard}/${SHARDS} exited with ${result.status ?? result.signal}`
+      `✗ browser tests, shard ${shard}/${SHARDS} ${
+        result.error === undefined
+          ? `exited with ${result.status ?? result.signal}`
+          : `could not start: ${result.error.message}`
+      }`
     );
     failed = true;
   }

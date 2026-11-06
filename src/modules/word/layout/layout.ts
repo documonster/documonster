@@ -29,7 +29,7 @@ import {
 } from "@utils/font-metrics";
 import { finalizeDocument } from "@word/builder/document-finalize";
 import { withDisplayFields } from "@word/core/field-view";
-import { symbolText } from "@word/core/text-utils";
+import { splitRunText, symbolText } from "@word/core/text-utils";
 import { faceExtents, faceLineHeight } from "@word/layout/font-face";
 import {
   DEFAULT_FONT_SIZE_HALF_PT,
@@ -646,15 +646,12 @@ function collectRunTokens(run: Run, tokens: LayoutToken[]): void {
   for (const item of run.content) {
     switch (item.type) {
       case "text": {
-        // A line break inside text is one, as the writer writes it (`<w:br/>`),
-        // and so is a tab, as Word sets one kept in `<w:t>`.
-        for (const piece of item.text.split(/(\r\n|\r|\n|\t)/)) {
-          if (piece === "\t") {
-            tokens.push({ type: "tab" });
-          } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
-            tokens.push({ type: "break" });
-          } else if (piece !== "") {
-            pushWordTokens(piece, tokens);
+        // A tab or a line break inside text is one — see `splitRunText`.
+        for (const piece of splitRunText(item.text)) {
+          if (piece.type === "text") {
+            pushWordTokens(piece.text, tokens);
+          } else {
+            tokens.push({ type: piece.type });
           }
         }
         break;

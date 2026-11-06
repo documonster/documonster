@@ -130,6 +130,25 @@ describe("template_inspect", () => {
 });
 
 describe("template_fill", () => {
+  it("leaves a path naming __proto__, constructor or prototype out of the shape, and the server's objects alone", async () => {
+    const fx = await fixture();
+    const doc = Document.create();
+    Document.addParagraph(doc, "{{__proto__.polluted}} {{a.constructor.prototype.polluted}}");
+    Document.addParagraph(
+      doc,
+      "{{#each __proto__.items}}x{{/each}} {{#if __proto__.flag}}y{{/if}}"
+    );
+    Document.addParagraph(doc, "{{safe.name}}");
+    await Document.writeFile(doc, path.join(fx.root, "proto.docx"));
+
+    const inspect = await run(templateInspectTool, fx, { path: "proto.docx" });
+    expect(Object.hasOwn(Object.prototype, "polluted")).toBe(false);
+    expect(Object.hasOwn(Object.prototype, "items")).toBe(false);
+    expect(Object.hasOwn(Object.prototype, "flag")).toBe(false);
+    const shape = JSON.parse(inspect.split("```json")[1]!.split("```")[0]!) as unknown;
+    expect(shape).toEqual({ safe: { name: "…" } });
+  });
+
   it("formats switched values in the locale it is given, and shapes their data by path", async () => {
     const fx = await fixture();
     const doc = Document.create();

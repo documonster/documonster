@@ -25,7 +25,7 @@ import { imageCreate } from "@excel/core/image";
 import { loadDefinedNamesModel, loadWorkbookModel } from "@excel/core/model-load";
 import type { OpaqueSourceRelationship } from "@excel/core/opaque-part";
 import { applyPrintName, isPrintName, type PrintSetup } from "@excel/core/print-names";
-import { takeStyledBlanks } from "@excel/core/styled-blanks";
+import { StyledBlankGrid, takeStyledBlanks } from "@excel/core/styled-blanks";
 import { adoptLoadedTotals, createTable, tableSetModel, type TableModel } from "@excel/core/table";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
@@ -74,7 +74,8 @@ import {
   readSharedStrings,
   readWorkbookPart,
   readWorksheetPart,
-  type ReadCell
+  type ReadCell,
+  type ReadHyperlink
 } from "@excel/xlsb/read/parts";
 import { recordSpec } from "@excel/xlsb/spec/records";
 import type { StyleTable } from "@excel/xlsb/styles";
@@ -963,34 +964,33 @@ async function readInto(
     // Attaching them later would be correct too — `getCell` settles the row (`settleStyledBlankRow`) — but it gives
     // the whole row back. Taking just the annotated cells is what the XLSX reader does (`restoreAnnotatedBlanks`), which
     // has no worksheet to settle yet, and a workbook must read to the same sheet from either container.
+    // The destination of each hyperlink, resolved once: the cells are given back for a link that will be attached, and
+    // only those — a link with no destination is reported as lost below and lands on nothing.
+    const linkTargets = new Map(
+      (relationshipsBySource.get(path) ?? []).map(relationship => [
+        relationship.id,
+        relationship.target
+      ])
+    );
+    const hyperlinkTargets = read.hyperlinks.map(link => hyperlinkTarget(link, linkTargets));
     const annotated: { row: number; column: number }[] = [];
-    // Only where a rectangle can be: a hyperlink names a range, and expanding all of one — a whole column, or a link
-    // whose relationship is missing — cost a cell for every address it spans, with nothing collapsed under most of them.
     const blanks = read.styledBlanks;
     if (blanks.length > 0) {
-      let top = Infinity;
-      let bottom = -1;
-      let left = Infinity;
-      let right = -1;
-      for (const range of blanks) {
-        top = Math.min(top, range.firstRow);
-        bottom = Math.max(bottom, range.lastRow);
-        left = Math.min(left, range.firstColumn);
-        right = Math.max(right, range.lastColumn);
-      }
       for (const comment of comments) {
         const { r, c } = decodeCell(comment.ref);
         annotated.push({ row: r, column: c });
       }
-      for (const link of read.hyperlinks) {
-        const lastRow = Math.min(link.ref.lastRow, bottom);
-        const lastColumn = Math.min(link.ref.lastColumn, right);
-        for (let row = Math.max(link.ref.firstRow, top); row <= lastRow; row++) {
-          for (let column = Math.max(link.ref.firstColumn, left); column <= lastColumn; column++) {
-            annotated.push({ row, column });
-          }
+      // **Only the cells a link and a rectangle share.** A hyperlink names a range, and expanding all of it — a whole
+      // column, or everything inside the box around two distant rectangles — cost a cell for every address it spans,
+      // with nothing collapsed under most of them. Walking every rectangle per link instead cost links × rectangles,
+      // which a hyperlink per row over a banded region makes quadratic; the grid finds the rows a link crosses by
+      // binary search, so this costs the bands crossed and the cells that are given back — those `"keep"` holds.
+      const grid = StyledBlankGrid.from(blanks.map(range => ({ ...range, style: {} })));
+      read.hyperlinks.forEach((link, index) => {
+        if (hyperlinkTargets[index] !== undefined) {
+          grid.forEachCellIn(link.ref, (row, column) => annotated.push({ row, column }));
         }
-      }
+      });
     }
     const { ranges: styledBlanks, taken } = takeStyledBlanks(blanks, annotated);
     // As the sheet reader builds a `BrtCellBlank` it keeps.
@@ -1332,29 +1332,8 @@ async function readInto(
     // to be resolved together. Applied after the cells, because a hyperlink upgrades a cell's value in
     // place and there has to be a value to upgrade.
     if (read.hyperlinks.length > 0) {
-      const targets = new Map(
-        (relationshipsBySource.get(path) ?? []).map(relationship => [
-          relationship.id,
-          relationship.target
-        ])
-      );
-      for (const link of read.hyperlinks) {
-        // **An internal link is recovered, not reported.**
-        //
-        // An empty `relId` means the destination is inside this workbook and `location` says where — which is a legal
-        // `BrtHLink`, not a malformed one. This treated the two the same: an absent relationship *and* a deliberate
-        // absence of one both fell into the loss branch, so `#Linked!A1` was written correctly by this library and then
-        // dropped on the way back in. The model's form for it is the `#`-prefixed fragment, which is exactly what the
-        // XLSX reader produces and what `core/hyperlink.ts` recognises.
-        //
-        // The two cases are now distinguished: no relationship *and* no location is a link with no destination at all,
-        // which stays a loss.
-        const internal = link.relId === "" && link.location !== "";
-        const target = internal
-          ? `#${link.location}`
-          : link.relId === ""
-            ? undefined
-            : targets.get(link.relId);
+      for (const [index, link] of read.hyperlinks.entries()) {
+        const target = hyperlinkTargets[index];
         if (target === undefined) {
           lost.push(
             `${name}!${encodeCol(link.ref.firstColumn)}${link.ref.firstRow + 1}: ` +
@@ -2261,4 +2240,24 @@ function tableDataRows(
     rows.push(cells);
   }
   return rows;
+}
+
+/**
+ * Where a `BrtHLink` points, or `undefined` when it points nowhere this read can follow.
+ *
+ * **An internal link is recovered, not reported.** An empty `relId` means the destination is inside this workbook and
+ * `location` says where — which is a legal `BrtHLink`, not a malformed one. Treating the two the same put an absent
+ * relationship *and* a deliberate absence of one into the loss branch, so `#Linked!A1` was written correctly by this
+ * library and then dropped on the way back in. The model's form for it is the `#`-prefixed fragment, which is exactly
+ * what the XLSX reader produces and what `core/hyperlink.ts` recognises. No relationship *and* no location is a link
+ * with no destination at all, which stays a loss.
+ */
+function hyperlinkTarget(
+  link: ReadHyperlink,
+  targets: ReadonlyMap<string, string>
+): string | undefined {
+  if (link.relId === "") {
+    return link.location === "" ? undefined : `#${link.location}`;
+  }
+  return targets.get(link.relId);
 }

@@ -469,8 +469,35 @@ export class StyledBlankGrid {
     this.taken.clear();
   }
 
-  /** The band holding a row (zero-based), or -1. */
-  private bandIndex(row: number): number {
+  /**
+   * Visit each blank cell (zero-based) inside `area`, row by row. Costs the bands the area's rows cross and the cells
+   * visited, not the area: a range over the whole sheet with two blanks in it visits two cells.
+   */
+  forEachCellIn(area: StyledBlankArea, visit: (row: number, column: number) => void): void {
+    for (let index = this.firstBandFrom(area.firstRow); index < this.bands.length; index++) {
+      const band = this.bands[index];
+      if (band.first > area.lastRow) {
+        break;
+      }
+      const top = Math.max(band.first, area.firstRow);
+      const bottom = Math.min(band.last, area.lastRow);
+      for (const run of band.runs) {
+        const left = Math.max(run.firstColumn, area.firstColumn);
+        const right = Math.min(run.lastColumn, area.lastColumn);
+        for (let row = top; row <= bottom && left <= right; row++) {
+          if (this.taken.has(row)) {
+            continue;
+          }
+          for (let column = left; column <= right; column++) {
+            visit(row, column);
+          }
+        }
+      }
+    }
+  }
+
+  /** The first band (by index) whose last row is at or after `row`. */
+  private firstBandFrom(row: number): number {
     let low = 0;
     let high = this.bands.length;
     while (low < high) {
@@ -481,6 +508,12 @@ export class StyledBlankGrid {
         high = middle;
       }
     }
+    return low;
+  }
+
+  /** The band holding a row (zero-based), or -1. */
+  private bandIndex(row: number): number {
+    const low = this.firstBandFrom(row);
     return low < this.bands.length && this.bands[low].first <= row ? low : -1;
   }
 }

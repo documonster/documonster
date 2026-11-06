@@ -821,28 +821,33 @@ function buildShape(tags: readonly { expression: string; type: string; path?: st
   return JSON.stringify(shape, null, 2);
 }
 
+/**
+ * Keys a template path must not name in the shape: assigning `__proto__` sets an object's prototype instead of adding a
+ * key, so a placeholder `{{__proto__.x}}` in an untrusted template wrote `x` onto `Object.prototype` of the server. A
+ * fill never reads them either — the engine resolves own properties only — so leaving them out of the shape loses
+ * nothing the template could use.
+ */
+const UNSAFE_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+
 /** Set `a.b.c` on a nested object without clobbering a sibling branch. */
 function assignPath(target: Record<string, unknown>, dotted: string, value: unknown): void {
   const parts = dotted.split(".").filter(part => part.length > 0);
-  if (parts.length === 0) {
+  if (parts.length === 0 || parts.some(part => UNSAFE_KEYS.has(part))) {
     return;
   }
 
   let cursor = target;
   for (let index = 0; index < parts.length - 1; index += 1) {
-    const key = parts[index];
-    if (key === undefined) {
-      return;
-    }
-    const existing = cursor[key];
+    const key = parts[index]!;
+    const existing = Object.hasOwn(cursor, key) ? cursor[key] : undefined;
     if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
       cursor[key] = {};
     }
     cursor = cursor[key] as Record<string, unknown>;
   }
 
-  const last = parts[parts.length - 1];
-  if (last !== undefined && cursor[last] === undefined) {
+  const last = parts[parts.length - 1]!;
+  if (!Object.hasOwn(cursor, last)) {
     cursor[last] = value;
   }
 }

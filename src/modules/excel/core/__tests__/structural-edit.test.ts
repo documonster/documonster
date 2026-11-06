@@ -324,6 +324,66 @@ describe("Column.splice", () => {
     expect(model.columns.map(c => c.name)).toEqual(["x", "z"]);
     expect(model.rows).toEqual([[1, 3]]);
   });
+
+  it("deletes the last column, its width with it, and leaves the columns before it alone", () => {
+    // Moving the definitions read the column past the one deleted with a call that creates it, and past XFD that threw
+    // after the cells had moved and the formulas been rewritten.
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "XFD1", "edge");
+    Cell.setValue(ws, "XFC1", "before");
+    Cell.setValue(ws, "A1", { formula: "XFC1&XFD1", result: "beforeedge" });
+    Column.setWidth(ws, "XFC", 12);
+    Column.setWidth(ws, "XFD", 20);
+    Column.splice(ws, 16384, 1);
+    expect(Cell.has(ws, "XFD1")).toBe(false);
+    expect(Column.getWidth(ws, "XFD")).toBeUndefined();
+    expect(Cell.getValue(ws, "XFC1")).toBe("before");
+    expect(Column.getWidth(ws, "XFC")).toBe(12);
+    expect(Cell.getFormula(ws, "A1")).toBe("XFC1&#REF!");
+    Column.splice(ws, 16383, 2);
+    expect(Cell.has(ws, "XFC1")).toBe(false);
+    expect(Column.getWidth(ws, "XFC")).toBeUndefined();
+  });
+
+  it("moves each column's definition as it is, key included, and invents no width", () => {
+    // Moved as a declared definition, a column with no width got the default one, and a header was written into
+    // cells that had just moved by themselves.
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Column.setDefinitions(ws, [{ key: "a" }, { key: "b", width: 30, hidden: true }]);
+    Cell.setValue(ws, "A1", 1);
+    Cell.setValue(ws, "B1", 2);
+    Cell.setValue(ws, "D1", 4);
+    const declared = Column.getWidth(ws, "A");
+    Column.splice(ws, 1, 0, ["x"]);
+    expect(Column.getWidth(ws, "A")).toBeUndefined();
+    expect(Column.getWidth(ws, "B")).toBe(declared);
+    // D had no definition; moved to E it still has none.
+    expect(Column.getWidth(ws, "E")).toBeUndefined();
+    expect(Column.getWidth(ws, "C")).toBe(30);
+    expect(Column.isHidden(ws, "C")).toBe(true);
+    expect(Column.getKey(ws, "B")).toBe("a");
+    expect(Column.getKey(ws, "C")).toBe("b");
+    Column.splice(ws, 1, 2);
+    expect(Column.getKey(ws, "A")).toBe("b");
+    expect(Column.getWidth(ws, "A")).toBe(30);
+    expect(Cell.getValue(ws, "A1")).toBe(2);
+  });
+
+  it("makes room at the end when the last column is deleted, so a column can be inserted", () => {
+    // The definitions past the new end were emptied but kept, and still counted as a column in use.
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "first");
+    Column.setWidth(ws, "XFD", 20);
+    expect(() => Column.splice(ws, 1, 0, ["new"])).toThrow(/out of bounds/);
+    Column.splice(ws, 16384, 1);
+    Column.splice(ws, 1, 0, ["new"]);
+    expect(Cell.getValue(ws, "A1")).toBe("new");
+    expect(Cell.getValue(ws, "B1")).toBe("first");
+    expect(Column.getWidth(ws, "XFD")).toBeUndefined();
+  });
 });
 
 describe("Worksheet.setName", () => {

@@ -11,7 +11,14 @@ import { checkHandle } from "@word/core/argument-checks";
 import { withDisplayFields } from "@word/core/field-view";
 import { imageKeys } from "@word/core/image-keys";
 import { checkSchema, w } from "@word/core/option-schema";
-import { extractMathText, hyperlinkContent, isRun, symbolText } from "@word/core/text-utils";
+import {
+  extractMathText,
+  hasRunTextControl,
+  hyperlinkContent,
+  isRun,
+  splitRunText,
+  symbolText
+} from "@word/core/text-utils";
 import { finalViewRun, isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
 import type { NumberingCounter } from "@word/query/numbering-counter";
@@ -519,10 +526,11 @@ function renderRun(state: MdRenderState, run: Run): string {
 function renderRunContent(state: MdRenderState, content: RunContent): string {
   switch (content.type) {
     case "text":
-      // A line break inside text is one, as the DOCX writer writes it; a tab is
-      // a space, as a tab content is.
-      return /[\t\n\r]/.test(content.text)
-        ? content.text.replace(/\r\n?|\n/g, "  \n").replace(/\t/g, " ")
+      // A tab or a line break inside text is one — see `splitRunText`.
+      return hasRunTextControl(content.text)
+        ? splitRunText(content.text)
+            .map(piece => (piece.type === "text" ? piece.text : renderRunContent(state, piece)))
+            .join("")
         : content.text;
     case "break":
       if (content.breakType === "page") {

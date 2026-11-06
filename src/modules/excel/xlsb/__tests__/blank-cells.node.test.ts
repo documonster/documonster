@@ -228,6 +228,40 @@ describe("collapse takes only what is a styled blank", () => {
     await expectSameSheet(kept.written, collapsed.written);
   });
 
+  it("gives back only the cells a link that will be attached shares with a rectangle", async () => {
+    // Two rectangles at opposite corners, and a link over the whole sheet whose relationship is missing: expanding the
+    // link — or the box around the rectangles — was a cell per address of the sheet before the link was found to
+    // point nowhere. It is reported lost and lands on nothing, so nothing is given back.
+    const bytes = await written(
+      sheet => {
+        Range.setStyle(sheet, "XFC1048575:XFD1048576", { numFmt: "@" });
+        Cell.setValue(sheet, "E5", { text: "x", hyperlink: "https://example.com" });
+      },
+      record => {
+        if (record.id !== idOf("BrtHLink")) {
+          return encodeBiffRecord(record.id, record.payload);
+        }
+        const payload = Uint8Array.from(record.payload);
+        const view = new DataView(payload.buffer);
+        view.setUint32(0, 0, true);
+        view.setUint32(4, 1048575, true);
+        view.setUint32(8, 0, true);
+        view.setUint32(12, 16383, true);
+        // The relationship id's last UTF-16 unit, so it names one the sheet does not declare.
+        const length = view.getUint32(16, true);
+        view.setUint16(20 + (length - 1) * 2, "Z".charCodeAt(0), true);
+        return encodeBiffRecord(record.id, payload);
+      }
+    );
+    const collapsed = Workbook.create();
+    await Workbook.read(collapsed, bytes, { blankCells: "collapse" });
+    const sheet = Workbook.listWorksheets(collapsed)[0];
+    expect(Cell.getHyperlink(sheet, "E5")).toBeUndefined();
+    expect(Cell.has(sheet, "B2")).toBe(false);
+    expect(Cell.has(sheet, "XFD1048576")).toBe(false);
+    expect(Cell.getNumFmt(sheet, "XFD1048576")).toBe("@");
+  });
+
   it("does not take a formula whose cached error it cannot read", async () => {
     // An error code outside the table reads as `null`, as a blank does. For a shared follower nothing else told the two
     // apart, so the formula was collapsed and written back as a `BrtCellBlank`.

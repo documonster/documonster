@@ -16,7 +16,14 @@ import { withDisplayFields } from "@word/core/field-view";
 import { indexImagesByKey } from "@word/core/image-keys";
 import { bytesToBase64, sanitizeUrl } from "@word/core/internal-utils";
 import { checkSchema, w } from "@word/core/option-schema";
-import { extractMathText, hyperlinkContent, isRun, symbolText } from "@word/core/text-utils";
+import {
+  extractMathText,
+  hasRunTextControl,
+  hyperlinkContent,
+  isRun,
+  splitRunText,
+  symbolText
+} from "@word/core/text-utils";
 import { isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
 import type { NumberingCounter } from "@word/query/numbering-counter";
@@ -975,16 +982,13 @@ function renderRun(state: RenderState, run: Run): void {
 function renderRunContentHtml(state: RenderState, content: RunContent): void {
   switch (content.type) {
     case "text":
-      // A line break inside text is one, as the DOCX writer writes it, and so
-      // is a tab, as Word sets one kept in `<w:t>`.
-      if (/[\t\n\r]/.test(content.text)) {
-        for (const piece of content.text.split(/(\r\n|\r|\n|\t)/)) {
-          if (piece === "\t") {
-            renderRunContentHtml(state, { type: "tab" });
-          } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
-            renderRunContentHtml(state, { type: "break" });
-          } else if (piece !== "") {
-            state.html.push(escapeHtml(piece));
+      // A tab or a line break inside text is one — see `splitRunText`.
+      if (hasRunTextControl(content.text)) {
+        for (const piece of splitRunText(content.text)) {
+          if (piece.type === "text") {
+            state.html.push(escapeHtml(piece.text));
+          } else {
+            renderRunContentHtml(state, piece);
           }
         }
         break;

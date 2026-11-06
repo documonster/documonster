@@ -190,6 +190,46 @@ describe("StyledBlankGrid", () => {
     }
   });
 
+  it("visits exactly the blank cells inside an area, and none of a taken row", () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const next = random(seed);
+      const runs = new StyledBlankRuns();
+      for (let row = 0; row < 16; row++) {
+        for (let column = 0; column < 12; column++) {
+          if (next() < 0.5) {
+            runs.add(row, column, next() < 0.5 ? 0 : 1);
+          }
+        }
+      }
+      const grid = StyledBlankGrid.from(
+        runs.ranges().map(range => ({ ...range, style: STYLES[range.styleIndex] }))
+      );
+      grid.takeRow(Math.floor(next() * 16));
+      const area = {
+        firstRow: Math.floor(next() * 18),
+        lastRow: 0,
+        firstColumn: Math.floor(next() * 14),
+        lastColumn: 0
+      };
+      area.lastRow = area.firstRow + Math.floor(next() * 8);
+      area.lastColumn = area.firstColumn + Math.floor(next() * 8);
+      const visited: string[] = [];
+      // Before anything rebuilds the bands, so the taken row is still only recorded.
+      grid.forEachCellIn(area, (row, column) => visited.push(`${row}:${column}`));
+      const cells = cellsOf(grid);
+      const expected = [...cells.keys()].filter(key => {
+        const [row, column] = key.split(":").map(Number);
+        return (
+          row >= area.firstRow &&
+          row <= area.lastRow &&
+          column >= area.firstColumn &&
+          column <= area.lastColumn
+        );
+      });
+      expect(visited.sort(), `seed ${seed}`).toEqual(expected.sort());
+    }
+  });
+
   it("answers between takes without being rebuilt, and agrees once it is", () => {
     for (let seed = 1; seed <= 20; seed++) {
       const next = random(seed);

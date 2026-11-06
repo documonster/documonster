@@ -191,6 +191,39 @@ export function extractRunText(run: Run): string {
   return text;
 }
 
+/** A piece of run text: text, a tab, or a line break. */
+export type RunTextPiece =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "tab" }
+  | { readonly type: "break" };
+
+const RUN_TEXT_CONTROL = /[\t\n\r]/;
+
+/** Whether run text holds a tab or a line break — whether {@link splitRunText} would split it. */
+export function hasRunTextControl(text: string): boolean {
+  return RUN_TEXT_CONTROL.test(text);
+}
+
+/**
+ * Run text as Word reads it. A line break inside text (`\n`, `\r\n` or `\r`) is one — the writer writes it as
+ * `<w:br/>` — and a tab is one, as Word sets a tab kept in `<w:t>`; neither is a character a face has a glyph for. So
+ * everything that draws or converts run text reads it through this, and the readers cannot disagree on, say, a lone
+ * `\r`. Text pieces are never empty.
+ */
+export function splitRunText(text: string): RunTextPiece[] {
+  const out: RunTextPiece[] = [];
+  for (const piece of text.split(/(\r\n|\r|\n|\t)/)) {
+    if (piece === "\t") {
+      out.push({ type: "tab" });
+    } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
+      out.push({ type: "break" });
+    } else if (piece !== "") {
+      out.push({ type: "text", text: piece });
+    }
+  }
+  return out;
+}
+
 /**
  * The character a `w:sym` stands for. `w:char` is a hexadecimal code point
  * (often in the Private Use Area of a symbol font); an unparseable code yields

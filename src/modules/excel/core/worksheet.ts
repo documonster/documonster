@@ -123,6 +123,7 @@ import {
   checkWorksheetAttached,
   columnCreate,
   columnSetDefn,
+  columnSetKey,
   eachRow,
   findCell,
   getCell,
@@ -135,6 +136,7 @@ import {
   getTable,
   getStyledBlankRanges,
   hasRowContent,
+  lastCellColumn,
   moveStyledBlankLines,
   rowEachCell,
   rowGetCell,
@@ -553,17 +555,11 @@ function lastLineInUse(ws: WorksheetData, kind: "rows" | "columns"): number {
     return Math.max(last, blanks?.lastRow ?? 0);
   }
   let last = Math.max(ws._columns.length, blanks?.lastCol ?? 0);
-  for (const row of ws._rows) {
-    if (row === undefined) {
-      continue;
+  ws._rows.forEach((row, index) => {
+    if (row !== undefined && row.cells.length > last) {
+      last = Math.max(last, lastCellColumn(ws, index + 1));
     }
-    for (let col = row.cells.length; col > last; col--) {
-      if (row.cells[col - 1] !== undefined) {
-        last = col;
-        break;
-      }
-    }
-  }
+  });
   return last;
 }
 
@@ -640,25 +636,54 @@ function _spliceColumnCells(
     );
   }
 
-  // splice column definitions
+  // splice column definitions — moved as they are (see `moveColumnDefinition`), and read without creating: past the last
+  // column there is none to read, and `getColumn` would make one — beyond XFD it throws, which deleting the last column
+  // reached after its cells had already moved.
   const nExpand = inserts.length - count;
   const nKeep = start + count;
   const nEnd = ws._columns.length;
   if (nExpand < 0) {
     for (let i = start + inserts.length; i <= nEnd; i++) {
-      columnSetDefn(getColumn(ws, i), columnDefn(getColumn(ws, i - nExpand)));
+      const column = ws._columns[i - 1];
+      if (column !== undefined) {
+        moveColumnDefinition(column, ws._columns[i - nExpand - 1]);
+      }
+    }
+    // The columns past the new end had nothing to take from: drop them, as a row splice drops the rows past its new
+    // end. Left in place they still counted as columns in use, so deleting XFD did not make room to insert one.
+    const kept = Math.max(nEnd + nExpand, Math.min(nEnd, start - 1));
+    if (ws._columns.length > kept) {
+      ws._columns.length = kept;
     }
   } else if (nExpand > 0) {
     for (let i = nEnd; i >= nKeep; i--) {
-      columnSetDefn(getColumn(ws, i + nExpand), columnDefn(getColumn(ws, i)));
+      moveColumnDefinition(getColumn(ws, i + nExpand), ws._columns[i - 1]);
     }
   }
   for (let i = start; i < start + inserts.length; i++) {
-    columnSetDefn(getColumn(ws, i), undefined);
+    moveColumnDefinition(getColumn(ws, i), undefined);
   }
 
   // account for merges
   _spliceMerges(ws, "col", start, count, inserts.length);
+}
+
+/**
+ * Give `dst` the definition `src` has — every field exactly, or none for `undefined` — as a column splice moves it.
+ *
+ * Not `columnSetDefn`, which is for a definition a caller declares: it gives a column with no width the default one,
+ * so every column a splice moved reported a width of 9 it never had, and it writes a header's values into the cells,
+ * which have just moved on their own. The key moves too, so the registry names the column that now holds it.
+ */
+function moveColumnDefinition(dst: ColumnData, src: ColumnData | undefined): void {
+  columnSetKey(dst, src?.key);
+  dst.header = src?.header;
+  dst.width = src?.width;
+  dst.customWidth = src?.customWidth;
+  dst.hidden = src?.hidden;
+  dst.outlineLevel = src?.outlineLevel;
+  dst.bestFit = src?.bestFit;
+  dst.style = src === undefined ? {} : ((copyStyle(src.style) as Partial<Style>) ?? {});
 }
 
 export function insertRow(
@@ -703,6 +728,10 @@ export function duplicateRow(
   // create count duplicates of rowNum
   // either inserting new or overwriting existing rows
   checkNumber("Row.duplicate", "count", count, { min: 0, integer: true });
+  // The splice below is checked before the source row is created or its styled blanks given back: refused after, the
+  // sheet had already changed.
+  checkLineSplice(ws, "Row.duplicate", "rows", rowNum + 1, insert ? 0 : count);
+  checkSpliceFits(ws, "Row.duplicate", "rows", rowNum + 1, insert ? 0 : count, count);
 
   const rSrc = getRow(ws, rowNum);
   // The source's styled blanks are among the cells it copies, as they are under `"keep"`.

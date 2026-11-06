@@ -30,10 +30,14 @@ export function localeFieldFormat(locale: string | undefined): FieldFormat {
   if (locale === undefined) {
     return {};
   }
-  let format = FORMAT_CACHE.get(locale);
+  // Cached by the locale `Intl` resolves the tag to, not by the tag: a caller's tags are unbounded — a private-use or
+  // extension subtag makes a new one every time — and a long-running server kept one entry for each. What they resolve
+  // to is the finite set of locales the platform has data for, and the symbols and names depend on nothing else.
+  const resolved = new Intl.NumberFormat(locale).resolvedOptions().locale;
+  let format = FORMAT_CACHE.get(resolved);
   if (!format) {
-    format = { symbols: localeNumberSymbols(locale), names: localeDateNames(locale) };
-    FORMAT_CACHE.set(locale, format);
+    format = { symbols: localeNumberSymbols(resolved), names: localeDateNames(resolved) };
+    FORMAT_CACHE.set(resolved, format);
   }
   return format;
 }
@@ -71,27 +75,31 @@ function localeNumberSymbols(locale: string): NumberSymbols {
 
 function localeDateNames(locale: string): DateNames {
   // The names as they stand in a date (`7 ноября`, not `ноябрь`), which is
-  // where a picture writes them.
-  const monthOf = (month: number, style: "long" | "short"): string => {
-    const parts = new Intl.DateTimeFormat(locale, {
-      day: "numeric",
-      month: style,
-      timeZone: "UTC"
-    }).formatToParts(Date.UTC(2001, month, 15));
-    return parts.find(p => p.type === "month")?.value ?? "";
+  // where a picture writes them. Gregorian whatever the locale's own calendar:
+  // the day and year a picture writes are the Gregorian ones the data holds,
+  // and `fa-IR` or `-u-ca-islamic` named the month of another calendar beside
+  // them (`7 آبان 2026` for 7 November).
+  // One formatter per name and width, each asked for every month or day.
+  const formatter = (options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat =>
+    new Intl.DateTimeFormat(locale, { ...options, calendar: "gregory", timeZone: "UTC" });
+  const monthsOf = (style: "long" | "short"): string[] => {
+    const format = formatter({ day: "numeric", month: style });
+    return Array.from(
+      { length: 12 },
+      (_, month) =>
+        format.formatToParts(Date.UTC(2001, month, 15)).find(p => p.type === "month")?.value ?? ""
+    );
   };
   // 2001-01-07 was a Sunday.
-  const dayOf = (day: number, style: "long" | "short"): string =>
-    new Intl.DateTimeFormat(locale, { weekday: style, timeZone: "UTC" }).format(
-      Date.UTC(2001, 0, 7 + day)
-    );
-  const twelve = Array.from({ length: 12 }, (_, i) => i);
-  const seven = Array.from({ length: 7 }, (_, i) => i);
+  const daysOf = (style: "long" | "short"): string[] => {
+    const format = formatter({ weekday: style });
+    return Array.from({ length: 7 }, (_, day) => format.format(Date.UTC(2001, 0, 7 + day)));
+  };
   return {
-    months: twelve.map(m => monthOf(m, "long")),
-    shortMonths: twelve.map(m => monthOf(m, "short")),
-    days: seven.map(d => dayOf(d, "long")),
-    shortDays: seven.map(d => dayOf(d, "short"))
+    months: monthsOf("long"),
+    shortMonths: monthsOf("short"),
+    days: daysOf("long"),
+    shortDays: daysOf("short")
   };
 }
 
