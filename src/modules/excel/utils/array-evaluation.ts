@@ -56,6 +56,7 @@ import { parse } from "@formula/syntax/parser";
 import { printAst } from "@formula/syntax/print";
 import { SPILL_OPERATOR } from "@formula/syntax/token-types";
 import { tokenize } from "@formula/syntax/tokenizer";
+import { escapeRegExp } from "@utils/regexp";
 
 interface Analysis {
   /** What Excel intersects when the formula is stored as an ordinary one — see `implicitIntersections`. */
@@ -133,7 +134,7 @@ function analyse(root: AstNode, functions: RegisteredFunctions | undefined): Ana
 
 /** A call to a function with a reference-only parameter, so most formulas are never parsed for the check below. */
 const CALLS_REFERENCE_ONLY = new RegExp(
-  `(?:^|[^A-Z0-9_.]|_XLFN\\.)(?:${[...REFERENCE_ONLY_FUNCTIONS].map(name => name.replace(/\./g, "\\.")).join("|")})\\s*\\(`,
+  `(?:^|[^A-Z0-9_.]|_XLFN\\.)(?:${[...REFERENCE_ONLY_FUNCTIONS].map(escapeRegExp).join("|")})\\s*\\(`,
   "i"
 );
 

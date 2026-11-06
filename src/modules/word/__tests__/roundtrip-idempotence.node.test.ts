@@ -56,17 +56,18 @@ describe("round trip of every .docx fixture", () => {
   });
 });
 
-/** The visible text of every TOC block in `xml`, field instructions removed. */
+/** The visible text of every TOC block in `xml`: its `w:t` text and tabs, not field instructions. */
 function tocBlockTexts(xml: string): string[] {
   return [...xml.matchAll(/<w:sdt>([\s\S]*?)<\/w:sdt>/g)]
     .filter(m => /<w:docPartGallery w:val="Table of Contents"\/>/.test(m[1]!))
     .map(m =>
-      m[1]!
-        .replace(/<w:sdtPr>[\s\S]*?<\/w:sdtPr>/, "")
-        .replace(/<w:instrText[^>]*>[^<]*<\/w:instrText>/g, "")
-        .replace(/<w:tab\/>/g, "\t")
-        .replace(/<\/w:p>/g, "\u00b6")
-        .replace(/<[^>]+>/g, "")
+      [
+        ...m[1]!
+          .replace(/<w:sdtPr>[\s\S]*?<\/w:sdtPr>/, "")
+          .matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>|<\/w:p>/g)
+      ]
+        .map(([token, text]) => text ?? (token === "<w:tab/>" ? "\t" : "\u00b6"))
+        .join("")
     );
 }
 

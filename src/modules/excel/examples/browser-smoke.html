@@ -231,7 +231,7 @@
         const result = document.getElementById("createResult");
         try {
           log("Creating workbook...");
-          const { Workbook, Worksheet, Row, Column } = Documonster.Excel;
+          const { Workbook, Row, Column } = Documonster.Excel;
           const wb = Workbook.create();
           wb.creator = "Documonster Browser Test";
           wb.created = new Date();

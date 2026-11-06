@@ -378,7 +378,9 @@ describe("round trip", () => {
   ] as const)(
     "a %s written after the edits reads back pointing at the same data (edited after a read: %s)",
     async (format, reread) => {
-      let { wb, d, other } = build();
+      const built = build();
+      const { other } = built;
+      let { wb, d } = built;
       DefinedNames.add(Workbook.getDefinedNames(wb), "D!$B$4:$B$5", "Amounts");
       ConditionalFormatting.add(d, {
         ref: "B4:B5",
@@ -395,7 +397,6 @@ describe("round trip", () => {
         // Edited after a read, a chart is patched in the bytes it was read from rather than rebuilt.
         wb = await Workbook.read(await Workbook.toBuffer(wb));
         d = Workbook.getWorksheet(wb, "D")!;
-        other = Workbook.getWorksheet(wb, "Other")!;
       }
 
       Row.insert(d, 1, ["top"]);

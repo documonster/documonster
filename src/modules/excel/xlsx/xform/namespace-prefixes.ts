@@ -27,6 +27,7 @@
  * in the same scope is being given that prefix, in which case it is renamed.
  */
 import { createPartDecoder } from "@excel/utils/part-decoder";
+import { escapeRegExp } from "@utils/regexp";
 import { xmlEncode, xmlEncodeAttr } from "@utils/xml-encode";
 import { SaxParser } from "@xml/sax";
 import type { ParseOpenTag } from "@xml/types";
@@ -950,7 +951,7 @@ export function createPrefixNormalizer(options?: PrefixNormalizerOptions): Prefi
       // is told per tag instead.
       attributeCounting = declarations === pending && options?.hinted !== true;
       if (attributeCounting && affecting.size > 0) {
-        const alternatives = [...affecting].map(prefix => prefix.replace(/[.-]/g, "\\$&"));
+        const alternatives = [...affecting].map(escapeRegExp);
         affectingPattern = new RegExp(`[ \t\r\n](?:${alternatives.join("|")}):`, "g");
         attributeTailLength = Math.max(...[...affecting].map(prefix => prefix.length)) + 1;
       }

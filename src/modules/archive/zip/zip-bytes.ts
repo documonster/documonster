@@ -15,7 +15,7 @@ import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import {
   DEFAULT_ZIP_LEVEL,
   DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
+  reproducibleZipModTime
 } from "@archive/core/defaults";
 import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
@@ -209,7 +209,7 @@ function parseZipBuildOptions(options: ZipOptions): {
   const level = options.level ?? DEFAULT_ZIP_LEVEL;
   const timestamps: ZipTimestampMode =
     options.timestamps ?? (reproducible ? "dos" : DEFAULT_ZIP_TIMESTAMPS);
-  const defaultModTime = options.modTime ?? (reproducible ? REPRODUCIBLE_ZIP_MOD_TIME : new Date());
+  const defaultModTime = options.modTime ?? (reproducible ? reproducibleZipModTime() : new Date());
 
   return {
     settings: {

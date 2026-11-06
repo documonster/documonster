@@ -191,7 +191,6 @@ export function resolveZipStringCodec(encoding?: ZipStringEncoding): ZipStringCo
   // taken for a codec and failed with a `TypeError` only once a name was encoded.
   if (
     typeof encoding !== "object" ||
-    encoding === null ||
     typeof (encoding as Partial<ZipStringCodec>).encode !== "function" ||
     typeof (encoding as Partial<ZipStringCodec>).decode !== "function"
   ) {

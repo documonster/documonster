@@ -34,7 +34,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import * as path from "node:path";
 
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { DEFAULT_COMPRESS_LEVEL, REPRODUCIBLE_ZIP_MOD_TIME } from "@archive/core/defaults";
+import { DEFAULT_COMPRESS_LEVEL, reproducibleZipModTime } from "@archive/core/defaults";
 import {
   checkBytes,
   checkEntryName,
@@ -1522,7 +1522,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   /** The date a ZIP write records for an entry added now that nothing else dates. */
   private _zipStamp(): Date {
     const options = this._zip_options;
-    return options.modTime ?? (options.reproducible ? REPRODUCIBLE_ZIP_MOD_TIME : new Date());
+    return options.modTime ?? (options.reproducible ? reproducibleZipModTime() : new Date());
   }
 
   /** The date a TAR write records for an entry added now that nothing else dates. */

@@ -10,10 +10,13 @@ describe("TarGzArchive.bytesSync", () => {
   });
 });
 
-/** Node's zlib produces the same deflate stream however its input is split; browsers do not. */
-const isNode =
-  typeof (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node ===
-  "string";
+/**
+ * Node's zlib produces the same deflate stream however its input is split; browsers do not, and
+ * neither does Bun, which reports a `versions.node` but brings its own zlib.
+ */
+const versions = (globalThis as { process?: { versions?: { node?: string; bun?: string } } })
+  .process?.versions;
+const isNode = typeof versions?.node === "string" && versions.bun === undefined;
 
 describe("tar.gz sync and async output agree", () => {
   const modTime = new Date(0);

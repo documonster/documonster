@@ -267,6 +267,13 @@ async function convert(soffice: string, file: string): Promise<Outcome> {
   }
 }
 
+/** The compound-file signature an encrypted OOXML package is wrapped in. */
+const COMPOUND_FILE_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+function isCompoundFile(bytes: Uint8Array): boolean {
+  return COMPOUND_FILE_SIGNATURE.every((byte, i) => bytes[i] === byte);
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const required = argv.includes("--require");
@@ -338,9 +345,26 @@ async function main(): Promise<void> {
   console.log(
     `${soffice}\n${targets.length} file(s) — ${byKind(".xlsb")} xlsb, ${byKind(".xlsx")} xlsx\n`
   );
+  // **An encrypted workbook is listed, not opened.** It is a compound file holding the encrypted package, and a headless
+  // conversion has no way to pass a password, so LibreOffice can only refuse it — a failure that says nothing about the
+  // writer. Its package is the same writer's output as every other file here; the encryption is checked against Excel's
+  // own files by the tests. Named on every run, so a file that should not be encrypted cannot hide here.
+  const encrypted: string[] = [];
+  for (const file of targets) {
+    if (isCompoundFile(await readFile(file))) {
+      encrypted.push(file);
+    }
+  }
+  if (encrypted.length > 0) {
+    console.log(
+      `${encrypted.length} encrypted file(s) not opened (no password on the command line):\n` +
+        encrypted.map(file => `  - ${file}`).join("\n") +
+        "\n"
+    );
+  }
   const failures: Outcome[] = [];
   let done = 0;
-  for (const file of targets) {
+  for (const file of targets.filter(file => !encrypted.includes(file))) {
     const outcome = await convert(soffice, file);
     done += 1;
     if (!outcome.ok) {
@@ -353,7 +377,7 @@ async function main(): Promise<void> {
 
   if (failures.length > 0) {
     console.error(
-      `\n✗ verify:libreoffice — ${failures.length} of ${targets.length} file(s) could not be read by LibreOffice.`
+      `\n✗ verify:libreoffice — ${failures.length} of ${targets.length - encrypted.length} file(s) could not be read by LibreOffice.`
     );
     console.error(
       "  A failure here means the file is broken. A pass would not have meant it is fine."
@@ -361,7 +385,9 @@ async function main(): Promise<void> {
     process.exit(1);
     return;
   }
-  console.log(`\n✓ verify:libreoffice — LibreOffice read all ${targets.length} file(s).`);
+  console.log(
+    `\n✓ verify:libreoffice — LibreOffice read all ${targets.length - encrypted.length} unencrypted file(s).`
+  );
   console.log("  This screens for structural damage; it is not evidence that Excel accepts them.");
 }
 

@@ -71,6 +71,12 @@ describe("Stream", () => {
   });
 });
 
+// `consumers.bytes` is newer than Node 22; there, what it would answer is the `arrayBuffer` as bytes.
+const nodeBytes: (source: never) => Promise<Uint8Array> =
+  "bytes" in nodeConsumers
+    ? nodeConsumers.bytes
+    : async source => new Uint8Array(await nodeConsumers.arrayBuffer(source));
+
 describe("consumers.text / json / bytes agree with node:stream/consumers", () => {
   const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x61]);
   const sources: Array<[string, () => unknown]> = [
@@ -103,7 +109,7 @@ describe("consumers.text / json / bytes agree with node:stream/consumers", () =>
 
   it.each(sources.slice(0, 3))("bytes of %s", async (_name, make) => {
     expect([...(await entry.consumers.bytes(make() as never))]).toEqual([
-      ...(await nodeConsumers.bytes(make() as never))
+      ...(await nodeBytes(make() as never))
     ]);
   });
 

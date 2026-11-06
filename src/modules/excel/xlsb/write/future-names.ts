@@ -9,6 +9,7 @@ import {
   etaStubName,
   futureFunctionStubName,
   hasNoXlsbForm,
+  isFunctionArgument,
   isFutureFunction,
   isUserFunction
 } from "@excel/xlsb/formula/ptg";
@@ -161,9 +162,9 @@ function etaNames(formula: string, defined: ReadonlySet<string>): string[] {
     return [];
   }
   const found: string[] = [];
-  const visit = (value: unknown): void => {
+  const visit = (value: unknown, parent: AstNode | undefined): void => {
     if (Array.isArray(value)) {
-      value.forEach(visit);
+      value.forEach(item => visit(item, parent));
       return;
     }
     if (typeof value !== "object" || value === null) {
@@ -171,15 +172,18 @@ function etaNames(formula: string, defined: ReadonlySet<string>): string[] {
     }
     const node = value as AstNode;
     if (node.type === NodeType.Name && node.sheet === undefined) {
-      const eta = etaStubName(node.name, defined.has(definedNameListKey(node.name)));
+      const eta = etaStubName(
+        node.name,
+        defined.has(definedNameListKey(node.name)) || !isFunctionArgument(node, parent)
+      );
       if (eta !== undefined) {
         found.push(eta);
       }
       return;
     }
-    Object.values(node).forEach(visit);
+    Object.values(node).forEach(child => visit(child, node));
   };
-  visit(root);
+  visit(root, undefined);
   return found;
 }
 

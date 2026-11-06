@@ -1,6 +1,7 @@
 /**
  * Compare two API records (see `dump.ts`) name by name. Used by `scripts/api-changes.ts`.
  */
+import { escapeRegExp } from "../../src/utils/regexp.ts";
 import type { ApiEntry, ApiRecord } from "./dump.ts";
 
 export type Row = [key: string, entry: ApiEntry];
@@ -107,7 +108,7 @@ export function sortUnions(s: string): string {
  */
 function canonFor(after: ApiRecord): Canon {
   const rename = (from: string, to: string): [RegExp, string] => [
-    new RegExp("(?<![\\w$.])" + from.replace(/\$/g, "\\$") + "(?![\\w$])", "g"),
+    new RegExp("(?<![\\w$.])" + escapeRegExp(from) + "(?![\\w$])", "g"),
     to
   ];
   // Per entry, then — for a signature in one entry naming a type another entry forwards — every forward whose old

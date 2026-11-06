@@ -91,10 +91,10 @@ const PROBES: Readonly<Record<string, Probes>> = {
     formulas: { "RkNumber!A82": "A81+1", "RkNumber!A277": "A276/300000" }
   },
   "cal-pass_protected": {
-    // Encrypted, OLE-wrapped. Refusing it clearly is the supported behaviour; parsing it as a ZIP is not.
-    rejected: /End of Central Directory|not a (zip|valid)/i
+    // Encrypted, OLE-wrapped. Read without its password, it is refused as encrypted — not parsed as a ZIP.
+    rejected: /the workbook is encrypted \(password-protected\)/
   },
-  "poi-protected_passtika": { rejected: /End of Central Directory|not a (zip|valid)/i }
+  "poi-protected_passtika": { rejected: /the workbook is encrypted \(password-protected\)/ }
 };
 
 /** A `"Sheet!A1"` probe key, split. */
@@ -258,15 +258,17 @@ const EXPECTED_REBUILD_DIFFERENCES: Readonly<
 /**
  * What an XLSX conversion is *expected* to refuse, by fixture.
  *
- * **One entry, and it is a real loss rather than a quirk.** `cal-any_sheets.xlsb` carries a chartsheet, whose `.bin` sheet
- * part has no form in a SpreadsheetML package — so the tab is genuinely gone and the XLSX writer says so. The chart, its
- * drawing and its style parts still travel; only the sheet does not.
+ * **Real losses rather than quirks.** `cal-any_sheets.xlsb` carries a chartsheet, whose `.bin` sheet part has no form in a
+ * SpreadsheetML package — so the tab is genuinely gone and the XLSX writer says so. The chart, its drawing and its style
+ * parts still travel; only the sheet does not. `poi-bug66682.xlsb`'s external link is a BIFF12 part too, which this
+ * library preserves rather than models, so it cannot cross either.
  *
  * Listed rather than ignored so that a *new* refusal is a failure. `unsupported` defaults to `"error"`, and a gate that
  * blanket-passed `"ignore"` would stop noticing the day a second thing became unwritable.
  */
 const EXPECTED_XLSX_LOSSES: Readonly<Record<string, readonly string[]>> = {
-  "cal-any_sheets": ["xl/chartsheets/sheet1.bin: preserved sheet part from the other container"]
+  "cal-any_sheets": ["xl/chartsheets/sheet1.bin: preserved part from the other container"],
+  "poi-bug66682": ["xl/externalLinks/externalLink1.bin: preserved part from the other container"]
 };
 
 /**

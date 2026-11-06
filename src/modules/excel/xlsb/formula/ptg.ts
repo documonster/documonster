@@ -47,6 +47,7 @@ import { ExcelUnsupportedFeatureError, XlsbParseError } from "@excel/errors";
 import { decodeCol, encodeCol } from "@excel/utils/address";
 import { definedNameListKey } from "@excel/utils/function-names";
 import {
+  acceptsFunctionArgument,
   bareFunctionName,
   isLambdaParameter,
   isWorksheetFunctionName,
@@ -1626,10 +1627,10 @@ function emit(encoder: Encoder, node: AstNode, parent: AstNode | undefined): voi
     out.u8(Ptg.MemFunc | memClass);
     const at = out.length;
     out.u16(0);
-    emitCore(encoder, node, entry);
+    emitCore(encoder, node, entry, parent);
     out.patchU16(at, out.length - at - 2);
   } else {
-    emitCore(encoder, node, entry);
+    emitCore(encoder, node, entry, parent);
   }
   const bareRoot =
     parent === undefined &&
@@ -1677,7 +1678,12 @@ function emitSpaces(out: TokenBuffer, at: number, text: string | undefined): voi
   }
 }
 
-function emitCore(encoder: Encoder, node: AstNode, entry: NodeLayout | undefined): void {
+function emitCore(
+  encoder: Encoder,
+  node: AstNode,
+  entry: NodeLayout | undefined,
+  parent: AstNode | undefined
+): void {
   const { out, where } = encoder;
   const lead = entry?.lead;
   switch (node.type) {
@@ -1793,7 +1799,7 @@ function emitCore(encoder: Encoder, node: AstNode, entry: NodeLayout | undefined
       return;
     case NodeType.Name:
       emitSpaces(out, SpaceAt.Expression, lead);
-      emitName(encoder, node);
+      emitName(encoder, node, isFunctionArgument(node, parent));
       return;
     case NodeType.UnionRef:
       // The members, then one union operator per join — the shape the decoder flattens. The union's own
@@ -2140,7 +2146,11 @@ function emitArray(encoder: Encoder, node: Extract<AstNode, { type: NodeType.Arr
  * Excel writes it as `PtgNameX` through a workbook-level `BrtExternSheet` entry (`BrtSupSelf`, -2, -2) — the same
  * token a formula reaching another workbook's name uses.
  */
-function emitName(encoder: Encoder, node: Extract<AstNode, { type: NodeType.Name }>): void {
+function emitName(
+  encoder: Encoder,
+  node: Extract<AstNode, { type: NodeType.Name }>,
+  functionArgument: boolean
+): void {
   const { out, context, where } = encoder;
   const index = indexOf(context);
   const candidates = index.names.get(definedNameListKey(node.name)) ?? [];
@@ -2161,7 +2171,7 @@ function emitName(encoder: Encoder, node: Extract<AstNode, { type: NodeType.Name
       .u32(local!.index + 1);
     return;
   }
-  const eta = etaStubName(node.name, candidates.length > 0);
+  const eta = etaStubName(node.name, candidates.length > 0 || !functionArgument);
   if (eta !== undefined) {
     // Always the value class, whatever the argument it fills: Excel's `GROUPBY(…,_xleta.SUM)`, `BYROW(…,_xleta.SUM)`
     // and `MAP(…,_xleta.ABS)` all carry `43`, where a reference argument of the same function is `25`.
@@ -2566,11 +2576,27 @@ const USER_FUNCTION_PREFIX = "_xludf.";
 const ETA_PREFIX = "_xleta.";
 
 /**
+ * Whether `node` is an argument a function may be passed by name: one of a call that takes a `LAMBDA`
+ * (`acceptsFunctionArgument`), or one applied to a call's result — `LAMBDA(f,f(4))(SQRT)`. Anywhere else a bare
+ * function name is a name: `COS(NA)` refers to a name `NA`, not to the function.
+ */
+export function isFunctionArgument(node: AstNode, parent: AstNode | undefined): boolean {
+  if (parent?.type !== NodeType.FunctionCall) {
+    return false;
+  }
+  if (parent.invocations?.some(list => list.includes(node))) {
+    return true;
+  }
+  return parent.args.includes(node) && acceptsFunctionArgument(parent.name);
+}
+
+/**
  * The `_xleta.` name a function named as a value stands for — `SUM` in `GROUPBY(A2:A9,B2:B9,SUM)` — or `undefined`
  * when `name` is not one.
  *
- * A name spelled `_xleta.X` is one, as a file stores it. A bare name is one when it is a worksheet function's and the
- * workbook defines no name of that spelling (`defined`): such a formula used to be refused for naming an undefined
+ * A name spelled `_xleta.X` is one, as a file stores it. A bare name is one when it is a worksheet function's, stands
+ * where a function can be passed ({@link isFunctionArgument}), and the workbook defines no name of that spelling — the
+ * caller passes `defined` when either of the last two does not hold: such a formula used to be refused for naming an undefined
  * name, so reading it as the function changes nothing a workbook could already write. Excel's own XLSB calls it
  * through a hidden `_xleta.SUM` name with the bare function name — no `_xlfn.` even for `PERCENTOF` or `ARRAYTOTEXT`.
  */

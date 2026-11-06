@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -43,9 +44,9 @@ function fixture(dts: string): string {
 /** The names `diffApi` reports as changed or removed between two declaration files. */
 function changes(before: string, after: string): string[] {
   const driver = `
-    import { dumpApi } from ${JSON.stringify(path.join(SCRIPTS, "dump.ts"))};
-    import { diffApi } from ${JSON.stringify(path.join(SCRIPTS, "diff.ts"))};
-    const [a, b] = process.argv.slice(1);
+    import { dumpApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "dump.ts")).href)};
+    import { diffApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "diff.ts")).href)};
+    const [a, b] = process.argv.slice(-2);
     const d = diffApi(dumpApi(a, "node", "x", []), dumpApi(b, "node", "x", []));
     console.log(JSON.stringify([...d.changed, ...d.removed].map(r => r[0].split(" :: ")[1])));
   `;
@@ -116,8 +117,8 @@ describe("api:changes comparison", () => {
       'import type { Result as ResultImpl } from "./impl";\nexport type Out = ResultImpl;\nexport declare function f(col: number): void;'
     );
     const driver = `
-      import { dumpApi } from ${JSON.stringify(path.join(SCRIPTS, "dump.ts"))};
-      const r = dumpApi(process.argv[1], "node", "x", []);
+      import { dumpApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "dump.ts")).href)};
+      const r = dumpApi(process.argv.at(-1), "node", "x", []);
       console.log(JSON.stringify([r["x :: Out"].sig, r["x :: f"].sig]));
     `;
     const out = execFileSync(process.execPath, ["--input-type=module", "-e", driver, dir], {
@@ -162,9 +163,9 @@ describe("api:changes comparison", () => {
       return d;
     };
     const driver = `
-      import { dumpApi } from ${JSON.stringify(path.join(SCRIPTS, "dump.ts"))};
-      import { diffApi } from ${JSON.stringify(path.join(SCRIPTS, "diff.ts"))};
-      const [a, b] = process.argv.slice(1);
+      import { dumpApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "dump.ts")).href)};
+      import { diffApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "diff.ts")).href)};
+      const [a, b] = process.argv.slice(-2);
       const d = diffApi(dumpApi(a, "node", "x", []), dumpApi(b, "node", "x", []));
       console.log(JSON.stringify(d.changed.map(r => r[0])));
     `;

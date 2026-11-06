@@ -42,10 +42,9 @@ const WORD_TOC =
 function paragraphTexts(xml: string): string[] {
   return [...xml.matchAll(/<w:p\b[^>]*>([\s\S]*?)<\/w:p>|<w:p\b[^>]*\/>/g)]
     .map(m =>
-      (m[1] ?? "")
-        .replace(/<w:instrText[^>]*>[^<]*<\/w:instrText>/g, "")
-        .replace(/<w:tab\/>/g, "\t")
-        .replace(/<[^>]+>/g, "")
+      [...(m[1] ?? "").matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>/g)]
+        .map(([, text]) => text ?? "\t")
+        .join("")
     )
     .filter(t => t !== "");
 }

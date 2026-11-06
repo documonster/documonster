@@ -8,9 +8,13 @@ import { sigCell as cell } from "./sig-cell.ts";
 import type { ToolCatalog } from "./tools.ts";
 
 const NOISE = /(?:\.|#)(isError|captureStackTrace|prepareStackTrace|stackTraceLimit)$|__@/;
-const INTERNAL_NOTE = /^Internal|not part of the (public )?API|Internal state/;
+const INTERNAL_NOTE = /^Internal|^.*(?:not part of the (?:public )?API|Internal state)/;
 
 const noisy = (k: string): boolean => NOISE.test(k);
+// Only `|` is escaped, and that is the whole job: GitHub's table splitter treats every `\|` as an escaped pipe — however
+// many backslashes precede it — and strips exactly that one backslash before the cell is parsed as Markdown. So the cell
+// renders as it would outside a table, a backslash and `\|` included. Escaping backslashes as well would double every
+// one shown inside a code span. Checked against GitHub's renderer (`gh api markdown -f mode=gfm`).
 const esc = (s: string): string => s.replace(/\|/g, "\\|");
 const code = (s: string): string => "`" + esc(s.replace(/`/g, "'")) + "`";
 // The namespaces are published as `Draw` / `Mermaid`; the declarations sometimes print the import alias.

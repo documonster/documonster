@@ -168,4 +168,12 @@ describe("eta-reduced lambdas: Excel's XLSB", () => {
       }
     }
   );
+
+  it("does not read a function name as a function where none can be passed", async () => {
+    const workbook = Workbook.create();
+    const sheet = Workbook.addWorksheet(workbook, "S");
+    Cell.setValue(sheet, "A1", { formula: "COS(NA)", result: { error: "#NAME?" } });
+    // `NA` here is a name the workbook does not define, which XLSB cannot encode — not `_xleta.NA`.
+    await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(/the name NA/);
+  });
 });

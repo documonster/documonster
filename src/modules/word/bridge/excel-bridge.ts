@@ -1164,7 +1164,7 @@ function seriesFormatting(
   dataPoints.sort((a, b) => a.index - b.index);
   return {
     ...(spPr !== undefined && { spPr }),
-    ...(dataPoints !== undefined && dataPoints.length > 0 && { dataPoints })
+    ...(dataPoints.length > 0 && { dataPoints })
   };
 }
 

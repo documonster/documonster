@@ -85,6 +85,18 @@ describe("XLSX: functions passed by name", () => {
     expect(xml.get("A2")).toBe("_xlfn.MAP(B2:B4,_xleta.SUM)");
   });
 
+  it("leaves a function name where no function can be passed as a name", async () => {
+    const workbook = Workbook.create();
+    const sheet = Workbook.addWorksheet(workbook, "S");
+    Cell.setValue(sheet, "A1", { formula: "COS(NA)" });
+    Cell.setValue(sheet, "A2", { formula: "MAP(B2:B4,LAMBDA(x,COS(NA)))" });
+    const xml = cellFormulas(
+      await part(await Workbook.toBuffer(workbook), "xl/worksheets/sheet1.xml")
+    );
+    expect(xml.get("A1")).toBe("COS(NA)");
+    expect(xml.get("A2")).toBe("_xlfn.MAP(B2:B4,_xlfn.LAMBDA(_xlpm.x,COS(NA)))");
+  });
+
   it("covers shared formulas, validations, conditional formats, names and table columns", async () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");

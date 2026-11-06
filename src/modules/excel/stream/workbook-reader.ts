@@ -4,7 +4,7 @@
  * Extends base with file path support and temp file storage for large files.
  */
 
-import { join } from "path";
+import { join, resolve } from "path";
 
 import type { ZipEntry } from "@archive/unzip/stream";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
@@ -101,7 +101,9 @@ class WorkbookReader extends WorkbookReaderBase<
       const refused = (error as { path?: unknown; syscall?: unknown } | null) ?? {};
       if (
         typeof source === "string" &&
-        refused.path === source &&
+        typeof refused.path === "string" &&
+        // Node reports the path as given, Bun resolved against the working directory.
+        resolve(refused.path) === resolve(source) &&
         typeof refused.syscall === "string"
       ) {
         throw fileSystemError(source, "read", error);

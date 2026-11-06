@@ -24,6 +24,7 @@ import path from "node:path";
 
 import ts from "typescript-api";
 
+import { escapeRegExp } from "../src/utils/regexp.ts";
 import { dumpApi } from "./api-changes/dump.ts";
 import type { ApiEntry, ApiRecord } from "./api-changes/dump.ts";
 import { checkReplacements, describesMember, mentionedNames } from "./api-changes/guide-check.ts";
@@ -212,7 +213,7 @@ function main(): void {
       if (
         ownerNow?.kind === "const" &&
         !ownerNow.deprecated &&
-        new RegExp(`(?:readonly )?${last.replace(/\$/g, "\\$")}:`).test(ownerNow.sig)
+        new RegExp(`(?:readonly )?${escapeRegExp(last)}:`).test(ownerNow.sig)
       ) {
         continue;
       }

@@ -37,14 +37,12 @@ const TAIL =
   `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:bookmarkStart w:id="0" w:name="_Toc1"/>` +
   `${R("Intro")}<w:bookmarkEnd w:id="0"/></w:p>`;
 
-/** The visible text of `w:body`: field instructions removed, a pilcrow per paragraph. */
+/** The visible text of `w:body`: its `w:t` text and tabs (not field instructions), a pilcrow per paragraph. */
 function bodyText(xml: string): string {
-  return /<w:body>([\s\S]*)<\/w:body>/
-    .exec(xml)![1]!
-    .replace(/<w:instrText[^>]*>[^<]*<\/w:instrText>/g, "")
-    .replace(/<w:tab\/>/g, "\t")
-    .replace(/<\/w:p>/g, "¶")
-    .replace(/<[^>]+>/g, "");
+  const body = /<w:body>([\s\S]*)<\/w:body>/.exec(xml)![1]!;
+  return [...body.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>|<\/w:p>/g)]
+    .map(([token, text]) => text ?? (token === "<w:tab/>" ? "\t" : "¶"))
+    .join("");
 }
 
 async function roundTrip(source: Uint8Array): Promise<string> {

@@ -155,6 +155,10 @@ These names changed only in that a \`Uint8Array<ArrayBufferLike>\` they returned
   return md;
 }
 
+// Only `|` is escaped, and that is the whole job: GitHub's table splitter treats every `\|` as an escaped pipe — however
+// many backslashes precede it — and strips exactly that one backslash before the cell is parsed as Markdown. So the cell
+// renders as it would outside a table, a backslash and `\|` included. Escaping backslashes as well would double every
+// one shown inside a code span. Checked against GitHub's renderer (`gh api markdown -f mode=gfm`).
 const esc = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ");
 
 interface IndexRow {

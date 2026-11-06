@@ -1,7 +1,7 @@
 import {
   DEFAULT_ZIP_LEVEL,
   DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
+  reproducibleZipModTime
 } from "@archive/core/defaults";
 import { checkEntryPath, checkString, checkZipOptions } from "@archive/core/entry-checks";
 import { ArchiveArgumentError, throwIfAborted, toError, ArchiveError } from "@archive/core/errors";
@@ -284,7 +284,7 @@ export class ZipEditor {
     const originalComment = this._remote.getZipComment();
 
     const reproducible = options.reproducible ?? false;
-    const defaultModTime = reproducible ? REPRODUCIBLE_ZIP_MOD_TIME : new Date();
+    const defaultModTime = reproducible ? reproducibleZipModTime() : new Date();
 
     this._options = {
       level: options.level ?? DEFAULT_ZIP_LEVEL,

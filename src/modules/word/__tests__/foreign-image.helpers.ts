@@ -1,5 +1,6 @@
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
+import { escapeRegExp } from "@utils/regexp";
 
 import { Document, Io } from "../index";
 
@@ -35,10 +36,7 @@ export async function readParts(bytes: Uint8Array): Promise<Map<string, Uint8Arr
 /** The content type `[Content_Types].xml` gives a part, by Override, then by Default. */
 export function contentTypeOf(parts: Map<string, Uint8Array>, path: string): string | undefined {
   const xml = new TextDecoder().decode(parts.get("[Content_Types].xml"));
-  const override = new RegExp(
-    `PartName="/${path.replace(/[.]/g, "\\.")}" ContentType="([^"]+)"`,
-    "i"
-  );
+  const override = new RegExp(`PartName="/${escapeRegExp(path)}" ContentType="([^"]+)"`, "i");
   const o = override.exec(xml) ?? new RegExp(`ContentType="([^"]+)" PartName="/${path}"`).exec(xml);
   if (o) {
     return o[1];

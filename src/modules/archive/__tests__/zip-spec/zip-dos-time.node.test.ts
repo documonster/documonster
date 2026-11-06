@@ -34,13 +34,18 @@ const roundTrip = async (modTime: Date, timestamps?: "dos" | "dos+utc") => {
 };
 
 describe("ZIP DOS timestamps", () => {
+  // Local fields, not Dates: `it.each` evaluates its table at load, before `beforeAll` sets TZ.
   it.each([
-    new Date(2020, 5, 1, 12, 30, 44),
-    new Date(1980, 0, 1, 0, 0, 0),
-    new Date(2107, 11, 31, 23, 59, 58)
-  ])("round-trips %s through the DOS fields", async date => {
-    expect(await roundTrip(date)).toEqual([date.getTime(), date.getTime()]);
-  });
+    [2020, 5, 1, 12, 30, 44],
+    [1980, 0, 1, 0, 0, 0],
+    [2107, 11, 31, 23, 59, 58]
+  ] as [number, number, number, number, number, number][])(
+    "round-trips %i-%i-%i %i:%i:%i (local) through the DOS fields",
+    async (...fields) => {
+      const date = new Date(...fields);
+      expect(await roundTrip(date)).toEqual([date.getTime(), date.getTime()]);
+    }
+  );
 
   it("reads the DOS fields of a streamed entry as local time too", async () => {
     const date = new Date(2020, 5, 1, 12, 30, 44);
@@ -66,17 +71,18 @@ describe("ZIP DOS timestamps", () => {
     expect(await roundTrip(date, "dos+utc")).toEqual([date.getTime(), date.getTime()]);
   });
 
-  it.each([new Date(Date.UTC(1969, 11, 31)), new Date(2108, 0, 1), new Date(1601, 0, 1)])(
-    "refuses %s, which no ZIP field holds",
-    date => {
-      expect(() => Archive.createZip().add("a.txt", "x", { modTime: date })).toThrow(ArchiveError);
-      expect(() => Archive.createZip({ modTime: date })).toThrow(ArchiveError);
-      expect(() => Archive.packZipSync([["a.txt", "x"]], { modTime: date })).toThrow(ArchiveError);
-      expect(() =>
-        Archive.createZip({ timestamps: "dos+utc" }).add("a.txt", "x", { modTime: date })
-      ).toThrow(ArchiveError);
-    }
-  );
+  it.each([
+    new Date(Date.UTC(1969, 11, 31)),
+    new Date(Date.UTC(2108, 0, 2)),
+    new Date(Date.UTC(1601, 0, 1))
+  ])("refuses %s, which no ZIP field holds", date => {
+    expect(() => Archive.createZip().add("a.txt", "x", { modTime: date })).toThrow(ArchiveError);
+    expect(() => Archive.createZip({ modTime: date })).toThrow(ArchiveError);
+    expect(() => Archive.packZipSync([["a.txt", "x"]], { modTime: date })).toThrow(ArchiveError);
+    expect(() =>
+      Archive.createZip({ timestamps: "dos+utc" }).add("a.txt", "x", { modTime: date })
+    ).toThrow(ArchiveError);
+  });
 
   it("refuses an out-of-range modTime in the editor and ArchiveFile too", async () => {
     const zip = Archive.packZipSync([["a.txt", "x"]]);

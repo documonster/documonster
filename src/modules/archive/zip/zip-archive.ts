@@ -4,7 +4,7 @@ import { ByteQueue } from "@archive/core/byte-queue";
 import {
   DEFAULT_ZIP_LEVEL,
   DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
+  reproducibleZipModTime
 } from "@archive/core/defaults";
 import {
   checkArchiveSource,
@@ -232,7 +232,7 @@ export class ZipArchive {
       level: options.level ?? DEFAULT_ZIP_LEVEL,
       timestamps: options.timestamps ?? (reproducible ? "dos" : DEFAULT_ZIP_TIMESTAMPS),
       comment: options.comment,
-      modTime: options.modTime ?? (reproducible ? REPRODUCIBLE_ZIP_MOD_TIME : new Date()),
+      modTime: options.modTime ?? (reproducible ? reproducibleZipModTime() : new Date()),
       smartStore: options.smartStore ?? true,
       zip64: options.zip64 ?? "auto",
       path: options.path ?? false,

@@ -7364,8 +7364,8 @@ function wrapSegmentsToLinesWithExclusions(
   paragraphTopPageY: number,
   pageContext: PageLayoutContext,
   options: FullLayoutOptions | undefined,
-  spaceShrink = 0,
-  tabStops?: TabStops
+  spaceShrink: number,
+  tabStops: TabStops
 ): { lines: ParagraphSegment[][]; slots: LineSlot[]; emptyDrop?: number } {
   const atoms = tokenizeSegments(segments, headingScale, options);
   const lines: ParagraphSegment[][] = [];
@@ -7483,9 +7483,13 @@ function wrapSegmentsToLinesWithExclusions(
           break;
         }
         if (atom.kind === "tab") {
-          const advance = tabStops
-            ? tabAdvance(tabStops, atoms, cursor, lineXOffset + lineWidth, lineXOffset + usable)
-            : { width: 0 };
+          const advance = tabAdvance(
+            tabStops,
+            atoms,
+            cursor,
+            lineXOffset + lineWidth,
+            lineXOffset + usable
+          );
           if (advance === undefined && lineAtoms.length > 0) {
             break;
           }
@@ -7656,9 +7660,9 @@ function wrapSegmentsToLines(
   firstLineIndent: number,
   headingScale: number,
   options: FullLayoutOptions | undefined,
-  spaceShrink = 0,
-  tabStops?: TabStops,
-  leftIndentPt = 0
+  spaceShrink: number,
+  tabStops: TabStops,
+  leftIndentPt: number
 ): ParagraphSegment[][] {
   const atoms = tokenizeSegments(segments, headingScale, options);
   const lines: ParagraphSegment[][] = [];
@@ -7713,9 +7717,7 @@ function wrapSegmentsToLines(
 
     if (atom.kind === "tab") {
       const start = leftIndentPt + (isFirstLine ? firstLineIndent : 0);
-      const advance = tabStops
-        ? tabAdvance(tabStops, atoms, index, start + lineWidth, start + effectiveWidth)
-        : { width: 0 };
+      const advance = tabAdvance(tabStops, atoms, index, start + lineWidth, start + effectiveWidth);
       if (advance === undefined && line.length > 0) {
         flushLine();
         openedByWrap = true;

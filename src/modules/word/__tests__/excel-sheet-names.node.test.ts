@@ -9,40 +9,12 @@
  *    struck through whatever it holds.
  *
  * Deprecation is read from the type-aware lint rule `typescript/no-deprecated` (TypeScript 7
- * has no JS language-service API) over a probe written beside this test and removed after.
+ * has no JS language-service API) over a probe (`@test/deprecation-probe`).
  */
-import { execFileSync } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-
 import { Row, Workbook } from "@excel/index";
+import { deprecatedLines } from "@test/deprecation-probe";
 import { WordExcel } from "@word/excel";
 import { describe, expect, it } from "vitest";
-
-const ROOT = path.resolve(__dirname, "../../../..");
-
-function deprecatedLines(lines: readonly string[]): number[] {
-  const probe = path.join(__dirname, `__deprecation-probe-${process.pid}__.ts`);
-  writeFileSync(probe, lines.join("\n") + "\n");
-  try {
-    let output: string;
-    try {
-      output = execFileSync(
-        path.join(ROOT, "node_modules/.bin/oxlint"),
-        ["--type-aware", "-A", "all", "-D", "typescript/no-deprecated", probe],
-        { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
-      );
-    } catch (err) {
-      // oxlint exits 1 when it reports something; the report is on stdout.
-      output = (err as { stdout?: string }).stdout ?? "";
-    }
-    return [...output.matchAll(/__\.ts:(\d+):\d+: error typescript\(no-deprecated\)/g)].map(m =>
-      Number(m[1])
-    );
-  } finally {
-    rmSync(probe, { force: true });
-  }
-}
 
 describe("WordExcel.toDocx sheets: names, numbers deprecated", () => {
   it("reports a numeric sheet as deprecated, and nothing else", () => {

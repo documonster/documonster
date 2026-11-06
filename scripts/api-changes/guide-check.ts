@@ -3,6 +3,7 @@
  * which names a guide mentions, which replacements its tables give, and checking those replacements against the
  * current build.
  */
+import { escapeRegExp } from "../../src/utils/regexp.ts";
 import type { ApiRecord } from "./dump.ts";
 
 /** Every identifier written inside a code span or fence of `text`. */
@@ -154,15 +155,13 @@ function blocks(text: string): string[] {
  */
 export function describesMember(text: string, owner: string, member: string): boolean {
   const names = [owner.split(".").pop()!, ...(OWNER_ALIASES[owner.split(".").pop()!] ?? [])];
-  const ownerRe = new RegExp(
-    `(?<![\\w$])(?:${names.map(n => n.replace(/\$/g, "\\$")).join("|")})(?![\\w$])`
-  );
+  const ownerRe = new RegExp(`(?<![\\w$])(?:${names.map(escapeRegExp).join("|")})(?![\\w$])`);
   const symbol = member.startsWith("[") ? member.slice(1, -1) : undefined;
   return (blockCache.get(text) ?? blockCache.set(text, blocks(text)).get(text)!).some(block => {
     const code = [...block.matchAll(/```[\s\S]*?```|`[^`\n]+`/g)].map(m => m[0]).join(" ");
     const has = symbol
       ? code.includes(symbol)
-      : new RegExp(`(?<![\\w$])${member.replace(/\$/g, "\\$")}(?![\\w$])`).test(code);
+      : new RegExp(`(?<![\\w$])${escapeRegExp(member)}(?![\\w$])`).test(code);
     return has && ownerRe.test(block);
   });
 }

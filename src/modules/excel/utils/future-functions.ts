@@ -228,6 +228,28 @@ export function isWorksheetFunctionName(name: string): boolean {
   return FUNCTION_ID_BY_NAME.has(bare) || FUTURE_FUNCTION_PREFIXES.has(bare);
 }
 
+/** The built-in functions that take a `LAMBDA` argument, so a function name may be passed to them. */
+const LAMBDA_TAKING_FUNCTIONS: ReadonlySet<string> = new Set([
+  "BYCOL",
+  "BYROW",
+  "GROUPBY",
+  "MAKEARRAY",
+  "MAP",
+  "PIVOTBY",
+  "REDUCE",
+  "SCAN"
+]);
+
+/**
+ * Whether a call to `name` can be passed a function by name: a built-in that takes a `LAMBDA`, or a function that is
+ * not a worksheet function — a `LAMBDA` behind a defined name. In any other call a bare function name is not a
+ * function: `COS(NA)` refers to a name `NA`, and Excel reports `#NAME?` for it rather than reading `_xleta.NA`.
+ */
+export function acceptsFunctionArgument(name: string): boolean {
+  const bare = bareFunctionName(name.replace(/^_xlpm\./i, ""));
+  return LAMBDA_TAKING_FUNCTIONS.has(bare) || !isWorksheetFunctionName(bare);
+}
+
 /** The workbook's defined names, by `excelNameKey`, while one of its parts is rendered — see {@link withFormulaNames}. */
 let renderingNames: ReadonlySet<string> | undefined;
 
@@ -777,7 +799,10 @@ export function toFileFormula(
   const shapes = callShapes(pieces);
   const declared = declarations(pieces, shapes);
   const loneArguments = new Set<number>();
-  for (const { lone } of shapes.values()) {
+  for (const [call, { lone }] of shapes) {
+    if (!acceptsFunctionArgument(pieces[call]!.text)) {
+      continue;
+    }
     for (const piece of lone) {
       if (piece !== undefined) {
         loneArguments.add(piece);

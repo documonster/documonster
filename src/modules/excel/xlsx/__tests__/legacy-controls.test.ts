@@ -473,7 +473,7 @@ describe("same-type controls through an XLSB", () => {
     const relsXml = decoder.decode(files.get(relsPath)!);
     const listRels = [...relsXml.matchAll(/<Relationship\b[^>]*>/g)]
       .map(([tag]) => tag)
-      .filter(tag => tag.includes(CTRL_PROP_REL))
+      .filter(tag => attr(tag, "Type") === CTRL_PROP_REL)
       .filter(tag =>
         decoder
           .decode(files.get(`xl/${attr(tag, "Target")!.replace(/^\.\.\//, "")}`)!)

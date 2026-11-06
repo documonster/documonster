@@ -14,8 +14,14 @@ export const DEFAULT_ZIP_TIMESTAMPS: ZipTimestampMode = "dos";
  *
  * Uses 1980-01-01 00:00:00 (local time), the earliest valid DOS timestamp.
  * Shared to ensure consistent reproducible output across all ZIP creation paths.
+ *
+ * Built per call: the DOS fields are written from the local fields at write time, so a `Date`
+ * fixed when the module loaded would no longer be local midnight once the time zone changes — and
+ * one shared `Date` instance could be mutated by whoever it was handed to.
  */
-export const REPRODUCIBLE_ZIP_MOD_TIME = new Date(1980, 0, 1, 0, 0, 0);
+export function reproducibleZipModTime(): Date {
+  return new Date(1980, 0, 1, 0, 0, 0);
+}
 
 /**
  * Default bound on one entry's uncompressed size when a reader is given no `maxEntrySize`: 512 MiB.
