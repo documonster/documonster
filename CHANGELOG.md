@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.22.0](https://github.com/documonster/documonster/compare/v0.21.1...v0.22.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* byte results are plain `Uint8Array`s on every platform — `Workbook.toBuffer` no longer resolves to a Node `Buffer`, so `slice()` copies and Buffer-only methods are gone; wrap without copying with `Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)`. `Archive.randomBytes()` without a length throws `ArchiveArgumentError`. See MIGRATION.md, "How to upgrade from 0.21.1".
+* see MIGRATION.md, "Final pre-freeze consistency pass".
+* hold every public API to one contract — argument errors, ownership, naming and type surface
+* contracts are tightened across every module — invalid arguments that were coerced or silently ignored now throw typed errors, and several outputs change to match Office. See MIGRATION.md "Unreleased".
+
+### Features
+
+* Final pre-freeze consistency pass — read limits on every path, one schema vocabulary, isolation fixes ([45b59b3](https://github.com/documonster/documonster/commit/45b59b3c3c71ebe11a16f0ab0bdbd9f974813ded))
+* Hold every public API to one contract — argument errors, ownership, naming and type surface ([4893bd3](https://github.com/documonster/documonster/commit/4893bd3fcac1f930d80a2108cbde7f672f959b7a))
+* Migration guides from exceljs and excelts, generated API change reports, plain Uint8Array byte results ([e7ad7fe](https://github.com/documonster/documonster/commit/e7ad7fee6a976bf7d00987caa56788409d7eea1f))
+* Unify the public API, tighten its contracts and fix correctness across modules ([9098a00](https://github.com/documonster/documonster/commit/9098a0040967810fe37d5445b12b0e1afb7140a6))
+* **word:** Fill a template from XML as an ERP exports it, keep each run's formatting, and format values with Word's field switches ([9d44abc](https://github.com/documonster/documonster/commit/9d44abc1c1c9c778d7ac7942740704f15903d1a9))
+
+
+### Bug Fixes
+
+* **excel:** Edit a collapsed sheet as if its styled blanks were cells ([59f2350](https://github.com/documonster/documonster/commit/59f2350514024cf5fe9f5c7c06d41ac4e4668500))
+* **excel:** Keep a styled blank's cell when a hyperlink or a comment lands on it ([6dc8962](https://github.com/documonster/documonster/commit/6dc8962da0f2b63b7d6525eba04a4cd48ba1e923))
+* **excel:** Keep a styled cell that points at a shared formula when collapsing blank cells ([#255](https://github.com/documonster/documonster/issues/255)) ([067d1ae](https://github.com/documonster/documonster/commit/067d1ae09350a3404f4db7e955c93e0b261afefd))
+* **excel:** Refuse a splice that would push cells off the sheet before anything moves ([52fb5c9](https://github.com/documonster/documonster/commit/52fb5c92a5302ef7ff1f42253a34ddbb1afddf0f))
+* Make CI pass on every platform and clear the CodeQL findings ([6f129b0](https://github.com/documonster/documonster/commit/6f129b045949b76d24caabf0cd236ec241900111))
+* **test:** Run the browser suite in shards and remove timing from three tests ([a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6))
+
+
+### Performance Improvements
+
+* Screen system fonts from their tables, not their whole files; make CI fast and its failures deterministic ([d9201a3](https://github.com/documonster/documonster/commit/d9201a34439050d7f6ff44fc30513968ec6368a4))
+
 ## [0.21.1](https://github.com/documonster/documonster/compare/v0.21.0...v0.21.1) (2026-10-25)
 
 
