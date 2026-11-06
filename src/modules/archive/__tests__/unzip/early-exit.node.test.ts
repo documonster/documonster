@@ -95,10 +95,16 @@ describe("leaving the loop early releases a real file stream", () => {
     const f = fixture();
     const file = join(dir, `leak-${fileCount++}.zip`);
     await writeFile(file, await ZIP_KINDS.deflated!(f));
+    // Process-wide, so the worker's own output is in the counts too: a `SimpleWriteWrap` is a write to its stdout or
+    // stderr pipe still in flight, which on a loaded CI runner can still be pending when the second count is taken.
+    // None of these is anything the reader opens; counting them failed the test on output the reader never wrote.
+    const STDIO = new Set(["SimpleWriteWrap", "WriteWrap", "ShutdownWrap", "PipeWrap", "TTYWrap"]);
     const count = () => {
       const counts = new Map<string, number>();
       for (const kind of process.getActiveResourcesInfo()) {
-        counts.set(kind, (counts.get(kind) ?? 0) + 1);
+        if (!STDIO.has(kind)) {
+          counts.set(kind, (counts.get(kind) ?? 0) + 1);
+        }
       }
       return counts;
     };
