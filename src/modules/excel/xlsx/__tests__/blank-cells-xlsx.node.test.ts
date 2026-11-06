@@ -18,6 +18,7 @@
  *    formatting reached H8000. Excel treats the dimension as advisory, which is why a wrong one ships unnoticed.
  */
 import { extractAll } from "@archive/unzip/extract";
+import { createZipSync } from "@archive/zip/zip-bytes";
 import { Cell, Workbook } from "@excel";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -160,6 +161,36 @@ describe("collapse keeps a styled cell that points at a shared formula", () => {
         sharedFormula: "B2"
       });
     }
+  });
+
+  it("keeps it in the default style too", async () => {
+    // `s="0"` is a style like any other for collapsing, so the dependent must be recognised there as well.
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Cell.setValue(sheet, "A2", 1);
+    Cell.setValue(sheet, "B2", { formula: "A2" });
+    Cell.setValue(sheet, "B3", { sharedFormula: "B2" });
+    const written = Uint8Array.from(
+      await Workbook.toBuffer(handle, { format: "xlsx", validate: false })
+    );
+    const entries = await extractAll(written);
+    const part = "xl/worksheets/sheet1.xml";
+    const xml = new TextDecoder().decode(entries.get(part)!.data);
+    const patched = xml.replace(
+      '<c r="B3"><f t="shared" si="0"/>',
+      '<c r="B3" s="0"><f t="shared" si="0"/>'
+    );
+    expect(patched).not.toBe(xml);
+    const bytes = createZipSync(
+      [...entries.values()].map(entry => ({
+        name: entry.path,
+        data: entry.path === part ? new TextEncoder().encode(patched) : entry.data
+      }))
+    );
+
+    const read = Workbook.create();
+    await Workbook.read(read, bytes, { blankCells: "collapse" });
+    expect(Cell.getValue(Workbook.getWorksheets(read)[0], "B3")).toEqual({ sharedFormula: "B2" });
   });
 });
 

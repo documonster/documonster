@@ -1,3 +1,4 @@
+import { Enums } from "@excel/core/enums";
 import { MaxItemsExceededError } from "@excel/errors";
 import type { Style } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
@@ -59,15 +60,14 @@ interface RowModel {
  * A style and no value. A cell with a formula, a hyperlink or a comment is not blank however empty its value looks —
  * `null` is a value a formula can produce — so all of those are checked rather than only the value.
  *
- * A cell that only points at a shared formula, `<f t="shared" si="0"/>`, has no formula text, and its `sharedFormula`
- * is not filled in until `reconcile`. At this point it is known only by its `si`.
+ * **A formula is recognised by the type the cell parser gave it, not by its text.** This runs while the row is parsed,
+ * before `reconcile`: a cell that only points at a shared formula, `<f t="shared" si="0"/>`, has no formula text yet
+ * and no `sharedFormula` until then, so checking those fields took it for a blank. `CellXform` has already typed it as
+ * a formula from its `<f>` — by the text, or by the `t` attribute when there is none.
  */
 function isStyledBlank(cell: {
   readonly value?: unknown;
   readonly type?: number;
-  readonly formula?: unknown;
-  readonly sharedFormula?: unknown;
-  readonly si?: unknown;
   readonly hyperlink?: unknown;
   readonly comment?: unknown;
   readonly styleId?: number;
@@ -75,9 +75,7 @@ function isStyledBlank(cell: {
   return (
     cell.styleId !== undefined &&
     cell.value === undefined &&
-    cell.formula === undefined &&
-    cell.sharedFormula === undefined &&
-    cell.si === undefined &&
+    cell.type !== Enums.ValueType.Formula &&
     cell.hyperlink === undefined &&
     cell.comment === undefined
   );
