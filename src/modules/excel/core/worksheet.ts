@@ -140,7 +140,8 @@ import {
   rowGetCell,
   rowSetValues,
   rowSplice,
-  settleStyledBlankRow
+  settleStyledBlankRow,
+  styledBlankExtent
 } from "@excel/core/worksheet-core";
 import {
   ExcelColumnOutOfBoundsError,
@@ -148,6 +149,7 @@ import {
   ExcelImageError,
   ExcelMergeConflictError,
   ExcelPivotTableError,
+  ExcelRowOutOfBoundsError,
   ExcelTableError
 } from "@excel/errors";
 import type {
@@ -469,6 +471,7 @@ export function spliceColumns(
       checkCellValue(value, { where: "Column.splice", field: `inserts[${i}][${r}]` })
     );
   });
+  checkSpliceFits(ws, "Column.splice", "columns", start, count, inserts.length);
   withLineEdit(ws, "columns", start, count, inserts.length, () =>
     _spliceColumnCells(ws, start, count, inserts)
   );
@@ -497,6 +500,71 @@ function checkLineSplice(
     throw new ExcelColumnOutOfBoundsError(start);
   }
   checkNumber(where, "count", count, { min: 0, integer: true });
+}
+
+/**
+ * Refuse a splice that would move a line, or put an inserted one, past the edge of the grid — before anything moves.
+ *
+ * Every line that holds something moves: a row or column with cells (a formatted empty one among them, as Excel keeps
+ * it), and a row with collapsed styled blanks, which are cells too. The check used to happen line by line as they moved,
+ * so the first one past the edge threw with the lines below it already moved and every reference already rewritten — a
+ * sheet half spliced. And a collapsed sheet, whose blanks move as rectangles, did not throw at all.
+ */
+function checkSpliceFits(
+  ws: WorksheetData,
+  where: string,
+  kind: "rows" | "columns",
+  start: number,
+  count: number,
+  inserted: number
+): void {
+  const limit = kind === "rows" ? 1048576 : 16384;
+  const outOfBounds = (line: number, details: string): Error =>
+    kind === "rows"
+      ? new ExcelRowOutOfBoundsError(line, details, { where, field: "start" })
+      : new ExcelColumnOutOfBoundsError(line, details, { where, field: "start" });
+  if (inserted > 0 && start + inserted - 1 > limit) {
+    throw outOfBounds(
+      start + inserted - 1,
+      `inserting ${inserted} at ${start} would reach past ${limit}, the last ${kind === "rows" ? "row" : "column"}`
+    );
+  }
+  const shift = inserted - count;
+  if (shift <= 0) {
+    return;
+  }
+  const last = lastLineInUse(ws, kind);
+  if (last >= start + count && last + shift > limit) {
+    throw outOfBounds(
+      last + shift,
+      `moving ${kind === "rows" ? "row" : "column"} ${last} by ${shift} would push it past ${limit}, the last one`
+    );
+  }
+}
+
+/** The last row or column that holds something a splice moves, 1-based, or 0. */
+function lastLineInUse(ws: WorksheetData, kind: "rows" | "columns"): number {
+  const blanks = styledBlankExtent(ws);
+  if (kind === "rows") {
+    let last = ws._rows.length;
+    while (last > 0 && ws._rows[last - 1] === undefined) {
+      last--;
+    }
+    return Math.max(last, blanks?.lastRow ?? 0);
+  }
+  let last = Math.max(ws._columns.length, blanks?.lastCol ?? 0);
+  for (const row of ws._rows) {
+    if (row === undefined) {
+      continue;
+    }
+    for (let col = row.cells.length; col > last; col--) {
+      if (row.cells[col - 1] !== undefined) {
+        last = col;
+        break;
+      }
+    }
+  }
+  return last;
 }
 
 /**
@@ -737,6 +805,7 @@ export function spliceRows(
   ...inserts: RowValues[]
 ): void {
   checkLineSplice(ws, "Row.splice", "rows", start, count);
+  checkSpliceFits(ws, "Row.splice", "rows", start, count, inserts.length);
   withLineEdit(ws, "rows", start, count, inserts.length, () =>
     _spliceRowCells(ws, start, count, inserts)
   );

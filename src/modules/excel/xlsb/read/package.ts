@@ -958,8 +958,11 @@ async function readInto(
 
     // **A styled blank a comment or a hyperlink lands on is not a blank**, and is given its cell back before the
     // cells are applied — the same cell `"keep"` reads, style and all. The annotations are separate records and a
-    // separate part, so the collapse could not see them; left in a rectangle, the note or link was attached to a new
-    // cell with no format, and the cell the model showed had lost it.
+    // separate part, so the collapse could not see them when it was made.
+    //
+    // Attaching them later would be correct too — `getCell` settles the row (`settleStyledBlankRow`) — but it gives
+    // the whole row back. Taking just the annotated cells is what the XLSX reader does (`restoreAnnotatedBlanks`), which
+    // has no worksheet to settle yet, and a workbook must read to the same sheet from either container.
     const annotated: { row: number; column: number }[] = [];
     for (const comment of comments) {
       const { r, c } = decodeCell(comment.ref);

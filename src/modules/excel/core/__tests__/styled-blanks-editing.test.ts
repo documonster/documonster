@@ -9,6 +9,8 @@
  */
 import { Cell, Column, Range, Row, Table, Workbook, Worksheet } from "@excel";
 import { ExcelFormula } from "@excel/bridge/formula";
+import { captureFormulaSnapshot } from "@excel/core/formula-capture";
+import { applyFormulaWriteback } from "@excel/core/formula-writeback";
 import { describe, expect, it } from "vitest";
 
 const YELLOW = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } } as const;
@@ -208,5 +210,87 @@ describe.each(["xlsx", "xlsb"] as const)("a collapsed %s sheet, edited", format 
     expect(covered).toBeGreaterThan(50);
     expect(Cell.has(collapsed.sheet, "E4")).toBe(false);
     expect(Cell.has(collapsed.sheet, "A5")).toBe(true);
+  });
+});
+
+describe.each(["xlsx", "xlsb"] as const)("a collapsed %s sheet, an edit that fails", format => {
+  it("rolls a failed formula writeback back to the same sheet", async () => {
+    // The journal records each cell a writeback touches and puts it back on failure. A target inside a collapsed blank
+    // has to be recorded as the formatted cell it is, or the rollback deletes it and the format goes with it.
+    const bytes = await source(format);
+    const [kept, collapsed] = await Promise.all([readAs(bytes, "keep"), readAs(bytes, "collapse")]);
+    for (const { handle, sheet } of [kept, collapsed]) {
+      // The source settles its own row; the rows the result would spill into are still collapsed.
+      Cell.setValue(sheet, "E5", { formula: "SEQUENCE(3,2)" });
+      const snapshot = captureFormulaSnapshot(handle);
+      expect(() =>
+        applyFormulaWriteback(
+          handle,
+          {
+            operations: [
+              {
+                type: "spill",
+                sheetName: "S",
+                sheetId: sheet.id,
+                row: 5,
+                col: 5,
+                results: [
+                  [1, 2],
+                  [3, 4],
+                  [5, 6]
+                ]
+              }
+            ],
+            spillState: { spillRegions: new Map() }
+          },
+          snapshot,
+          captureFormulaSnapshot(handle),
+          {
+            afterOperation: () => {
+              throw new Error("injected writeback failure");
+            }
+          }
+        )
+      ).toThrow("injected writeback failure");
+    }
+    expect(cellsOf(collapsed.sheet)).toEqual(cellsOf(kept.sheet));
+    expect(await writtenCells(collapsed.handle, format)).toEqual(
+      await writtenCells(kept.handle, format)
+    );
+  });
+
+  it("refuses to push the region off the sheet, as a kept one does, and changes nothing", async () => {
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Cell.setValue(sheet, "A1", 1);
+    Range.setStyle(sheet, "B1048570:C1048576", { fill: YELLOW });
+    Range.setStyle(sheet, "XFC2:XFD4", { fill: RED });
+    const bytes = Uint8Array.from(
+      await Workbook.toBuffer(
+        handle,
+        format === "xlsx" ? { format, validate: false } : { format, unsupported: "ignore" }
+      )
+    );
+    for (const splice of [
+      (ws: Worksheet.Handle) => Row.insert(ws, 2, ["x"]),
+      (ws: Worksheet.Handle) => Column.splice(ws, 1, 0, ["y"])
+    ]) {
+      const outcomes = await Promise.all(
+        (["keep", "collapse"] as const).map(async blankCells => {
+          const { sheet: ws } = await readAs(bytes, blankCells);
+          const before = cellsOf(ws);
+          let error: string | undefined;
+          try {
+            splice(ws);
+          } catch (caught) {
+            error = String(caught);
+          }
+          expect(cellsOf(ws), blankCells).toEqual(before);
+          return error;
+        })
+      );
+      expect(outcomes[0]).toMatch(/out of bounds/);
+      expect(outcomes[1]).toBe(outcomes[0]);
+    }
   });
 });

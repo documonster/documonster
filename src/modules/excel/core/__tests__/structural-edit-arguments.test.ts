@@ -153,3 +153,39 @@ describe("Column.splice inserts", () => {
     expect(Row.getValues(ws, 1)).toEqual(["a", "x", "b"]);
   });
 });
+
+describe("a splice that would push cells off the sheet", () => {
+  // Refused before anything moves. The edge used to be found by the move itself, so the error came with the rows below
+  // the insertion already shifted and every formula already rewritten.
+  it.each([
+    [
+      "rows",
+      (ws: ReturnType<typeof sheetWithRows>["ws"]) => Cell.setNumFmt(ws, "B1048576", "@"),
+      (ws: ReturnType<typeof sheetWithRows>["ws"]) => Row.insert(ws, 2, ["x"])
+    ],
+    [
+      "rows, inserted past the last",
+      () => undefined,
+      (ws: ReturnType<typeof sheetWithRows>["ws"]) => Row.splice(ws, 1048576, 0, ["x"], ["y"])
+    ],
+    [
+      "columns",
+      (ws: ReturnType<typeof sheetWithRows>["ws"]) => Cell.setValue(ws, "XFD3", 1),
+      (ws: ReturnType<typeof sheetWithRows>["ws"]) => Column.splice(ws, 1, 0, ["y"])
+    ]
+  ])("%s: refused, and nothing changes", (_name, prepare, splice) => {
+    const { ws } = sheetWithRows(5);
+    Cell.setValue(ws, "C1", { formula: "A3" });
+    prepare(ws);
+    const before = JSON.stringify(Worksheet.getModel(ws));
+    expect(() => splice(ws)).toThrow(ExcelArgumentError);
+    expect(JSON.stringify(Worksheet.getModel(ws))).toBe(before);
+  });
+
+  it("still moves what fits", () => {
+    const { ws } = sheetWithRows(5);
+    Cell.setNumFmt(ws, "B1048575", "@");
+    Row.insert(ws, 2, ["x"]);
+    expect(Cell.getNumFmt(ws, "B1048576")).toBe("@");
+  });
+});

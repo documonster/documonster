@@ -849,6 +849,16 @@ export function hasStyledBlankInRow(ws: WorksheetData, r: number): boolean {
   return (ws._styledBlanks?.runsAt(r - 1).length ?? 0) > 0;
 }
 
+/** The last row and column (1-based) a collapsed styled blank reaches, or `undefined`. */
+export function styledBlankExtent(
+  ws: WorksheetData
+): { readonly lastRow: number; readonly lastCol: number } | undefined {
+  const extent = ws._styledBlanks?.extent();
+  return extent === undefined
+    ? undefined
+    : { lastRow: extent.lastRow + 1, lastCol: extent.lastColumn + 1 };
+}
+
 /**
  * Give a row's styled blanks their cells back, taking the row out of the grid — see {@link getStyledBlankRanges}.
  *

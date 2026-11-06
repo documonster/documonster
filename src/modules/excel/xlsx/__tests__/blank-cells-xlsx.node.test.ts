@@ -221,6 +221,44 @@ describe("the two containers agree", () => {
     expect(Cell.getValue(sheet, "A1")).toBe(1);
     expect(Cell.getValue(sheet, "H20")).toBe(160);
   });
+
+  it("give an annotated blank its cell back alike", async () => {
+    // Each reader takes the annotated cells out of the rectangles itself, at a different point of the read. They must
+    // leave the same blanks collapsed, and the same cells, or a workbook would read differently by container.
+    const handle = Workbook.create();
+    const ws = Workbook.addWorksheet(handle, "S");
+    Range.setStyle(ws, "A1:F6", {
+      fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEEEEE" } }
+    });
+    Cell.setNote(ws, "C3", "a note");
+    Cell.setNote(ws, "F6", "another");
+    const read = async (format: "xlsx" | "xlsb") => {
+      const bytes = await Workbook.toBuffer(
+        handle,
+        format === "xlsx" ? { format, validate: false } : { format, unsupported: "ignore" }
+      );
+      const target = Workbook.create();
+      await Workbook.read(target, bytes, { blankCells: "collapse" });
+      const sheet = Workbook.listWorksheets(target)[0];
+      const covered = new Set<string>();
+      for (const range of Worksheet.getModel(sheet).styledBlankRanges ?? []) {
+        for (let row = range.firstRow; row <= range.lastRow; row++) {
+          for (let col = range.firstColumn; col <= range.lastColumn; col++) {
+            covered.add(`${row}:${col}`);
+          }
+        }
+      }
+      const cells = ["C3", "F6", "A1", "D3"].map(address => [
+        Cell.has(sheet, address),
+        Cell.getNote(sheet, address),
+        Cell.getFill(sheet, address)
+      ]);
+      return { covered: [...covered].sort(), cells };
+    };
+    const [viaXlsx, viaXlsb] = await Promise.all([read("xlsx"), read("xlsb")]);
+    expect(viaXlsx.covered).toHaveLength(34);
+    expect(viaXlsb).toEqual(viaXlsx);
+  });
 });
 
 describe("collapse gives a styled blank with a hyperlink or a comment its cell back", () => {

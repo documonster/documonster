@@ -205,8 +205,14 @@ function spliceLines(
  * row, and a walk per cell turned reading the format of every cell, or writing a value down a column, into
  * rectangles × cells. The rectangles are what a model and the writers carry, so they are rebuilt on the way out.
  *
- * Bands are disjoint and in row order. Taking a row out of a band leaves it in place with no runs rather than splicing
- * the array, so settling a sheet row by row, which is how a sheet is edited, costs nothing per row beyond the row.
+ * Bands are disjoint and in row order. Taking a row off a band's edge shortens it in place, and taking a band's only row
+ * empties it rather than removing it, so settling a sheet row by row — which is how a sheet is edited — costs nothing per
+ * row beyond the row; only a row from the middle of a band splits it.
+ *
+ * **Never larger than the cells it stands for.** A band holds one run for each rectangle crossing its rows, so a sheet
+ * whose rectangles overlap in rows without lining up — styles side by side, starting on different rows — has more runs
+ * than rectangles. But each run covers at least one cell of its band, so there are never more runs than the cells
+ * `"keep"` would have held, and each is a fraction of a cell's size.
  */
 export class StyledBlankGrid {
   private bands: StyledBlankBand[];
@@ -256,36 +262,48 @@ export class StyledBlankGrid {
     if (this.cachedRanges !== undefined) {
       return this.cachedRanges;
     }
-    const out: StyledBlankRangeModel[] = [];
-    let open: { index: number; run: StyledBlankRun }[] = [];
+    type Open = {
+      firstRow: number;
+      lastRow: number;
+      firstColumn: number;
+      lastColumn: number;
+      style: Partial<Style>;
+    };
+    const out: Open[] = [];
+    // The rectangles still open below the previous band, in column order like the runs of every band — so the run that
+    // continues one is found by walking both lists together, not by searching.
+    let open: Open[] = [];
     let previousLast = Number.NaN;
     for (const band of this.bands) {
       if (band.runs.length === 0) {
         continue;
       }
-      const continuing = band.first === previousLast + 1;
-      const nextOpen: { index: number; run: StyledBlankRun }[] = [];
+      const above = band.first === previousLast + 1 ? open : [];
+      const nextOpen: Open[] = [];
+      let candidate = 0;
       for (const run of band.runs) {
-        const above = continuing
-          ? open.find(
-              candidate =>
-                candidate.run.firstColumn === run.firstColumn &&
-                candidate.run.lastColumn === run.lastColumn &&
-                candidate.run.style === run.style
-            )
-          : undefined;
-        if (above !== undefined) {
-          out[above.index] = { ...out[above.index], lastRow: band.last };
-          nextOpen.push(above);
+        while (candidate < above.length && above[candidate].firstColumn < run.firstColumn) {
+          candidate++;
+        }
+        const match = above[candidate];
+        if (
+          match !== undefined &&
+          match.firstColumn === run.firstColumn &&
+          match.lastColumn === run.lastColumn &&
+          match.style === run.style
+        ) {
+          match.lastRow = band.last;
+          nextOpen.push(match);
         } else {
-          out.push({
+          const rectangle: Open = {
             firstRow: band.first,
             lastRow: band.last,
             firstColumn: run.firstColumn,
             lastColumn: run.lastColumn,
             style: run.style
-          });
-          nextOpen.push({ index: out.length - 1, run });
+          };
+          out.push(rectangle);
+          nextOpen.push(rectangle);
         }
       }
       open = nextOpen;
@@ -296,7 +314,20 @@ export class StyledBlankGrid {
   }
 
   isEmpty(): boolean {
-    return this.ranges().length === 0;
+    return !this.bands.some(band => band.runs.length > 0);
+  }
+
+  /** The last row and the last column (zero-based) any blank reaches, or `undefined` when there is none. */
+  extent(): { readonly lastRow: number; readonly lastColumn: number } | undefined {
+    let lastRow = -1;
+    let lastColumn = -1;
+    for (const band of this.bands) {
+      if (band.runs.length > 0) {
+        lastRow = band.last;
+        lastColumn = Math.max(lastColumn, band.runs[band.runs.length - 1].lastColumn);
+      }
+    }
+    return lastRow === -1 ? undefined : { lastRow, lastColumn };
   }
 
   /** The runs in a row (zero-based); empty when it holds no blank. */
@@ -346,8 +377,9 @@ export class StyledBlankGrid {
   /**
    * Move the blanks as a row or column splice moves the cells: zero-based along `axis`, the `deleted` lines from `start`
    * go, `inserted` new ones take their place, and every line after them moves by the difference. A band or run across
-   * the edit is cut rather than stretched, because the new lines are empty; one pushed past `lastLine`, the edge of the
-   * grid, loses what went past it, as the cells themselves would.
+   * the edit is cut rather than stretched, because the new lines are empty. Nothing past `lastLine`, the edge of the
+   * grid, is kept: a sheet refuses a splice that would push a blank there before it starts (`checkSpliceFits`), so this
+   * only keeps the grid total.
    */
   splice(
     axis: "row" | "column",
