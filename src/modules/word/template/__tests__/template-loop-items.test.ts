@@ -123,6 +123,46 @@ describe("loops over a value that is not an array", () => {
     expect(cellTexts(filled)).toEqual([["Name", "Jan", "Sum"]]);
   });
 
+  it("repeat no #cols column for an empty, null or missing collection, in strict mode too", () => {
+    for (const data of [{ months: [] }, { months: null }, {}]) {
+      const doc = tableDoc([["Name", "{{#cols months}}{{.}}{{/cols}}", "Sum"]]);
+      const filled = Template.fill(doc, data, { richPlaceholders: true });
+      expect(cellTexts(filled), JSON.stringify(data)).toEqual([["Name", "Sum"]]);
+    }
+  });
+
+  it("repeat the #cols columns' widths with them, counted in grid columns", () => {
+    const doc = tableDoc([["Name", "{{#cols months}}{{.}}{{/cols}}", "Sum"]]);
+    const widths = (data: Record<string, unknown>, source: DocxDocument = doc): unknown =>
+      (Template.fill(source, data, { richPlaceholders: true }).body[0] as Table).columnWidths;
+    const gridded: DocxDocument = {
+      body: [{ ...(doc.body[0] as Table), columnWidths: [1000, 2000, 3000] }]
+    };
+    expect(widths({ months: ["Jan", "Feb"] }, gridded)).toEqual([1000, 2000, 2000, 3000]);
+    expect(widths({ months: [] }, gridded)).toEqual([1000, 3000]);
+    // A spanning cell before the loop and a two-column loop cell.
+    const spanned: DocxDocument = {
+      body: [
+        {
+          type: "table",
+          columnWidths: [100, 200, 300, 400, 500],
+          rows: [
+            {
+              cells: [
+                { ...cell("Name"), properties: { gridSpan: 2 } },
+                { ...cell("{{#cols m}}{{.}}{{/cols}}"), properties: { gridSpan: 2 } },
+                cell("Sum")
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    expect(widths({ m: ["a", "b"] }, spanned)).toEqual([100, 200, 300, 400, 300, 400, 500]);
+    // Without a grid the writer makes one, as before.
+    expect(widths({ months: ["Jan"] })).toBeUndefined();
+  });
+
   it("repeat nothing for undefined or null", () => {
     const doc = paragraphs("start", "{{#each items}}", "{{.}}", "{{/each}}", "end");
     expect(Query.getText(Template.fill(doc, {}))).toBe("start\nend");
