@@ -77,11 +77,17 @@ export function fieldSwitchArgument(
   return undefined;
 }
 
+/** The symbols and names the general switches write with; English when not given. */
+export interface FieldFormat {
+  readonly symbols?: NumberSymbols;
+  readonly names?: DateNames;
+}
+
 /**
  * `value` — a field's result — formatted by the general switches of the field
  * whose code is `code`.
  */
-export function formatFieldResult(value: string, code: string): string {
+export function formatFieldResult(value: string, code: string, format: FieldFormat = {}): string {
   const tokens = tokenizeFieldCode(code);
   let out = value;
   for (let i = 0; i < tokens.length - 1; i++) {
@@ -93,12 +99,12 @@ export function formatFieldResult(value: string, code: string): string {
     if (t.text === "\\#") {
       const n = parseFieldNumber(out);
       if (n !== undefined) {
-        out = formatNumberPicture(n, arg);
+        out = formatNumberPicture(n, arg, format.symbols);
       }
     } else if (t.text === "\\@") {
       const d = parseFieldDate(out);
       if (d) {
-        out = formatDatePicture(d, arg);
+        out = formatDatePicture(d, arg, format.names);
       }
     }
   }
@@ -114,6 +120,28 @@ export function formatFieldResult(value: string, code: string): string {
 // =============================================================================
 // \* — case and number formats
 // =============================================================================
+
+const GENERAL_FORMATS = new Set([
+  "upper",
+  "lower",
+  "caps",
+  "firstcap",
+  "arabic",
+  "roman",
+  "alphabetic",
+  "ordinal",
+  "hex",
+  "cardtext",
+  "ordtext",
+  "dollartext",
+  "mergeformat",
+  "charformat"
+]);
+
+/** Whether `format` is a `\*` format Word has (in any case: `roman` and `ROMAN` differ, but both exist). */
+export function isGeneralFormat(format: string): boolean {
+  return GENERAL_FORMATS.has(format.toLowerCase());
+}
 
 function formatGeneral(value: string, format: string): string {
   switch (format.toLowerCase()) {
@@ -260,7 +288,7 @@ function ordinal(n: number): string {
 // =============================================================================
 
 /** A field value as a number: digits with an optional sign, grouping commas and decimals. */
-function parseFieldNumber(value: string): number | undefined {
+export function parseFieldNumber(value: string): number | undefined {
   const trimmed = value.trim();
   if (!/^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(trimmed)) {
     return undefined;
@@ -300,14 +328,38 @@ function pictureSections(picture: string): string[] {
 const DIGIT = /[0#x]/;
 
 /**
+ * The symbols a numeric picture is read and written with: Word takes them
+ * from the regional settings, so a German picture is `#.##0,00`, and an
+ * Indian one groups `12,34,567`.
+ */
+export interface NumberSymbols {
+  readonly decimal: string;
+  readonly group: string;
+  /** Digits in the group nearest the decimal symbol, and in each group after it. */
+  readonly groupSizes: readonly [primary: number, secondary: number];
+}
+
+const ENGLISH_NUMBER_SYMBOLS: NumberSymbols = { decimal: ".", group: ",", groupSizes: [3, 3] };
+
+/** A space-like grouping symbol (`fr`'s narrow no-break space) matches any space in a picture. */
+function isGroupChar(c: string, group: string): boolean {
+  return c === group || (/^\s$/u.test(group) && /^\s$/u.test(c));
+}
+
+/**
  * `n` drawn in Word's numeric picture: `0` a digit, `#` a digit or a space,
  * `x` a digit after which (to the left) digits are dropped — or, after the
- * decimal point, the place to round at; `.` the decimal point, `,` digit
- * grouping, `-` / `+` the sign, `'text'` literal text, anything else itself.
+ * decimal point, the place to round at; the decimal symbol, the grouping
+ * symbol, `-` / `+` the sign, `'text'` literal text, anything else itself.
  * Sections `positive;negative;zero` pick the picture by sign; with one, a
- * negative number gets a minus.
+ * negative number gets a minus. The symbols are English (`.` `,` `;`) unless
+ * `symbols` says otherwise, and the result is written with them.
  */
-export function formatNumberPicture(n: number, picture: string): string {
+export function formatNumberPicture(
+  n: number,
+  picture: string,
+  symbols: NumberSymbols = ENGLISH_NUMBER_SYMBOLS
+): string {
   const sections = pictureSections(picture);
   let section = sections[0]!;
   // With a section of its own for negatives, the picture states the sign.
@@ -323,8 +375,12 @@ export function formatNumberPicture(n: number, picture: string): string {
   for (const c of section) {
     if (c === "'") {
       quoted = !quoted;
+    } else if (!quoted && c === symbols.decimal) {
+      chars.push({ c: ".", literal: false });
+    } else if (!quoted && isGroupChar(c, symbols.group)) {
+      chars.push({ c: ",", literal: false });
     } else {
-      chars.push({ c, literal: quoted });
+      chars.push({ c, literal: quoted || c === "." || c === "," });
     }
   }
   const isPlace = (x: PictureChar): boolean =>
@@ -356,17 +412,19 @@ export function formatNumberPicture(n: number, picture: string): string {
     padded = (slots[i] === "#" ? " " : "0") + padded;
   }
   if (intPlaces.includes(",")) {
+    const [primary, secondary] = symbols.groupSizes;
     let grouped = "";
     for (let i = 0; i < padded.length; i++) {
-      if (i > 0 && (padded.length - i) % 3 === 0) {
+      const right = padded.length - i;
+      if (i > 0 && right >= primary && (right - primary) % secondary === 0) {
         // A separator with no digit to its left is dropped, not padded.
-        grouped += padded[i - 1] === " " ? "" : ",";
+        grouped += padded[i - 1] === " " ? "" : symbols.group;
       }
       grouped += padded[i];
     }
     padded = grouped;
   }
-  const body = dot >= 0 ? `${padded}.${rounded.frac}` : padded;
+  const body = dot >= 0 ? `${padded}${symbols.decimal}${rounded.frac}` : padded;
 
   let stated = false;
   const literal = (list: readonly PictureChar[]): string =>
@@ -412,7 +470,7 @@ const MONTHS = [
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /** The parts of a date-time value, as written (no time zone applies). */
-interface FieldDate {
+export interface FieldDate {
   readonly year: number;
   readonly month: number;
   readonly day: number;
@@ -426,7 +484,7 @@ interface FieldDate {
  * for the `T`) or US (`3/5/2024`, with an optional `13:08`). The time is taken
  * as written, in no time zone.
  */
-function parseFieldDate(value: string): FieldDate | undefined {
+export function parseFieldDate(value: string): FieldDate | undefined {
   const v = value.trim();
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(v);
   const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(v);
@@ -453,13 +511,32 @@ function parseFieldDate(value: string): FieldDate | undefined {
 
 const DATE_TOKEN = /'[^']*'|AM\/PM|am\/pm|A\/P|a\/p|y+|M+|d+|H+|h+|m+|s+/g;
 
+/** The names a date-time picture writes: twelve months from January, seven days from Sunday. */
+export interface DateNames {
+  readonly months: readonly string[];
+  readonly shortMonths: readonly string[];
+  readonly days: readonly string[];
+  readonly shortDays: readonly string[];
+}
+
+const ENGLISH_DATE_NAMES: DateNames = {
+  months: MONTHS,
+  shortMonths: MONTHS.map(m => m.slice(0, 3)),
+  days: DAYS,
+  shortDays: DAYS.map(d => d.slice(0, 3))
+};
+
 /**
  * `date` drawn in Word's date-time picture: `M`–`MMMM` month, `d`–`dddd`
  * day, `yy` / `yyyy` year, `H`/`HH` 24-hour and `h`/`hh` 12-hour, `m`/`mm`
  * minute, `s`/`ss` second, `AM/PM` `am/pm` `A/P` `a/p`, `'text'` literal.
- * English month and day names.
+ * Month and day names are English unless `names` gives others.
  */
-export function formatDatePicture(date: FieldDate, picture: string): string {
+export function formatDatePicture(
+  date: FieldDate,
+  picture: string,
+  names: DateNames = ENGLISH_DATE_NAMES
+): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
   const weekday = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
   const h12 = date.hour % 12 === 0 ? 12 : date.hour % 12;
@@ -472,17 +549,17 @@ export function formatDatePicture(date: FieldDate, picture: string): string {
         return token.length >= 3 ? String(date.year) : pad(date.year % 100);
       case "M":
         return token.length >= 4
-          ? MONTHS[date.month - 1]!
+          ? names.months[date.month - 1]!
           : token.length === 3
-            ? MONTHS[date.month - 1]!.slice(0, 3)
+            ? names.shortMonths[date.month - 1]!
             : token.length === 2
               ? pad(date.month)
               : String(date.month);
       case "d":
         return token.length >= 4
-          ? DAYS[weekday]!
+          ? names.days[weekday]!
           : token.length === 3
-            ? DAYS[weekday]!.slice(0, 3)
+            ? names.shortDays[weekday]!
             : token.length === 2
               ? pad(date.day)
               : String(date.day);

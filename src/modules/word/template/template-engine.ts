@@ -19,6 +19,7 @@ import { isForbiddenKey } from "@utils/object";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 import { checkHandle, checkNamedValues, checkRecord } from "@word/core/argument-checks";
+import type { FieldFormat } from "@word/core/field-format";
 import { imageKeys, isSamePicture } from "@word/core/image-keys";
 import { assertImageMediaType } from "@word/core/image-media";
 import { cloneModel, utf8Encoder } from "@word/core/internal-utils";
@@ -37,13 +38,20 @@ import {
 } from "@word/core/range-markers";
 import { isRun } from "@word/core/text-utils";
 import { DocxTemplateError } from "@word/errors";
+import {
+  applySwitches,
+  checkSwitches,
+  isSupportedLocale,
+  localeFieldFormat,
+  splitSwitches
+} from "@word/template/template-format";
 import type {
   DocxDocument,
   BodyContent,
   Paragraph,
   ParagraphChild,
   Run,
-  RunProperties,
+  RunContent,
   Table,
   TableRow,
   TableCell,
@@ -71,6 +79,16 @@ export interface TemplateOptions {
    * unresolved control directives are skipped silently.
    */
   readonly strict?: boolean;
+  /**
+   * The locale format switches write in — a BCP 47 tag such as `"de-DE"` or
+   * `"en-IN"` — as Word writes in its regional settings: a `\#` picture is
+   * written in the locale's symbols (`#.##0,00` in German) and groups digits
+   * as it does (`12,34,567.00` in Indian English), and `\@` names months
+   * and days in its language. The data is read the same way in every locale:
+   * numbers with a decimal point, dates as ISO, XML Schema or `YYYYMMDD` write
+   * them. Default: English pictures and names, as Word's `en-US`.
+   */
+  readonly locale?: string;
   /**
    * Also resolve the rich placeholders — image (`{{%path}}`), rich text
    * (`{{&path}}`), sub-document (`{{>path}}`), chart (`{{^path}}`) and HTML
@@ -148,6 +166,11 @@ export interface TemplateTag {
     | "colsClose";
   /** Location hint (e.g. "body paragraph 3", "header"). */
   readonly location: string;
+  /**
+   * For a variable, the data path it reads — `amount` for
+   * `amount \# "#,##0.00"`, whose `expression` carries the format switches too.
+   */
+  readonly path?: string;
 }
 
 // =============================================================================
@@ -172,6 +195,8 @@ interface TextToken {
 interface VariableToken {
   readonly type: TokenType.Variable;
   readonly path: string;
+  /** Word field switches after the path (`\# "0.00"`), when it has any. */
+  readonly switches?: string;
 }
 
 interface IfOpenToken {
@@ -257,6 +282,12 @@ const delimitersSchema = s
 export const templateOptionsShape = {
   delimiters: delimitersSchema,
   strict: w.boolean().optional(),
+  locale: s
+    .custom<string>(
+      isSupportedLocale,
+      'a locale tag this platform formats in ("en-US", "de-DE", "en-IN", …)'
+    )
+    .optional(),
   richPlaceholders: w.boolean().optional()
 };
 
@@ -313,7 +344,14 @@ function fillInPlace(
   const rich: RichState | undefined = scope.rich
     ? { images: createTemplateImageSink(doc.images, scope.where), depth: 0 }
     : undefined;
-  const ctx: TemplateContext = { open, close, strict, data, rich };
+  const ctx: TemplateContext = {
+    open,
+    close,
+    strict,
+    data,
+    format: localeFieldFormat(options?.locale),
+    rich
+  };
 
   // Process body
   const newBody = processBodyContent(doc.body as BodyContent[], ctx, "body");
@@ -395,6 +433,8 @@ interface TemplateContext {
   readonly close: string;
   readonly strict: boolean;
   readonly data: Record<string, unknown>;
+  /** The symbols and names format switches write with. */
+  readonly format: FieldFormat;
   /** Set when rich placeholders are resolved. */
   readonly rich?: RichState;
 }
@@ -494,7 +534,12 @@ function tokenize(
     } else if (expr === "/each") {
       tokens.push({ type: TokenType.EachClose });
     } else {
-      tokens.push({ type: TokenType.Variable, path: expr });
+      const split = splitSwitches(expr);
+      tokens.push(
+        split
+          ? { type: TokenType.Variable, path: split.path, switches: split.switches }
+          : { type: TokenType.Variable, path: expr }
+      );
     }
   }
 
@@ -515,7 +560,15 @@ function resolvePath(data: unknown, path: string): unknown {
   }
   const startPath = path.startsWith(".") ? path.slice(1) : path;
   const parts = startPath.split(".");
-  let current: unknown = data;
+  // `.name` is the current loop item's — not a loop variable or an enclosing
+  // key that happens to share the name.
+  let current: unknown =
+    path.startsWith(".") &&
+    data != null &&
+    typeof data === "object" &&
+    Object.hasOwn(data as object, ".")
+      ? (data as Record<string, unknown>)["."]
+      : data;
   for (const part of parts) {
     if (current == null || typeof current !== "object") {
       return undefined;
@@ -532,21 +585,93 @@ function resolvePath(data: unknown, path: string): unknown {
   return current;
 }
 
-function isTruthy(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.length > 0;
+/**
+ * The items a loop repeats over. A value that is not an array is one item, so a
+ * template does not depend on how many there are: XML cannot say "a list of
+ * one", and a single `<item>` reads as an object where two read as an array.
+ * `undefined` and `null` are no items.
+ */
+function loopItems(value: unknown): readonly unknown[] {
+  if (value === undefined || value === null) {
+    return [];
   }
-  return !!value;
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * The text a value reads as when it is written or tested: a record's `#text`
+ * when it has one — an XML element that has attributes or mixed content beside
+ * its text — and the value itself otherwise.
+ */
+function textOf(value: unknown): unknown {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const text = Object.hasOwn(value, "#text")
+      ? (value as Record<string, unknown>)["#text"]
+      : undefined;
+    if (typeof text === "string") {
+      return text;
+    }
+  }
+  return value;
+}
+
+function isTruthy(value: unknown): boolean {
+  const read = textOf(value);
+  if (Array.isArray(read)) {
+    return read.length > 0;
+  }
+  return !!read;
 }
 
 function valueToString(value: unknown): string {
-  if (value == null) {
+  const read = textOf(value);
+  if (read == null) {
     return "";
   }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
+  if (read instanceof Date) {
+    // `JSON.stringify` would write it quoted.
+    return Number.isNaN(read.getTime()) ? "" : read.toISOString();
   }
-  return String(value);
+  if (typeof read === "object") {
+    return JSON.stringify(read);
+  }
+  return String(read);
+}
+
+/**
+ * `value` written by the Word field switches of its placeholder. A switch that
+ * is not one is the template's mistake and always throws; a value the switch
+ * cannot apply to — `\#` on a value that is not a number, `\@` on one that is
+ * not a date — throws in strict mode and is written as it is otherwise, as Word
+ * leaves it.
+ */
+function formattedValue(
+  value: unknown,
+  path: string,
+  switches: string,
+  ctx: TemplateContext,
+  location: string
+): string {
+  const tag = `{{${path} ${switches}}}`;
+  const wrong = checkSwitches(switches);
+  if (wrong !== undefined) {
+    throw new DocxTemplateError(`Invalid placeholder ${tag}: ${wrong}`, path, location, {
+      tagName: path,
+      sectionPath: location
+    });
+  }
+  const text = valueToString(value);
+  const out = applySwitches(textOf(value), text, switches, ctx.format);
+  if ("text" in out) {
+    return out.text;
+  }
+  if (ctx.strict) {
+    throw new DocxTemplateError(`Cannot format ${tag}: ${out.problem}`, path, location, {
+      tagName: path,
+      sectionPath: location
+    });
+  }
+  return text;
 }
 
 // =============================================================================
@@ -600,13 +725,13 @@ function processBodyItems(
         }
 
         const innerBlocks = blocks.slice(i + 1, endIdx);
-        const items = resolvePath(ctx.data, collectionExpr);
+        const items = loopItems(resolvePath(ctx.data, collectionExpr));
 
         result.push(...listRangeAnchors([block]));
-        if (Array.isArray(items) && items.length > 0) {
+        if (items.length > 0) {
           const ranges = repeatedRanges(innerBlocks);
           for (let idx = 0; idx < items.length; idx++) {
-            const itemData = buildLoopData(items[idx], idx, ctx.data);
+            const itemData = buildLoopData(items[idx], idx, items.length, ctx.data);
             const innerCtx: TemplateContext = { ...ctx, data: itemData };
             const processed = processBodyItems(
               keepClonedRangeMarkers(cloneBlocks(innerBlocks), idx, items.length, ranges),
@@ -619,18 +744,6 @@ function processBodyItems(
           result.push(...listRangeAnchors(innerBlocks));
         }
         result.push(...listRangeAnchors([blocks[endIdx]!]));
-        if (!Array.isArray(items) && ctx.strict && items !== undefined && items !== null) {
-          throw new DocxTemplateError(
-            `{{#each ${collectionExpr}}} expects an array, got ${typeof items}`,
-            `#each ${collectionExpr}`,
-            location,
-            {
-              tagName: `#each ${collectionExpr}`,
-              paragraphIndex: i,
-              sectionPath: location
-            }
-          );
-        }
 
         i = endIdx + 1;
         continue;
@@ -731,39 +844,31 @@ function processBlockList(
 // Paragraph processing (inline variable substitution)
 // =============================================================================
 
+/**
+ * The placeholders in the text of `para`'s runs resolved in place: each run
+ * keeps its formatting, and what lies between the runs' text — a tab, a line
+ * break, a field whole or in pieces with its instruction and result, a picture
+ * — stays where it is. A placeholder's value goes where it starts, in that
+ * run's formatting; a taken `{{#if}}` branch keeps the runs it spans, and an
+ * inline `{{#each}}` is written as one text where it starts. A tab or a line
+ * break in a value is written as one.
+ */
 function processParagraph(para: Paragraph, ctx: TemplateContext, location: string): Paragraph {
-  // Merge all run text, resolve inline variables, then rebuild runs
-  const fullText = extractParagraphText(para);
-
-  // Quick check: does this paragraph contain any delimiters?
-  if (!fullText.includes(ctx.open)) {
+  const { items, text } = collectFreeText(para);
+  if (!text.includes(ctx.open)) {
     return para;
   }
-
-  // A field keeps its place among the text around it.
-  if (holdsField(para)) {
-    return processTextAroundFields(para, ctx, location);
-  }
-
-  // Tokenize and evaluate inline expressions
-  const tokens = tokenize(fullText, ctx.open, ctx.close);
-  const resolved = evaluateInlineTokens(tokens, ctx, location);
-
-  // If the text didn't change, return as-is
-  if (resolved === fullText) {
-    return para;
-  }
-
-  // Rebuild the paragraph runs with the resolved text
-  return rebuildParagraphText(para, resolved);
+  const spans: [number, number][] = [];
+  const tokens = tokenize(text, ctx.open, ctx.close, spans);
+  const segments: TextSegment[] = [];
+  segmentTokens(tokens, spans, 0, tokens.length, text.length, ctx, location, segments);
+  return applySegments(para, items, text, segments);
 }
 
-/** Whether any run of `para` holds a field, whole or in pieces. */
-function holdsField(para: Paragraph): boolean {
-  return para.children.some(child => isRun(child) && child.content.some(c => c.type === "field"));
-}
-
-/** A text content item of a run directly in the paragraph, outside every field. */
+/**
+ * A content item of a run directly in the paragraph, outside every field, that
+ * a template's text reads through: text, a tab (`\t`) or a line break (`\n`).
+ */
 interface FreeText {
   readonly child: number;
   readonly content: number;
@@ -772,17 +877,30 @@ interface FreeText {
 }
 
 /**
- * {@link processParagraph} for a paragraph holding fields: the placeholders in
- * the text of its runs outside every field are resolved in place, each run
- * keeping its formatting and every field — whole, or in pieces with its
- * instruction and result — staying where it is, as does the text in a field's
- * result (which Word computes). A placeholder's value goes where it starts.
+ * A piece of a paragraph's free text: kept as it is, or replaced with `output`
+ * — written at `start`, with the rest of the piece removed.
  */
-function processTextAroundFields(
-  para: Paragraph,
-  ctx: TemplateContext,
-  location: string
-): Paragraph {
+interface TextSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly output?: string;
+}
+
+/** The text a run content item reads as in a template, or `undefined` if it is not text. */
+function freeTextOf(c: RunContent): string | undefined {
+  if (c.type === "text") {
+    return c.text;
+  }
+  if (c.type === "tab") {
+    return "\t";
+  }
+  if (c.type === "break" && (c.breakType === undefined || c.breakType === "textWrapping")) {
+    return "\n";
+  }
+  return undefined;
+}
+
+function collectFreeText(para: Paragraph): { items: FreeText[]; text: string } {
   const items: FreeText[] = [];
   let text = "";
   let depth = 0;
@@ -797,42 +915,126 @@ function processTextAroundFields(
         } else if (c.fieldChar === "end") {
           depth = Math.max(0, depth - 1);
         }
-      } else if (c.type === "text" && depth === 0) {
-        items.push({ child: ci, content: k, start: text.length, end: text.length + c.text.length });
-        text += c.text;
+        return;
+      }
+      const free = depth === 0 ? freeTextOf(c) : undefined;
+      if (free !== undefined) {
+        items.push({ child: ci, content: k, start: text.length, end: text.length + free.length });
+        text += free;
       }
     });
   });
-  if (!text.includes(ctx.open)) {
-    return para;
+  return { items, text };
+}
+
+/** Index of the `{{else}}` of the inline `{{#if}}` at `open`, before `close`, or -1. */
+function findInlineElse(tokens: readonly Token[], open: number, close: number): number {
+  let depth = 0;
+  for (let i = open + 1; i < close; i++) {
+    const t = tokens[i]!;
+    if (t.type === TokenType.IfOpen) {
+      depth++;
+    } else if (t.type === TokenType.IfClose) {
+      depth--;
+    } else if (t.type === TokenType.Else && depth === 0) {
+      return i;
+    }
   }
-  const spans: [number, number][] = [];
-  const tokens = tokenize(text, ctx.open, ctx.close, spans);
-  // Top-level segments of the source: literal text, or what an expression
-  // (an inline block from its open tag to its close) evaluates to.
-  const segments: { start: number; end: number; output?: string }[] = [];
-  for (let i = 0; i < tokens.length; i++) {
+  return -1;
+}
+
+/** The segments of `tokens[from, to)`, appended to `out`. */
+function segmentTokens(
+  tokens: Token[],
+  spans: readonly [number, number][],
+  from: number,
+  to: number,
+  textLength: number,
+  ctx: TemplateContext,
+  location: string,
+  out: TextSegment[]
+): void {
+  const drop = (first: number, last: number): void => {
+    if (first <= last) {
+      out.push({ start: spans[first]![0], end: spans[last]![1], output: "" });
+    }
+  };
+  for (let i = from; i < to; i++) {
     const token = tokens[i]!;
     const [start, end] = spans[i]!;
     if (token.type === TokenType.Text) {
-      segments.push({ start, end });
+      out.push({ start, end });
+      continue;
+    }
+    if (token.type === TokenType.IfOpen) {
+      const close = collectInlineIf(tokens, i).endIndex;
+      if (close === -1) {
+        // Throws, as an unclosed inline block always has.
+        out.push({
+          start,
+          end: textLength,
+          output: evaluateInlineTokens(tokens.slice(i), ctx, location)
+        });
+        return;
+      }
+      const elseAt = findInlineElse(tokens, i, close);
+      const taken = isTruthy(resolvePath(ctx.data, token.condition));
+      const trueEnd = elseAt === -1 ? close : elseAt;
+      drop(i, i);
+      if (taken) {
+        segmentTokens(tokens, spans, i + 1, trueEnd, textLength, ctx, location, out);
+        drop(trueEnd, close);
+      } else {
+        drop(i + 1, trueEnd - 1);
+        if (elseAt !== -1) {
+          drop(elseAt, elseAt);
+          segmentTokens(tokens, spans, elseAt + 1, close, textLength, ctx, location, out);
+        }
+        drop(close, close);
+      }
+      i = close;
       continue;
     }
     let last = i;
-    if (token.type === TokenType.IfOpen) {
-      last = collectInlineIf(tokens, i).endIndex;
-    } else if (token.type === TokenType.EachOpen) {
+    if (token.type === TokenType.EachOpen) {
       last = collectInlineEach(tokens, i).endIndex;
     }
-    // An unclosed block throws as it does in a paragraph without fields.
+    // An unclosed block throws.
     const slice = last === -1 ? tokens.slice(i) : tokens.slice(i, last + 1);
     const output = evaluateInlineTokens(slice, ctx, location);
-    segments.push({ start, end: last === -1 ? text.length : spans[last]![1], output });
+    out.push({ start, end: last === -1 ? textLength : spans[last]![1], output });
     if (last === -1) {
-      break;
+      return;
     }
     i = last;
   }
+}
+
+/**
+ * The run content `text` is written as, in place of `c`: text in `c`'s
+ * formatting, with each tab and line break as one.
+ */
+function freeTextContent(c: RunContent, text: string): RunContent[] {
+  const out: RunContent[] = [];
+  for (const piece of text.split(/(\r\n|\r|\n|\t)/)) {
+    if (piece === "\t") {
+      out.push({ type: "tab" });
+    } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
+      out.push({ type: "break" });
+    } else if (piece !== "") {
+      out.push(c.type === "text" ? { ...c, text: piece } : { type: "text", text: piece });
+    }
+  }
+  return out;
+}
+
+/** `para` with its free text rewritten as `segments` say. */
+function applySegments(
+  para: Paragraph,
+  items: readonly FreeText[],
+  text: string,
+  segments: readonly TextSegment[]
+): Paragraph {
   const replaced = new Map<string, string>();
   for (const item of items) {
     let out = "";
@@ -861,17 +1063,15 @@ function processTextAroundFields(
       return;
     }
     let changed = false;
-    const content: Run["content"][number][] = [];
+    const content: RunContent[] = [];
     child.content.forEach((c, k) => {
       const next = replaced.get(`${ci}:${k}`);
-      if (next === undefined || c.type !== "text") {
+      if (next === undefined) {
         content.push(c);
         return;
       }
       changed = true;
-      if (next !== "") {
-        content.push({ ...c, text: next });
-      }
+      content.push(...freeTextContent(c, next));
     });
     if (!changed) {
       children.push(child);
@@ -915,7 +1115,10 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
             sectionPath: location
           });
         }
-        result += valueToString(value);
+        result +=
+          token.switches === undefined
+            ? valueToString(value)
+            : formattedValue(value, token.path, token.switches, ctx, location);
         i++;
         break;
       }
@@ -944,7 +1147,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
 
       case TokenType.EachOpen: {
         // Inline each: collect tokens until matching /each
-        const items = resolvePath(ctx.data, token.collection);
+        const items = loopItems(resolvePath(ctx.data, token.collection));
         const { body, endIndex } = collectInlineEach(tokens, i);
         if (endIndex === -1) {
           throw new DocxTemplateError(
@@ -955,12 +1158,10 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
           );
         }
 
-        if (Array.isArray(items)) {
-          for (let idx = 0; idx < items.length; idx++) {
-            const itemData = buildLoopData(items[idx], idx, ctx.data);
-            const innerCtx: TemplateContext = { ...ctx, data: itemData };
-            result += evaluateInlineTokens(body, innerCtx, location);
-          }
+        for (let idx = 0; idx < items.length; idx++) {
+          const itemData = buildLoopData(items[idx], idx, items.length, ctx.data);
+          const innerCtx: TemplateContext = { ...ctx, data: itemData };
+          result += evaluateInlineTokens(body, innerCtx, location);
         }
         i = endIndex + 1;
         break;
@@ -1046,89 +1247,6 @@ function collectInlineEach(
 }
 
 // =============================================================================
-// Rebuild paragraph with new text content
-// =============================================================================
-
-/**
- * Rebuild a paragraph's run text content with a new resolved string.
- * Preserves the formatting of the first text run.
- */
-function rebuildParagraphText(para: Paragraph, newText: string): Paragraph {
-  // Find the first run with text content to use as formatting reference
-  let refProperties: RunProperties | undefined;
-  for (const child of para.children) {
-    if (!isRun(child)) {
-      continue;
-    }
-    for (const c of child.content) {
-      if (c.type === "text") {
-        refProperties = child.properties;
-        break;
-      }
-    }
-    if (refProperties !== undefined) {
-      break;
-    }
-  }
-
-  // If no text runs found, get properties from first run
-  if (refProperties === undefined) {
-    for (const child of para.children) {
-      if (isRun(child)) {
-        refProperties = child.properties;
-        break;
-      }
-    }
-  }
-
-  // Build new children:
-  //   - replace the first Run we see with `newRun` (carrying the resolved text);
-  //   - drop every other Run (their text was already concatenated into newText);
-  //   - keep non-Run children (bookmarkStart / bookmarkEnd / commentRangeStart /
-  //     commentRangeEnd / hyperlink / insertedRun / movedToRun / etc.) at
-  //     their original index. Reordering these silently miswires bookmark and
-  //     comment ranges, since the start/end markers stop bracketing the
-  //     intended content.
-  // The markers that rode on the absorbed runs (range permissions) move onto
-  // the surviving run, in source order, so their ranges stay paired.
-  const absorbedMarkers: RangeMarker[] = [];
-  for (const child of para.children) {
-    if (isRun(child) && child.rangeMarkersBefore) {
-      absorbedMarkers.push(...child.rangeMarkersBefore);
-    }
-  }
-  const newRun: Run = {
-    ...(absorbedMarkers.length > 0 ? { rangeMarkersBefore: absorbedMarkers } : {}),
-    properties: refProperties,
-    content: [{ type: "text", text: newText }]
-  };
-
-  const newChildren: ParagraphChild[] = [];
-  let runReplaced = false;
-  for (const child of para.children) {
-    if (isRun(child)) {
-      if (!runReplaced) {
-        newChildren.push(newRun);
-        runReplaced = true;
-      }
-      // Subsequent runs are absorbed into newRun's text — drop them.
-    } else {
-      newChildren.push(child);
-    }
-  }
-  // If the paragraph had no runs at all (rare — typically all bookmark
-  // markers), append newRun at the end so the rendered text still appears.
-  if (!runReplaced) {
-    newChildren.push(newRun);
-  }
-
-  return {
-    ...para,
-    children: newChildren
-  };
-}
-
-// =============================================================================
 // Table processing (row-level loops)
 // =============================================================================
 
@@ -1188,9 +1306,9 @@ function processTable(
           );
         }
 
-        const items = resolvePath(ctx.data, collectionExpr);
+        const items = loopItems(resolvePath(ctx.data, collectionExpr));
 
-        if (!Array.isArray(items) || items.length === 0) {
+        if (items.length === 0) {
           // The loop rows go; the ranges they opened or closed stay paired.
           dropRows(table.rows.slice(i, endRowIdx + 1));
         } else {
@@ -1205,7 +1323,7 @@ function processTable(
               : removeRowTag(removeMatchingRowClose(row, tags), tags.open, "first");
             const ranges = repeatedRanges(templateRow);
             for (let idx = 0; idx < items.length; idx++) {
-              const itemData = buildLoopData(items[idx], idx, ctx.data);
+              const itemData = buildLoopData(items[idx], idx, items.length, ctx.data);
               const innerCtx: TemplateContext = { ...ctx, data: itemData };
               const clonedRow = keepClonedRangeMarkers(
                 cloneRow(templateRow),
@@ -1233,7 +1351,7 @@ function processTable(
             );
             const ranges = repeatedRanges(templateRows);
             for (let idx = 0; idx < items.length; idx++) {
-              const itemData = buildLoopData(items[idx], idx, ctx.data);
+              const itemData = buildLoopData(items[idx], idx, items.length, ctx.data);
               const innerCtx: TemplateContext = { ...ctx, data: itemData };
               // One loop iteration's rows are one copy of the repeated content.
               const clonedRows = keepClonedRangeMarkers(
@@ -1734,9 +1852,17 @@ function findIfBlock(
 // Loop data construction
 // =============================================================================
 
+/**
+ * The data inside one iteration of a loop: the enclosing data, the item's own
+ * keys, `.` for the item itself, and the loop's variables — `@index` (from 0),
+ * `@number` (from 1), `@first` and `@last`. The loop's variables win over a key
+ * of the item with the same name, such as an XML attribute `number`; that one
+ * is still `{{.@number}}`.
+ */
 function buildLoopData(
   item: unknown,
   index: number,
+  count: number,
   parentData: Record<string, unknown>
 ): Record<string, unknown> {
   // Build the loop context on a null-prototype object so that an item
@@ -1752,8 +1878,6 @@ function buildLoopData(
     }
     result[key] = parentData[key];
   }
-  result["@index"] = index;
-  result["."] = item;
 
   // If item is an object, spread its OWN properties so {{.name}} and
   // {{name}} both work. Skip the same dangerous key set defensively.
@@ -1772,6 +1896,11 @@ function buildLoopData(
     }
   }
 
+  result["."] = item;
+  result["@index"] = index;
+  result["@number"] = index + 1;
+  result["@first"] = index === 0;
+  result["@last"] = index === count - 1;
   return result;
 }
 
@@ -1934,7 +2063,8 @@ function scanTemplateTags(
       } else if (expr.startsWith("!")) {
         tags.push({ expression: expr, type: "htmlChunk", location });
       } else {
-        tags.push({ expression: expr, type: "variable", location });
+        const path = splitSwitches(expr)?.path ?? expr;
+        tags.push({ expression: expr, type: "variable", location, path });
       }
     }
   }
@@ -2336,10 +2466,11 @@ function processTableColumnLoop(
     }
   }
 
-  const items = resolvePath(data, colsExpr);
-  if (!Array.isArray(items)) {
+  const value = resolvePath(data, colsExpr);
+  if (value === undefined || value === null) {
     return table;
   }
+  const items = loopItems(value);
 
   const colsOpenRegex = new RegExp(
     escapeRegex(open) +
@@ -2365,7 +2496,7 @@ function processTableColumnLoop(
       const itemCtx: TemplateContext = {
         ...ctx,
         strict: false,
-        data: buildLoopData(items[idx], idx, data)
+        data: buildLoopData(items[idx], idx, items.length, data)
       };
       // One iteration's cells are one copy of the repeated content.
       const clonedCells = keepClonedRangeMarkers(
@@ -2381,8 +2512,10 @@ function processTableColumnLoop(
             return block;
           }
           const text = extractParagraphText(block as Paragraph);
-          const cleaned = text.replace(colsOpenRegex, "").replace(colsCloseRegex, "");
-          return cleaned === text ? block : rebuildParagraphText(block as Paragraph, cleaned);
+          const matches = [...text.matchAll(colsOpenRegex), ...text.matchAll(colsCloseRegex)];
+          return matches.length === 0
+            ? block
+            : removeMaskedText(block as Paragraph, maskMatches(text, matches));
         });
         expandedCells.push({
           ...clonedCell,

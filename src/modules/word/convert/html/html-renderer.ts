@@ -975,6 +975,20 @@ function renderRun(state: RenderState, run: Run): void {
 function renderRunContentHtml(state: RenderState, content: RunContent): void {
   switch (content.type) {
     case "text":
+      // A line break inside text is one, as the DOCX writer writes it, and so
+      // is a tab, as Word sets one kept in `<w:t>`.
+      if (/[\t\n\r]/.test(content.text)) {
+        for (const piece of content.text.split(/(\r\n|\r|\n|\t)/)) {
+          if (piece === "\t") {
+            renderRunContentHtml(state, { type: "tab" });
+          } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
+            renderRunContentHtml(state, { type: "break" });
+          } else if (piece !== "") {
+            state.html.push(escapeHtml(piece));
+          }
+        }
+        break;
+      }
       state.html.push(escapeHtml(content.text));
       break;
     case "break":

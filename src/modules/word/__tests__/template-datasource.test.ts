@@ -114,10 +114,10 @@ describe("createXmlDataSource", () => {
     expect(source.getArray("item")).toEqual(["A", "B", "C"]);
   });
 
-  it("getArray returns empty array for non-array element", () => {
+  it("getArray returns a single element as a one-item array", () => {
     const xml = "<root><name>Alice</name></root>";
     const source = createXmlDataSource(xml);
-    expect(source.getArray("name")).toEqual([]);
+    expect(source.getArray("name")).toEqual(["Alice"]);
   });
 
   it("handles XML with declaration and comments", () => {
@@ -137,6 +137,73 @@ describe("createXmlDataSource", () => {
     const data = source.getData();
     expect(data.x).toBe("1");
     expect(data.y).toBe("2");
+  });
+
+  it("keeps a leaf's attributes beside its text", () => {
+    const source = createXmlDataSource('<r><amount currency="EUR">10.00</amount></r>');
+    expect(source.getData()).toEqual({ amount: { "@currency": "EUR", "#text": "10.00" } });
+  });
+
+  it("keeps an attributed empty leaf's text as an empty string", () => {
+    const source = createXmlDataSource('<r><flag on="y"/></r>');
+    expect(source.getData()).toEqual({ flag: { "@on": "y", "#text": "" } });
+  });
+
+  it("keeps the whole text of an element with mixed content", () => {
+    const source = createXmlDataSource("<r><p>Hello <b>x</b> world</p></r>");
+    expect(source.getData()).toEqual({ p: { b: "x", "#text": "Hello x world" } });
+  });
+
+  it("gives an element with children and only layout whitespace no #text", () => {
+    const source = createXmlDataSource("<r>\n  <order>\n    <id>1</id>\n  </order>\n</r>");
+    expect(source.getData()).toEqual({ order: { id: "1" } });
+  });
+
+  it("reads an element with xsi:nil as null", () => {
+    const xml =
+      '<r xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
+      '<a xsi:nil="true"/><b xsi:nil="false">2</b><c xsi:nil="1"/></r>';
+    const source = createXmlDataSource(xml);
+    expect(source.getData()).toEqual({ a: null, b: "2", c: null });
+    expect(source.getArray("a")).toEqual([]);
+  });
+
+  it("resolves the xsi prefix by namespace, not by name", () => {
+    const xml = '<r xmlns:xsi="urn:not-schema-instance"><a xsi:nil="true">1</a></r>';
+    expect(createXmlDataSource(xml).getData()).toEqual({ a: { "@nil": "true", "#text": "1" } });
+  });
+
+  it("drops prefixes, namespace declarations and xsi attributes", () => {
+    const xml =
+      '<n0:inv xmlns:n0="urn:sap" xmlns="urn:default" ' +
+      'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:sap inv.xsd">' +
+      '<n0:total xml:lang="en">5</n0:total></n0:inv>';
+    expect(createXmlDataSource(xml).getData()).toEqual({
+      total: { "@lang": "en", "#text": "5" }
+    });
+  });
+
+  it("finds rootTag with or without its prefix", () => {
+    const xml = '<env xmlns:n0="urn:sap"><n0:inv><n0:total>5</n0:total></n0:inv></env>';
+    expect(createXmlDataSource(xml, "inv").getData()).toEqual({ total: "5" });
+    expect(createXmlDataSource(xml, "n0:inv").getData()).toEqual({ total: "5" });
+  });
+
+  it("reads a document element that is a leaf as #text, with its attributes", () => {
+    expect(createXmlDataSource("<r>hi</r>").getData()).toEqual({ "#text": "hi" });
+    expect(createXmlDataSource('<r id="1">hi</r>').getData()).toEqual({
+      "@id": "1",
+      "#text": "hi"
+    });
+  });
+
+  it("does not let an element named __proto__ replace a record's prototype", () => {
+    const data = createXmlDataSource(
+      "<r><__proto__><polluted>1</polluted></__proto__><ok>1</ok></r>"
+    ).getData();
+    expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+    expect((data as { polluted?: unknown }).polluted).toBeUndefined();
+    expect(data).toEqual({ ok: "1" });
   });
 });
 

@@ -646,7 +646,17 @@ function collectRunTokens(run: Run, tokens: LayoutToken[]): void {
   for (const item of run.content) {
     switch (item.type) {
       case "text": {
-        pushWordTokens(item.text, tokens);
+        // A line break inside text is one, as the writer writes it (`<w:br/>`),
+        // and so is a tab, as Word sets one kept in `<w:t>`.
+        for (const piece of item.text.split(/(\r\n|\r|\n|\t)/)) {
+          if (piece === "\t") {
+            tokens.push({ type: "tab" });
+          } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
+            tokens.push({ type: "break" });
+          } else if (piece !== "") {
+            pushWordTokens(piece, tokens);
+          }
+        }
         break;
       }
       case "tab":

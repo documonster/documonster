@@ -421,7 +421,8 @@ const NON_PATH_LEAVES: ReadonlySet<string> = new Set([
   "template_fill::data{}",
   "template_fill::images{}.altText",
   "template_fill::images{}.background",
-  "template_fill::images{}.source"
+  "template_fill::images{}.source",
+  "template_fill::locale"
 ]);
 
 // ---------------------------------------------------------------------------

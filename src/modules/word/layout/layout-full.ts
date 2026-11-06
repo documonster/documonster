@@ -6704,7 +6704,24 @@ function pushRunSegments(run: Run, out: ParagraphSegment[], properties: Run["pro
   };
   for (const item of run.content) {
     if (item.type === "text") {
-      pending += item.text;
+      // A line break inside text is one, as the writer writes it (`<w:br/>`),
+      // and so is a tab, as Word sets one kept in `<w:t>` — neither is a
+      // character a face has a glyph for.
+      if (!/[\t\n\r]/.test(item.text)) {
+        pending += item.text;
+        continue;
+      }
+      for (const piece of item.text.split(/(\r\n|\r|\n|\t)/)) {
+        if (piece === "\t") {
+          flush();
+          out.push({ type: "tab", properties });
+        } else if (piece === "\n" || piece === "\r" || piece === "\r\n") {
+          flush();
+          out.push({ type: "break", properties });
+        } else {
+          pending += piece;
+        }
+      }
     } else if (item.type === "tab") {
       flush();
       out.push({ type: "tab", properties });

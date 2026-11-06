@@ -519,7 +519,11 @@ function renderRun(state: MdRenderState, run: Run): string {
 function renderRunContent(state: MdRenderState, content: RunContent): string {
   switch (content.type) {
     case "text":
-      return content.text;
+      // A line break inside text is one, as the DOCX writer writes it; a tab is
+      // a space, as a tab content is.
+      return /[\t\n\r]/.test(content.text)
+        ? content.text.replace(/\r\n?|\n/g, "  \n").replace(/\t/g, " ")
+        : content.text;
     case "break":
       if (content.breakType === "page") {
         // Page breaks are emitted at the paragraph level (see renderParagraph

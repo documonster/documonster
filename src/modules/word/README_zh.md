@@ -250,6 +250,51 @@ const filled = Template.fill(doc, {
 把每个命名占位符精确替换为文字、段落、表格或图片——没有数据对象、没有条件与循环，也不处理批注。
 模板含逻辑时用 `fill`，只需把占位符换成现成内容时用 `patch`。
 
+循环（`{{#each}}`，包括表格行循环与 `{{#cols}}`）把不是数组的值当作一项，`undefined` 与 `null` 当作零项。
+因此同一个模板既能填一行明细也能填多行——XML 无法表达“只有一项的列表”，
+`Template.createXmlDataSource` 读到单个 `<item>` 时得到的是对象，读到两个时才是数组。
+
+XML 属性是 `@name` 键：`<amount currency="EUR">10.00</amount>` 读作
+`{ "@currency": "EUR", "#text": "10.00" }`，模板输出和判断带 `#text` 的记录时按其文本处理——
+`{{amount}}` 是 `10.00`，`{{amount.@currency}}` 是 `EUR`。带 `xsi:nil="true"` 的元素读作 `null`；
+名称去掉命名空间前缀。
+
+循环内 `{{@index}}` 从 0 计数、`{{@number}}` 从 1 计数，`{{@first}}` / `{{@last}}` 标记首尾
+（`{{#if @last}}`）。`{{.name}}` 是当前项自己的 `name`——当某个项的键（例如 XML 属性 `@number`）
+与循环变量同名时，用它来读取。
+
+占位符可以带 Word 的域开关，与 `MERGEFIELD` 的写法相同：
+
+```typescript
+import { Document, Template } from "documonster/word";
+
+const invoice = Document.create();
+Document.addParagraph(invoice, 'Total: {{total \\# "#,##0.00"}} due {{due \\@ "d MMMM yyyy"}}');
+Document.addParagraph(invoice, '{{customer \\* Upper}}{{phone \\b " — Tel. "}}');
+const filled = Template.fill(invoice, {
+  total: "1234.5",
+  due: "2026-11-07",
+  customer: "Acme",
+  phone: ""
+});
+// Total: 1,234.50 due 7 November 2026
+// ACME
+
+Template.fill(
+  invoice,
+  { total: "1234.5", due: "2026-11-07", customer: "Acme", phone: "" },
+  {
+    locale: "de-DE"
+  }
+); // 此时图片串按德语符号书写："#.##0,00" → 1.234,50，"7. November 2026"
+```
+
+`\#` 是数字图片串，`\@` 是日期时间图片串，`\*` 是大小写或数字格式（`Upper`、`Caps`、`roman`、
+`CardText` 等），`\b` / `\f` 是值非空时写在其前 / 后的文本。无论 `locale` 是什么，数据都按机器格式读取——
+数字用小数点，日期为 ISO、XML Schema `dateTime` 或 SAP 的 `YYYYMMDD`，`Date` 按 UTC 时间；`locale`
+决定图片串的书写方式（与 Word 的区域设置相同），并按该地区的方式分组数字（`en-IN` 写作 `12,34,567.00`）。
+图片串无法应用的值在 strict 模式下报错，否则原样写出；写错的开关总是报错。
+
 ### 字段
 
 ```typescript

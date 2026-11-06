@@ -130,6 +130,31 @@ describe("template_inspect", () => {
 });
 
 describe("template_fill", () => {
+  it("formats switched values in the locale it is given, and shapes their data by path", async () => {
+    const fx = await fixture();
+    const doc = Document.create();
+    Document.addParagraph(doc, 'Total {{total \\# "#.##0,00"}} due {{due \\@ "d. MMMM yyyy"}}');
+    Document.addParagraph(doc, "{{#each lines}}{{@number}}. {{.text}}{{/each}}");
+    await Document.writeFile(doc, path.join(fx.root, "de.docx"));
+
+    const inspect = await run(templateInspectTool, fx, { path: "de.docx" });
+    const shape = JSON.parse(inspect.split("```json")[1]!.split("```")[0]!) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(shape).sort()).toEqual(["due", "lines", "total"]);
+
+    await run(templateFillTool, fx, {
+      template: "de.docx",
+      out: "de-filled.docx",
+      locale: "de-DE",
+      data: { total: "1234.5", due: "2026-11-07", lines: [{ text: "Widget" }] }
+    });
+    const text = Query.getText(await Document.readFile(path.join(fx.root, "de-filled.docx")));
+    expect(text).toContain("Total 1.234,50 due 7. November 2026");
+    expect(text).toContain("1. Widget");
+  });
+
   it("reads its data from a JSON file with dataFrom", async () => {
     const fx = await fixture();
     const file = await makeTemplate(fx);

@@ -7,7 +7,7 @@
  * @stability experimental
  */
 
-import { isRecordArgument } from "@utils/object";
+import { isForbiddenKey, isRecordArgument } from "@utils/object";
 import type { SchemaMatches } from "@utils/schema";
 import {
   checkArray,
@@ -38,7 +38,11 @@ export interface DataSource {
   /** Retrieve all data as a flat record. */
   readonly getData: () => Record<string, unknown>;
 
-  /** Retrieve an array value by key. Returns empty array if not found or not an array. */
+  /**
+   * Retrieve a list by dot-separated path. Returns an empty array if not found.
+   * A value that is not an array is an empty array, except in a source whose
+   * format cannot tell one item from a list of one (XML), where it is that item.
+   */
   readonly getArray: (key: string) => unknown[];
 
   /** Retrieve a single value by dot-separated path. Returns undefined if not found. */
@@ -150,25 +154,39 @@ export function createJsonDataSource(input: string | Record<string, unknown>): D
 /**
  * Data source that reads from an XML string.
  *
- * Flattens the XML structure into dot-separated key-value pairs.
- * Repeated elements with the same tag are collected into arrays.
+ * The document element is the data: each child element is a key, by its local
+ * name (a prefix such as `n0:` is dropped). A leaf is its text; an element with
+ * children is a nested record. Repeated elements with the same tag are
+ * collected into arrays; an element that occurs once is its value alone, since
+ * XML has no way to say "a list of one". A template's loops treat that value as
+ * one item, and `getArray` returns it as a one-item array, so the same template
+ * fills one `<item>` as it fills several.
+ *
+ * Attributes are `@name` keys of their element's record. A leaf that has
+ * attributes is a record too, with its text under `#text`, and so is an element
+ * whose text is mixed with child elements; a template reads such a record as
+ * its text, so `{{amount}}` stays `10.00` beside `{{amount.@currency}}`. An
+ * element with `xsi:nil="true"` is `null`. Namespace declarations and the other
+ * `xsi:` attributes are left out.
  *
  * Example XML:
  * ```xml
  * <root>
  *   <name>John</name>
  *   <address><city>NY</city></address>
+ *   <amount currency="EUR">10.00</amount>
  *   <item>A</item>
  *   <item>B</item>
  * </root>
  * ```
- * Produces: `{ name: "John", "address.city": "NY", address: { city: "NY" }, item: ["A", "B"] }`
+ * Produces:
+ * `{ name: "John", address: { city: "NY" }, amount: { "@currency": "EUR", "#text": "10.00" }, item: ["A", "B"] }`
  *
  * @param xml - An XML string to parse. An empty string is no data.
  * @param rootTag - The element whose content is the data: the document
  * element when it has this name, otherwise the first element below it that
- * does. If not provided, or no element has this name, the document element is
- * used.
+ * does — matched with or without its prefix. If not provided, or no element has
+ * this name, the document element is used.
  * @throws {DocxArgumentError} If `xml` is not well-formed.
  * @stability experimental
  */
@@ -176,7 +194,17 @@ export function createXmlDataSource(xml: string, rootTag?: string): DataSource {
   const where = "Template.createXmlDataSource";
   checkString(xml, "xml", where);
   checkString(rootTag, "rootTag", where, { optional: true });
-  return dataSourceFromRecord(parseXmlToRecord(xml, rootTag, where));
+  const data = parseXmlToRecord(xml, rootTag, where);
+  return {
+    ...dataSourceFromRecord(data),
+    getArray(key: string) {
+      const value = resolveDataPath(data, key);
+      if (value === undefined || value === null) {
+        return [];
+      }
+      return Array.isArray(value) ? value : [value];
+    }
+  };
 }
 
 // =============================================================================
@@ -374,23 +402,18 @@ export function fillFromSource(
 }
 
 // =============================================================================
-// Internal: XML Parser (minimal, zero-dependency)
+// Internal: XML to record
 // =============================================================================
 
-interface XmlNode {
-  readonly tag: string;
-  readonly attributes: Record<string, string>;
-  readonly children: XmlNode[];
-  readonly text: string;
-}
+const XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance";
+
+/** Namespace prefix → URI in scope at an element; `""` is the default namespace. */
+type NamespaceScope = ReadonlyMap<string, string>;
 
 /**
- * Parse an XML string into a flat Record using the project's hardened
- * SAX-backed DOM parser. The parser enforces the standard `maxDepth` and
- * `maxEntityExpansions` limits, so this helper is safe to call on
- * untrusted input — earlier versions used a hand-rolled regex parser
- * with no depth limit and no protection against billion-laughs / nested
- * element bombs.
+ * Parse an XML string into a Record using the project's hardened SAX-backed
+ * DOM parser, which enforces the standard `maxDepth` and
+ * `maxEntityExpansions` limits, so this is safe to call on untrusted input.
  */
 function parseXmlToRecord(
   xml: string,
@@ -418,37 +441,34 @@ function parseXmlToRecord(
   }
   // A rootTag naming no element is ignored, as it always was: the document
   // element is the data.
-  const element = (rootTag === undefined ? undefined : findElementNamed(root, rootTag)) ?? root;
-  return xmlElementToRecord(element);
-}
-
-/** Adapter from XmlElement (DOM) to the legacy XmlNode shape. */
-function elementToXmlNode(el: XmlElement): XmlNode {
-  const children: XmlNode[] = [];
-  let text = "";
-  for (const child of el.children) {
-    if (child.type === "element") {
-      children.push(elementToXmlNode(child));
-    } else if (child.type === "text" || child.type === "cdata") {
-      text += child.value;
-    }
+  const found = rootTag === undefined ? undefined : findElementNamed(root, rootTag, new Map());
+  const [element, scope] = found ?? [root, inScope(new Map(), root)];
+  const value = elementValue(element, scope);
+  if (value === null) {
+    return {};
   }
-  return {
-    tag: el.local ?? el.name.replace(/^.*:/, ""),
-    attributes: { ...el.attributes },
-    children,
-    text
-  };
+  if (typeof value === "string") {
+    return value === "" ? {} : { "#text": value };
+  }
+  return value;
 }
 
-/** `el` itself when it is named `name`, else the first element below it that is. */
-function findElementNamed(el: XmlElement, name: string): XmlElement | undefined {
-  if (el.name === name) {
-    return el;
+/**
+ * `el` itself when it is named `name` (with or without its prefix), else the
+ * first element below it that is — with the namespaces in scope there.
+ */
+function findElementNamed(
+  el: XmlElement,
+  name: string,
+  parentScope: NamespaceScope
+): [XmlElement, NamespaceScope] | undefined {
+  const scope = inScope(parentScope, el);
+  if (el.name === name || localName(el.name) === name) {
+    return [el, scope];
   }
   for (const child of el.children) {
     if (child.type === "element") {
-      const found = findElementNamed(child, name);
+      const found = findElementNamed(child, name, scope);
       if (found) {
         return found;
       }
@@ -457,69 +477,109 @@ function findElementNamed(el: XmlElement, name: string): XmlElement | undefined 
   return undefined;
 }
 
-function xmlElementToRecord(el: XmlElement): Record<string, unknown> {
-  return xmlNodeToRecord(elementToXmlNode(el));
+function localName(qualified: string): string {
+  const colon = qualified.indexOf(":");
+  return colon === -1 ? qualified : qualified.slice(colon + 1);
 }
 
-/** Stub for the legacy entrypoint kept for tests / external callers. */
-function parseXmlElement(xml: string): XmlNode | null {
-  try {
-    return elementToXmlNode(parseXml(xml).root);
-  } catch {
-    return null;
-  }
-}
-// Suppress no-unused-vars lint — kept for binary compat with prior internal API.
-void parseXmlElement;
-
-/** Convert an XmlNode tree into a flat Record. */
-function xmlNodeToRecord(node: XmlNode): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  // Add attributes with @ prefix
-  for (const key of Object.keys(node.attributes)) {
-    result[`@${key}`] = node.attributes[key];
-  }
-
-  // Group children by tag name
-  const childGroups = new Map<string, XmlNode[]>();
-  for (const child of node.children) {
-    const existing = childGroups.get(child.tag);
-    if (existing) {
-      existing.push(child);
-    } else {
-      childGroups.set(child.tag, [child]);
+/** The namespaces in scope inside `el`: its parent's, plus what it declares. */
+function inScope(parentScope: NamespaceScope, el: XmlElement): NamespaceScope {
+  let scope: Map<string, string> | undefined;
+  for (const [name, uri] of Object.entries(el.attributes)) {
+    if (name === "xmlns" || name.startsWith("xmlns:")) {
+      scope ??= new Map(parentScope);
+      scope.set(name === "xmlns" ? "" : name.slice(6), uri);
     }
   }
+  return scope ?? parentScope;
+}
 
-  // Convert child groups
-  for (const [tag, group] of childGroups) {
-    if (group.length === 1) {
-      const child = group[0];
-      if (child.children.length === 0) {
-        // Leaf node — use text value
-        result[tag] = child.text || "";
-      } else {
-        // Nested object
-        result[tag] = xmlNodeToRecord(child);
+/** The text of `el` and every element below it, in document order. */
+function textContent(el: XmlElement): string {
+  let text = "";
+  for (const child of el.children) {
+    if (child.type === "element") {
+      text += textContent(child);
+    } else if (child.type === "text" || child.type === "cdata") {
+      text += child.value;
+    }
+  }
+  return text;
+}
+
+/**
+ * What an element reads as in the template's data.
+ *
+ * - An element with `xsi:nil="true"` is `null`: XML Schema's way to say the
+ *   value is absent, which SAP and most schema-driven exports write.
+ * - A leaf with no attributes is its text.
+ * - Anything else is a record: each attribute as `@name`, each child element
+ *   under its name (repeated ones as an array), and `#text` for the element's
+ *   own text — on a leaf that has attributes, and on an element whose text is
+ *   mixed with child elements (`<p>Hello <b>x</b></p>`), where it is the text
+ *   of the whole element. The template engine reads a record with `#text` as
+ *   that text, so `{{amount}}` is `10.00` and `{{amount.@currency}}` is `EUR`.
+ *
+ * Names are local: a prefix (`n0:total`, `xml:lang`) is dropped. Namespace
+ * declarations and the `xsi:` attributes are instructions to a parser or a
+ * validator, not data, and are left out.
+ */
+function elementValue(
+  el: XmlElement,
+  scope: NamespaceScope
+): Record<string, unknown> | string | null {
+  const record: Record<string, unknown> = {};
+  let hasAttributes = false;
+  for (const [name, value] of Object.entries(el.attributes)) {
+    if (name === "xmlns" || name.startsWith("xmlns:")) {
+      continue;
+    }
+    const colon = name.indexOf(":");
+    if (colon !== -1 && scope.get(name.slice(0, colon)) === XSI_NAMESPACE) {
+      if (name.slice(colon + 1) === "nil" && (value.trim() === "true" || value.trim() === "1")) {
+        return null;
       }
-    } else {
-      // Multiple elements with same tag — array
-      result[tag] = group.map(child => {
-        if (child.children.length === 0) {
-          return child.text || "";
-        }
-        return xmlNodeToRecord(child);
-      });
+      continue;
+    }
+    record[`@${localName(name)}`] = value;
+    hasAttributes = true;
+  }
+
+  let ownText = "";
+  const groups = new Map<string, unknown[]>();
+  for (const child of el.children) {
+    if (child.type === "element") {
+      const tag = child.local ?? localName(child.name);
+      if (isForbiddenKey(tag)) {
+        // `record.__proto__ = …` would replace the record's prototype, not add a key.
+        continue;
+      }
+      const value = elementValue(child, inScope(scope, child));
+      const group = groups.get(tag);
+      if (group) {
+        group.push(value);
+      } else {
+        groups.set(tag, [value]);
+      }
+    } else if (child.type === "text" || child.type === "cdata") {
+      ownText += child.value;
     }
   }
 
-  // If node has text and no children, include it
-  if (node.children.length === 0 && node.text) {
-    result["#text"] = node.text;
+  if (groups.size === 0) {
+    if (!hasAttributes) {
+      return ownText;
+    }
+    record["#text"] = ownText;
+    return record;
   }
-
-  return result;
+  for (const [tag, group] of groups) {
+    record[tag] = group.length === 1 ? group[0] : group;
+  }
+  if (ownText.trim() !== "") {
+    record["#text"] = textContent(el);
+  }
+  return record;
 }
 
 // =============================================================================

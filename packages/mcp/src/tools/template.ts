@@ -110,7 +110,8 @@ export const templateInspectTool = defineTool({
     lines.push("", "## Data shape", "", "```json", buildShape(tags), "```");
     lines.push(
       "",
-      "Loop variables written `.name` refer to a property of the current item.",
+      "Loop variables written `.name` refer to a property of the current item; `@index` (from 0), `@number` (from 1), `@first` and `@last` are the loop's own.",
+      'A tag with switches (`\\# "#,##0.00"`, `\\@ "d MMMM yyyy"`) formats its value: give numbers and dates as machines write them (`1234.5`, `2026-11-07`).',
       "Pass this structure as `data` to template_fill."
     );
 
@@ -145,7 +146,7 @@ export const templateFillTool = defineTool({
   group: "word",
   title: "Fill a Word template",
   description:
-    "Fill a .docx template's placeholders from JSON and save the result. Supports variables with dotted paths, {{#each}} loops (including table rows), {{#if}} conditionals, and {{%name}} image placeholders filled from the `images` argument (a file or a Mermaid diagram). Call template_inspect first to learn the exact field names. The template's own styling is preserved — you supply only data.",
+    'Fill a .docx template\'s placeholders from JSON and save the result. Supports variables with dotted paths, Word format switches on them ({{total \\# "#,##0.00"}}, {{date \\@ "d MMMM yyyy"}}, written in `locale`), {{#each}} loops (including table rows) with {{@number}} counting from 1, {{#if}} conditionals, and {{%name}} image placeholders filled from the `images` argument (a file or a Mermaid diagram). Call template_inspect first to learn the exact field names. The template\'s own styling is preserved — you supply only data.',
   inputSchema: {
     template: z.string().min(1).describe("Template path (.docx), relative to the server root."),
     out: z
@@ -170,6 +171,13 @@ export const templateFillTool = defineTool({
       .optional()
       .describe(
         'Pictures for the template\'s `{{%name}}` placeholders, keyed without the %. Each takes a .png/.jpg/.gif file or a Mermaid diagram, e.g. { "logo": { "from": "logo.png" }, "flow": { "source": "flowchart LR\\n A --> B" } }. Images go here rather than in `data` because a picture cannot travel through JSON.'
+      ),
+    locale: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Locale the template\'s format switches write in, e.g. "de-DE" (a `\\#` picture in German symbols, month names in German) or "en-IN" (12,34,567.00). Defaults to English.'
       ),
     allowMissing: z
       .boolean()
@@ -247,7 +255,8 @@ export const templateFillTool = defineTool({
       // nothing reports a failure.
       filled = Template.fill(doc, templateData, {
         strict: args.allowMissing !== true,
-        richPlaceholders: true
+        richPlaceholders: true,
+        ...(args.locale === undefined ? {} : { locale: args.locale })
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -787,12 +796,15 @@ function describeFilledImages(
 }
 
 /** Build an example JSON shape from the tag list. */
-function buildShape(tags: readonly { expression: string; type: string }[]): string {
+function buildShape(tags: readonly { expression: string; type: string; path?: string }[]): string {
   const shape: Record<string, unknown> = {};
 
   for (const tag of tags) {
-    if (tag.type === "variable" && !tag.expression.startsWith(".")) {
-      assignPath(shape, tag.expression, "…");
+    // `path` is the data the variable reads, without its format switches; a
+    // `.name` is a loop item's and an `@number` a loop variable, neither data.
+    const variable = tag.path ?? tag.expression;
+    if (tag.type === "variable" && !variable.startsWith(".") && !variable.startsWith("@")) {
+      assignPath(shape, variable, "…");
     } else if (tag.type === "eachOpen") {
       const name = tag.expression.replace(/^#each\s+/, "").trim();
       if (name.length > 0) {

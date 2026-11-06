@@ -277,6 +277,59 @@ paragraph, a table or an image — no data object, no conditionals or loops,
 comments left alone. Use `fill` when the template carries logic, `patch` when
 you only swap placeholders for ready-made content.
 
+A loop (`{{#each}}`, table-row loops and `{{#cols}}` included) treats a value
+that is not an array as one item, and `undefined` or `null` as none. So one
+template fills one line item as it fills several — XML cannot say "a list of
+one", and `Template.createXmlDataSource` reads a single `<item>` as an object
+where two read as an array.
+
+XML attributes are `@name` keys: `<amount currency="EUR">10.00</amount>` reads
+as `{ "@currency": "EUR", "#text": "10.00" }`, and the template writes and tests
+a record with `#text` as that text — `{{amount}}` is `10.00`,
+`{{amount.@currency}}` is `EUR`. An element with `xsi:nil="true"` is `null`;
+names are read without their namespace prefix.
+
+Inside a loop, `{{@index}}` counts from 0 and `{{@number}}` from 1, and
+`{{@first}}` / `{{@last}}` mark the ends (`{{#if @last}}`). `{{.name}}` is the
+current item's own `name` — the way to reach an item key such as an XML
+attribute `@number` that a loop variable shares a name with.
+
+A placeholder takes Word's field switches, as a `MERGEFIELD` does:
+
+```typescript
+import { Document, Template } from "documonster/word";
+
+const invoice = Document.create();
+Document.addParagraph(invoice, 'Total: {{total \\# "#,##0.00"}} due {{due \\@ "d MMMM yyyy"}}');
+Document.addParagraph(invoice, '{{customer \\* Upper}}{{phone \\b " — Tel. "}}');
+const filled = Template.fill(invoice, {
+  total: "1234.5",
+  due: "2026-11-07",
+  customer: "Acme",
+  phone: ""
+});
+// Total: 1,234.50 due 7 November 2026
+// ACME
+
+Template.fill(
+  invoice,
+  { total: "1234.5", due: "2026-11-07", customer: "Acme", phone: "" },
+  {
+    locale: "de-DE"
+  }
+); // a picture is then written in German symbols: "#.##0,00" → 1.234,50, "7. November 2026"
+```
+
+`\#` is a numeric picture, `\@` a date-time picture, `\*` a case or number
+format (`Upper`, `Caps`, `roman`, `CardText`, …), and `\b` / `\f` text written
+before / after a value that is not empty. The data is read as machines write it
+— numbers with a decimal point, dates as ISO, XML Schema `dateTime` or SAP's
+`YYYYMMDD`, a `Date` by its UTC time — whatever `locale` is; `locale` is what
+the picture is written in, as Word's regional settings are, and it groups digits
+as the locale does (`en-IN` writes `12,34,567.00`). A value a picture cannot
+take throws in strict mode and is written as it is otherwise; a switch that is
+not one always throws.
+
 ### Fields
 
 ```typescript
