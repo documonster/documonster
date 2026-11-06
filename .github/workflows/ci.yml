@@ -18,9 +18,9 @@ jobs:
 
   test:
     needs: should-run
-    # Node, packages and three browser shards in sequence: the Windows runners take
-    # about 18 minutes for it, which 15 cut off in the middle of the browser run.
-    timeout-minutes: 25
+    # Node, packages and six browser shards in sequence: the Windows runners take
+    # about 20 minutes for it, which 15 cut off in the middle of the browser run.
+    timeout-minutes: 30
     name: Node v${{ matrix.node-version }} on ${{ matrix.os }}
     strategy:
       fail-fast: false

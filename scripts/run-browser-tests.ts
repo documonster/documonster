@@ -10,6 +10,8 @@
  * every file after the crash left unrun. A shard is a fresh Vitest process and a fresh browser, so what a renderer
  * accumulates is bounded by the shard's size rather than the suite's.
  *
+ * Six, not three: at ~240 files a shard the renderer still died on a Windows runner, at file 201 of 237.
+ *
  * Shards run sequentially: running them at once would put the same total in memory at the same time.
  * `--passWithNoTests` keeps a filtered run (`pnpm test:browser some-file`) from failing on the shards it leaves empty.
  */
@@ -17,7 +19,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import process from "node:process";
 
-const SHARDS = 3;
+const SHARDS = 6;
 const VITEST = join(process.cwd(), "node_modules", "vitest", "vitest.mjs");
 const forwarded = process.argv.slice(2).filter(arg => arg !== "--");
 
