@@ -111,6 +111,7 @@ import {
   isArchiveBytes,
   type ArchiveBytes
 } from "@archive/io/archive-source";
+import { asPlainBytes } from "@utils/binary";
 import { s } from "@utils/schema";
 
 /**
@@ -360,11 +361,11 @@ export class HttpRangeReader implements RandomAccessReader {
    * @throws {RangeError} If `start` or `end` is outside the file (the message names it)
    * @throws {ArchiveHttpRangeError} If the HTTP request fails
    */
-  async read(start: number, end: number): Promise<Uint8Array> {
+  async read(start: number, end: number): Promise<Uint8Array<ArrayBuffer>> {
     checkRange("Archive.HttpRangeReader#read", start, end, this._size);
 
     if (this._fullData) {
-      return this._fullData.subarray(start, end);
+      return asPlainBytes(this._fullData.subarray(start, end));
     }
 
     // HTTP Range header uses inclusive end

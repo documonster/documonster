@@ -11,6 +11,7 @@
  * preserves the binary VBA project for round-trip fidelity.
  */
 
+import { asPlainBytes } from "@utils/binary";
 import { checkBytes, checkHandle, invalidArgument } from "@word/core/argument-checks";
 import { markDerived } from "@word/core/ownership";
 import type { DocxDocument, OpaquePart } from "@word/types";
@@ -103,9 +104,10 @@ export function getVbaProjectInfo(doc: DocxDocument): VbaProjectInfo {
  * @param doc - The parsed document.
  * @returns The vbaProject.bin bytes, or undefined if not present.
  */
-export function getVbaProjectData(doc: DocxDocument): Uint8Array | undefined {
+export function getVbaProjectData(doc: DocxDocument): Uint8Array<ArrayBuffer> | undefined {
   checkHandle(doc, "document", "doc", "Vba.getData");
-  return findVbaBinary(doc);
+  const data = findVbaBinary(doc);
+  return data && asPlainBytes(data);
 }
 
 /**

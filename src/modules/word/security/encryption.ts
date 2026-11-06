@@ -26,6 +26,7 @@ import {
   verifyPackagePassword
 } from "@archive/office-crypto/agile";
 import type { AgileEncryptionInfo, EncryptOptions } from "@archive/office-crypto/agile";
+import { asPlainBytes } from "@utils/binary";
 import { checkBytes, checkString, invalidArgument } from "@word/core/argument-checks";
 import { DocxDecryptionError, DocxParseError } from "@word/errors";
 import { checkEncryptOptions } from "@word/security/package-encryption";
@@ -71,8 +72,8 @@ export function deriveEncryptionKey(
     keyBits: number;
   },
   blockKey: Uint8Array
-): Promise<Uint8Array> {
-  return translated(() => deriveAgileKey(password, info, blockKey));
+): Promise<Uint8Array<ArrayBuffer>> {
+  return translated(() => deriveAgileKey(password, info, blockKey)).then(asPlainBytes);
 }
 
 /** Block keys as defined in MS-OFFCRYPTO 2.3.4.13. */
@@ -128,9 +129,11 @@ export function decryptDocx(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   password: string,
   maxDecryptedSize?: number
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const bytes = checkBytes(buffer, "buffer", "WordCrypto.decrypt");
-  return translated(() => decryptSharedPackage(bytes, password, maxDecryptedSize));
+  return translated(() => decryptSharedPackage(bytes, password, maxDecryptedSize)).then(
+    asPlainBytes
+  );
 }
 
 /**
@@ -172,7 +175,7 @@ export async function encryptDocx(
   zipBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
   password: string,
   options?: EncryptOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "WordCrypto.encrypt";
   const zip = checkBytes(zipBytes, "zipBytes", where);
   checkString(password, "password", where);
@@ -184,5 +187,5 @@ export async function encryptDocx(
   if (signature !== 0x04034b50 && signature !== 0x06054b50) {
     invalidArgument(where, "zipBytes", "a ZIP package (a .docx file's bytes)", zip);
   }
-  return translated(() => encryptPackage(zip, password, options));
+  return asPlainBytes(await translated(() => encryptPackage(zip, password, options)));
 }

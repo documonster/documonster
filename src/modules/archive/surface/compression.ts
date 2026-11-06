@@ -87,11 +87,11 @@ function wrapSync<R>(
   };
 }
 
-function wrapAsync(
+function wrapAsync<R>(
   where: string,
   codec: Codec,
-  run: (data: Uint8Array, options?: CompressOptions) => Promise<Uint8Array>
-): (data: Uint8Array, options?: CompressOptions) => Promise<Uint8Array> {
+  run: (data: Uint8Array, options?: CompressOptions) => Promise<R>
+): (data: Uint8Array, options?: CompressOptions) => Promise<R> {
   return async (data, options) => {
     checkArguments(where, data, options);
     try {

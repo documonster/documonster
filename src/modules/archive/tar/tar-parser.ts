@@ -26,7 +26,7 @@ import { TAR_BLOCK_SIZE, TAR_TYPE } from "@archive/tar/tar-constants";
 import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
 import { decodeHeader, isZeroBlock, calculatePadding } from "@archive/tar/tar-header";
 import { isReadableStream } from "@stream/core/type-guards";
-import { textDecoder } from "@utils/binary";
+import { textDecoder, asPlainBytes } from "@utils/binary";
 import { describeValue as describeSource } from "@utils/describe-value";
 
 // Helper to strip trailing null characters without using control char regex
@@ -126,7 +126,7 @@ export interface TarEntry {
 /** One entry of {@link untar} / {@link untarSync} (and their tar.gz forms): its header and its data. */
 export interface UnpackedTarEntry {
   info: TarEntryInfo;
-  data: Uint8Array;
+  data: Uint8Array<ArrayBuffer>;
 }
 
 /** A parsed entry over data already read. */
@@ -612,7 +612,7 @@ export async function untar(
   for await (const entry of readTarStream(source, options)) {
     result.set(entry.info.path, {
       info: entry.info,
-      data: await entry.bytes()
+      data: asPlainBytes(await entry.bytes())
     });
   }
   return result;
@@ -621,7 +621,7 @@ export async function untar(
 /**
  * Parse an in-memory TAR archive synchronously and return every entry with its data —
  * the synchronous form of {@link untar} for a `Uint8Array` source. Each `data` is a view
- * into `source`, not a copy.
+ * into `source`, not a copy (unless `source` is in a `SharedArrayBuffer`, which is copied — see `asPlainBytes`).
  */
 export function untarSync(
   source: ArchiveBytes,
@@ -638,7 +638,7 @@ export function untarSync(
   const bytes = archiveBytesToUint8Array(source);
   const result = new Map<string, UnpackedTarEntry>();
   for (const { info, start, end } of parseTarRecords(bytes, options)) {
-    result.set(info.path, { info, data: bytes.subarray(start, end) });
+    result.set(info.path, { info, data: asPlainBytes(bytes.subarray(start, end)) });
   }
   return result;
 }

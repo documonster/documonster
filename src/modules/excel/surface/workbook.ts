@@ -54,6 +54,8 @@ export {
   getExternalLink,
   listExternalLinks,
   listPersons,
+  getDefaultFont,
+  setDefaultFont,
   registerFunction,
   unregisterFunction,
   getModel,

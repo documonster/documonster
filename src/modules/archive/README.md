@@ -366,7 +366,7 @@ const editor = await Archive.ZipEditor.open(zipBytes, {
 });
 
 // From URL (HTTP Range requests)
-const editor = await Archive.ZipEditor.openUrl("https://example.com/archive.zip");
+const remote = await Archive.ZipEditor.openUrl("https://example.com/archive.zip");
 
 // Operations
 editor.has("file.txt"); // Check existence
@@ -377,8 +377,6 @@ editor.rename("a.txt", "b.txt"); // Rename entry
 editor.setComment("Updated archive"); // Set archive comment
 
 // Reusable edit plans
-import { Archive } from "documonster/archive";
-
 const plan = new Archive.ZipEditPlan();
 plan.set("config.json", newConfig);
 plan.delete("temp/");

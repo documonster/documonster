@@ -20,6 +20,7 @@ import {
 } from "@pdf/core/digital-signature";
 import type { PdfSignatureCheck, SignPdfOptions } from "@pdf/core/digital-signature";
 import { PdfSignaturePlaceholderMissingError } from "@pdf/errors";
+import { asPlainBytes } from "@utils/binary";
 import { check, s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 
@@ -139,13 +140,13 @@ export async function verify(
 export async function fillPlaceholder(
   pdfBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
   options: SignPdfOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "Pdf.Signature.fillPlaceholder";
   const data = readPdfBytes(where, "pdfBytes", pdfBytes);
   check(signPdfOptionsSchema, options, at(where, "options"));
   checkSigningMaterial(where, options.certificate, options.privateKey);
   try {
-    return await signPdf(data, options.certificate, options.privateKey);
+    return asPlainBytes(await signPdf(data, options.certificate, options.privateKey));
   } catch (err) {
     if (err instanceof PdfSignaturePlaceholderMissingError) {
       throw new PdfSignaturePlaceholderMissingError(

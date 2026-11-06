@@ -21,6 +21,7 @@ import type { RasterSurfaceOptions } from "@draw/raster/surface";
 import { renderNode as renderNodeImpl } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import type { DrawMatrix, DrawNode } from "@draw/types";
+import { asPlainBytes } from "@utils/binary";
 import { check, s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 
@@ -94,7 +95,7 @@ export function downsample(
   width: number,
   height: number,
   factor: number
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   checkPositiveInteger("Draw.Backend.downsample", "width", width);
   checkPositiveInteger("Draw.Backend.downsample", "height", height);
   checkPositiveInteger("Draw.Backend.downsample", "factor", factor);
@@ -110,7 +111,7 @@ export function downsample(
       isBytes ? `${source.length} bytes` : source
     );
   }
-  return downsampleImpl(source, width, height, factor);
+  return asPlainBytes(downsampleImpl(source, width, height, factor));
 }
 
 /**

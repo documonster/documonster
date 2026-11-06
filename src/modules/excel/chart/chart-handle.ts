@@ -59,6 +59,7 @@ import { argumentChecks } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
 import { copyPlain } from "@excel/utils/copy-plain";
 import { RelType } from "@excel/xlsx/rel-type";
+import { asPlainBytes } from "@utils/binary";
 
 /**
  * Default chart extent when a caller passes a single-cell address. Matches
@@ -434,12 +435,13 @@ export function chartUnknownElements(
  * have their own extension mechanism and do not use `c:userShapes`).
  * The bytes are the chart's own, not a copy: write into them and the file changes.
  */
-export function chartUserShapesXml(c: ChartHandle): Uint8Array | undefined {
+export function chartUserShapesXml(c: ChartHandle): Uint8Array<ArrayBuffer> | undefined {
   checkChart(c);
   if (c.chartNumber <= 0) {
     return undefined;
   }
-  return getChartEntry(getSheetWorkbook(c.worksheet), c.chartNumber)?.userShapesXml;
+  const xml = getChartEntry(getSheetWorkbook(c.worksheet), c.chartNumber)?.userShapesXml;
+  return xml && asPlainBytes(xml);
 }
 
 /**

@@ -10,7 +10,7 @@
  * to the streaming API (`Stream.RowHandle`).
  */
 import type { CellData } from "@excel/core/cell";
-import { cellType, checkRowList, checkRowValues } from "@excel/core/cell";
+import { cellType, checkCellValue, checkRowList, checkRowValues } from "@excel/core/cell";
 import { ValueType } from "@excel/core/enums";
 import type { RowData, RowDimensions, RowModel } from "@excel/core/row";
 import {
@@ -56,7 +56,8 @@ import {
   rowCommit,
   rowEachCell,
   rowGetCell,
-  rowSetValues
+  rowSetValues,
+  rowSplice
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { ExcelUnsupportedFeatureError } from "@excel/errors";
@@ -91,6 +92,7 @@ import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
 export type Sheet = WorksheetData;
 
 const MAX_ROW = 1048576;
+const MAX_COL = 16384;
 
 /**
  * Where a new row takes its style from.
@@ -314,6 +316,29 @@ export function splice(
   refuseWrittenRows(ws, "Row.splice", "splice rows");
   inserts.forEach((values, i) => checkRowValues("Row.splice", values, `inserts[${i}]`));
   spliceRows(ws, start, count, ...(inserts as RowValues[]));
+}
+
+/**
+ * Within row `row`, remove `count` cells starting at column `start` (1-based) and insert `inserts` in their place,
+ * as `Array.prototype.splice` does: the cells to the right move left or right, each taking its value, style and
+ * note with it, and an inserted cell starts unstyled. Other rows are not touched, and nothing that refers to the
+ * moved cells (a formula, a defined name, a merge) is rewritten — for an edit references follow, use
+ * `Column.splice`.
+ *
+ * This is exceljs's `row.splice(start, count, ...values)`.
+ */
+export function spliceCells(
+  ws: WorksheetData | StreamWorksheet,
+  row: number,
+  start: number,
+  count: number,
+  ...inserts: CellValueInput[]
+): void {
+  const where = "Row.spliceCells";
+  checkNumber(where, "start", start, { min: 1, max: MAX_COL, integer: true });
+  checkNumber(where, "count", count, { min: 0, integer: true });
+  inserts.forEach((value, i) => checkCellValue(value, { where, field: `inserts[${i}]` }));
+  rowSplice(editRow(ws, where, row), start, count, ...(inserts as CellValue[]));
 }
 
 // --- counting / iteration ---

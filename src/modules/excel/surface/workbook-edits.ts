@@ -37,6 +37,7 @@ import {
   eachWorksheet as coreEachWorksheet,
   getChartsheet as coreGetChartsheet,
   getChartsheets as coreListChartsheets,
+  getDefaultFont as coreGetDefaultFont,
   getExternalLink as coreGetExternalLink,
   getWorkbookModel as coreGetWorkbookModel,
   importWorksheet as coreImportWorksheet,
@@ -50,6 +51,7 @@ import {
   removeWorksheet as coreRemoveWorksheet,
   renameChartsheet as coreRenameChartsheet,
   replaceChartsheetChart as coreReplaceChartsheetChart,
+  setDefaultFont as coreSetDefaultFont,
   unprotectWorkbook,
   unregisterFunction as coreUnregisterFunction,
   verifyWorkbookPassword
@@ -66,6 +68,7 @@ import { setModel as surfaceSetModel } from "@excel/surface/workbook-model";
 import type {
   AddWorksheetOptions,
   AutoFilter,
+  Font,
   HeaderFooter,
   NamedStyle,
   PageSetup,
@@ -76,8 +79,10 @@ import type {
 } from "@excel/types";
 import { argumentChecks, checkProtectCall, checkSchema } from "@excel/utils/arguments";
 import { copyPlain } from "@excel/utils/copy-plain";
+import { copyStyleFacet } from "@excel/utils/copy-style";
 import { splitPasswordOptions } from "@excel/utils/sheet-protection";
 import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
+import { checkStyleFacet } from "@excel/utils/style-checks";
 import { isRecordArgument } from "@utils/object";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -213,6 +218,41 @@ export function eachWorksheet(
 export function getDefinedNames(wb: WorkbookData | StreamWorkbook): DefinedNamesData {
   const writer = asStreamWorkbook(wb);
   return writer ? writer._getDefinedNames() : coreGetDefinedNames(wb as WorkbookData);
+}
+
+/**
+ * The workbook's default font — the font of the "Normal" style, which every cell without a font of its own is shown
+ * in — or `undefined` when the workbook uses Excel's (Calibri 11). A copy: change it with {@link setDefaultFont}.
+ */
+export function getDefaultFont(wb: WorkbookData | StreamWorkbook): Partial<Font> | undefined {
+  const writer = asStreamWorkbook(wb);
+  if (!writer) {
+    checkWorkbook(wb);
+  }
+  const font = writer ? writer.defaultFont : coreGetDefaultFont(wb as WorkbookData);
+  return copyStyleFacet("font", font);
+}
+
+/**
+ * Set the workbook's default font (the "Normal" style's font, written as the first font of the styles part), or reset
+ * it to Excel's with `undefined`. The font is copied in. A streaming writer takes it until it is committed, and only
+ * with `useStyles: true`: without it the writer writes no styles, so there is no default font to set.
+ *
+ * @throws {ExcelStreamStateError} On a streaming writer that has been committed.
+ */
+export function setDefaultFont(
+  wb: WorkbookData | StreamWorkbook,
+  font: Partial<Font> | undefined
+): void {
+  checkStyleFacet("Workbook.setDefaultFont", "font", font, "font");
+  const copy = copyStyleFacet("font", font);
+  const writer = asStreamWorkbook(wb);
+  if (writer) {
+    writer.defaultFont = copy;
+    return;
+  }
+  checkWorkbook(wb);
+  coreSetDefaultFont(wb as WorkbookData, copy);
 }
 
 /**
@@ -458,7 +498,11 @@ export const replaceChartsheetChart = /* @__PURE__ */ workbookOnly(
   "has no chartsheets",
   coreReplaceChartsheetChart
 );
-/** @deprecated Use `Chartsheet.setName(Workbook.getChartsheet(wb, nameOrIndex), name)`. Removed in 1.0. */
+/**
+ * @deprecated Look the chartsheet up, then rename it:
+ * `const cs = Workbook.getChartsheet(wb, nameOrIndex); if (cs) Chartsheet.setName(cs, name);` — this answered
+ * `false` when there is no such chartsheet. Removed in 1.0.
+ */
 export const renameChartsheet = /* @__PURE__ */ workbookOnly(
   "Workbook.renameChartsheet",
   "has no chartsheets",

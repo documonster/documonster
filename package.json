@@ -283,6 +283,11 @@
   },
   "scripts": {
     "analyze:browser": "node scripts/clean.ts dist && node --input-type=module -e \"import { execSync } from 'node:child_process'; process.env.ANALYZE='true'; execSync('rolldown -c rolldown.config.ts', { stdio: 'inherit' });\"",
+    "api:changes": "node scripts/api-changes.ts",
+    "verify:excelts-guide": "node scripts/verify-excelts-guide.ts",
+    "verify:exceljs-guide": "node scripts/verify-exceljs-guide.ts",
+    "verify:exceljs-parity": "node scripts/verify-exceljs-parity.ts",
+    "verify:excelts-parity": "node scripts/verify-exceljs-parity.ts --against excelts",
     "benchmark": "node scripts/clean.ts dist && pnpm build:esm && node --expose-gc scripts/benchmark.ts",
     "benchmark:formula": "pnpm build && node --expose-gc benchmark/formula-benchmark.mjs",
     "benchmark:xlsb": "node --expose-gc --import @oxc-node/core/register benchmark/xlsb-benchmark.ts",
@@ -294,7 +299,7 @@
     "build:verify": "pnpm build:verify:node && pnpm build:verify:browser && pnpm verify:cjs && pnpm verify:browser-stubs",
     "build:verify:browser": "tsc --noEmit --ignoreConfig --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --customConditions browser --lib ESNext,DOM scripts/fixtures/stream-portable-consumer.ts dist/types/modules/excel/index.browser.d.ts dist/types/modules/excel/chart/index.d.ts dist/types/modules/excel/bridge/csv.d.ts dist/types/modules/excel/bridge/markdown.d.ts dist/types/modules/excel/bridge/formula.d.ts dist/types/modules/archive/index.browser.d.ts dist/types/modules/csv/index.d.ts dist/types/modules/markdown/index.d.ts dist/types/modules/stream/index.browser.d.ts dist/types/modules/pdf/index.d.ts dist/types/modules/formula/index.d.ts dist/types/modules/xml/index.d.ts dist/types/modules/word/index.d.ts dist/types/modules/word/html.d.ts dist/types/modules/word/crypto.d.ts dist/types/modules/word/markdown.d.ts dist/types/modules/word/excel.d.ts",
     "build:verify:node": "tsc --noEmit --ignoreConfig --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ESNext --types node scripts/fixtures/stream-portable-consumer.ts dist/types/modules/archive/index.d.ts dist/types/modules/csv/index.d.ts dist/types/modules/excel/index.d.ts dist/types/modules/excel/chart/index.d.ts dist/types/modules/excel/bridge/formula.d.ts dist/types/modules/excel/bridge/csv.node.d.ts dist/types/modules/excel/bridge/markdown.node.d.ts dist/types/modules/formula/index.d.ts dist/types/modules/markdown/index.d.ts dist/types/modules/pdf/index.d.ts dist/types/modules/stream/index.d.ts dist/types/modules/xml/index.d.ts dist/types/modules/word/index.d.ts dist/types/modules/word/html.d.ts dist/types/modules/word/crypto.d.ts dist/types/modules/word/markdown.d.ts dist/types/modules/word/excel.d.ts",
-    "check": "pnpm build:esm && concurrently --raw \"pnpm type\" \"pnpm lint\" \"pnpm format\" \"pnpm verify:layers\" \"pnpm verify:public-types\" \"pnpm verify:packages\" \"pnpm verify:types-versions\" \"pnpm verify:doc-examples\" \"pnpm verify:doc-links\"",
+    "check": "pnpm build:esm && concurrently --raw \"pnpm type\" \"pnpm lint\" \"pnpm format\" \"pnpm verify:layers\" \"pnpm verify:public-types\" \"pnpm verify:packages\" \"pnpm verify:types-versions\" \"pnpm verify:doc-examples\" \"pnpm verify:doc-links\" \"pnpm verify:guide-tables\" \"pnpm verify:guide-examples\"",
     "clean": "node scripts/clean.ts \"**/node_modules\" \"**/dist\" pnpm-lock.yaml && pnpm i",
     "corpus:xlsb": "node --import @oxc-node/core/register scripts/fetch-xlsb-corpus.ts",
     "example": "node scripts/run-examples.ts",
@@ -320,6 +325,8 @@
     "verify:cjs": "node scripts/verify-cjs-entrypoints.ts",
     "verify:doc-examples": "node scripts/verify-doc-examples.ts",
     "verify:doc-links": "node scripts/verify-doc-links.ts",
+    "verify:guide-tables": "node scripts/verify-guide-tables.ts",
+    "verify:guide-examples": "node scripts/verify-guide-examples.ts",
     "verify:examples": "node scripts/run-examples.ts",
     "verify:compat": "node scripts/verify-compat.ts",
     "verify:install": "node scripts/verify-installed-package.cjs",
@@ -353,6 +360,7 @@
     "rolldown": "^1.2.11",
     "rollup-plugin-visualizer": "^7.1.1",
     "typescript": "catalog:",
+    "typescript-api": "npm:typescript@5.9.3",
     "vitest": "catalog:"
   },
   "browserslist": [

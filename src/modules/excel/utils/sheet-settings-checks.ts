@@ -22,6 +22,12 @@
  * schema's, so a refusal here reads as one from a schema-checked option does.
  */
 import { ExcelInvalidAddressError } from "@excel/errors";
+import type {
+  PageSetupCellComments,
+  PageSetupErrors,
+  PageSetupOrder,
+  PageSetupOrientation
+} from "@excel/types";
 import { argumentFailure } from "@excel/utils/arguments";
 import { describeValue as describe } from "@utils/describe-value";
 import {
@@ -43,21 +49,47 @@ export interface SheetSettings {
 /** ST_SheetState. */
 export const SHEET_STATES: readonly string[] = ["visible", "hidden", "veryHidden"];
 /** ST_Orientation. */
-export const ORIENTATIONS: readonly string[] = ["default", "portrait", "landscape"];
+export const ORIENTATIONS = [
+  "default",
+  "portrait",
+  "landscape"
+] as const satisfies readonly PageSetupOrientation[];
 /** ST_PageOrder. */
-export const PAGE_ORDERS: readonly string[] = ["downThenOver", "overThenDown"];
+export const PAGE_ORDERS = [
+  "downThenOver",
+  "overThenDown"
+] as const satisfies readonly PageSetupOrder[];
 /**
  * ST_CellComments, plus `"None"` — the model's default — and `"asDisplyed"`, the spelling this library once used.
  */
-export const CELL_COMMENTS: readonly string[] = [
+export const CELL_COMMENTS = [
   "None",
   "none",
   "asDisplayed",
   "asDisplyed",
   "atEnd"
-];
+] as const satisfies readonly PageSetupCellComments[];
 /** ST_PrintError. */
-export const PRINT_ERRORS: readonly string[] = ["displayed", "blank", "dash", "NA"];
+export const PRINT_ERRORS = [
+  "displayed",
+  "blank",
+  "dash",
+  "NA"
+] as const satisfies readonly PageSetupErrors[];
+
+// `satisfies` keeps each list inside its type; these keep each type inside its list, so the two are one vocabulary.
+type Covers<List extends readonly string[], Type extends string> = [
+  Exclude<Type, List[number]>
+] extends [never]
+  ? true
+  : never;
+const _vocabularies: [
+  Covers<typeof ORIENTATIONS, PageSetupOrientation>,
+  Covers<typeof PAGE_ORDERS, PageSetupOrder>,
+  Covers<typeof CELL_COMMENTS, PageSetupCellComments>,
+  Covers<typeof PRINT_ERRORS, PageSetupErrors>
+] = [true, true, true, true];
+void _vocabularies;
 /** The model's view states: ST_PaneState's `frozenSplit` is read as `frozen`, and a sheet without a pane is `normal`. */
 export const VIEW_STATES: readonly string[] = ["normal", "frozen", "split"];
 /** ST_SheetViewType. */

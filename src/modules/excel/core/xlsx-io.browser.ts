@@ -37,6 +37,7 @@ import { createXlsxByteStream } from "@excel/core/xlsx-stream";
 import { encryptWorkbookPackage, openWorkbookPackage } from "@excel/utils/container-errors";
 import type { XlsxParseStream, XlsxReadOptions } from "@excel/xlsx/types";
 import { writeXlsxBytes, writeXlsxToStream } from "@excel/xlsx/write/package";
+import { asPlainBytes } from "@utils/binary";
 
 export type {
   WorkbookDiagnosticReadOptions,
@@ -79,12 +80,12 @@ function loadXlsxReader() {
 export async function toBuffer(
   wb: WorkbookData,
   options?: WorkbookWriteOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkWorkbook(wb);
   checkIoOptions("Workbook.toBuffer", options, "write");
   // `null` is taken as no options, as the check documents.
   options ??= undefined;
-  return packageBytes(wb, options);
+  return asPlainBytes(await packageBytes(wb, options));
 }
 
 /** The package `toBuffer` returns, encrypted with `options.password` when one is given (the code loads only then). */

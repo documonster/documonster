@@ -31,7 +31,7 @@ export interface ToPngOptions extends RasterizeOptions {
  */
 export interface PngImage extends Omit<RasterizedImage, "data"> {
   /** The PNG file. */
-  readonly png: Uint8Array;
+  readonly png: Uint8Array<ArrayBuffer>;
 }
 
 const dpiSchema = positive().optional();

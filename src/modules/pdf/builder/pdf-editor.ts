@@ -114,6 +114,7 @@ import { isPdfArray, isPdfRef, dictGetName, decodePdfStringBytes } from "@pdf/re
 import type { PdfDictValue, PdfObject, PdfRef } from "@pdf/reader/pdf-parser";
 import { getDictStringValue } from "@pdf/reader/reader-utils";
 import { alphaGsName } from "@pdf/render/page-renderer";
+import { asPlainBytes } from "@utils/binary";
 import type { CjkLanguage } from "@utils/cjk";
 import { describeValue } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
@@ -1052,16 +1053,16 @@ export class PdfEditor {
    * @throws {PdfArgumentError} An index names no page, or a removed one (field
    *   `options.pageIndices[i]`) — before any part is written.
    */
-  splitPages(options?: EditorSplitOptions): Promise<Uint8Array[]>;
+  splitPages(options?: EditorSplitOptions): Promise<Uint8Array<ArrayBuffer>[]>;
   /**
    * @deprecated Pass `{ pageIndices }` as one options object. The positional form is removed
    * in 1.0. It skips an index out of range or naming a removed page, as it always has, and
    * throws `PdfStructureError` for one in range that is not an integer.
    */
-  splitPages(pageIndices?: readonly number[] | null): Promise<Uint8Array[]>;
+  splitPages(pageIndices?: readonly number[] | null): Promise<Uint8Array<ArrayBuffer>[]>;
   async splitPages(
     optionsOrIndices?: EditorSplitOptions | readonly number[] | null
-  ): Promise<Uint8Array[]> {
+  ): Promise<Uint8Array<ArrayBuffer>[]> {
     // Anything but an options object is the positional list it has always been — `null`
     // included, which meant "every page".
     const where = "Pdf.Editor#splitPages";
@@ -1162,7 +1163,7 @@ export class PdfEditor {
       );
     }
 
-    return results;
+    return results.map(asPlainBytes);
   }
 
   /**
@@ -1619,7 +1620,7 @@ export class PdfEditor {
    *
    * @returns The modified PDF as Uint8Array
    */
-  async toBuffer(options: EditorToBufferOptions = {}): Promise<Uint8Array> {
+  async toBuffer(options: EditorToBufferOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     checkWriteOptions("Pdf.Editor#toBuffer", options);
     const { incremental } = options;
     if (
@@ -1632,7 +1633,7 @@ export class PdfEditor {
         `Pdf.Editor#toBuffer: options.incremental must be true, false or "required", got ${describeIndex(incremental)}`
       );
     }
-    return this._serialized(() => this._toBuffer(options));
+    return asPlainBytes(await this._serialized(() => this._toBuffer(options)));
   }
 
   /**
@@ -1847,13 +1848,15 @@ export class PdfEditor {
    * @deprecated Use {@link PdfEditor.toBuffer} (which keeps the encryption by default; pass
    * `{ encryption: "remove" }` for this method's decrypted copy). Removed in 1.0.
    */
-  async save(options?: EditorWriteOptions): Promise<Uint8Array> {
-    return this._serialized(() =>
-      this._writeFull(options, {
-        caller: "save()",
-        legacyFormRules: true,
-        rewriteEncryption: "remove"
-      })
+  async save(options?: EditorWriteOptions): Promise<Uint8Array<ArrayBuffer>> {
+    return asPlainBytes(
+      await this._serialized(() =>
+        this._writeFull(options, {
+          caller: "save()",
+          legacyFormRules: true,
+          rewriteEncryption: "remove"
+        })
+      )
     );
   }
 
@@ -1866,13 +1869,15 @@ export class PdfEditor {
    * @deprecated Use `toBuffer({ incremental: true })` (whose fallback keeps the encryption by
    * default). Removed in 1.0.
    */
-  async saveIncremental(options?: EditorWriteOptions): Promise<Uint8Array> {
-    return this._serialized(() =>
-      this._writeIncremental(options, {
-        caller: "saveIncremental()",
-        legacyFormRules: true,
-        rewriteEncryption: "remove"
-      })
+  async saveIncremental(options?: EditorWriteOptions): Promise<Uint8Array<ArrayBuffer>> {
+    return asPlainBytes(
+      await this._serialized(() =>
+        this._writeIncremental(options, {
+          caller: "saveIncremental()",
+          legacyFormRules: true,
+          rewriteEncryption: "remove"
+        })
+      )
     );
   }
 
@@ -3371,7 +3376,7 @@ export class PdfEditor {
    * });
    * ```
    */
-  async sign(options: EditorSignOptions): Promise<Uint8Array> {
+  async sign(options: EditorSignOptions): Promise<Uint8Array<ArrayBuffer>> {
     checkSignatureOptions("Pdf.Editor#sign", options);
     checkWriteOptions("Pdf.Editor#sign", options);
     // The signature is applied through a full rewrite, which breaks any
@@ -3408,7 +3413,7 @@ export class PdfEditor {
       }
     });
 
-    return signPdf(pdfWithPlaceholder, options.certificate, options.privateKey);
+    return asPlainBytes(await signPdf(pdfWithPlaceholder, options.certificate, options.privateKey));
   }
 
   /**

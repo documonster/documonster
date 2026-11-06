@@ -14,7 +14,8 @@ import { ArchiveArgumentError } from "@archive/core/errors";
 import {
   concatUint8Arrays as concatImpl,
   stringToUint8Array as stringToUint8ArrayImpl,
-  uint8ArrayToString as uint8ArrayToStringImpl
+  uint8ArrayToString as uint8ArrayToStringImpl,
+  asPlainBytes
 } from "@utils/binary";
 import { s } from "@utils/schema";
 import {
@@ -54,7 +55,7 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
  * outside the alphabet — including the URL-safe `-` and `_` — is refused, so the result is
  * the same on every platform.
  */
-export function base64ToUint8Array(base64: string): Uint8Array {
+export function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   checkString("Archive.base64ToUint8Array", "base64", base64);
   const compact = base64.replace(/[\t\n\f\r ]+/g, "");
   if (!BASE64.test(compact) || compact.replace(/=+$/, "").length % 4 === 1) {
@@ -63,7 +64,7 @@ export function base64ToUint8Array(base64: string): Uint8Array {
       "Archive.base64ToUint8Array: base64 is not valid base64"
     );
   }
-  return base64ToUint8ArrayImpl(compact);
+  return asPlainBytes(base64ToUint8ArrayImpl(compact));
 }
 
 /** Encode `bytes` as standard base64, padded. */
@@ -76,7 +77,10 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
  * Concatenate `arrays`. `totalLength`, when given, must be their combined length: it saves
  * the sum, it does not truncate or pad.
  */
-export function concatUint8Arrays(arrays: readonly Uint8Array[], totalLength?: number): Uint8Array {
+export function concatUint8Arrays(
+  arrays: readonly Uint8Array[],
+  totalLength?: number
+): Uint8Array<ArrayBuffer> {
   checkArchiveArgument(
     s.array(s.unknown(), { expected: "an array of Uint8Array" }),
     arrays,
@@ -98,9 +102,9 @@ export function concatUint8Arrays(arrays: readonly Uint8Array[], totalLength?: n
 }
 
 /** Encode `str` as UTF-8. */
-export function stringToUint8Array(str: string): Uint8Array {
+export function stringToUint8Array(str: string): Uint8Array<ArrayBuffer> {
   checkString("Archive.stringToUint8Array", "str", str);
-  return stringToUint8ArrayImpl(str);
+  return asPlainBytes(stringToUint8ArrayImpl(str));
 }
 
 /** Decode `arr` with `encoding` (a `TextDecoder` label; default `"utf-8"`). */

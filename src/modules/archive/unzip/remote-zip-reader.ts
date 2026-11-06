@@ -172,6 +172,7 @@ import {
   ZipEocdNotFoundError,
   throwIfAborted
 } from "@archive/core/errors";
+import { asPlainBytes } from "@utils/binary";
 
 const remoteZipReaderOptionsSchema = s.object(
   {
@@ -462,7 +463,7 @@ export class RemoteZipReader {
   async getRawCompressedData(
     pathOrEntry: string | ZipEntryRecord,
     options: RawEntryReadOptions = {}
-  ): Promise<Uint8Array | undefined> {
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
     const entry =
       typeof pathOrEntry === "string"
         ? this._lookup("getRawCompressedData", pathOrEntry)
@@ -481,7 +482,7 @@ export class RemoteZipReader {
     const dataOffset = await this.getEntryDataOffset(entry);
     throwIfAborted(signal);
 
-    return this.reader.read(dataOffset, dataOffset + entry.compressedSize);
+    return asPlainBytes(await this.reader.read(dataOffset, dataOffset + entry.compressedSize));
   }
 
   /**
@@ -492,7 +493,7 @@ export class RemoteZipReader {
   getRawCompressedStream(
     pathOrEntry: string | ZipEntryRecord,
     options: RawEntryStreamOptions = {}
-  ): AsyncIterable<Uint8Array> | undefined {
+  ): AsyncIterable<Uint8Array<ArrayBuffer>> | undefined {
     const entry =
       typeof pathOrEntry === "string"
         ? this._lookup("getRawCompressedStream", pathOrEntry)
@@ -520,7 +521,7 @@ export class RemoteZipReader {
           throwIfAborted(signal);
 
           const end = Math.min(entry.compressedSize, offset + chunkSize);
-          yield await reader.read(dataOffset + offset, dataOffset + end);
+          yield asPlainBytes(await reader.read(dataOffset + offset, dataOffset + end));
           offset = end;
         }
       }
@@ -533,7 +534,7 @@ export class RemoteZipReader {
   async getRawEntry(
     path: string,
     options: RawEntryReadOptions = {}
-  ): Promise<{ entry: ZipEntryRecord; compressedData: Uint8Array } | undefined> {
+  ): Promise<{ entry: ZipEntryRecord; compressedData: Uint8Array<ArrayBuffer> } | undefined> {
     const entry = this._lookup("getRawEntry", path);
     if (!entry) {
       return undefined;
@@ -551,7 +552,7 @@ export class RemoteZipReader {
   getRawEntryStream(
     path: string,
     options: RawEntryStreamOptions = {}
-  ): { entry: ZipEntryRecord; compressedData: AsyncIterable<Uint8Array> } | undefined {
+  ): { entry: ZipEntryRecord; compressedData: AsyncIterable<Uint8Array<ArrayBuffer>> } | undefined {
     const entry = this._lookup("getRawEntryStream", path);
     if (!entry) {
       return undefined;
@@ -666,13 +667,19 @@ export class RemoteZipReader {
    * @param options - Password, CRC-32 check and progress callback
    * @returns File data, or undefined if entry not found
    */
-  extract(path: string, options?: RemoteZipExtractOptions): Promise<Uint8Array | undefined>;
+  extract(
+    path: string,
+    options?: RemoteZipExtractOptions
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  extract(path: string, password: string | Uint8Array): Promise<Uint8Array | undefined>;
+  extract(
+    path: string,
+    password: string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
   async extract(
     path: string,
     options?: RemoteZipExtractOptions | string | Uint8Array
-  ): Promise<Uint8Array | undefined> {
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
     const entry = this._lookup("extract", path);
     if (!entry) {
       return undefined;
@@ -688,13 +695,19 @@ export class RemoteZipReader {
    * @param options - Extract options or password
    * @returns File data
    */
-  extractEntry(entry: ZipEntryRecord, options?: RemoteZipExtractOptions): Promise<Uint8Array>;
+  extractEntry(
+    entry: ZipEntryRecord,
+    options?: RemoteZipExtractOptions
+  ): Promise<Uint8Array<ArrayBuffer>>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  extractEntry(entry: ZipEntryRecord, password: string | Uint8Array): Promise<Uint8Array>;
+  extractEntry(
+    entry: ZipEntryRecord,
+    password: string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer>>;
   async extractEntry(
     entry: ZipEntryRecord,
     options?: RemoteZipExtractOptions | string | Uint8Array
-  ): Promise<Uint8Array> {
+  ): Promise<Uint8Array<ArrayBuffer>> {
     const opts = this.normalizeExtractOptions(options);
     const password = opts.password ?? this.options.password;
     const shouldCheckCrc = opts.checkCrc32 ?? this.options.checkCrc32 ?? true;
@@ -713,7 +726,9 @@ export class RemoteZipReader {
     // Report progress for download
     opts.onprogress?.(entry.compressedSize, entry.compressedSize);
 
-    return this.processEntryCompressedData(entry, compressedData, password, shouldCheckCrc);
+    return asPlainBytes(
+      await this.processEntryCompressedData(entry, compressedData, password, shouldCheckCrc)
+    );
   }
 
   private async processEntryCompressedData(
@@ -764,12 +779,12 @@ export class RemoteZipReader {
    * @param options - Extract options or password
    * @returns Map of path to file data (directories are excluded)
    */
-  extractAll(options?: RemoteZipExtractOptions): Promise<Map<string, Uint8Array>>;
+  extractAll(options?: RemoteZipExtractOptions): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  extractAll(password: string | Uint8Array): Promise<Map<string, Uint8Array>>;
+  extractAll(password: string | Uint8Array): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
   async extractAll(
     options?: RemoteZipExtractOptions | string | Uint8Array
-  ): Promise<Map<string, Uint8Array>> {
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>> {
     const filePaths: string[] = [];
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
@@ -791,17 +806,17 @@ export class RemoteZipReader {
   extractMultiple(
     paths: readonly string[],
     options?: RemoteZipExtractOptions
-  ): Promise<Map<string, Uint8Array>>;
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
   extractMultiple(
     paths: readonly string[],
     password: string | Uint8Array
-  ): Promise<Map<string, Uint8Array>>;
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
   async extractMultiple(
     paths: readonly string[],
     options?: RemoteZipExtractOptions | string | Uint8Array
-  ): Promise<Map<string, Uint8Array>> {
-    const result = new Map<string, Uint8Array>();
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>> {
+    const result = new Map<string, Uint8Array<ArrayBuffer>>();
     if (!Array.isArray(paths)) {
       throw new ArchiveArgumentError(
         "paths",
@@ -964,7 +979,7 @@ export class RemoteZipReader {
           password,
           shouldCheckCrc
         );
-        result.set(path, data);
+        result.set(path, asPlainBytes(data));
         processedSize += entry.compressedSize;
       }
 
@@ -1028,19 +1043,19 @@ export class RemoteZipReader {
    */
   entriesGenerator(
     options?: RemoteZipExtractOptions
-  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array> }>;
+  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array<ArrayBuffer>> }>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
   entriesGenerator(
     password: string | Uint8Array
-  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array> }>;
+  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array<ArrayBuffer>> }>;
   async *entriesGenerator(
     options?: RemoteZipExtractOptions | string | Uint8Array
-  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array> }> {
+  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array<ArrayBuffer>> }> {
     const opts = this.normalizeExtractOptions(options);
 
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
-      let dataPromise: Promise<Uint8Array> | null = null;
+      let dataPromise: Promise<Uint8Array<ArrayBuffer>> | null = null;
       const getData = () => {
         if (!dataPromise) {
           dataPromise = this.extractEntry(entry, opts);

@@ -8,7 +8,7 @@
 import { checkStreamArgument, pullStreamOptionsSchema } from "@stream/arguments";
 import { StreamArgumentError, StreamStateError } from "@stream/errors";
 import type { IPullStream, PullStreamOptions, PullUntilOptions } from "@stream/types";
-import { uint8ArrayIndexOf } from "@utils/binary";
+import { uint8ArrayIndexOf, asPlainBytes } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 import { isRecordArgument } from "@utils/object";
 
@@ -217,28 +217,40 @@ export class PullStream extends EventEmitter implements IPullStream {
   /**
    * Pull exactly `size` bytes from the buffer.
    */
-  pull(size: number): Promise<Uint8Array>;
+  pull(size: number): Promise<Uint8Array<ArrayBuffer>>;
   /** @deprecated Use {@link pullUntil}, which takes `{ includePattern }`. Removed in 1.0. */
-  pull(pattern: Uint8Array, includePattern?: boolean): Promise<Uint8Array>;
-  pull(sizeOrPattern: number | Uint8Array, includePattern?: boolean): Promise<Uint8Array> {
+  pull(pattern: Uint8Array, includePattern?: boolean): Promise<Uint8Array<ArrayBuffer>>;
+  pull(
+    sizeOrPattern: number | Uint8Array,
+    includePattern?: boolean
+  ): Promise<Uint8Array<ArrayBuffer>> {
     if (typeof sizeOrPattern === "number") {
-      return this._pullSize(sizeOrPattern);
+      return this._pullSize(sizeOrPattern).then(asPlainBytes);
     }
-    return this._pullPattern(sizeOrPattern, includePattern ?? false, "Streams.PullStream#pull");
+    return this._pullPattern(
+      sizeOrPattern,
+      includePattern ?? false,
+      "Streams.PullStream#pull"
+    ).then(asPlainBytes);
   }
 
   /**
    * Pull the bytes up to the first occurrence of `pattern`, which is consumed too; it is
    * included in the result when `options.includePattern` is `true` (default `false`).
    */
-  pullUntil(pattern: Uint8Array, options?: PullUntilOptions): Promise<Uint8Array>;
+  pullUntil(pattern: Uint8Array, options?: PullUntilOptions): Promise<Uint8Array<ArrayBuffer>>;
   /** @deprecated Pass `{ includePattern }`. Removed in 1.0. */
-  pullUntil(pattern: Uint8Array, includePattern: boolean): Promise<Uint8Array>;
-  pullUntil(pattern: Uint8Array, options?: PullUntilOptions | boolean): Promise<Uint8Array> {
+  pullUntil(pattern: Uint8Array, includePattern: boolean): Promise<Uint8Array<ArrayBuffer>>;
+  pullUntil(
+    pattern: Uint8Array,
+    options?: PullUntilOptions | boolean
+  ): Promise<Uint8Array<ArrayBuffer>> {
     const includePattern = isRecordArgument(options)
       ? (options as PullUntilOptions).includePattern
       : (options as boolean | undefined);
-    return this._pullPattern(pattern, includePattern ?? false, "Streams.PullStream#pullUntil");
+    return this._pullPattern(pattern, includePattern ?? false, "Streams.PullStream#pullUntil").then(
+      asPlainBytes
+    );
   }
 
   private _pullSize(size: number): Promise<Uint8Array> {

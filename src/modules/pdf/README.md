@@ -175,7 +175,7 @@ for (const page of result.pages) {
 The simplest way to generate PDFs from Excel workbooks:
 
 ```typescript
-import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Column, Row, Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
@@ -1367,7 +1367,9 @@ The PDF module is fully tree-shakeable. If you don't import any PDF exports, the
 ```typescript
 // Only imports Excel core — PDF module is NOT included
 import { Workbook } from "documonster/excel";
+```
 
+```typescript
 // Imports Excel + PDF bridge
 import { Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
@@ -1672,7 +1674,7 @@ that call's parameter name: `options.fontSize`, `options.watermark.pages[0]`, `m
 All errors extend `BaseError` with `cause` chain support:
 
 ```typescript
-import { Pdf } from "documonster/pdf";
+import { isPdfError, Pdf } from "documonster/pdf";
 
 try {
   await Pdf.fromExcel(workbook);

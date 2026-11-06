@@ -37,7 +37,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 ### Creating a Workbook
 
 ```typescript
-import { Workbook, Worksheet } from "documonster/excel";
+import { Row, Workbook, Worksheet } from "documonster/excel";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "My Sheet");
@@ -80,9 +80,11 @@ const workbook = await Workbook.readFile("input.xlsx");
 // const workbook = await Workbook.read(input.files[0]);
 
 const worksheet = Workbook.getWorksheet(workbook, 1);
-Row.each(worksheet, rowNumber => {
-  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.getValues(worksheet, rowNumber)));
-});
+if (worksheet) {
+  Row.each(worksheet, rowNumber => {
+    console.log("Row " + rowNumber + " = " + JSON.stringify(Row.getValues(worksheet, rowNumber)));
+  });
+}
 ```
 
 ### Encrypted Workbooks
@@ -575,6 +577,10 @@ lines inserted strictly inside it grow it (a table gains the rows, or columns na
 just past its end leave it alone; a deleted range shrinks, and a reference whose cells are all deleted becomes
 `#REF!`. A splice that both removes and inserts overwrites the lines it replaces, so references to them stay.
 
+`Row.spliceCells(worksheet, row, start, count, ...values)` is the other kind of splice: it shifts the cells of one row
+left or right — each keeping its value, style and note — and touches nothing else, as exceljs's `row.splice` did. No
+reference follows those cells.
+
 `Worksheet.setName` renames the sheet in every formula, name and chart series that refers to it, quoting the new name
 where it needs quotes, and `Workbook.removeWorksheet` turns references to the removed sheet into `#REF!`. Internal
 hyperlink locations are text and are not rewritten, as in Excel.
@@ -641,9 +647,13 @@ When writing with the streaming writer you hold a row _handle_ rather than a row
 number, so the break goes through the `Stream` surface:
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
-Stream.addRowPageBreak(sheet.getRow(20));
+const writer = new Stream.WorkbookWriter({ filename: "report.xlsx" });
+const sheet = Workbook.addWorksheet(writer, "Data");
+const row = sheet.addRow(["Subtotal", 1200]);
+Stream.addRowPageBreak(row); // the next row starts a new page
+Stream.commitRow(row);
 ```
 
 ### Sheet Protection
@@ -773,6 +783,7 @@ options from something else:
 
 ```typescript
 import { CHART_EX_PRESETS, CHART_PRESETS } from "documonster/chart";
+import { Chart, Table } from "documonster/excel";
 
 // A preset — 99 classic and 10 Office 2016 ones, named as Excel's gallery names them.
 Chart.place(
@@ -1378,7 +1389,7 @@ Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest
 Export any workbook to PDF with zero external dependencies:
 
 ```typescript
-import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Column, Row, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
@@ -3204,7 +3215,13 @@ Documonster is published as subpath entry points — there is no bare
 
 ```typescript
 // Excel domain errors — from documonster/excel
-import { ExcelError, isExcelError, ExcelImageError, ExcelTableError } from "documonster/excel";
+import {
+  ExcelError,
+  isExcelError,
+  ExcelImageError,
+  ExcelTableError,
+  Workbook
+} from "documonster/excel";
 
 // PDF export + PDF errors — from documonster/pdf
 import { Pdf, PdfError, isPdfError } from "documonster/pdf";

@@ -7,6 +7,7 @@
 
 import { CfbError, readCfb as readSharedCfb, writeCfb as writeSharedCfb } from "@archive/cfb/cfb";
 import type { CfbEntry } from "@archive/cfb/cfb";
+import { asPlainBytes } from "@utils/binary";
 import {
   checkBytes,
   checkNodeArray,
@@ -44,7 +45,7 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
  * @param entries - Named stream entries to include.
  * @returns The CFB file as a Uint8Array.
  */
-export function writeCfb(entries: readonly CfbEntry[]): Uint8Array {
+export function writeCfb(entries: readonly CfbEntry[]): Uint8Array<ArrayBuffer> {
   const where = "WordCrypto.Cfb.write";
   checkNodeArray(entries, "entries", where);
   // Every entry is checked before any is written; its data is read as the bytes it views.
@@ -54,7 +55,7 @@ export function writeCfb(entries: readonly CfbEntry[]): Uint8Array {
     return { ...entry, data: checkBytes(entry.data, `entries[${i}].data`, where) };
   });
   try {
-    return writeSharedCfb(streams);
+    return asPlainBytes(writeSharedCfb(streams));
   } catch (error) {
     throw docxCfbError(error);
   }

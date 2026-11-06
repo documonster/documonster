@@ -175,7 +175,7 @@ for (const page of result.pages) {
 从 Excel 工作簿生成 PDF 的最简单方式:
 
 ```typescript
-import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Column, Row, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
@@ -1263,7 +1263,9 @@ PDF 模块完全可摇树优化。如果你不导入任何 PDF 导出项,该模�
 ```typescript
 // 仅导入 Excel 核心 —— PDF 模块不会被包含
 import { Workbook } from "documonster/excel";
+```
 
+```typescript
 // 导入 Excel + PDF 桥接
 import { Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
@@ -1555,7 +1557,7 @@ import {
 所有错误均继承自 `BaseError`,并支持 `cause` 链:
 
 ```typescript
-import { Pdf } from "documonster/pdf";
+import { isPdfError, Pdf } from "documonster/pdf";
 
 try {
   await Pdf.fromExcel(workbook);

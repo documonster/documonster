@@ -331,7 +331,7 @@ const fields = Query.listFormFields(doc);
 // name no field has is refused.
 const filled = Transform.fillFormFields(
   doc,
-  new Map([
+  new Map<string, string | boolean | number>([
     ["FullName", "Jane Doe"],
     ["AgreeTerms", true],
     ["Country", 2]
@@ -498,7 +498,7 @@ const md = WordMarkdown.fromDocx(doc);
 const mdSetext = WordMarkdown.fromDocx(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX (full document or body fragment)
-const doc = await WordMarkdown.toDocx("# Title\n\nHello **world**");
+const fromMarkdown = await WordMarkdown.toDocx("# Title\n\nHello **world**");
 const { body: bodyItems } = await WordMarkdown.toDocxBody("- a\n- b");
 
 // Table columns are sized from their content and a fenced code block is set

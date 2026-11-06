@@ -87,7 +87,7 @@ export async function decrypt(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   password: string,
   options?: DecryptOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "WordCrypto.decrypt";
   checkString(password, "password", where);
   checkRecord(options, "options", where, { optional: true });

@@ -60,7 +60,7 @@ import {
   throwIfAborted
 } from "@archive/core/errors";
 import { readUint32LE } from "@archive/zip-spec/binary";
-import { concatUint8Arrays } from "@utils/binary";
+import { concatUint8Arrays, asPlainBytes } from "@utils/binary";
 import { assertLimitOption } from "@utils/limits";
 
 // Re-export shared types and GZIP utilities
@@ -228,27 +228,30 @@ async function processWithStrategy(
 export async function compress(
   data: Uint8Array,
   options: CompressOptions = {}
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
 
   // Level 0 is DEFLATE's stored blocks: still a DEFLATE stream.
   if (level === 0) {
-    return deflateRawStore(data);
+    return asPlainBytes(deflateRawStore(data));
   }
 
   const processOptions = options.level === undefined ? { ...options, level } : options;
-  return processWithStrategy(deflateStrategy, data, processOptions);
+  return asPlainBytes(await processWithStrategy(deflateStrategy, data, processOptions));
 }
 
 /**
  * Compress data synchronously using pure JS implementation
  */
-export function compressSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function compressSync(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Uint8Array<ArrayBuffer> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   if (level === 0) {
-    return deflateRawStore(data);
+    return asPlainBytes(deflateRawStore(data));
   }
-  return deflateRawCompressed(data, level);
+  return asPlainBytes(deflateRawCompressed(data, level));
 }
 
 /**
@@ -257,17 +260,20 @@ export function compressSync(data: Uint8Array, options: CompressOptions = {}): U
 export async function decompress(
   data: Uint8Array,
   options: CompressOptions = {}
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
-  return processWithStrategy(inflateStrategy, data, options);
+  return asPlainBytes(await processWithStrategy(inflateStrategy, data, options));
 }
 
 /**
  * Decompress data synchronously using pure JS implementation
  */
-export function decompressSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function decompressSync(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Uint8Array<ArrayBuffer> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
-  return inflateRaw(data, options.maxOutputLength);
+  return asPlainBytes(inflateRaw(data, options.maxOutputLength));
 }
 
 // =============================================================================
@@ -370,29 +376,32 @@ function wrapGzip(deflated: Uint8Array, original: Uint8Array): Uint8Array {
  * 2. Fallback: compress (deflate-raw) + manual GZIP wrapper
  *    - Inherits Worker Pool support from compress() for large files
  */
-export async function gzip(data: Uint8Array, options: CompressOptions = {}): Promise<Uint8Array> {
+export async function gzip(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Promise<Uint8Array<ArrayBuffer>> {
   throwIfAborted(options.signal);
 
   if (hasGzipCompressionStream()) {
     const cs = new CompressionStream("gzip");
     const out = await transformWithStream(data, cs);
     throwIfAborted(options.signal);
-    return out;
+    return asPlainBytes(out);
   }
 
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   const compressOptions = options.level === undefined ? { ...options, level } : options;
   const deflated = level === 0 ? deflateRawStore(data) : await compress(data, compressOptions);
-  return wrapGzip(deflated, data);
+  return asPlainBytes(wrapGzip(deflated, data));
 }
 
 /**
  * Gzip-compress data synchronously using the JS fallback.
  */
-export function gzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function gzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array<ArrayBuffer> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data, level);
-  return wrapGzip(deflated, data);
+  return asPlainBytes(wrapGzip(deflated, data));
 }
 
 /**
@@ -403,7 +412,10 @@ export function gzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8
  * 2. Fallback: parse header + decompress (inflate-raw) + verify CRC32
  *    - Inherits Worker Pool support from decompress() for large files
  */
-export async function gunzip(data: Uint8Array, options: CompressOptions = {}): Promise<Uint8Array> {
+export async function gunzip(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Promise<Uint8Array<ArrayBuffer>> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
   throwIfAborted(options.signal);
 
@@ -411,7 +423,7 @@ export async function gunzip(data: Uint8Array, options: CompressOptions = {}): P
     const ds = new DecompressionStream("gzip");
     const out = await transformWithStream(data, ds, options.maxOutputLength);
     throwIfAborted(options.signal);
-    return out;
+    return asPlainBytes(out);
   }
 
   const { deflateData, expectedCrc32, expectedSize } = parseGzipPayload(data);
@@ -423,12 +435,15 @@ export async function gunzip(data: Uint8Array, options: CompressOptions = {}): P
 /**
  * Gunzip data synchronously using the JS fallback.
  */
-export function gunzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function gunzipSync(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Uint8Array<ArrayBuffer> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
   const { deflateData, expectedCrc32, expectedSize } = parseGzipPayload(data);
   const out = inflateRaw(deflateData, options.maxOutputLength);
   verifyGzipOutput(out, expectedCrc32, expectedSize);
-  return out;
+  return asPlainBytes(out);
 }
 
 // =============================================================================
@@ -461,7 +476,10 @@ function parseZlibPayload(data: Uint8Array): {
  * 1. Native CompressionStream("deflate") when available
  * 2. Fallback: compress (deflate-raw) + manual Zlib wrapper
  */
-export async function zlib(data: Uint8Array, options: CompressOptions = {}): Promise<Uint8Array> {
+export async function zlib(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Promise<Uint8Array<ArrayBuffer>> {
   throwIfAborted(options.signal);
 
   // Native "deflate" format is Zlib
@@ -469,22 +487,22 @@ export async function zlib(data: Uint8Array, options: CompressOptions = {}): Pro
     const cs = new CompressionStream("deflate");
     const out = await transformWithStream(data, cs);
     throwIfAborted(options.signal);
-    return out;
+    return asPlainBytes(out);
   }
 
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   const compressOptions = options.level === undefined ? { ...options, level } : options;
   const deflated = level === 0 ? deflateRawStore(data) : await compress(data, compressOptions);
-  return wrapZlib(deflated, data, level);
+  return asPlainBytes(wrapZlib(deflated, data, level));
 }
 
 /**
  * Compress data with Zlib wrapper (sync)
  */
-export function zlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function zlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array<ArrayBuffer> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data, level);
-  return wrapZlib(deflated, data, level);
+  return asPlainBytes(wrapZlib(deflated, data, level));
 }
 
 /**
@@ -494,7 +512,10 @@ export function zlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8
  * 1. Native DecompressionStream("deflate") when available
  * 2. Fallback: parse header + decompress (inflate-raw) + verify Adler-32
  */
-export async function unzlib(data: Uint8Array, options: CompressOptions = {}): Promise<Uint8Array> {
+export async function unzlib(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Promise<Uint8Array<ArrayBuffer>> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
   throwIfAborted(options.signal);
 
@@ -503,7 +524,7 @@ export async function unzlib(data: Uint8Array, options: CompressOptions = {}): P
     const ds = new DecompressionStream("deflate");
     const out = await transformWithStream(data, ds, options.maxOutputLength);
     throwIfAborted(options.signal);
-    return out;
+    return asPlainBytes(out);
   }
 
   const { deflateData, expectedAdler32 } = parseZlibPayload(data);
@@ -518,12 +539,15 @@ export async function unzlib(data: Uint8Array, options: CompressOptions = {}): P
  * @param options - `maxOutputLength` bounds the output; decoding stops with a
  *   `ArchiveLimitExceededError` as soon as it is exceeded
  */
-export function unzlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function unzlibSync(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Uint8Array<ArrayBuffer> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
   const { deflateData, expectedAdler32 } = parseZlibPayload(data);
   const out = inflateRaw(deflateData, options.maxOutputLength);
   verifyAdler32(out, expectedAdler32);
-  return out;
+  return asPlainBytes(out);
 }
 
 // =============================================================================
@@ -547,7 +571,7 @@ export function unzlibSync(data: Uint8Array, options: CompressOptions = {}): Uin
 export async function decompressAuto(
   data: Uint8Array,
   options: CompressOptions = {}
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const format = detectCompressionFormat(data);
 
   switch (format) {
@@ -563,7 +587,10 @@ export async function decompressAuto(
 /**
  * Decompress data synchronously, automatically detecting the format
  */
-export function decompressAutoSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
+export function decompressAutoSync(
+  data: Uint8Array,
+  options: CompressOptions = {}
+): Uint8Array<ArrayBuffer> {
   const format = detectCompressionFormat(data);
 
   switch (format) {

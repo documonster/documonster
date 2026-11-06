@@ -84,7 +84,7 @@ import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import type { Writable } from "@stream";
 import { Streams } from "@stream";
-import { stringToUint8Array } from "@utils/binary";
+import { stringToUint8Array, asPlainBytes } from "@utils/binary";
 import { excelNameKey, sheetNameKey } from "@utils/name-key";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -1071,7 +1071,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * @throws {ExcelStreamStateError} If the writer was given a `stream` or `filename` — the package went there and the
    * writer holds none — or committing failed.
    */
-  async toBuffer(): Promise<Uint8Array> {
+  async toBuffer(): Promise<Uint8Array<ArrayBuffer>> {
     const output = this._ownedOutput;
     if (!output) {
       throw new ExcelStreamStateError(
@@ -1084,7 +1084,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     if (!bytes) {
       throw new ExcelStreamStateError("get the workbook bytes", "the writer produced no output");
     }
-    return bytes;
+    return asPlainBytes(bytes);
   }
 
   /** The output the writer created because it was given none; `toBuffer` reads it. */

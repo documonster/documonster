@@ -169,7 +169,7 @@ export class ChunkedBuilder {
   /**
    * Convert to Uint8Array (browser-compatible)
    */
-  toUint8Array(): Uint8Array {
+  toUint8Array(): Uint8Array<ArrayBuffer> {
     return textEncoder.encode(this.toString());
   }
 }

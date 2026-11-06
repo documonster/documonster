@@ -1765,7 +1765,7 @@ function sanitizeOdtPictureName(raw: string | undefined): string {
  *
  * @stability experimental
  */
-export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
+export async function writeOdt(doc: DocxDocument): Promise<Uint8Array<ArrayBuffer>> {
   checkHandle(doc, "document", "doc", "Convert.toOdt");
   // ODF records the proofing language and East Asian face like DOCX does, so
   // a document that asked for them to be derived gets them here too.

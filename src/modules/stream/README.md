@@ -273,7 +273,7 @@ A stream that is both readable and writable independently.
 import { Duplex, duplexPair, Streams } from "documonster/stream";
 
 // Create duplex stream
-const duplex = Streams.createDuplex({
+const duplex = Streams.createDuplex<string, unknown>({
   objectMode: true,
   read() {
     this.push("data from readable side");
@@ -507,7 +507,7 @@ console.log(collector.chunks); // [4, 8] (2*2=4, 4*2=8)
 try {
   await pipeline(source, badTransform, collector);
 } catch (err) {
-  console.error("Pipeline failed:", err.message);
+  console.error("Pipeline failed:", (err as Error).message);
 }
 ```
 
@@ -530,7 +530,7 @@ await finished(readable);
 console.log("Stream completed");
 
 // Also works with writables
-const writable = new Streams.Collector();
+const writable = new Streams.Collector<string>({ objectMode: true });
 writable.write("data");
 writable.end();
 await finished(writable);
@@ -614,7 +614,7 @@ readable.on("data", chunk => {
 try {
   await finished(readable);
 } catch (err) {
-  console.log("Stream aborted:", err.message);
+  console.log("Stream aborted:", (err as Error).message);
 }
 ```
 
@@ -770,12 +770,13 @@ Streams.isDuplex(stream); // true if duplex stream
 Streams.isStream(stream); // true if any stream type
 
 // Usage
-async function processStream(input: unknown) {
+function processStream(input: unknown) {
   if (isReadable(input)) {
-    // TypeScript knows input is Readable here
-    for await (const chunk of input) {
+    // `input` is a ReadableLike here: something that can be listened to and piped. It is not
+    // necessarily async-iterable (a legacy stream is not), so read it through its events:
+    input.on("data", chunk => {
       // ...
-    }
+    });
   }
 }
 ```
@@ -927,7 +928,7 @@ const writable = new Writable({
 import { pipeline, Streams } from "documonster/stream";
 
 // Error in transform function
-const badTransform = Streams.createTransform(
+const badTransform = Streams.createTransform<string, string>(
   chunk => {
     if (chunk === "bad") {
       throw new Error("Invalid data");
@@ -941,7 +942,7 @@ const badTransform = Streams.createTransform(
 try {
   await pipeline(source, badTransform, destination);
 } catch (err) {
-  console.error("Pipeline failed:", err.message);
+  console.error("Pipeline failed:", (err as Error).message);
 }
 
 // Event-based error handling

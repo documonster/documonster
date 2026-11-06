@@ -55,7 +55,7 @@ import { encodeHeader, createPadding, createEndOfArchive } from "@archive/tar/ta
 import type { TarParseOptions } from "@archive/tar/tar-parser";
 import { entrySizeLimit, parseTar, readTarStream } from "@archive/tar/tar-parser";
 import { isWritableStream } from "@stream/core/type-guards";
-import { concatUint8Arrays, textEncoder } from "@utils/binary";
+import { concatUint8Arrays, textEncoder, asPlainBytes, plainChunks } from "@utils/binary";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 
@@ -216,7 +216,7 @@ export type TarArchiveStreamOptions = ArchiveStreamOptions<TarArchiveProgress>;
  */
 export type TarArchiveOperation = ArchiveOperationBase<TarArchiveProgress> & {
   /** Async iterable of TAR output chunks */
-  iterable: AsyncIterable<Uint8Array>;
+  iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 };
 
 export interface TarReaderOptions {
@@ -373,7 +373,7 @@ export class TarArchive {
   /**
    * Generate archive as async iterable (matches ZipArchive.stream)
    */
-  stream(options: TarArchiveStreamOptions = {}): AsyncIterable<Uint8Array> {
+  stream(options: TarArchiveStreamOptions = {}): AsyncIterable<Uint8Array<ArrayBuffer>> {
     return this.operation(options).iterable;
   }
 
@@ -488,7 +488,7 @@ export class TarArchive {
     }
 
     return {
-      iterable: generate(),
+      iterable: plainChunks(generate()),
       signal,
       abort(reason?: unknown) {
         controller.abort(reason);
@@ -505,29 +505,29 @@ export class TarArchive {
   /**
    * Generate archive as Uint8Array (matches ZipArchive.toBuffer)
    */
-  async toBuffer(options: TarArchiveStreamOptions = {}): Promise<Uint8Array> {
-    return collect(this.stream(options));
+  async toBuffer(options: TarArchiveStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
+    return asPlainBytes(await collect(this.stream(options)));
   }
 
   /**
    * @deprecated Use {@link toBuffer}. Removed in 1.0.
    */
-  async bytes(options: TarArchiveStreamOptions = {}): Promise<Uint8Array> {
+  async bytes(options: TarArchiveStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     return this.toBuffer(options);
   }
 
   /**
    * @deprecated Use {@link toBufferSync}. Removed in 1.0.
    */
-  bytesSync(): Uint8Array {
-    return this._buildSync("bytesSync");
+  bytesSync(): Uint8Array<ArrayBuffer> {
+    return asPlainBytes(this._buildSync("bytesSync"));
   }
 
   /**
    * Generate archive synchronously (matches ZipArchive.toBufferSync)
    */
-  toBufferSync(): Uint8Array {
-    return this._buildSync("toBufferSync");
+  toBufferSync(): Uint8Array<ArrayBuffer> {
+    return asPlainBytes(this._buildSync("toBufferSync"));
   }
 
   /** Build synchronously; `method` names the public entry point in error messages. */
@@ -605,11 +605,11 @@ export interface TarReaderEntry {
   readonly isDirectory: boolean;
   readonly info: TarEntryInfo;
   /** Get entry data as Uint8Array (matches UnzipEntry.bytes) */
-  bytes(): Promise<Uint8Array>;
+  bytes(): Promise<Uint8Array<ArrayBuffer>>;
   /** Get entry data as string (matches UnzipEntry.text) */
   text(encoding?: string): Promise<string>;
   /** Stream entry data (matches UnzipEntry.stream) */
-  stream(): AsyncIterable<Uint8Array>;
+  stream(): AsyncIterable<Uint8Array<ArrayBuffer>>;
   /** Entry data as a Web `ReadableStream` (matches UnzipEntry.readableStream) */
   readableStream(): ReadableStream<Uint8Array>;
   /**
@@ -635,15 +635,15 @@ export function createTarReaderEntry(info: TarEntryInfo, data: Uint8Array): TarR
     info,
     path: info.path,
     isDirectory: isDirectory(info) || info.path.endsWith("/"),
-    async bytes(): Promise<Uint8Array> {
-      return data;
+    async bytes(): Promise<Uint8Array<ArrayBuffer>> {
+      return asPlainBytes(data);
     },
     async text(encoding?: string): Promise<string> {
       return decodeEntryText(data, encoding);
     },
-    async *stream(): AsyncIterable<Uint8Array> {
+    async *stream(): AsyncIterable<Uint8Array<ArrayBuffer>> {
       if (data.length > 0) {
-        yield data;
+        yield asPlainBytes(data);
       }
     },
     readableStream(): ReadableStream<Uint8Array> {
@@ -903,7 +903,7 @@ export class TarReader {
    * Read one entry's bytes (matches `ZipReader.bytes`); `undefined` when the archive has no such
    * entry. Parses and caches the archive as {@link TarReader.get} does.
    */
-  async bytes(path: string): Promise<Uint8Array | undefined> {
+  async bytes(path: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
     checkEntryPath("Archive.TarReader#bytes", path);
     // Through `get`, so a subclass that overrides it is honoured
     const entry = await this.get(path);
@@ -1086,7 +1086,7 @@ export function addEntries(
 export async function tar(
   entries: ReadonlyMap<string, ArchiveSource> | Iterable<TarEntryInput>,
   options?: TarArchiveOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkTarArchiveOptions("Archive.packTar", options);
   const archive = new TarArchive(options);
   addEntries(archive, entries);
@@ -1099,7 +1099,7 @@ export async function tar(
 export function tarSync(
   entries: ReadonlyMap<string, string | Uint8Array | ArrayBuffer> | Iterable<TarEntryInput>,
   options?: TarArchiveOptions
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   checkTarArchiveOptions("Archive.packTarSync", options);
   const archive = new TarArchive(options);
   addEntries(archive, entries, "Archive.packTarSync");

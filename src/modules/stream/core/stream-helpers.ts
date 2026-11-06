@@ -103,7 +103,7 @@ export async function json<T = unknown>(stream: AsyncIterableStream): Promise<T>
 }
 
 /** A whole stream's bytes. */
-export function bytes(stream: AsyncIterableStream): Promise<Uint8Array> {
+export function bytes(stream: AsyncIterableStream): Promise<Uint8Array<ArrayBuffer>> {
   return streamToUint8Array(stream as AsyncIterable<Uint8Array>);
 }
 
@@ -195,7 +195,7 @@ function toAsyncIterable<T>(
  */
 export async function streamToUint8Array(
   stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | Iterable<Uint8Array | string>
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
   for await (const chunk of toAsyncIterable(stream, "Streams.bytes")) {
@@ -215,7 +215,7 @@ export async function streamToUint8Array(
  */
 export function streamToBuffer(
   stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   return streamToUint8Array(stream);
 }
 

@@ -23,6 +23,7 @@ import { initDecryption, isEncrypted } from "@pdf/reader/pdf-decrypt";
 import { PdfDocument } from "@pdf/reader/pdf-document";
 import { decodePdfStringBytes, dictGetName, isPdfArray, isPdfRef } from "@pdf/reader/pdf-parser";
 import type { PdfDictValue, PdfObject } from "@pdf/reader/pdf-parser";
+import { asPlainBytes } from "@utils/binary";
 import { check, s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 
@@ -83,7 +84,7 @@ export interface PdfSignatureReport {
    * The signer's certificate (DER), as embedded in the signature — the one its SignerInfo
    * names. Unverified: evaluate it against your trust store to authenticate the signer.
    */
-  certificate?: Uint8Array;
+  certificate?: Uint8Array<ArrayBuffer>;
   /**
    * Common name from {@link certificate}. A claim, not an identity: a self-signed
    * certificate can carry any name.
@@ -263,9 +264,9 @@ async function verifyOne(
   }
 
   const result = await verifyPdfSignatureBytes(data, gap, byteRange);
-  let certificate: Uint8Array | undefined;
+  let certificate: Uint8Array<ArrayBuffer> | undefined;
   try {
-    certificate = parseCmsSignedData(gap).certificate;
+    certificate = asPlainBytes(parseCmsSignedData(gap).certificate);
   } catch {
     certificate = undefined;
   }

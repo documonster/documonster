@@ -29,11 +29,12 @@ import type { ZipEntryRecord, ZipParseOptions } from "@archive/unzip/zip-parser"
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipOptions } from "@archive/zip/zip-archive";
 import { ZipArchive } from "@archive/zip/zip-archive";
+import { asPlainBytes } from "@utils/binary";
 
 /** One extracted ZIP entry: its central-directory record and its uncompressed data. */
 export interface UnpackedZipEntry {
   info: ZipEntryRecord;
-  data: Uint8Array;
+  data: Uint8Array<ArrayBuffer>;
 }
 
 /** Options for {@link unpackZip} / {@link unpackZipSync}. */
@@ -63,7 +64,7 @@ function addZipEntries(
 export async function packZip(
   entries: ReadonlyMap<string, ArchiveSource> | Iterable<TarEntryInput>,
   options?: Omit<ZipOptions, "format">
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkZipOptions("Archive.packZip", options);
   checkZipEncryptionOptions("Archive.packZip", options);
   const archive = new ZipArchive(options);
@@ -79,7 +80,7 @@ export async function packZip(
 export function packZipSync(
   entries: ReadonlyMap<string, string | Uint8Array | ArrayBuffer> | Iterable<TarEntryInput>,
   options?: Omit<ZipOptions, "format">
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   checkZipOptions("Archive.packZipSync", options);
   checkZipEncryptionOptions("Archive.packZipSync", options);
   const archive = new ZipArchive(options);
@@ -93,7 +94,7 @@ function extractAllEntries(
 ): Map<string, UnpackedZipEntry> {
   const result = new Map<string, UnpackedZipEntry>();
   for (const info of parser.getEntries()) {
-    result.set(info.path, { info, data: read(info.path) ?? new Uint8Array(0) });
+    result.set(info.path, { info, data: asPlainBytes(read(info.path) ?? new Uint8Array(0)) });
   }
   return result;
 }

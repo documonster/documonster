@@ -30,6 +30,7 @@ import {
 } from "@archive/tar/tar-archive";
 import type { TarEntry, TarParseOptions, UnpackedTarEntry } from "@archive/tar/tar-parser";
 import { parseTar, readTarStream, untar, untarSync } from "@archive/tar/tar-parser";
+import { plainChunks } from "@utils/binary";
 import { createAbortError, isAbortError, throwIfAborted } from "@utils/errors";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -77,8 +78,8 @@ export class TarGzArchive extends TarArchive {
   /**
    * Generate compressed archive as async iterable (true streaming)
    */
-  override async *stream(): AsyncIterable<Uint8Array> {
-    yield* gzipTarStream(super.stream(), this._gzLevel);
+  override async *stream(): AsyncIterable<Uint8Array<ArrayBuffer>> {
+    yield* plainChunks(gzipTarStream(super.stream(), this._gzLevel));
   }
 
   /**
@@ -102,7 +103,7 @@ export function createTarGzArchive(options?: TarGzOptions): TarGzArchive {
 export async function targz(
   entries: ReadonlyMap<string, ArchiveSource> | Iterable<TarEntryInput>,
   options: TarGzOptions = {}
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkTarGzOptions("Archive.packTarGz", options);
   const archive = new TarGzArchive(options);
   addEntries(archive, entries, "Archive.packTarGz");
@@ -270,7 +271,7 @@ export async function untargz(
 export function targzSync(
   entries: ReadonlyMap<string, string | Uint8Array | ArrayBuffer> | Iterable<TarEntryInput>,
   options: TarGzOptions = {}
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   checkTarGzOptions("Archive.packTarGzSync", options);
   const archive = new TarGzArchive(options);
   addEntries(archive, entries, "Archive.packTarGzSync");

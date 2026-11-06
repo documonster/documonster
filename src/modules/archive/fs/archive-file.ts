@@ -112,7 +112,12 @@ import { ZipArchive } from "@archive/zip/zip-archive";
 import type { ZipEntry, ZipOptions } from "@archive/zip/zip-bytes";
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
-import { concatUint8Arrays, textEncoder as utf8Encoder } from "@utils/binary";
+import {
+  concatUint8Arrays,
+  textEncoder as utf8Encoder,
+  asPlainBytes,
+  plainChunks
+} from "@utils/binary";
 import type { FileEntry, GlobOptions, TraverseOptions } from "@utils/fs";
 import {
   traverseDirectory,
@@ -1007,7 +1012,7 @@ function wrapStreamOperation(
   overrideIterable?: AsyncIterable<Uint8Array>
 ): ArchiveStreamOperation {
   return {
-    iterable: overrideIterable ?? op.iterable,
+    iterable: plainChunks(overrideIterable ?? op.iterable),
     signal: op.signal,
     abort: reason => op.abort(reason),
     pointer: () => op.pointer(),
@@ -2458,36 +2463,36 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   /**
    * Build the archive and return as a buffer.
    */
-  async toBuffer(): Promise<Uint8Array> {
+  async toBuffer(): Promise<Uint8Array<ArrayBuffer>> {
     if (this._format === "zip") {
-      return this._buildZip();
+      return asPlainBytes(await this._buildZip());
     } else {
-      return this._buildTar();
+      return asPlainBytes(await this._buildTar());
     }
   }
 
   /**
    * Build the archive and return as a buffer (sync).
    */
-  toBufferSync(): Uint8Array {
+  toBufferSync(): Uint8Array<ArrayBuffer> {
     if (this._format === "zip") {
-      return this._buildZipSync();
+      return asPlainBytes(this._buildZipSync());
     } else {
-      return this._buildTarSync();
+      return asPlainBytes(this._buildTarSync());
     }
   }
 
   /**
    * @deprecated Use {@link toBuffer}. Removed in 1.0.
    */
-  async bytes(): Promise<Uint8Array> {
+  async bytes(): Promise<Uint8Array<ArrayBuffer>> {
     return this.toBuffer();
   }
 
   /**
    * @deprecated Use {@link toBufferSync}. Removed in 1.0.
    */
-  bytesSync(): Uint8Array {
+  bytesSync(): Uint8Array<ArrayBuffer> {
     return this.toBufferSync();
   }
 
@@ -2573,7 +2578,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    * writeStream.end();
    * ```
    */
-  stream(options: ArchiveStreamOptions = {}): AsyncIterable<Uint8Array> {
+  stream(options: ArchiveStreamOptions = {}): AsyncIterable<Uint8Array<ArrayBuffer>> {
     return this.operation(options).iterable;
   }
 
@@ -2599,7 +2604,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     const op =
       this._format === "zip" ? this._buildZipStream(options) : this._buildTarStream(options);
     return {
-      iterable: readingSources(op.iterable),
+      iterable: plainChunks(readingSources(op.iterable)),
       signal: op.signal,
       abort: reason => op.abort(reason),
       pointer: () => op.pointer(),
@@ -2792,23 +2797,31 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    *
    * @param options.password - Overrides the password the archive was opened with (ZIP)
    */
-  readEntry(entryPath: string, options?: ArchiveFileReadOptions): Promise<Uint8Array | undefined>;
+  readEntry(
+    entryPath: string,
+    options?: ArchiveFileReadOptions
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  readEntry(entryPath: string, password: string | Uint8Array): Promise<Uint8Array | undefined>;
+  readEntry(
+    entryPath: string,
+    password: string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
   async readEntry(
     entryPath: string,
     options?: ArchiveFileReadOptions | string | Uint8Array
-  ): Promise<Uint8Array | undefined> {
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
     checkEntryPath("Archive.ArchiveFile#readEntry", entryPath, "entryPath");
     if (this._format === "zip") {
       const v = (await this._zipViewAsync()).get(this._zipKey(entryPath));
-      return v ? this._zipDataOf(v, toReadOptions(options).password) : undefined;
+      return v
+        ? asPlainBytes(await this._zipDataOf(v, toReadOptions(options).password))
+        : undefined;
     }
     if (this._tar_pending.length === 0) {
       return this._tarReader ? (this._tarReader as TarReader).bytes(entryPath) : undefined;
     }
     const v = this._tarViewEntry(await this._tarViewAsync(), entryPath);
-    return v ? (await this._tarEntryOf(v)).data : undefined;
+    return v ? asPlainBytes((await this._tarEntryOf(v)).data) : undefined;
   }
 
   /**
@@ -2817,20 +2830,26 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    *
    * @param options.password - Overrides the password the archive was opened with (ZIP)
    */
-  readEntrySync(entryPath: string, options?: ArchiveFileReadOptions): Uint8Array | undefined;
+  readEntrySync(
+    entryPath: string,
+    options?: ArchiveFileReadOptions
+  ): Uint8Array<ArrayBuffer> | undefined;
   /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
-  readEntrySync(entryPath: string, password: string | Uint8Array): Uint8Array | undefined;
+  readEntrySync(
+    entryPath: string,
+    password: string | Uint8Array
+  ): Uint8Array<ArrayBuffer> | undefined;
   readEntrySync(
     entryPath: string,
     options?: ArchiveFileReadOptions | string | Uint8Array
-  ): Uint8Array | undefined {
+  ): Uint8Array<ArrayBuffer> | undefined {
     checkEntryPath("Archive.ArchiveFile#readEntrySync", entryPath, "entryPath");
     if (this._format === "zip") {
       const v = this._zipViewSync().get(this._zipKey(entryPath));
-      return v ? this._zipDataOfSync(v, toReadOptions(options).password) : undefined;
+      return v ? asPlainBytes(this._zipDataOfSync(v, toReadOptions(options).password)) : undefined;
     }
     const v = this._tarViewEntry(this._tarViewSync(), entryPath);
-    return v ? this._tarEntryOfSync(v).data : undefined;
+    return v ? asPlainBytes(this._tarEntryOfSync(v).data) : undefined;
   }
 
   /**

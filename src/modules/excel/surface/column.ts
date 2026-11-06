@@ -17,6 +17,7 @@ import type { ColumnDefn, ColumnHeaderValue } from "@excel/core/column";
 import {
   columnAddPageBreak,
   columnDefn,
+  columnCollapsed,
   columnHidden,
   columnIsDefault,
   columnOutlineLevel,
@@ -524,6 +525,15 @@ export function isHidden(ws: WorksheetData | StreamWorksheet, col: string | numb
   readColumns(ws);
   const c = findColumn(ws, col);
   return c !== undefined && columnHidden(c);
+}
+/**
+ * Whether the column is collapsed — its outline level is at or above the sheet's column outline level, as
+ * `Row.isCollapsed` answers for a row. `false` for a column that does not exist. Creates nothing.
+ */
+export function isCollapsed(ws: WorksheetData | StreamWorksheet, col: string | number): boolean {
+  readColumns(ws);
+  const c = findColumn(ws, col);
+  return c !== undefined && columnCollapsed(c);
 }
 /** Hide or show the column. */
 export function setHidden(

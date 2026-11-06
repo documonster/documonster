@@ -18,6 +18,7 @@
 import type { PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfDictValue, PdfStream } from "@pdf/reader/pdf-parser";
 import { isPdfRef, isPdfArray, dictGetName, dictGetNumber } from "@pdf/reader/pdf-parser";
+import { asPlainBytes } from "@utils/binary";
 
 // =============================================================================
 // Types
@@ -49,9 +50,9 @@ export interface ExtractedImage {
    */
   format: "jpeg" | "jpx" | "raw" | "ccitt" | "jbig2";
   /** The image data */
-  data: Uint8Array;
+  data: Uint8Array<ArrayBuffer>;
   /** Alpha mask data — same dimensions, 1 component, 8 bits; absent when the image has none */
-  alphaMask?: Uint8Array;
+  alphaMask?: Uint8Array<ArrayBuffer>;
   /** Filter name from the original stream */
   filter: string;
   /** XObject name (if it was a named XObject) */
@@ -180,8 +181,8 @@ function extractImage(
     colorSpace,
     components,
     format,
-    data,
-    ...(alphaMask === undefined ? {} : { alphaMask }),
+    data: asPlainBytes(data),
+    ...(alphaMask === undefined ? {} : { alphaMask: asPlainBytes(alphaMask) }),
     filter,
     name
   };

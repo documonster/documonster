@@ -43,7 +43,7 @@ import { isSymlink } from "@archive/zip-spec/zip-entry-info";
 import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
 import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
 import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
-import { concatUint8Arrays, getTextDecoder } from "@utils/binary";
+import { concatUint8Arrays, getTextDecoder, asPlainBytes } from "@utils/binary";
 
 function attachAbortToParseEntry(entry: ParseZipEntry, signal: AbortSignal): void {
   let cleanedUp = false;
@@ -132,16 +132,6 @@ function keepEntry(
     entry.once("error", onError);
     entry.once("close", onClose);
   });
-}
-
-/**
- * In Node.js an entry's data may be a `Buffer`, which causes deep-equality mismatches
- * against `Uint8Array`; hand back a plain view of the same bytes.
- */
-function asPlainBytes(data: Uint8Array): Uint8Array {
-  return typeof Buffer !== "undefined" && data instanceof Buffer
-    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-    : data;
 }
 
 /** Resolves once `entry` has been read to its end, or is gone. */
@@ -492,7 +482,7 @@ export class UnzipEntry {
     return bytes;
   }
 
-  async bytes(): Promise<Uint8Array> {
+  async bytes(): Promise<Uint8Array<ArrayBuffer>> {
     if (this._data && this._info) {
       // Use shared extraction core for buffer mode
       const compressedData = readEntryCompressedData(this._data, this._info);
@@ -504,11 +494,13 @@ export class UnzipEntry {
         true,
         this._maxEntrySize
       );
-      return this._processExtractedBytes(bytes);
+      return asPlainBytes(this._processExtractedBytes(bytes));
     }
     if (this._parseEntry) {
       if (!this._startReading()) {
-        return this._processExtractedBytes(await this._decryptStreamed(await this._keptBytes()));
+        return asPlainBytes(
+          this._processExtractedBytes(await this._decryptStreamed(await this._keptBytes()))
+        );
       }
       const limit = this._maxEntrySize;
       const declared = this._parseEntry.vars.uncompressedSize;
@@ -526,7 +518,7 @@ export class UnzipEntry {
         );
       }
       const data = await this._parseEntry.buffer();
-      let bytes = asPlainBytes(data);
+      let bytes: Uint8Array = asPlainBytes(data);
       if (limit !== undefined && bytes.length > limit) {
         throw new ArchiveFileTooLargeError(
           this.path,
@@ -537,7 +529,7 @@ export class UnzipEntry {
 
       bytes = await this._decryptStreamed(bytes);
 
-      return this._processExtractedBytes(bytes);
+      return asPlainBytes(this._processExtractedBytes(bytes));
     }
     return new Uint8Array(0);
   }
@@ -553,14 +545,14 @@ export class UnzipEntry {
     return bytes;
   }
 
-  async *stream(): AsyncIterable<Uint8Array> {
+  async *stream(): AsyncIterable<Uint8Array<ArrayBuffer>> {
     if (this._data && this._info) {
       // Symlinks are tiny and their target is resolved by bytes() via
       // _processExtractedBytes; keep the buffered path for them.
       if (this._info.type === "symlink") {
         const data = await this.bytes();
         if (data.length) {
-          yield data;
+          yield asPlainBytes(data);
         }
         return;
       }
@@ -635,7 +627,7 @@ export class UnzipEntry {
           if (this._onBytesOut && chunk.length) {
             this._onBytesOut(this.path, this.type, chunk.length);
           }
-          yield chunk;
+          yield asPlainBytes(chunk);
         }
       } finally {
         await iterator.return?.();
@@ -647,7 +639,7 @@ export class UnzipEntry {
       if (!this._startReading()) {
         const data = await this.bytes();
         if (data.length) {
-          yield data;
+          yield asPlainBytes(data);
         }
         return;
       }
@@ -673,7 +665,7 @@ export class UnzipEntry {
             if (this._onBytesOut && chunk.length) {
               this._onBytesOut(this.path, this.type, chunk.length);
             }
-            yield chunk;
+            yield asPlainBytes(chunk);
           }
           completed = true;
         } finally {
@@ -694,7 +686,7 @@ export class UnzipEntry {
           if (this._onBytesOut && chunk.length) {
             this._onBytesOut(this.path, this.type, chunk.length);
           }
-          yield chunk;
+          yield asPlainBytes(chunk);
         }
         completed = true;
       } finally {
@@ -1131,7 +1123,7 @@ export class ZipReader {
    * Read one entry's decompressed bytes; `undefined` when the archive has no such entry. Buffers a
    * one-shot source as {@link ZipReader.list} does.
    */
-  async bytes(path: string): Promise<Uint8Array | undefined> {
+  async bytes(path: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
     checkEntryPath("Archive.ZipReader#bytes", path);
     // Through `get`, so a subclass that overrides it is honoured
     const entry = await this.get(path);

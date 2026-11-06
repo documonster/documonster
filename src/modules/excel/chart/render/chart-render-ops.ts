@@ -25,6 +25,7 @@ import { workbookThemeColors } from "@excel/chart/render/workbook-theme";
 import { checkChart } from "@excel/core/feature-handles";
 import type { ChartHandle } from "@excel/core/worksheet-core";
 import { ExcelChartOptionsError } from "@excel/errors";
+import { asPlainBytes } from "@utils/binary";
 
 /**
  * Render this chart as a **zero-dependency deterministic preview** SVG.
@@ -73,19 +74,19 @@ export function chartToSVG(c: ChartHandle, options: ChartRenderOptions = {}): st
 export async function chartToPNG(
   c: ChartHandle,
   options: ChartRenderOptions = {}
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkChart(c);
   options = withWorkbookTheme(c, options);
   // `async` makes the "no model" branch reject the returned promise instead of
   // throwing synchronously, honouring the `Promise<Uint8Array>` contract.
   const model = chartChartModel(c);
   if (model) {
-    return renderChartPng(model, options, "Chart.toPng");
+    return asPlainBytes(await renderChartPng(model, options, "Chart.toPng"));
   }
   const chartEx = chartChartExModel(c);
   if (chartEx) {
     _chartRefreshChartExCaches(c);
-    return renderChartExPng(chartEx, options, "Chart.toPng");
+    return asPlainBytes(await renderChartExPng(chartEx, options, "Chart.toPng"));
   }
   throw new ExcelChartOptionsError("c", "Cannot render chart because no chart model is available.");
 }

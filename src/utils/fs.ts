@@ -511,7 +511,7 @@ export function safeStatsSync(filePath: string): nodeFs.Stats | undefined {
 /**
  * Read a file as Uint8Array.
  */
-export async function readFileBytes(filePath: string): Promise<Uint8Array> {
+export async function readFileBytes(filePath: string): Promise<Uint8Array<ArrayBuffer>> {
   const buffer = await _fsp.readFile(filePath);
   return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }
@@ -519,7 +519,7 @@ export async function readFileBytes(filePath: string): Promise<Uint8Array> {
 /**
  * Synchronously read a file as Uint8Array.
  */
-export function readFileBytesSync(filePath: string): Uint8Array {
+export function readFileBytesSync(filePath: string): Uint8Array<ArrayBuffer> {
   const buffer = _fs.readFileSync(filePath);
   return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }

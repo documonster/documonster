@@ -56,7 +56,7 @@ import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-e
 import { buildZipEntryMetadata } from "@archive/zip/zip-entry-metadata";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
 import { createZipOperation } from "@archive/zip/zip-output-pipeline";
-import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
+import { stringToUint8Array as encodeUtf8, asPlainBytes } from "@utils/binary";
 import { isNode } from "@utils/env";
 
 /** Archive options */
@@ -350,7 +350,7 @@ export class ZipArchive {
     });
   }
 
-  stream(options: ZipStreamOptions = {}): AsyncIterable<Uint8Array> {
+  stream(options: ZipStreamOptions = {}): AsyncIterable<Uint8Array<ArrayBuffer>> {
     return this.operation(options).iterable;
   }
 
@@ -602,7 +602,7 @@ export class ZipArchive {
   /**
    * Build the archive and return the complete ZIP bytes.
    */
-  async toBuffer(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+  async toBuffer(options: ZipStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     this._sealed = true;
 
     const signalOpt = options.signal ?? this._streamDefaults.signal;
@@ -610,7 +610,7 @@ export class ZipArchive {
 
     // If progress/abort is requested, prefer the streaming pipeline.
     if (onProgress || signalOpt) {
-      return collect(this.stream(options));
+      return asPlainBytes(await collect(this.stream(options)));
     }
 
     const allSourcesInMemory = this._entries.every(e => isInMemoryArchiveSource(e.source));
@@ -639,7 +639,7 @@ export class ZipArchive {
       })
     ) {
       try {
-        return await this._browserStreamingBytes();
+        return asPlainBytes(await this._browserStreamingBytes());
       } catch {
         // Fall back to the buffered builder
       }
@@ -655,7 +655,7 @@ export class ZipArchive {
           this._toBuildEntry(entry, toUint8ArraySync(toSyncSource(entry.source)))
         );
 
-        return createZipSync(entries, this._getCreateZipOptions());
+        return asPlainBytes(createZipSync(entries, this._getCreateZipOptions()));
       }
 
       const entries = await Promise.all(
@@ -664,31 +664,31 @@ export class ZipArchive {
         )
       );
 
-      return createZip(entries, this._getCreateZipOptions());
+      return asPlainBytes(await createZip(entries, this._getCreateZipOptions()));
     }
 
-    return collect(this.stream());
+    return asPlainBytes(await collect(this.stream()));
   }
 
   /**
    * @deprecated Use {@link toBuffer}. Removed in 1.0.
    */
-  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     return this.toBuffer(options);
   }
 
   /**
    * @deprecated Use {@link toBufferSync}. Removed in 1.0.
    */
-  bytesSync(): Uint8Array {
-    return this._buildSync("bytesSync");
+  bytesSync(): Uint8Array<ArrayBuffer> {
+    return asPlainBytes(this._buildSync("bytesSync"));
   }
 
   /**
    * Build the archive synchronously (in-memory sources only).
    */
-  toBufferSync(): Uint8Array {
-    return this._buildSync("toBufferSync");
+  toBufferSync(): Uint8Array<ArrayBuffer> {
+    return asPlainBytes(this._buildSync("toBufferSync"));
   }
 
   /** Build synchronously; `method` names the public entry point in error messages. */

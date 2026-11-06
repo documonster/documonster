@@ -26,7 +26,7 @@ import {
   checkKeyStrength
 } from "@archive/crypto/aes-format";
 import { checkZipPassword } from "@archive/crypto/zip-crypto";
-import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
+import { stringToUint8Array as encodeUtf8, asPlainBytes } from "@utils/binary";
 import { randomBytes } from "@utils/random-bytes";
 
 export {
@@ -285,7 +285,7 @@ export async function aesDecrypt(
   encryptedData: Uint8Array,
   password: string | Uint8Array,
   keyStrength: AesKeyStrength
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkBytes("Archive.Crypto.decryptAes", "encryptedData", encryptedData);
   checkZipPassword("Archive.Crypto.decryptAes", password);
   checkKeyStrength("Archive.Crypto.decryptAes", keyStrength);
@@ -311,7 +311,7 @@ export async function aesDecrypt(
   }
 
   // Decrypt data
-  return aesCtr(keys.encryptionKey, ciphertext, false);
+  return asPlainBytes(await aesCtr(keys.encryptionKey, ciphertext, false));
 }
 
 /**
@@ -326,7 +326,7 @@ export async function aesEncrypt(
   data: Uint8Array,
   password: string | Uint8Array,
   keyStrength: AesKeyStrength
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkBytes("Archive.Crypto.encryptAes", "data", data);
   checkZipPassword("Archive.Crypto.encryptAes", password);
   checkKeyStrength("Archive.Crypto.encryptAes", keyStrength);

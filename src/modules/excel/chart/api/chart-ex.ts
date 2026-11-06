@@ -40,6 +40,7 @@ import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { checkWorksheet, type WorksheetData } from "@excel/core/worksheet-core";
 import { argumentChecks } from "@excel/utils/arguments";
+import { asPlainBytes } from "@utils/binary";
 
 // Every builder here runs through `namedCall`, so an argument error says which call received
 // it (`ChartEx.createModel: options.series must …`) — the builders are shared with `Chart.*`
@@ -109,8 +110,8 @@ export function applyPreset(
 export async function toPng(
   model: ChartExModel,
   options?: ChartRenderOptions
-): Promise<Uint8Array> {
-  return renderChartExPng(model, options, "ChartEx.toPng");
+): Promise<Uint8Array<ArrayBuffer>> {
+  return asPlainBytes(await renderChartExPng(model, options, "ChartEx.toPng"));
 }
 
 /**

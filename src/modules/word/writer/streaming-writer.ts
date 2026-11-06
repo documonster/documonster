@@ -36,6 +36,7 @@
 import { Zip, ZipDeflate } from "@archive/zip/stream";
 import type { AnySink } from "@stream/core/sink-adapter";
 import { SinkAdapter } from "@stream/core/sink-adapter";
+import { asPlainBytes } from "@utils/binary";
 import type { SchemaMatches } from "@utils/schema";
 import { withStatedDefaults } from "@word/builder/document-finalize";
 import {
@@ -657,7 +658,7 @@ export class DocumentWriter {
    * @throws {DocxWriteError} If the writer was given `options.sink` — the
    * bytes went to the sink and the writer holds none — or committing failed.
    */
-  async toBuffer(): Promise<Uint8Array> {
+  async toBuffer(): Promise<Uint8Array<ArrayBuffer>> {
     if (this._sinkAdapter) {
       throw new DocxWriteError(
         "Stream.DocumentWriter#toBuffer: the document was written to options.sink; the writer holds no bytes"
@@ -670,7 +671,7 @@ export class DocumentWriter {
     }
     const bytes = this._assembleOutput();
     this._outputChunks = [bytes];
-    return bytes;
+    return asPlainBytes(bytes);
   }
 
   /**
@@ -684,7 +685,7 @@ export class DocumentWriter {
    * @deprecated Use {@link commit} to finish the document and
    * {@link toBuffer} to obtain its bytes. Removed in 1.0.
    */
-  async finalize(): Promise<Uint8Array> {
+  async finalize(): Promise<Uint8Array<ArrayBuffer>> {
     if (this._finalized) {
       throw new DocxWriteError("Stream.DocumentWriter: already finalized");
     }
@@ -694,7 +695,7 @@ export class DocumentWriter {
     if (this._sinkAdapter) {
       return EMPTY_U8;
     }
-    return this._assembleOutput();
+    return asPlainBytes(this._assembleOutput());
   }
 
   /** Write the trailing parts and close the archive and, in sink mode, the sink. */

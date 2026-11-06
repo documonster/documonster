@@ -293,7 +293,7 @@ const fields = Query.listFormFields(doc);
 // 下拉框取选项序号或选项文字；文档中没有的域名会被拒绝。
 const filled = Transform.fillFormFields(
   doc,
-  new Map([
+  new Map<string, string | boolean | number>([
     ["FullName", "Jane Doe"],
     ["AgreeTerms", true],
     ["Country", 2]
@@ -455,7 +455,7 @@ const md = WordMarkdown.fromDocx(doc);
 const mdSetext = WordMarkdown.fromDocx(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX（完整文档或正文片段）
-const doc = await WordMarkdown.toDocx("# Title\n\nHello **world**");
+const fromMarkdown = await WordMarkdown.toDocx("# Title\n\nHello **world**");
 const { body: bodyItems } = await WordMarkdown.toDocxBody("- a\n- b");
 
 // 表格列宽按内容测量，代码块字号收缩到最长行不折行为止 —— 这两件事只能由生产方决定，

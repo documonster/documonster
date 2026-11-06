@@ -197,14 +197,14 @@ export const createAbortError = createAbortErrorImpl;
 export const isAbortError = isAbortErrorImpl;
 /**
  * @deprecated Not an archive operation. Decode natively: `Uint8Array.fromBase64(s)` where the
- * runtime has it (not Node 22), `Buffer.from(s, "base64")` on Node, or `atob` and a loop in a
- * browser. Removed in 1.0.
+ * runtime has it (not Node 22), `Buffer.from(s, "base64")` on Node, or
+ * `Uint8Array.from(atob(s), c => c.charCodeAt(0))` in a browser. Removed in 1.0.
  */
 export const base64ToUint8Array = base64ToUint8ArrayImpl;
 /**
  * @deprecated Not an archive operation. Encode natively: `bytes.toBase64()` where the runtime
- * has it (not Node 22), `Buffer.from(bytes).toString("base64")` on Node, or `btoa` over the
- * bytes in a browser. Removed in 1.0.
+ * has it (not Node 22), `Buffer.from(bytes).toString("base64")` on Node, or
+ * `btoa(Array.from(bytes, b => String.fromCharCode(b)).join(""))` in a browser. Removed in 1.0.
  */
 export const uint8ArrayToBase64 = uint8ArrayToBase64Impl;
 /**

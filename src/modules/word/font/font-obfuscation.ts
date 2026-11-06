@@ -8,6 +8,7 @@
  * but bytes are applied in a specific order derived from the GUID.
  */
 
+import { asPlainBytes } from "@utils/binary";
 import { checkBytes, invalidArgument } from "@word/core/argument-checks";
 import { generateGuid } from "@word/core/internal-utils";
 
@@ -52,8 +53,8 @@ function parseGuid(guid: unknown, where: string): Uint8Array {
  * @param fontKey - The GUID from w:fontKey attribute.
  * @returns The deobfuscated font data (new buffer).
  */
-export function deobfuscateFont(data: Uint8Array, fontKey: string): Uint8Array {
-  return xorFontHeader(data, fontKey, "Font.deobfuscate");
+export function deobfuscateFont(data: Uint8Array, fontKey: string): Uint8Array<ArrayBuffer> {
+  return asPlainBytes(xorFontHeader(data, fontKey, "Font.deobfuscate"));
 }
 
 function xorFontHeader(data: Uint8Array, fontKey: string, where: string): Uint8Array {
@@ -75,9 +76,9 @@ function xorFontHeader(data: Uint8Array, fontKey: string, where: string): Uint8A
  * @param fontKey - The GUID to use for obfuscation (also stored in w:fontKey).
  * @returns The obfuscated font data (new buffer).
  */
-export function obfuscateFont(data: Uint8Array, fontKey: string): Uint8Array {
+export function obfuscateFont(data: Uint8Array, fontKey: string): Uint8Array<ArrayBuffer> {
   // Obfuscation is symmetric with deobfuscation (XOR)
-  return xorFontHeader(data, fontKey, "Font.obfuscate");
+  return asPlainBytes(xorFontHeader(data, fontKey, "Font.obfuscate"));
 }
 
 /**

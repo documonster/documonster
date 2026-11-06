@@ -20,8 +20,9 @@ import { CsvArgumentError } from "@csv/errors";
 import { formatCsv, headerNames } from "@csv/format";
 import { createFormatConfig } from "@csv/format/config";
 import { parseCsv } from "@csv/parse";
+import { recordErrorToThrow } from "@csv/parse/sync";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
-import type { CsvParseOptions, CsvFormatOptions, Row as CsvRow } from "@csv/types";
+import type { CsvParseOptions, CsvFormatOptions, CsvRecordError, Row as CsvRow } from "@csv/types";
 import { checkFormatOptions, checkParseOptions } from "@csv/utils/check-options";
 import {
   DEFAULT_DATE_FORMATS,
@@ -54,7 +55,7 @@ import type { SchemaMatches } from "@utils/schema";
 export type ExcelCsvInput =
   | string // CSV string or URL (http:// or https://)
   | ArrayBuffer
-  | Uint8Array
+  | ArrayBufferView // Bytes: a Uint8Array, or any other typed array or DataView, read as the bytes it views
   | File // Browser File object
   | Blob // Browser Blob object
   | IReadable<Uint8Array | string> // Node readable stream
@@ -133,7 +134,7 @@ export interface ExcelCsvReadOptions extends CsvReadParseFields {
   signal?: AbortSignal;
   /**
    * The encoding of the input bytes — any label `TextDecoder` accepts (`"utf-8"`, `"windows-1252"`, `"shift_jis"`, …),
-   * as `Csv.parse` takes it. Default `"utf-8"`. Applies to every byte input: a `Uint8Array` or `ArrayBuffer`, a `File`
+   * as `Csv.parse` takes it. Default `"utf-8"`. Applies to every byte input: an `ArrayBuffer` or any `ArrayBufferView`, a `File`
    * or `Blob`, a byte stream, a URL's response, a file path. Text input is already decoded.
    */
   encoding?: string;
@@ -204,6 +205,12 @@ export interface ExcelCsvWriteOptions extends CsvWriteFormatFields {
   dateUTC?: boolean;
   /** Turn each cell value into the value written, in place of the default formatting. */
   map?(value: CellValue, index: number): CellValue;
+  /**
+   * Turn each row written into the row to write instead — the values after `map`, and the row's number on the sheet —
+   * so a row can gain, lose or reorder fields: exceljs's `formatterOptions.transform`. Every row written passes through
+   * it, the header row and the blank line of an empty row (`[]`) included.
+   */
+  mapRow?(values: CellValue[], rowNumber: number): readonly CellValue[];
   /** Write a blank line for each empty row between rows that have values. Default `true`. */
   includeEmptyRows?: boolean;
   /**
@@ -357,6 +364,20 @@ function* csvRows(
 ): Generator<CellValue[]> {
   const includeEmptyRows = options?.includeEmptyRows !== false;
   const writeHeaders = options?.writeHeaders !== false;
+  const mapRow = options?.mapRow;
+  const out = (values: CellValue[], rowNumber: number): CellValue[] => {
+    if (!mapRow) {
+      return values;
+    }
+    const mapped: unknown = mapRow(values, rowNumber);
+    if (!Array.isArray(mapped)) {
+      throw new ExcelArgumentError(
+        "options.mapRow",
+        `options.mapRow must return an array of values for row ${rowNumber}, got ${describeInput(mapped)}.`
+      );
+    }
+    return [...(mapped as CellValue[])];
+  };
   let lastRow = 1;
   for (const { row, rowNumber } of iterateWorksheetRows(worksheet)) {
     if (!writeHeaders && rowNumber === 1) {
@@ -364,10 +385,10 @@ function* csvRows(
     }
     if (includeEmptyRows) {
       while (lastRow++ < rowNumber - 1) {
-        yield [];
+        yield out([], lastRow);
       }
     }
-    yield rowValues(row).slice(1).map(map);
+    yield out(rowValues(row).slice(1).map(map), rowNumber);
     lastRow = rowNumber;
   }
 }
@@ -405,7 +426,26 @@ function createDrainRacer(emitter: {
     });
 }
 
-function buildParserOptions(options?: ExcelCsvReadOptions): Partial<CsvParseOptions> {
+/**
+ * The parser options for a read, and the records the parser leaves out (a row with the wrong number of fields under a
+ * header, text after a closing quote) when the caller gives no `onSkip` to receive them. A sheet has nowhere to put
+ * such a record, so a read throws for it rather than import the rest without it — as `Csv.parseStream` does. With a
+ * header row they used to be dropped without a word: `Csv.parse` reports them in its result there, and the result was
+ * read for its rows only.
+ */
+function buildParserOptions(options?: ExcelCsvReadOptions): {
+  parserOptions: Partial<CsvParseOptions>;
+  skipped: CsvRecordError[];
+} {
+  const skipped: CsvRecordError[] = [];
+  const onSkip = options?.onSkip ?? ((error: CsvRecordError) => void skipped.push(error));
+  return { parserOptions: parserOptionsOf(options, onSkip), skipped };
+}
+
+function parserOptionsOf(
+  options: ExcelCsvReadOptions | undefined,
+  onSkip: CsvParseOptions["onSkip"]
+): Partial<CsvParseOptions> {
   return {
     delimiter: options?.delimiter ?? ",",
     quote: options?.quote,
@@ -430,7 +470,7 @@ function buildParserOptions(options?: ExcelCsvReadOptions): Partial<CsvParseOpti
     // import fail on the records it could not read as rows.
     skipRecordsWithError: options?.skipRecordsWithError,
     skipRecordsWithEmptyValues: options?.skipRecordsWithEmptyValues,
-    onSkip: options?.onSkip,
+    onSkip,
     // Byte chunks are decoded by the parser stream; text arrives already decoded.
     encoding: options?.encoding
   };
@@ -501,7 +541,9 @@ function asBridgeError(where: string, check: () => void): void {
   } catch (error) {
     if (error instanceof CsvArgumentError) {
       const detail = error.message.slice(error.message.indexOf(": ") + 2);
-      throw new ExcelArgumentError(error.field, `${where}: ${detail}`, { cause: error });
+      throw new ExcelArgumentError(error.field, `${where}: ${detail}`, {
+        cause: error
+      });
     }
     throw error;
   }
@@ -574,6 +616,7 @@ const writeOptionsSchema = s.object({
   dateFormat: s.string({ expected: 'a format string such as "YYYY-MM-DD"' }).optional(),
   dateUTC: flag(),
   map: s.function<(value: CellValue, index: number) => CellValue>().optional(),
+  mapRow: s.function<(values: CellValue[], rowNumber: number) => readonly CellValue[]>().optional(),
   includeEmptyRows: flag(),
   encoding: s.string().optional(),
   highWaterMark: highWaterMark()
@@ -604,7 +647,9 @@ function readValueMapper(
       `${where}: options.dateFormats must be an array of the date forms a CSV read knows, such as "YYYY-MM-DD", got ${JSON.stringify(dateFormats)}.`
     );
   }
-  asBridgeError(where, () => checkParseOptions(buildParserOptions(options) as CsvParseOptions));
+  asBridgeError(where, () =>
+    checkParseOptions(parserOptionsOf(options, options?.onSkip) as CsvParseOptions)
+  );
   return (
     options?.map ||
     (createDefaultValueMapper(dateFormats, {
@@ -685,7 +730,7 @@ export function checkCsvWriteArguments(
 /** @internal — shared by read entry points and the Node file variant. */
 export function readCsvContent(
   workbook: Workbook,
-  content: string | ArrayBuffer | Uint8Array,
+  content: string | ArrayBuffer | ArrayBufferView,
   options?: ExcelCsvReadOptions,
   where = "ExcelCsv.addWorksheet"
 ): Worksheet {
@@ -703,7 +748,11 @@ export function readCsvContent(
 
   const map = readValueMapper(where, options);
   // Parsed before the sheet is added, so text the parser refuses leaves the workbook as it was.
-  const result = parseCsv(str, buildParserOptions(options));
+  const { parserOptions, skipped } = buildParserOptions(options);
+  const result = parseCsv(str, parserOptions);
+  if (skipped.length > 0) {
+    throw recordErrorToThrow(where, skipped);
+  }
   refuseLongSheetName(options?.sheetName);
   const worksheet = addWorksheet(workbook, options?.sheetName);
 
@@ -734,7 +783,8 @@ export function readCsvStream(
   const map = readValueMapper(where, options);
   refuseLongSheetName(options?.sheetName);
   const worksheet = addWorksheet(workbook, options?.sheetName);
-  const parser = new CsvParserStream(buildParserOptions(options));
+  const { parserOptions, skipped } = buildParserOptions(options);
+  const parser = new CsvParserStream(parserOptions);
   const useHeaders = !!options?.headers;
   let headerRow: string[] | null = null;
 
@@ -760,7 +810,9 @@ export function readCsvStream(
     // adapted via readableStreamToAsyncIterable); pipeline accepts it as a
     // source at runtime even though its type union lists concrete streams.
     pipeline(stream as IReadable<Uint8Array | string>, parser)
-      .then(() => resolve(worksheet))
+      .then(() =>
+        skipped.length > 0 ? reject(recordErrorToThrow(where, skipped)) : resolve(worksheet)
+      )
       .catch(reject);
   });
 }
@@ -879,12 +931,12 @@ async function addCsvWorksheet(
   if (isReadableStream(input)) {
     return readCsvStream(workbook, input, options, where);
   }
-  return readCsvContent(workbook, input as string | ArrayBuffer | Uint8Array, options, where);
+  return readCsvContent(workbook, input as string | ArrayBuffer | ArrayBufferView, options, where);
 }
 
 /**
  * Read CSV into a new worksheet on `workbook`. Accepts a CSV string, URL,
- * `ArrayBuffer`/`Uint8Array`, browser `File`/`Blob`, a Node or Web readable stream, or an
+ * an `ArrayBuffer` or any `ArrayBufferView`, browser `File`/`Blob`, a Node or Web readable stream, or an
  * async iterable of text or byte chunks ({@link ExcelCsvInput}).
  *
  * @example
@@ -1087,7 +1139,10 @@ export function writeCsv(
  * Write a worksheet to a CSV buffer (`Uint8Array`) synchronously. Published as
  * `ExcelCsv.toBufferSync`; `ExcelCsv.toBuffer` is the asynchronous form.
  */
-export function writeCsvBufferSync(workbook: Workbook, options?: ExcelCsvWriteOptions): Uint8Array {
+export function writeCsvBufferSync(
+  workbook: Workbook,
+  options?: ExcelCsvWriteOptions
+): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(formatWorksheet("ExcelCsv.toBufferSync", workbook, options));
 }
 
@@ -1099,7 +1154,7 @@ export function writeCsvBufferSync(workbook: Workbook, options?: ExcelCsvWriteOp
 export async function writeCsvBuffer(
   workbook: Workbook,
   options?: ExcelCsvWriteOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   return new TextEncoder().encode(formatWorksheet("ExcelCsv.toBuffer", workbook, options));
 }
 
@@ -1232,7 +1287,15 @@ export function createCsvImportParser(
   const map = readValueMapper("ExcelCsv.createImportStream", options);
   refuseLongSheetName(options?.sheetName);
   const worksheet = addWorksheet(workbook, options?.sheetName);
-  const parser = new CsvParserStream(buildParserOptions(options));
+  // A record the parser leaves out, with no `onSkip` to receive it, fails the import stream as it is met.
+  const parser: CsvParserStream = new CsvParserStream(
+    parserOptionsOf(
+      options,
+      options?.onSkip ??
+        (error =>
+          parser.destroy(recordErrorToThrow("ExcelCsv.createImportStream", [error]) as Error))
+    )
+  );
   const useHeaders = !!options?.headers;
   let headerRow: string[] | null = null;
 

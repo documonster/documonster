@@ -293,20 +293,32 @@ export interface Margins {
 // ============================================================================
 // Page Setup Types
 // ============================================================================
+/** `ST_Orientation`: `"default"` lets the printer choose. */
+export type PageSetupOrientation = "default" | "portrait" | "landscape";
+/** `ST_PageOrder`: the order pages of a sheet wider and taller than one page are printed in. */
+export type PageSetupOrder = "downThenOver" | "overThenDown";
+/**
+ * `ST_CellComments`, plus `"None"` — the model's default — and `"asDisplyed"`, the spelling this library once wrote,
+ * which a file it made may still carry.
+ */
+export type PageSetupCellComments = "None" | "none" | "asDisplayed" | "asDisplyed" | "atEnd";
+/** `ST_PrintError`: how a cell error is printed. */
+export type PageSetupErrors = "displayed" | "blank" | "dash" | "NA";
+
 export interface PageSetup {
   margins: Margins;
-  orientation: string;
+  orientation: PageSetupOrientation;
   horizontalDpi?: number;
   verticalDpi?: number;
   fitToPage: boolean;
   fitToWidth: number;
   fitToHeight: number;
   scale: number;
-  pageOrder: string;
+  pageOrder: PageSetupOrder;
   blackAndWhite: boolean;
   draft: boolean;
-  cellComments: string;
-  errors: string;
+  cellComments: PageSetupCellComments;
+  errors: PageSetupErrors;
   paperSize?: number;
   showRowColHeaders: boolean;
   showGridLines: boolean;

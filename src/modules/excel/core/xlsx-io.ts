@@ -60,6 +60,7 @@ import type {
   WorkbookStreamInput,
   WorkbookWriteOptions
 } from "@excel/core/workbook-io-types";
+import { asPlainBytes } from "@utils/binary";
 
 /**
  * The XLSX reader, loaded on demand — the boundary `workbook-format.ts` already draws for XLSB.
@@ -103,15 +104,17 @@ function loadXlsxReader() {
 export async function toBuffer(
   wb: WorkbookData,
   options?: WorkbookWriteOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkWorkbook(wb);
   checkIoOptions("Workbook.toBuffer", options, "write");
   // `null` is taken as no options, as the check documents.
   options ??= undefined;
   const bytes = await packageBytes(wb, options);
-  return Object.getPrototypeOf(bytes) === Uint8Array.prototype
-    ? bytes
-    : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return asPlainBytes(
+    (await Object.getPrototypeOf(bytes)) === Uint8Array.prototype
+      ? bytes
+      : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  );
 }
 
 /**

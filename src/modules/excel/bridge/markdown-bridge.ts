@@ -595,7 +595,7 @@ export function formatWorksheet(
 export function writeMarkdownBuffer(
   workbook: Workbook,
   options?: ExcelMarkdownWriteOptions
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(formatWorksheet("ExcelMarkdown.toBufferSync", workbook, options));
 }
 
@@ -608,6 +608,6 @@ export function writeMarkdownBuffer(
 export async function markdownToBuffer(
   workbook: Workbook,
   options?: ExcelMarkdownWriteOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   return new TextEncoder().encode(formatWorksheet("ExcelMarkdown.toBuffer", workbook, options));
 }

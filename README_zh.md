@@ -129,8 +129,8 @@ await Workbook.writeFile(workbook, "output.xlsx");
 
 // 读取
 const wb = await Workbook.readFile("output.xlsx");
-const readSheet = Workbook.getWorksheet(wb, 1);
-Row.each(readSheet, n => console.log(n, Row.getValues(readSheet, n)));
+const readSheet = Workbook.getWorksheet(wb, 1); // undefined when the workbook has no such sheet
+if (readSheet) Row.each(readSheet, n => console.log(n, Row.getValues(readSheet, n)));
 
 // PDF — 直接从数据生成，无需 Workbook
 import { Pdf } from "documonster/pdf";
@@ -308,6 +308,8 @@ Vitest 无需任何配置。
 - 🏠 [GitHub 仓库](https://github.com/documonster/documonster)
 - 🐛 [问题追踪](https://github.com/documonster/documonster/issues)
 - 📋 [更新日志](CHANGELOG.md)
-- 🔄 [迁移指南](MIGRATION.md)
+- 🔄 [迁移指南](MIGRATION.md)（documonster 版本之间升级）
+- 🔀 [从 exceljs 迁移](MIGRATION_EXCELJS_TO_DOCUMONSTER.md) ·
+  [从 @cj-tech-master/excelts 迁移](MIGRATION_EXCELTS_TO_DOCUMONSTER.md)
 - 📄 [许可证 (Apache-2.0)](LICENSE)
 - 📦 [第三方声明](THIRD_PARTY_NOTICES.md)

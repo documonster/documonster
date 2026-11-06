@@ -1,3 +1,4 @@
+import { asPlainBytes } from "@utils/binary";
 import {
   checkBytes,
   checkInteger,
@@ -87,7 +88,7 @@ export async function deriveKey(
   },
   password: string,
   blockKey: Uint8Array
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "WordCrypto.Agile.deriveKey";
   checkKeyInfo(info, "info", where);
   checkString(password, "password", where);
@@ -109,18 +110,20 @@ export async function decryptPackage(
   info: AgileEncryptionInfo,
   password: string,
   options?: DecryptOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "WordCrypto.Agile.decryptPackage";
   const bytes = checkBytes(encryptedPackage, "encryptedPackage", where);
   checkKeyInfo(info, "info", where);
   checkString(password, "password", where);
   checkRecord(options, "options", where, { optional: true });
   checkLimit(options?.maxDecryptedSize, "options.maxDecryptedSize", where, { optional: true });
-  return decryptAgilePackage(
-    bytes,
-    info,
-    password,
-    options?.maxDecryptedSize ?? DEFAULT_SECURITY_POLICY.maxPackageSize
+  return asPlainBytes(
+    await decryptAgilePackage(
+      bytes,
+      info,
+      password,
+      options?.maxDecryptedSize ?? DEFAULT_SECURITY_POLICY.maxPackageSize
+    )
   );
 }
 

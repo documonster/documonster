@@ -118,7 +118,7 @@ export function terminateDefaultWorkerPool(): void {
 export async function deflateWithPool(
   data: Uint8Array,
   options?: TaskOptions & { level?: number }
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   void data;
   void options;
   return rejectStub("Compression.Workers.deflate");
@@ -127,7 +127,7 @@ export async function deflateWithPool(
 export async function inflateWithPool(
   data: Uint8Array,
   options?: TaskOptions & { maxOutputLength?: number }
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   void data;
   void options;
   return rejectStub("Compression.Workers.inflate");
@@ -135,14 +135,14 @@ export async function inflateWithPool(
 
 export async function deflateBatchWithPool(
   items: Array<{ data: Uint8Array; options?: TaskOptions & { level?: number } }>
-): Promise<Uint8Array[]> {
+): Promise<Uint8Array<ArrayBuffer>[]> {
   void items;
   return rejectStub("Compression.Workers.deflateBatch");
 }
 
 export async function inflateBatchWithPool(
   items: Array<{ data: Uint8Array; options?: TaskOptions }>
-): Promise<Uint8Array[]> {
+): Promise<Uint8Array<ArrayBuffer>[]> {
   void items;
   return rejectStub("Compression.Workers.inflateBatch");
 }

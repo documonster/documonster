@@ -40,6 +40,7 @@ import {
   ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError
 } from "@archive/core/errors";
+import { asPlainBytes } from "@utils/binary";
 
 export { ArchiveWorkerStreamStartError };
 
@@ -673,7 +674,7 @@ export class WorkerPool {
           this._completedTasks++;
           const duration = message.duration ?? performance.now() - task.startTime;
           task.resolve({
-            data: message.data!,
+            data: asPlainBytes(message.data!),
             duration
           });
         } else {
@@ -1205,9 +1206,9 @@ export function terminateDefaultWorkerPool(): void {
 export async function deflateWithPool(
   data: Uint8Array,
   options?: TaskOptions & { level?: number }
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const result = await getDefaultWorkerPool().execute("deflate", data, options);
-  return result.data;
+  return asPlainBytes(result.data);
 }
 
 /**
@@ -1216,9 +1217,9 @@ export async function deflateWithPool(
 export async function inflateWithPool(
   data: Uint8Array,
   options?: TaskOptions & { maxOutputLength?: number }
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const result = await getDefaultWorkerPool().execute("inflate", data, options);
-  return result.data;
+  return asPlainBytes(result.data);
 }
 
 /**
@@ -1227,7 +1228,7 @@ export async function inflateWithPool(
 async function executeBatchByType(
   taskType: WorkerTaskType,
   items: Array<{ data: Uint8Array; options?: TaskOptions & { level?: number } }>
-): Promise<Uint8Array[]> {
+): Promise<Uint8Array<ArrayBuffer>[]> {
   const batchItems = new Array<{
     taskType: WorkerTaskType;
     data: Uint8Array;
@@ -1239,7 +1240,7 @@ async function executeBatchByType(
   }
 
   const results = await getDefaultWorkerPool().executeBatch(batchItems);
-  const output = new Array<Uint8Array>(results.length);
+  const output = new Array<Uint8Array<ArrayBuffer>>(results.length);
   for (let i = 0; i < results.length; i++) {
     output[i] = results[i]!.data;
   }
@@ -1251,7 +1252,7 @@ async function executeBatchByType(
  */
 export async function deflateBatchWithPool(
   items: Array<{ data: Uint8Array; options?: TaskOptions & { level?: number } }>
-): Promise<Uint8Array[]> {
+): Promise<Uint8Array<ArrayBuffer>[]> {
   return executeBatchByType("deflate", items);
 }
 
@@ -1260,6 +1261,6 @@ export async function deflateBatchWithPool(
  */
 export async function inflateBatchWithPool(
   items: Array<{ data: Uint8Array; options?: TaskOptions }>
-): Promise<Uint8Array[]> {
+): Promise<Uint8Array<ArrayBuffer>[]> {
   return executeBatchByType("inflate", items);
 }

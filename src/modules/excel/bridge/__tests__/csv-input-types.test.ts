@@ -43,5 +43,16 @@ describe("ExcelCsv.read takes what ExcelCsvInput names", () => {
   it("ExcelCsvInput includes them", () => {
     expectTypeOf<ReadableStream<Uint8Array>>().toMatchTypeOf<ExcelCsvInput>();
     expectTypeOf<AsyncIterable<Uint8Array | string>>().toMatchTypeOf<ExcelCsvInput>();
+    expectTypeOf<DataView>().toMatchTypeOf<ExcelCsvInput>();
+    expectTypeOf<Uint16Array>().toMatchTypeOf<ExcelCsvInput>();
+  });
+
+  it("reads any ArrayBufferView as the bytes it views", async () => {
+    const framed = new Uint8Array(bytes.length + 4);
+    framed.set(bytes, 2);
+    const wb = await ExcelCsv.read(new DataView(framed.buffer, 2, bytes.length));
+    const ws = Workbook.getWorksheets(wb)[0]!;
+    expect(Cell.getValue(ws, "A1")).toBe("a");
+    expect(Cell.getValue(ws, "B2")).toBe(2);
   });
 });

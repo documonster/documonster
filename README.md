@@ -129,8 +129,8 @@ await Workbook.writeFile(workbook, "output.xlsx");
 
 // Read
 const wb = await Workbook.readFile("output.xlsx");
-const readSheet = Workbook.getWorksheet(wb, 1);
-Row.each(readSheet, n => console.log(n, Row.getValues(readSheet, n)));
+const readSheet = Workbook.getWorksheet(wb, 1); // undefined when the workbook has no such sheet
+if (readSheet) Row.each(readSheet, n => console.log(n, Row.getValues(readSheet, n)));
 
 // PDF — generate from data, no Workbook needed
 import { Pdf } from "documonster/pdf";
@@ -313,6 +313,8 @@ Vitest needs no configuration.
 - 🏠 [GitHub Repository](https://github.com/documonster/documonster)
 - 🐛 [Issue Tracker](https://github.com/documonster/documonster/issues)
 - 📋 [Changelog](CHANGELOG.md)
-- 🔄 [Migration Guide](MIGRATION.md)
+- 🔄 [Migration Guide](MIGRATION.md) — upgrading between documonster releases
+- 🔀 [Migrating from exceljs](MIGRATION_EXCELJS_TO_DOCUMONSTER.md) ·
+  [Migrating from @cj-tech-master/excelts](MIGRATION_EXCELTS_TO_DOCUMONSTER.md)
 - 📄 [License (Apache-2.0)](LICENSE)
 - 📦 [Third-Party Notices](THIRD_PARTY_NOTICES.md)

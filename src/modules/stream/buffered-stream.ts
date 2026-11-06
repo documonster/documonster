@@ -12,7 +12,7 @@ import {
 } from "@stream/arguments";
 import { StreamStateError, StreamArgumentError } from "@stream/errors";
 import type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
-import { textEncoder } from "@utils/binary";
+import { textEncoder, asPlainBytes } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 import { s } from "@utils/schema";
 
@@ -24,11 +24,11 @@ export type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
 export function createStringChunk(data: string): StreamDataChunk {
   checkStreamArgument(s.string(), data, "Streams.createStringChunk", "data");
   let buffer: Uint8Array | undefined;
-  function toUint8Array(): Uint8Array {
+  function toUint8Array(): Uint8Array<ArrayBuffer> {
     if (!buffer) {
       buffer = textEncoder.encode(data);
     }
-    return buffer;
+    return asPlainBytes(buffer);
   }
   return {
     get length(): number {
@@ -59,8 +59,8 @@ export function createByteChunk(data: Uint8Array): StreamDataChunk {
       target.set(data.subarray(offset, offset + copyLength), targetOffset);
       return copyLength;
     },
-    toUint8Array(): Uint8Array {
-      return data;
+    toUint8Array(): Uint8Array<ArrayBuffer> {
+      return asPlainBytes(data);
     }
   };
 }
@@ -91,7 +91,7 @@ class ReadWriteBuffer {
     return this.iWrite === this.size;
   }
 
-  read(size?: number): Uint8Array | null {
+  read(size?: number): Uint8Array<ArrayBuffer> | null {
     if (size === 0) {
       return null;
     }
@@ -115,12 +115,12 @@ class ReadWriteBuffer {
     return size;
   }
 
-  toUint8Array(): Uint8Array {
+  toUint8Array(): Uint8Array<ArrayBuffer> {
     if (this.iRead === 0 && this.iWrite === this.size) {
-      return this.buffer;
+      return asPlainBytes(this.buffer);
     }
     // Use subarray for zero-copy view when returning whole remaining buffer
-    return this.buffer.subarray(this.iRead, this.iWrite);
+    return asPlainBytes(this.buffer.subarray(this.iRead, this.iWrite));
   }
 }
 
@@ -183,7 +183,7 @@ export class BufferedStream extends EventEmitter {
   /**
    * Read data from the stream
    */
-  read(size?: number): Uint8Array | null {
+  read(size?: number): Uint8Array<ArrayBuffer> | null {
     // Try to satisfy the read from existing buffers
     let buffer = this._getBuffer(size);
 
@@ -206,7 +206,7 @@ export class BufferedStream extends EventEmitter {
       buffer = this._getBuffer(size);
     }
 
-    return buffer;
+    return buffer && asPlainBytes(buffer);
   }
 
   /**
@@ -301,7 +301,7 @@ export class BufferedStream extends EventEmitter {
    * @deprecated Use {@link readAll}, which does the same: despite the `to` name this
    * consumes the buffered data. Removed in 1.0.
    */
-  toUint8Array(): Uint8Array {
+  toUint8Array(): Uint8Array<ArrayBuffer> {
     return this.readAll();
   }
 
@@ -331,7 +331,7 @@ export class BufferedStream extends EventEmitter {
    * one internal batch, it returns everything, and an empty array (not `null`) when nothing is
    * buffered.
    */
-  readAll(): Uint8Array {
+  readAll(): Uint8Array<ArrayBuffer> {
     // Fast path: no data
     if (this._totalLength === 0) {
       return new Uint8Array(0);

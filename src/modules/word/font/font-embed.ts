@@ -14,6 +14,7 @@
  * glyphs that are actually used in the document.
  */
 
+import { asPlainBytes } from "@utils/binary";
 import { glyphComponents, parseTtf } from "@utils/font-ttf";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -94,15 +95,15 @@ export interface EmbedFontResult {
  * @throws {DocxArgumentError} If `fontData` is not a font — it does not
  * begin with an `sfnt` version (TrueType, OpenType or a collection).
  */
-export function subsetFont(fontData: Uint8Array, characters: string): Uint8Array {
+export function subsetFont(fontData: Uint8Array, characters: string): Uint8Array<ArrayBuffer> {
   const where = "Font.subset";
   fontData = checkFontData(fontData, "fontData", where);
   checkString(characters, "characters", where);
   try {
-    return _subsetTtf(fontData, characters);
+    return asPlainBytes(_subsetTtf(fontData, characters));
   } catch {
     // If subsetting fails for any reason, return original data
-    return fontData;
+    return asPlainBytes(fontData);
   }
 }
 

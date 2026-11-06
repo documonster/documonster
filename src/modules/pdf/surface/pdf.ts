@@ -54,6 +54,7 @@ import * as SignatureNs from "@pdf/surface/signature";
 import type { PdfExportOptions } from "@pdf/types";
 import type { DocxDocument, DocxToPdfOptions } from "@pdf/word-bridge";
 import type { WordChart } from "@pdf/word-chart-bridge";
+import { asPlainBytes } from "@utils/binary";
 import { isRecordArgument } from "@utils/object";
 import { check, fail, s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -67,10 +68,13 @@ import type { SchemaMatches } from "@utils/schema";
  *
  * Yields to the event loop between output pages during layout and rendering.
  */
-export async function fromTable(input: PdfInput, options?: PdfExportOptions): Promise<Uint8Array> {
+export async function fromTable(
+  input: PdfInput,
+  options?: PdfExportOptions
+): Promise<Uint8Array<ArrayBuffer>> {
   checkPdfInput("Pdf.fromTable", input);
   checkPdfExportOptions("Pdf.fromTable", options);
-  return pdf(input, options);
+  return asPlainBytes(await pdf(input, options));
 }
 
 /**
@@ -124,7 +128,10 @@ export const verifySignature = verifyPdfSignature;
  * @deprecated Use `Pdf.Signature.fillPlaceholder(bytes, { certificate, privateKey })` —
  * this only completes a placeholder already in the file. Removed in 1.0.
  */
-export function sign(pdfBytes: Uint8Array, options: SignPdfOptions): Promise<Uint8Array>;
+export function sign(
+  pdfBytes: Uint8Array,
+  options: SignPdfOptions
+): Promise<Uint8Array<ArrayBuffer>>;
 /**
  * @deprecated Use `Pdf.Signature.fillPlaceholder(bytes, { certificate, privateKey })`.
  * Removed in 1.0.
@@ -133,18 +140,20 @@ export function sign(
   pdfBytes: Uint8Array,
   certificate: Uint8Array,
   privateKey: Uint8Array
-): Promise<Uint8Array>;
+): Promise<Uint8Array<ArrayBuffer>>;
 export function sign(
   pdfBytes: Uint8Array,
   optionsOrCertificate: SignPdfOptions | Uint8Array,
   privateKey?: Uint8Array
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   // Anything but an options object is the positional certificate, handed on unchanged as the
   // positional form always did — a typed array from another realm fails `instanceof Uint8Array`.
   if (!isRecordArgument(optionsOrCertificate)) {
-    return signPdf(pdfBytes, optionsOrCertificate, privateKey as Uint8Array);
+    return signPdf(pdfBytes, optionsOrCertificate, privateKey as Uint8Array).then(asPlainBytes);
   }
-  return signPdf(pdfBytes, optionsOrCertificate.certificate, optionsOrCertificate.privateKey);
+  return signPdf(pdfBytes, optionsOrCertificate.certificate, optionsOrCertificate.privateKey).then(
+    asPlainBytes
+  );
 }
 
 /** Low-level signing and verification primitives — see `Pdf.Signature`. */
@@ -200,7 +209,7 @@ export function fromExcel(
      */
     readonly sheets?: readonly string[];
   }
-): Promise<Uint8Array>;
+): Promise<Uint8Array<ArrayBuffer>>;
 /**
  * @deprecated Pass sheet names. Numeric positions are deprecated (removed in 1.0): they
  * are 1-based here but 0-based in `WordExcel.toDocx` and sheet ids in
@@ -214,17 +223,20 @@ export function fromExcel(
   // `sheets` is required here, so only a value that certainly carries a list able to hold a
   // number — a literal with one, a variable inferred as `number[]` — resolves to this form.
   options: Omit<ExcelToPdfOptions, "sheets"> & { readonly sheets: readonly (string | number)[] }
-): Promise<Uint8Array>;
+): Promise<Uint8Array<ArrayBuffer>>;
 /**
  * Convert an Excel workbook to a PDF, with options typed as the published
  * {@link ExcelToPdfOptions}. Not deprecated: such a value may well hold only names, and
  * striking it through would flag valid code. Prefer names in `sheets`.
  */
-export function fromExcel(workbook: Workbook, options?: ExcelToPdfOptions): Promise<Uint8Array>;
+export function fromExcel(
+  workbook: Workbook,
+  options?: ExcelToPdfOptions
+): Promise<Uint8Array<ArrayBuffer>>;
 export async function fromExcel(
   workbook: Workbook,
   input?: Omit<ExcelToPdfOptions, "sheets"> & { readonly sheets?: readonly (string | number)[] }
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   // The exporter only reads `sheets`, so the read-only list of the names form is passed as is.
   const options = input as ExcelToPdfOptions | undefined;
   // Checked before the bridge runs `recalculate`, which edits the workbook.
@@ -239,22 +251,25 @@ export async function fromExcel(
   }
   checkWorkbookHandle("Pdf.fromExcel", workbook);
   const { excelToPdf } = await import("@pdf/excel-bridge");
-  return excelToPdf(workbook, options);
+  return asPlainBytes(await excelToPdf(workbook, options));
 }
 
 /** Render a single chart handle to a PDF. Dynamically loads the excel bridge. */
 export async function fromChart(
   chart: ChartHandle,
   options?: ChartToPdfOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkChartToPdfOptions(options);
   checkChartHandle("Pdf.fromChart", chart);
   const { chartToPdf } = await import("@pdf/excel-bridge");
-  return chartToPdf(chart, options);
+  return asPlainBytes(await chartToPdf(chart, options));
 }
 
 /** Convert a DOCX document to a PDF. Dynamically loads the word bridge. */
-export async function fromDocx(doc: DocxDocument, options?: DocxToPdfOptions): Promise<Uint8Array> {
+export async function fromDocx(
+  doc: DocxDocument,
+  options?: DocxToPdfOptions
+): Promise<Uint8Array<ArrayBuffer>> {
   checkDocxToPdfOptions(options);
   if (typeof doc !== "object" || doc === null || !Array.isArray((doc as { body?: unknown }).body)) {
     throw new PdfArgumentError(
@@ -263,7 +278,7 @@ export async function fromDocx(doc: DocxDocument, options?: DocxToPdfOptions): P
     );
   }
   const { docxToPdf } = await import("@pdf/word-bridge");
-  return docxToPdf(doc, options);
+  return asPlainBytes(await docxToPdf(doc, options));
 }
 
 /**

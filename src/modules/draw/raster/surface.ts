@@ -21,6 +21,7 @@ import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import { DEFAULT_TEXT_FAMILY, flattenPath, roundedRectToPath, sectorToPath } from "@draw/types";
 import type { DrawClip, DrawList, DrawPaint, DrawPoint } from "@draw/types";
+import { asPlainBytes } from "@utils/binary";
 import { parseCssColor } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
 
@@ -96,6 +97,8 @@ export interface RgbaImage {
  * report something only this function can know.
  */
 export interface RasterizedImage extends RgbaImage {
+  /** {@link RgbaImage.data}, over an ordinary `ArrayBuffer` (so it is a `BufferSource`). */
+  readonly data: Uint8Array<ArrayBuffer>;
   /**
    * Code points no available font could draw, sorted.
    *
@@ -167,7 +170,9 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
   return {
     width: pixelWidth,
     height: pixelHeight,
-    data: samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples),
+    data: asPlainBytes(
+      samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples)
+    ),
     uncoveredCodePoints: canvas.getUncoveredCodePoints(),
     textWarnings: canvas.getTextWarnings()
   };

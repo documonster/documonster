@@ -47,8 +47,17 @@ pnpm build:packages
 
 pnpm verify:doc-examples  # documented imports & members must exist — see "Documentation" below
 pnpm verify:doc-links     # local Markdown targets & headings must exist
+pnpm verify:guide-tables  # the calls in the migration guides' tables must compile
+pnpm verify:guide-examples  # every ts code block of the migration guides compiles whole (`ts browser`, `ts before`)
 pnpm verify:examples      # every example must actually run — see "Examples" below
 pnpm verify:compat        # the last release's examples still type-check and run
+pnpm api:changes --migration  # before a release: regenerate docs/api-changes-since-v<last>.md and
+                              # the generated parts of MIGRATION.md (needs build:esm + build:packages)
+pnpm verify:excelts-guide     # the excelts guide accounts for every name excelts 10.2.0 published; --write
+                              # regenerates its name index and docs/api-changes-from-excelts-10.2.0.md
+pnpm verify:exceljs-guide     # the exceljs guide accounts for every name exceljs 4.4.0 published
+pnpm verify:exceljs-parity    # the guides' ports write the same workbooks as exceljs 4.4.0 (and
+pnpm verify:excelts-parity    # excelts 10.2.0) did — both installed from npm
 
 # Single test file
 pnpm exec vitest run src/modules/excel/core/__tests__/cell.test.ts

@@ -147,7 +147,7 @@ const result = await Csv.parseAsync(csvString, { headers: true });
 
 // From ReadableStream (browser fetch)
 const response = await fetch("/data.csv");
-const result = await Csv.parseAsync(response.body, { headers: true });
+const result = await Csv.parseAsync(response.body!, { headers: true });
 
 // From async iterable
 const result = await Csv.parseAsync(asyncChunks, { headers: true });
@@ -244,7 +244,9 @@ import { pipeline } from "documonster/stream";
 const parser = new Csv.ParserStream({ headers: true, dynamicTyping: true });
 
 // With transform and validation
-parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
+parser
+  .transform((row: Record<string, string>) => ({ ...row, email: row.email.trim().toLowerCase() }))
+  .validate((row: Record<string, string>) => row.email.includes("@"));
 
 // Events
 parser.on("headers", headers => console.log("Headers:", headers));

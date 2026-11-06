@@ -67,6 +67,7 @@ import {
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { checkWorksheet, type WorksheetData } from "@excel/core/worksheet-core";
 import { argumentChecks } from "@excel/utils/arguments";
+import { asPlainBytes } from "@utils/binary";
 
 // Every function here runs through `namedCall`, so an argument error says which call received
 // it (`ChartClassic.createModel: options.series must …`) — the builders are shared with
@@ -190,8 +191,11 @@ export function fillStrRef(
  *   that is not text, a `background` that is not a colour, or `fonts` / `useSystemFonts` of
  *   the wrong shape.
  */
-export async function toPng(model: ChartModel, options?: ChartRenderOptions): Promise<Uint8Array> {
-  return renderChartPng(model, options, "ChartClassic.toPng");
+export async function toPng(
+  model: ChartModel,
+  options?: ChartRenderOptions
+): Promise<Uint8Array<ArrayBuffer>> {
+  return asPlainBytes(await renderChartPng(model, options, "ChartClassic.toPng"));
 }
 
 /**

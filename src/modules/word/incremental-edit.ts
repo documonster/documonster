@@ -48,6 +48,7 @@
 
 import { createZip } from "@archive/create-archive";
 import { unzipZip } from "@archive/read-archive";
+import { asPlainBytes } from "@utils/binary";
 import type { SchemaMatches } from "@utils/schema";
 import { xmlEncodeAttr } from "@utils/xml-encode";
 import { PartPath } from "@word/constants";
@@ -199,7 +200,7 @@ export async function editDocxIncremental(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   edits: readonly IncrementalEdit[],
   options?: IncrementalEditOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "Package.edit";
   const bytes = checkPackageBytes(buffer, where);
   checkIncrementalEdits(edits, where);
@@ -316,7 +317,7 @@ export async function readDocxPart(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   path: string,
   options?: ReadDocxOptions
-): Promise<Uint8Array | undefined> {
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
   const where = "Package.readPart";
   const bytes = checkPackageBytes(buffer, where);
   checkString(path, "path", where);
@@ -332,7 +333,7 @@ export async function readDocxPart(
     found = await entry.bytes();
     return true;
   });
-  return found;
+  return found && asPlainBytes(found);
 }
 
 function checkPackageBytes(buffer: unknown, where: string): Uint8Array {

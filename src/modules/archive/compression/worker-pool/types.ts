@@ -203,7 +203,7 @@ export interface TaskOptions {
  */
 export interface TaskResult {
   /** Processed output data */
-  data: Uint8Array;
+  data: Uint8Array<ArrayBuffer>;
   /** Processing time in milliseconds */
   duration: number;
 }

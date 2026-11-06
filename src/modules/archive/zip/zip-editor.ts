@@ -37,6 +37,7 @@ import type { SetViewEntry } from "@archive/zip/zip-edit-view";
 import { ZipEditView } from "@archive/zip/zip-edit-view";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
 import { createZipOperation } from "@archive/zip/zip-output-pipeline";
+import { asPlainBytes } from "@utils/binary";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -608,7 +609,7 @@ export class ZipEditor {
    * }
    * ```
    */
-  stream(options: ZipStreamOptions = {}): AsyncIterable<Uint8Array> {
+  stream(options: ZipStreamOptions = {}): AsyncIterable<Uint8Array<ArrayBuffer>> {
     return this.operation(options).iterable;
   }
 
@@ -857,12 +858,12 @@ export class ZipEditor {
    * });
    * ```
    */
-  async toBuffer(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+  async toBuffer(options: ZipStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     const signalOpt = options.signal ?? this._streamDefaults.signal;
     const onProgress = options.onProgress ?? this._streamDefaults.onProgress;
 
     if (onProgress || signalOpt) {
-      return collect(this.stream(options));
+      return asPlainBytes(await collect(this.stream(options)));
     }
 
     const preservedMeta = this._buildRawPreservedEntries();
@@ -951,7 +952,9 @@ export class ZipEditor {
         })
       ];
 
-      return createZipSync([...rawEntries, ...normalEntries], this._getBuildOptions());
+      return asPlainBytes(
+        createZipSync([...rawEntries, ...normalEntries], this._getBuildOptions())
+      );
     }
 
     // Async path: some sources need streaming collection (Blob or streaming)
@@ -985,13 +988,15 @@ export class ZipEditor {
 
     const normalEntries: ZipEntry[] = [...recompressedPreserved, ...resolvedEntries];
 
-    return createZip([...rawEntries, ...normalEntries], this._getBuildOptions());
+    return asPlainBytes(
+      await createZip([...rawEntries, ...normalEntries], this._getBuildOptions())
+    );
   }
 
   /**
    * @deprecated Use {@link toBuffer}. Removed in 1.0.
    */
-  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     return this.toBuffer(options);
   }
 

@@ -326,7 +326,7 @@ const editor = await Archive.ZipEditor.open(zipBytes, {
 });
 
 // 从 URL（HTTP Range 请求）
-const editor = await Archive.ZipEditor.openUrl("https://example.com/archive.zip");
+const remote = await Archive.ZipEditor.openUrl("https://example.com/archive.zip");
 
 // 操作
 editor.has("file.txt"); // 检查存在
@@ -337,8 +337,6 @@ editor.rename("a.txt", "b.txt"); // 重命名条目
 editor.setComment("Updated archive"); // 设置归档注释
 
 // 可复用的编辑计划
-import { Archive } from "documonster/archive";
-
 const plan = new Archive.ZipEditPlan();
 plan.set("config.json", newConfig);
 plan.delete("temp/");

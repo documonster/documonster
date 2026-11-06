@@ -290,13 +290,13 @@ export function safeStatsSync(filePath: string): Stats | undefined {
 }
 
 /** Read a file as a `Uint8Array`. */
-export async function readFileBytes(filePath: string): Promise<Uint8Array> {
+export async function readFileBytes(filePath: string): Promise<Uint8Array<ArrayBuffer>> {
   checkPath("Fs.readFileBytes", "filePath", filePath);
   return readFileBytesImpl(filePath);
 }
 
 /** Synchronously read a file as a `Uint8Array`. */
-export function readFileBytesSync(filePath: string): Uint8Array {
+export function readFileBytesSync(filePath: string): Uint8Array<ArrayBuffer> {
   checkPath("Fs.readFileBytesSync", "filePath", filePath);
   return readFileBytesSyncImpl(filePath);
 }

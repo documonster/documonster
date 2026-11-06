@@ -552,10 +552,16 @@ describe("a value that cannot reach the file is refused at the call", () => {
 });
 
 describe("plain settings the caller assigned are refused when the workbook is written", () => {
+  // Values outside the vocabulary are type errors for a typed caller; `as never` writes them as JavaScript or `any`
+  // would, which is what the writer's check is for.
   const ASSIGNED: [string, (ws: Ws) => void, RegExp][] = [
-    ["orientation", ws => (ws.pageSetup.orientation = "sideways"), /pageSetup\.orientation/],
-    ["page order", ws => (ws.pageSetup.pageOrder = "sideways"), /pageSetup\.pageOrder/],
-    ["printed errors", ws => (ws.pageSetup.errors = "hidden"), /pageSetup\.errors/],
+    [
+      "orientation",
+      ws => (ws.pageSetup.orientation = "sideways" as never),
+      /pageSetup\.orientation/
+    ],
+    ["page order", ws => (ws.pageSetup.pageOrder = "sideways" as never), /pageSetup\.pageOrder/],
+    ["printed errors", ws => (ws.pageSetup.errors = "hidden" as never), /pageSetup\.errors/],
     ["scale", ws => (ws.pageSetup.scale = 12.5), /pageSetup\.scale/],
     ["margin", ws => (ws.pageSetup.margins.left = NaN), /pageSetup\.margins\.left/],
     [
@@ -697,7 +703,7 @@ describe("values Excel accepts still work, at the boundaries", () => {
   });
 
   it("writes cellComments as the schema spells it, for both spellings", async () => {
-    for (const spelling of ["asDisplayed", "asDisplyed"]) {
+    for (const spelling of ["asDisplayed", "asDisplyed"] as const) {
       const { wb, ws } = setup();
       ws.pageSetup.cellComments = spelling;
       const entries = await extractAll(await Workbook.toBuffer(wb));
@@ -757,7 +763,8 @@ describe("a value the source file carried is kept as read, not dropped or refuse
     const xml = await sheetXml(await Workbook.toBuffer(wb));
     expect(xml).toContain('orientation="landscape"');
     expect(xml).not.toContain("sideways");
-    ws.pageSetup.orientation = "sideways";
+    // A typed caller cannot write this; JavaScript and `any` can, and the writer refuses it.
+    ws.pageSetup.orientation = "sideways" as never;
     await expect(Workbook.toBuffer(wb)).rejects.toThrow(/pageSetup\.orientation/);
   });
 

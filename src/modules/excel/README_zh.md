@@ -37,7 +37,7 @@
 ### 创建工作簿
 
 ```typescript
-import { Workbook, Worksheet } from "documonster/excel";
+import { Row, Workbook, Worksheet } from "documonster/excel";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "My Sheet");
@@ -79,9 +79,11 @@ const workbook = await Workbook.readFile("input.xlsx");
 // const workbook = await Workbook.read(input.files[0]);
 
 const worksheet = Workbook.getWorksheet(workbook, 1);
-Row.each(worksheet, rowNumber => {
-  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.getValues(worksheet, rowNumber)));
-});
+if (worksheet) {
+  Row.each(worksheet, rowNumber => {
+    console.log("Row " + rowNumber + " = " + JSON.stringify(Row.getValues(worksheet, rowNumber)));
+  });
+}
 ```
 
 ### 加密的工作簿
@@ -513,6 +515,9 @@ Column.splice(worksheet, 1, 0, []); // E2 变为 =SUM(B3:B6)
 或名为 `Column1`、`Column2`…… 的新列），紧接在区域之后插入则不影响它；删除会缩小区域，单元格被全部删除的引用变为
 `#REF!`。同时删除又插入的 splice 会覆盖被替换的行列，因此指向它们的引用保持不变。
 
+`Row.spliceCells(worksheet, row, start, count, ...values)` 是另一种 splice：只在一行之内左右移动单元格（各自保留值、样式和批注），
+不改动其他内容，与 exceljs 的 `row.splice` 相同；不会有引用随之更新。
+
 `Worksheet.setName` 会在所有引用该工作表的公式、名称和图表系列中改用新名称（必要时自动加引号）；`Workbook.removeWorksheet`
 会把指向被删除工作表的引用变为 `#REF!`。工作簿内部超链接的位置是文本，与 Excel 一样不会被改写。
 
@@ -576,9 +581,13 @@ Excel 写出的文件一律贯穿全幅，而 `Pdf.fromExcel` 只读取分页位
 用流式写入器时，你持有的是行**句柄**而不是行号，因此分页符走 `Stream` 面：
 
 ```typescript
-import { Stream } from "documonster/excel";
+import { Stream, Workbook } from "documonster/excel";
 
-Stream.addRowPageBreak(sheet.getRow(20));
+const writer = new Stream.WorkbookWriter({ filename: "report.xlsx" });
+const sheet = Workbook.addWorksheet(writer, "Data");
+const row = sheet.addRow(["Subtotal", 1200]);
+Stream.addRowPageBreak(row); // the next row starts a new page
+Stream.commitRow(row);
 ```
 
 ### 工作表保护
@@ -706,6 +715,7 @@ Chart.place(ws, "E1:M16", {
 
 ```typescript
 import { CHART_EX_PRESETS, CHART_PRESETS } from "documonster/chart";
+import { Chart, Table } from "documonster/excel";
 
 // 预设：99 个经典预设和 10 个 Office 2016 预设，名字与 Excel 图库一致。
 Chart.place(
@@ -1305,7 +1315,7 @@ Excel 和 WPS 可以通过提供 CI 作业接入同样的模式，这些作业�
 零外部依赖地将任意工作簿导出为 PDF：
 
 ```typescript
-import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Column, Row, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
@@ -2926,7 +2936,13 @@ Documonster 以子路径入口点发布——不存在裸 `"documonster"` 导出
 
 ```typescript
 // Excel 领域错误——来自 documonster/excel
-import { ExcelError, isExcelError, ExcelImageError, ExcelTableError } from "documonster/excel";
+import {
+  ExcelError,
+  isExcelError,
+  ExcelImageError,
+  ExcelTableError,
+  Workbook
+} from "documonster/excel";
 
 // PDF 导出 + PDF 错误——来自 documonster/pdf
 import { Pdf, PdfError, isPdfError } from "documonster/pdf";

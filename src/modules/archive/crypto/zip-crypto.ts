@@ -197,7 +197,7 @@ export function zipCryptoDecrypt(
   password: string | Uint8Array,
   crc32: number,
   lastModTime?: number
-): Uint8Array | null {
+): Uint8Array<ArrayBuffer> | null {
   if (encryptedData.length < ZIP_CRYPTO_HEADER_SIZE) {
     return null;
   }
@@ -236,7 +236,7 @@ export function zipCryptoDecryptOrThrow(
   password: string | Uint8Array,
   crc32: number,
   lastModTime?: number
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const where = "Archive.Crypto.decryptZipCrypto";
   checkBytes(where, "encryptedData", encryptedData);
   checkZipPassword(where, password);
@@ -266,7 +266,7 @@ export function zipCryptoEncrypt(
   password: string | Uint8Array,
   crc32: number,
   getRandomBytes: (length: number) => Uint8Array
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const where = "Archive.Crypto.encryptZipCrypto";
   checkBytes(where, "data", data);
   checkZipPassword(where, password);

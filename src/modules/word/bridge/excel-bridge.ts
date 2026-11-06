@@ -890,7 +890,7 @@ export function renderWordChartSvg(chart: Chart, options?: DocxChartSvgOptions):
  */
 export async function generateChartEmbeddedXlsx(
   series: readonly { name: string; categories: readonly string[]; values: readonly number[] }[]
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkWordChartSeries(series, "series", "WordExcel.toChartXlsx");
   // `createWorkbook` comes from the static import at the top with `addWorksheet`, which the next
   // line calls. It was an `await import()` of the very same module, which bought nothing — the

@@ -786,7 +786,7 @@ export class PdfContentStream {
   /**
    * Get the content stream as a Uint8Array (UTF-8 encoded).
    */
-  toUint8Array(): Uint8Array {
+  toUint8Array(): Uint8Array<ArrayBuffer> {
     return new TextEncoder().encode(this.toString());
   }
 }

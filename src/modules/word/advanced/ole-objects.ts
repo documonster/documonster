@@ -14,6 +14,7 @@
  * not full OLE compound document manipulation.
  */
 
+import { asPlainBytes } from "@utils/binary";
 import { ContentType } from "@word/constants";
 import {
   checkBytes,
@@ -171,13 +172,16 @@ export function hasOleObjects(doc: DocxDocument): boolean {
  * Get the binary data of a specific OLE object by its relationship ID.
  * Returns undefined if not found.
  */
-export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | undefined {
+export function getOleObjectData(
+  doc: DocxDocument,
+  rId: string
+): Uint8Array<ArrayBuffer> | undefined {
   checkHandle(doc, "document", "doc", "Ole.getData");
   // Structured OLE objects carry the exact rId used on document.xml.rels.
   if (doc.oleObjects) {
     for (const ole of doc.oleObjects) {
       if (ole.rId === rId) {
-        return ole.data;
+        return ole.data && asPlainBytes(ole.data);
       }
     }
   }
@@ -192,7 +196,7 @@ export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | u
       if (part.relationships) {
         for (const rel of part.relationships) {
           if (rel.id === rId) {
-            return part.data;
+            return asPlainBytes(part.data);
           }
         }
       }
@@ -204,7 +208,7 @@ export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | u
       const expectedStem = rId.replace("rId", "oleObject");
       const oleStemRe = new RegExp(`(^|/)${escapeRegex(expectedStem)}(?:\\.[^./]+)?$`);
       if (oleStemRe.test(part.path)) {
-        return part.data;
+        return asPlainBytes(part.data);
       }
     }
   }

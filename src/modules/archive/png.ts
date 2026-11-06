@@ -97,7 +97,7 @@ export function encodePng(
   width: number,
   height: number,
   options: EncodePngOptions = {}
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   checkArchiveArgument(
     s.custom(
       v => ArrayBuffer.isView(v) && (v as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1,

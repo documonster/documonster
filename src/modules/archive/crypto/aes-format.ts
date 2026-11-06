@@ -155,7 +155,7 @@ export function buildAesExtraField(
   version: 1 | 2,
   keyStrength: AesKeyStrength,
   compressionMethod: number
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   checkArchiveArgument(
     s.oneOf([1, 2], { expected: "1 or 2" }),
     version,

@@ -7,6 +7,7 @@
 
 import type { EncryptOptions } from "@archive/office-crypto/agile";
 import { unzipZip } from "@archive/read-archive";
+import { asPlainBytes } from "@utils/binary";
 import { readFileBytes, writeFileBytes } from "@utils/fs";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -57,10 +58,13 @@ export type { PatchContent, PatchOperation } from "@word/patcher";
  * comments, numbering definitions or builder images share an id — see
  * `DocxDocument`.
  */
-export async function toBuffer(doc: DocxDocument, options?: DocxWriteOptions): Promise<Uint8Array> {
+export async function toBuffer(
+  doc: DocxDocument,
+  options?: DocxWriteOptions
+): Promise<Uint8Array<ArrayBuffer>> {
   checkHandle(doc, "document", "doc", "Document.toBuffer");
   checkWriteOptions(options, "Document.toBuffer");
-  return encryptIfRequested(await packageDocx(doc, options), options);
+  return asPlainBytes(await encryptIfRequested(await packageDocx(doc, options), options));
 }
 
 /** Package a DocxDocument model to base64 string — encrypted with `{ password }`, as {@link toBuffer}. */
@@ -263,7 +267,7 @@ export async function patchTemplate(
   template: CompiledTemplate,
   patches: readonly PatchOperation[],
   options?: PatchOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const doc = (template as { _doc?: unknown } | null | undefined)?._doc;
   if (typeof doc !== "object" || doc === null || !Array.isArray((doc as { body?: unknown }).body)) {
     invalidArgument(
@@ -277,7 +281,7 @@ export async function patchTemplate(
   checkPatchOptions(options, "Package.patchTemplate");
   // Deep clone the document to avoid mutating the cached template
   const patched = applyPatchesToDocument(structuredClone(template._doc), patches);
-  return packageDocx(patched, writeOptions(options));
+  return asPlainBytes(await packageDocx(patched, writeOptions(options)));
 }
 
 /**
@@ -304,13 +308,13 @@ export async function patchDocument(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   patches: readonly PatchOperation[],
   options?: PatchOptions & ReadDocxOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "Package.patch";
   checkPatches(patches, where);
   checkPatchOptions(options, where);
   const doc = await readPackage(buffer, options, where);
   const patched = applyPatchesToDocument(doc, patches);
-  return packageDocx(patched, writeOptions(options));
+  return asPlainBytes(await packageDocx(patched, writeOptions(options)));
 }
 
 /** `Document.read` under the name of the `Package` function that reads. */
@@ -351,11 +355,11 @@ export async function fillTemplateFromBuffer(
   buffer: Uint8Array,
   data: Record<string, unknown>,
   options?: LegacyTemplateOptions & { readonly compressionLevel?: number }
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   checkPackageOptions(options, "options", "Io.fillTemplateFromBuffer");
   const doc = await readDocx(buffer);
   const filled = fillTemplate(doc, data, options);
-  return packageDocx(filled, { compressionLevel: options?.compressionLevel });
+  return asPlainBytes(await packageDocx(filled, { compressionLevel: options?.compressionLevel }));
 }
 
 /**
@@ -375,13 +379,15 @@ export async function fillBuffer(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   data: Readonly<Record<string, unknown>> | ReadonlyMap<string, unknown>,
   options?: TemplateOptions & PatchOptions & ReadDocxOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const where = "Package.fillTemplate";
   // Checked before the file is read, so a bad argument costs no parse.
   fillData(data, where);
   checkPatchOptions(options, where);
   const doc = await readPackage(buffer, options, where);
-  return packageDocx(fillDocument(doc, data, options, where), writeOptions(options));
+  return asPlainBytes(
+    await packageDocx(fillDocument(doc, data, options, where), writeOptions(options))
+  );
 }
 
 // =============================================================================

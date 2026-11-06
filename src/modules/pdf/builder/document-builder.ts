@@ -59,6 +59,7 @@ import { FontManager } from "@pdf/font/font-manager";
 import { parseTtf } from "@pdf/font/ttf-parser";
 import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
 import type { PdfColor, PdfEncryptionOptions, PdfExportOptions } from "@pdf/types";
+import { asPlainBytes } from "@utils/binary";
 import type { CjkLanguage } from "@utils/cjk";
 import { check, s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
@@ -2432,7 +2433,7 @@ export class PdfDocumentBuilder {
    *
    * @returns The PDF file as Uint8Array.
    */
-  async toBuffer(): Promise<Uint8Array> {
+  async toBuffer(): Promise<Uint8Array<ArrayBuffer>> {
     // PDF/A forbids encryption (ISO 19005-1, 6.1.3); writing both produced a file that claims a conformance it breaks.
     if (this._pdfA && this._encryption) {
       throw new PdfArgumentError(
@@ -2450,14 +2451,14 @@ export class PdfDocumentBuilder {
     });
     await previous;
     try {
-      return await this._build(snapshot);
+      return asPlainBytes(await this._build(snapshot));
     } finally {
       release();
     }
   }
 
   /** @deprecated Use {@link PdfDocumentBuilder.toBuffer}. Removed in 1.0. */
-  async build(): Promise<Uint8Array> {
+  async build(): Promise<Uint8Array<ArrayBuffer>> {
     return this.toBuffer();
   }
 

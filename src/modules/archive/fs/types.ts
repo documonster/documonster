@@ -282,7 +282,7 @@ export interface ArchiveStreamOptions {
  */
 export interface ArchiveStreamOperation {
   /** Async iterable of archive output chunks */
-  iterable: AsyncIterable<Uint8Array>;
+  iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 
   /** Abort signal linked to this operation */
   signal: AbortSignal;

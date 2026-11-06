@@ -29,8 +29,11 @@ import {
   rangeExpand,
   rangeExpandToAddress,
   rangeForEachAddress,
+  rangeAbsolute,
+  rangeAbsoluteShort,
   rangeIntersects,
-  rangeToString
+  rangeRange,
+  rangeShortRange
 } from "@excel/core/range";
 import {
   checkWorksheet,
@@ -54,9 +57,11 @@ import type {
   Protection,
   Style
 } from "@excel/types";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
 import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** Refuse something that is not a range (`Range.create`) where one is required. */
 function checkRange(where: string, r: unknown, field = "r"): asserts r is RangeData {
@@ -98,10 +103,32 @@ export function intersects(r: RangeData, other: RangeData): boolean {
   return rangeIntersects(r, other);
 }
 
-/** The range as `A1:B2` text. */
-export function toString(r: RangeData): string {
+/** Options for {@link toString}. */
+export interface ToStringOptions {
+  /** Write each corner as an absolute reference: `$B$2:$D$5`, the form a defined name or a formula keeps. */
+  readonly absolute?: boolean;
+  /** Write a range of one cell as that cell: `B2` rather than `B2:B2`. */
+  readonly compact?: boolean;
+}
+
+const toStringOptionsSchema = s.object(
+  { absolute: s.boolean().optional(), compact: s.boolean().optional() },
+  { readonly: true }
+);
+const _toStringOptionsMatch: SchemaMatches<typeof toStringOptionsSchema, ToStringOptions> = true;
+void _toStringOptionsMatch;
+
+/**
+ * The range as `A1:B2` text, after the sheet name it was made with (`Sheet1!B2:D5`). `absolute` writes the corners as
+ * `$B$2:$D$5` and `compact` a one-cell range as `B2`: together they are exceljs's `$shortRange`.
+ */
+export function toString(r: RangeData, options?: ToStringOptions): string {
   checkRange("Range.toString", r);
-  return rangeToString(r);
+  checkSchema("Range.toString", "options", toStringOptionsSchema.optional(), options);
+  if (options?.compact) {
+    return options.absolute ? rangeAbsoluteShort(r) : rangeShortRange(r);
+  }
+  return options?.absolute ? rangeAbsolute(r) : rangeRange(r);
 }
 
 /** Visit every cell of the range, row by row, as `(address, row, col)`. */
