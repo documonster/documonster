@@ -49,18 +49,73 @@ describe("numeric pictures (\\#)", () => {
     expect(out.replace(/\s/gu, " ")).toBe("1 234 567,50");
   });
 
+  it("keeps a space that is not between digit places as text in such a locale", () => {
+    const fr = { locale: "fr-FR" };
+    const norm = (s: string): string => s.replace(/\s/gu, " ");
+    expect(norm(fillText('{{a \\# "# ##0,00 €"}}', { a: "1234.5" }, fr))).toBe("1 234,50 €");
+    expect(norm(fillText('{{a \\# "€ # ##0,00"}}', { a: "1234.5" }, fr))).toBe("€ 1 234,50");
+  });
+
+  it("takes an apostrophe between digit places as the grouping symbol of a locale that groups with one", () => {
+    const ch = { locale: "de-CH" };
+    const group = new Intl.NumberFormat("de-CH", {
+      useGrouping: "always"
+    } as Intl.NumberFormatOptions)
+      .formatToParts(1234)
+      .find(part => part.type === "group")!.value;
+    expect(fillText("{{a \\# \"#'##0.00 'CHF';-#'##0.00\"}}", { a: "1234.5" }, ch)).toBe(
+      `1${group}234.50 CHF`
+    );
+    expect(fillText("{{a \\# \"#'##0.00 'CHF';-#'##0.00\"}}", { a: "-1234.5" }, ch)).toBe(
+      `-1${group}234.50`
+    );
+    // As Word types it, turned into `'` like every other typographic quote.
+    expect(fillText('{{a \\# "#\u2019##0.00"}}', { a: "1234.5" }, ch)).toBe(`1${group}234.50`);
+  });
+
   it("reads a typographic quote as Word types one", () => {
     expect(fillText("{{a \\# \u201C#,##0.00\u201D}}", { a: "1234.5" })).toBe("1,234.50");
   });
 });
 
 describe("date pictures (\\@)", () => {
+  it("refuses a date-time with a part out of range, and reads XML Schema's end of day", () => {
+    const pic = '{{d \\@ "yyyy-MM-dd HH:mm:ss"}}';
+    for (const d of [
+      "2026-11-07T99:99:99",
+      "2026-11-07T23:60:00",
+      "2026-11-07 24:00",
+      "2026-02-29",
+      "2026-11-07T12:30:00+15:00",
+      "2026-11-07T12:30:00+14:30",
+      "2026-11-07T12:30:00+01:60",
+      "2026-11-07T12:30.123",
+      "2026-11-07T24:00:01",
+      "20261131"
+    ]) {
+      expect(() => fillText(pic, { d }), d).toThrow(/is not a date/);
+    }
+    expect(fillText(pic, { d: "2026-12-31T24:00:00Z" })).toBe("2027-01-01 00:00:00");
+    expect(fillText(pic, { d: "2026-11-07T12:30:00.5-14:00" })).toBe("2026-11-07 12:30:00");
+  });
+
+  it("reads a year below 100 as written, and names its weekday", () => {
+    expect(fillText('{{d \\@ "yyyy-MM-dd dddd"}}', { d: "0096-02-29" })).toBe(
+      "0096-02-29 Wednesday"
+    );
+    expect(() => fillText('{{d \\@ "yyyy"}}', { d: "0100-02-29" })).toThrow(/is not a date/);
+  });
+
   it("reads ISO, XML Schema and SAP dates", () => {
     expect(fillText('{{d \\@ "dd.MM.yyyy"}}', { d: "2026-11-07" })).toBe("07.11.2026");
     expect(fillText('{{d \\@ "dd.MM.yyyy HH:mm"}}', { d: "2026-11-07T14:05:09.120+05:30" })).toBe(
       "07.11.2026 14:05"
     );
     expect(fillText('{{d \\@ "dd.MM.yyyy"}}', { d: "2026-11-07Z" })).toBe("07.11.2026");
+    // Fractional seconds without a zone, as .NET and Java write a local date-time.
+    expect(fillText('{{d \\@ "dd.MM.yyyy HH:mm"}}', { d: "2026-11-07T14:05:09.1234567" })).toBe(
+      "07.11.2026 14:05"
+    );
     expect(fillText('{{d \\@ "dd.MM.yyyy"}}', { d: "20261107" })).toBe("07.11.2026");
   });
 
@@ -116,8 +171,37 @@ describe("format errors", () => {
   });
 
   it("throws for a switch that is not one, whatever the mode", () => {
-    for (const tag of ['{{a \\x "0"}}', "{{a \\* Bogus}}", "{{a \\#}}", '{{a \\# "0" junk}}']) {
+    for (const tag of [
+      '{{a \\# "0.00}}',
+      '{{a \\x "0"}}',
+      "{{a \\* Bogus}}",
+      "{{a \\#}}",
+      '{{a \\# "0" junk}}'
+    ]) {
       expect(() => fillText(tag, { a: "1" }, { strict: false }), tag).toThrow(DocxTemplateError);
+    }
+  });
+
+  it("throws for a switch that is not one where it is never written, and changes nothing", () => {
+    for (const bad of ["{{a \\* Bogus}}", '{{a \\# "0.00}}']) {
+      const templates = [
+        [`{{#if no}}${bad}{{/if}}`],
+        ["{{#if no}}", bad, "{{/if}}"],
+        ["{{#each none}}", bad, "{{/each}}"],
+        [`{{#each none}}${bad}{{/each}}`]
+      ];
+      for (const paragraphs of templates) {
+        const doc = Document.create();
+        for (const text of paragraphs) {
+          Document.addParagraph(doc, text);
+        }
+        const before = Query.getText(doc);
+        expect(
+          () => Template.fill(doc, { no: false, none: [] }, { strict: false }),
+          paragraphs.join("|")
+        ).toThrow(/Invalid placeholder/);
+        expect(Query.getText(doc)).toBe(before);
+      }
     }
   });
 

@@ -15,6 +15,7 @@
  */
 
 import { asPlainBytes } from "@utils/binary";
+import { escapeRegExp } from "@utils/regexp";
 import { ContentType } from "@word/constants";
 import {
   checkBytes,
@@ -206,7 +207,7 @@ export function getOleObjectData(
       // first such adjacent file silently leaks back as if it were the
       // requested OLE object.
       const expectedStem = rId.replace("rId", "oleObject");
-      const oleStemRe = new RegExp(`(^|/)${escapeRegex(expectedStem)}(?:\\.[^./]+)?$`);
+      const oleStemRe = new RegExp(`(^|/)${escapeRegExp(expectedStem)}(?:\\.[^./]+)?$`);
       if (oleStemRe.test(part.path)) {
         return asPlainBytes(part.data);
       }
@@ -652,9 +653,4 @@ function extractOleFromRawXml(rawXml: string): OleObject | null {
     height: heightMatch ? parseInt(heightMatch[1]!, 10) : undefined,
     rawXml
   };
-}
-
-/** Escape regex meta-characters in a literal string for use inside RegExp. */
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

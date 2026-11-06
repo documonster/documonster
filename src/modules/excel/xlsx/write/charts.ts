@@ -70,6 +70,7 @@ import type { IZipWriter } from "@excel/xlsx/types";
 import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { appendToZip, renderToZip } from "@excel/xlsx/zip-writer";
+import { escapeRegExp } from "@utils/regexp";
 import { xmlEncode, xmlEncodeAttr, xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
@@ -1554,10 +1555,6 @@ function replaceOrRemoveSimpleGroupField(block: string, tag: string, value: unkn
     return block.slice(0, insertAt) + replacement + block.slice(insertAt);
   }
   return block;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function serialiseSimpleGroupFieldValue(value: unknown): string {

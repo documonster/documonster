@@ -41,20 +41,24 @@ function fixture(dts: string): string {
   return dir;
 }
 
-/** The names `diffApi` reports as changed or removed between two declaration files. */
+/**
+ * The names `diffApi` reports as changed or removed between two declaration files.
+ *
+ * The drivers take their directories in the environment, not after `-e <code>`: Bun on Windows does not hand those
+ * arguments to the script.
+ */
 function changes(before: string, after: string): string[] {
   const driver = `
     import { dumpApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "dump.ts")).href)};
     import { diffApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "diff.ts")).href)};
-    const [a, b] = process.argv.slice(-2);
+    const [a, b] = [process.env.API_A, process.env.API_B];
     const d = diffApi(dumpApi(a, "node", "x", []), dumpApi(b, "node", "x", []));
     console.log(JSON.stringify([...d.changed, ...d.removed].map(r => r[0].split(" :: ")[1])));
   `;
-  const out = execFileSync(
-    process.execPath,
-    ["--input-type=module", "-e", driver, fixture(before), fixture(after)],
-    { encoding: "utf8" }
-  );
+  const out = execFileSync(process.execPath, ["--input-type=module", "-e", driver], {
+    encoding: "utf8",
+    env: { ...process.env, API_A: fixture(before), API_B: fixture(after) }
+  });
   return JSON.parse(out) as string[];
 }
 
@@ -118,11 +122,12 @@ describe("api:changes comparison", () => {
     );
     const driver = `
       import { dumpApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "dump.ts")).href)};
-      const r = dumpApi(process.argv.at(-1), "node", "x", []);
+      const r = dumpApi(process.env.API_A, "node", "x", []);
       console.log(JSON.stringify([r["x :: Out"].sig, r["x :: f"].sig]));
     `;
-    const out = execFileSync(process.execPath, ["--input-type=module", "-e", driver, dir], {
-      encoding: "utf8"
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", driver], {
+      encoding: "utf8",
+      env: { ...process.env, API_A: dir }
     });
     expect(JSON.parse(out)).toEqual(["type Out = Result;", "(col: number): void"]);
   });
@@ -165,15 +170,14 @@ describe("api:changes comparison", () => {
     const driver = `
       import { dumpApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "dump.ts")).href)};
       import { diffApi } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "diff.ts")).href)};
-      const [a, b] = process.argv.slice(-2);
+      const [a, b] = [process.env.API_A, process.env.API_B];
       const d = diffApi(dumpApi(a, "node", "x", []), dumpApi(b, "node", "x", []));
       console.log(JSON.stringify(d.changed.map(r => r[0])));
     `;
-    const out = execFileSync(
-      process.execPath,
-      ["--input-type=module", "-e", driver, run(before), run(after)],
-      { encoding: "utf8" }
-    );
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", driver], {
+      encoding: "utf8",
+      env: { ...process.env, API_A: run(before), API_B: run(after) }
+    });
     expect(JSON.parse(out)).toEqual([]);
   });
 

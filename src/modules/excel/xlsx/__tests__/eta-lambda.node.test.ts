@@ -97,6 +97,22 @@ describe("XLSX: functions passed by name", () => {
     expect(xml.get("A2")).toBe("_xlfn.MAP(B2:B4,_xlfn.LAMBDA(_xlpm.x,COS(NA)))");
   });
 
+  it("passes a function by name only in the argument a LAMBDA goes in", async () => {
+    const workbook = Workbook.create();
+    const sheet = Workbook.addWorksheet(workbook, "S");
+    Cell.setValue(sheet, "A1", { formula: "BYROW(SUM,LAMBDA(x,x))" });
+    Cell.setValue(sheet, "A2", { formula: "GROUPBY(B1:B3,C1:C3,SUM,NA)" });
+    Cell.setValue(sheet, "A3", { formula: "MAP(SUM,B1:B3,ABS)" });
+    Cell.setValue(sheet, "A4", { formula: "REDUCE(SUM,B1:B3,MAX)" });
+    const xml = cellFormulas(
+      await part(await Workbook.toBuffer(workbook), "xl/worksheets/sheet1.xml")
+    );
+    expect(xml.get("A1")).toBe("_xlfn.BYROW(SUM,_xlfn.LAMBDA(_xlpm.x,_xlpm.x))");
+    expect(xml.get("A2")).toBe("_xlfn.GROUPBY(B1:B3,C1:C3,_xleta.SUM,NA)");
+    expect(xml.get("A3")).toBe("_xlfn.MAP(SUM,B1:B3,_xleta.ABS)");
+    expect(xml.get("A4")).toBe("_xlfn.REDUCE(SUM,B1:B3,_xleta.MAX)");
+  });
+
   it("covers shared formulas, validations, conditional formats, names and table columns", async () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");

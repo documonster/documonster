@@ -21,6 +21,12 @@ import { formatListCounter } from "@word/query/page-field";
 export interface FieldToken {
   readonly text: string;
   readonly quoted: boolean;
+  /**
+   * Set on a quoted token the code ends inside, with no closing quote. A field
+   * reads it to the end, as Word does; a template refuses it, since its text
+   * is the author's and a forgotten quote is a mistake there.
+   */
+  readonly unterminated?: true;
 }
 
 /**
@@ -48,8 +54,9 @@ export function tokenizeFieldCode(code: string): FieldToken[] {
         text += code[i];
         i++;
       }
+      const closed = i < n;
       i++;
-      out.push({ text, quoted: true });
+      out.push(closed ? { text, quoted: true } : { text, quoted: true, unterminated: true });
       continue;
     }
     let text = "";
@@ -309,11 +316,13 @@ function roundedDigits(n: number, decimals: number): { int: string; frac: string
 }
 
 /** The sections of a picture (positive;negative;zero), split outside quotes. */
-function pictureSections(picture: string): string[] {
+function pictureSections(picture: string, group: string): string[] {
   const out: string[] = [""];
   let quoted = false;
-  for (const c of picture) {
-    if (c === "'") {
+  const chars = [...picture];
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i]!;
+    if (c === "'" && !(!quoted && isGroupAt(chars, i, group))) {
       quoted = !quoted;
     }
     if (c === ";" && !quoted) {
@@ -341,9 +350,23 @@ export interface NumberSymbols {
 
 const ENGLISH_NUMBER_SYMBOLS: NumberSymbols = { decimal: ".", group: ",", groupSizes: [3, 3] };
 
-/** A space-like grouping symbol (`fr`'s narrow no-break space) matches any space in a picture. */
-function isGroupChar(c: string, group: string): boolean {
-  return c === group || (/^\s$/u.test(group) && /^\s$/u.test(c));
+const SPACE = /^\s$/u;
+const APOSTROPHE = /^['\u2019]$/u;
+
+/**
+ * Whether `chars[i]` is the grouping symbol. Most are unambiguous, but two
+ * mean something else in a picture too: a space (`fr`'s narrow no-break
+ * space; any space matches it) is literal text, as in `# ##0,00 €`, and an
+ * apostrophe (`de-CH`) quotes text. Those are the grouping symbol only
+ * between two digit places, where neither reading makes sense.
+ */
+function isGroupAt(chars: readonly string[], i: number, group: string): boolean {
+  const c = chars[i]!;
+  const kind = SPACE.test(group) ? SPACE : APOSTROPHE.test(group) ? APOSTROPHE : undefined;
+  if (kind === undefined) {
+    return c === group;
+  }
+  return kind.test(c) && DIGIT.test(chars[i - 1] ?? "") && DIGIT.test(chars[i + 1] ?? "");
 }
 
 /**
@@ -360,7 +383,7 @@ export function formatNumberPicture(
   picture: string,
   symbols: NumberSymbols = ENGLISH_NUMBER_SYMBOLS
 ): string {
-  const sections = pictureSections(picture);
+  const sections = pictureSections(picture, symbols.group);
   let section = sections[0]!;
   // With a section of its own for negatives, the picture states the sign.
   let signed = true;
@@ -372,13 +395,15 @@ export function formatNumberPicture(
   }
   const chars: PictureChar[] = [];
   let quoted = false;
-  for (const c of section) {
-    if (c === "'") {
+  const source = [...section];
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!;
+    if (!quoted && isGroupAt(source, i, symbols.group)) {
+      chars.push({ c: ",", literal: false });
+    } else if (c === "'") {
       quoted = !quoted;
     } else if (!quoted && c === symbols.decimal) {
       chars.push({ c: ".", literal: false });
-    } else if (!quoted && isGroupChar(c, symbols.group)) {
-      chars.push({ c: ",", literal: false });
     } else {
       chars.push({ c, literal: quoted || c === "." || c === "," });
     }
@@ -479,6 +504,48 @@ export interface FieldDate {
   readonly second: number;
 }
 
+/** Days in `month` (1–12) of `year`, by the proleptic Gregorian calendar. */
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
+  }
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+}
+
+/**
+ * `parts` as a date-time, or `undefined` when one of them is out of range — a
+ * 30 February, an hour 24 or a minute 60. Checked by arithmetic rather than
+ * through `Date`, which reads a year below 100 as 19xx.
+ */
+export function fieldDate(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0
+): FieldDate | undefined {
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return undefined;
+  }
+  return { year, month, day, hour, minute, second };
+}
+
+/** The weekday of a date, 0 for Sunday, for any year. */
+function weekdayOf(date: FieldDate): number {
+  const d = new Date(0);
+  d.setUTCFullYear(date.year, date.month - 1, date.day);
+  return d.getUTCDay();
+}
+
 /**
  * A field value as a date: ISO (`2024-03-05`, `2024-03-05T13:08[:09]`, a space
  * for the `T`) or US (`3/5/2024`, with an optional `13:08`). The time is taken
@@ -495,18 +562,7 @@ export function parseFieldDate(value: string): FieldDate | undefined {
   const [year, month, day] = iso
     ? [Number(m[1]), Number(m[2]), Number(m[3])]
     : [Number(m[3]), Number(m[1]), Number(m[2])];
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-    return undefined;
-  }
-  return {
-    year,
-    month,
-    day,
-    hour: Number(m[4] ?? 0),
-    minute: Number(m[5] ?? 0),
-    second: Number(m[6] ?? 0)
-  };
+  return fieldDate(year, month, day, Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0));
 }
 
 const DATE_TOKEN = /'[^']*'|AM\/PM|am\/pm|A\/P|a\/p|y+|M+|d+|H+|h+|m+|s+/g;
@@ -538,7 +594,7 @@ export function formatDatePicture(
   names: DateNames = ENGLISH_DATE_NAMES
 ): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
-  const weekday = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
+  const weekday = weekdayOf(date);
   const h12 = date.hour % 12 === 0 ? 12 : date.hour % 12;
   const pm = date.hour >= 12;
   return picture.replace(DATE_TOKEN, token => {
@@ -546,7 +602,7 @@ export function formatDatePicture(
       case "'":
         return token.slice(1, -1);
       case "y":
-        return token.length >= 3 ? String(date.year) : pad(date.year % 100);
+        return token.length >= 3 ? String(date.year).padStart(4, "0") : pad(date.year % 100);
       case "M":
         return token.length >= 4
           ? names.months[date.month - 1]!

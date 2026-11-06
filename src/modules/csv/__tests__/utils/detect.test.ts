@@ -2,7 +2,6 @@
  * CSV Detection Utilities Unit Tests
  *
  * Tests for detection and normalization functions:
- * - escapeRegex: Escape special regex characters
  * - normalizeQuoteOption: Normalize quote config
  * - normalizeEscapeOption: Normalize escape config
  * - startsWithFormulaChar: CSV injection prevention
@@ -12,7 +11,6 @@
  */
 
 import {
-  escapeRegex,
   normalizeQuoteOption,
   normalizeEscapeOption,
   startsWithFormulaChar,
@@ -21,49 +19,6 @@ import {
   detectDelimiter
 } from "@csv/utils/detect";
 import { describe, it, expect } from "vitest";
-
-// =============================================================================
-// escapeRegex Tests
-// =============================================================================
-
-describe("escapeRegex", () => {
-  it("escapes special regex characters", () => {
-    expect(escapeRegex(".")).toBe("\\.");
-    expect(escapeRegex("*")).toBe("\\*");
-    expect(escapeRegex("+")).toBe("\\+");
-    expect(escapeRegex("?")).toBe("\\?");
-    expect(escapeRegex("^")).toBe("\\^");
-    expect(escapeRegex("$")).toBe("\\$");
-    expect(escapeRegex("{")).toBe("\\{");
-    expect(escapeRegex("}")).toBe("\\}");
-    expect(escapeRegex("(")).toBe("\\(");
-    expect(escapeRegex(")")).toBe("\\)");
-    expect(escapeRegex("|")).toBe("\\|");
-    expect(escapeRegex("[")).toBe("\\[");
-    expect(escapeRegex("]")).toBe("\\]");
-    expect(escapeRegex("\\")).toBe("\\\\");
-  });
-
-  it("escapes multiple special characters", () => {
-    expect(escapeRegex("a.b*c")).toBe("a\\.b\\*c");
-    expect(escapeRegex("[a-z]+")).toBe("\\[a-z\\]\\+");
-    expect(escapeRegex("(foo|bar)")).toBe("\\(foo\\|bar\\)");
-  });
-
-  it("leaves normal characters unchanged", () => {
-    expect(escapeRegex("hello")).toBe("hello");
-    expect(escapeRegex("abc123")).toBe("abc123");
-    expect(escapeRegex("")).toBe("");
-  });
-
-  it("produces valid regex pattern", () => {
-    const input = "test.*pattern+";
-    const escaped = escapeRegex(input);
-    const regex = new RegExp(escaped);
-    expect(regex.test(input)).toBe(true);
-    expect(regex.test("test_any_pattern")).toBe(false);
-  });
-});
 
 // =============================================================================
 // normalizeQuoteOption Tests

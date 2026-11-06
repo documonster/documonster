@@ -1,3 +1,4 @@
+import { extractAll } from "@archive/unzip/extract";
 import {
   cellFont,
   cellGetStyle,
@@ -480,9 +481,14 @@ describe("style sharing", () => {
         }
         return wb;
       };
-      const shared = new Uint8Array(await Workbook.toBuffer(build(false)));
-      const separated = new Uint8Array(await Workbook.toBuffer(build(true)));
-      expect(separated.length).toBe(shared.length);
+      // The parts themselves, not the package's size: the package also carries the write time, so its compressed
+      // length can differ by a byte between two writes of the same workbook.
+      const parts = async (wb: Workbook.Handle) => {
+        const files = await extractAll(await Workbook.toBuffer(wb));
+        const text = (path: string) => new TextDecoder().decode(files.get(path)!.data);
+        return [text("xl/styles.xml"), text("xl/worksheets/sheet1.xml")];
+      };
+      expect(await parts(build(true))).toEqual(await parts(build(false)));
     });
   });
 });

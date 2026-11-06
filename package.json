@@ -316,7 +316,7 @@
     "preversion": "pnpm check && pnpm build && pnpm test",
     "test": "vitest run && pnpm build:esm && pnpm test:packages && pnpm test:browser --",
     "test:all": "pnpm test",
-    "test:browser": "pnpm generate:csv-worker && node scripts/clean.ts dist && pnpm build:esm && pnpm build:browser:bundle && vitest run --config vitest.browser.config.ts",
+    "test:browser": "pnpm generate:csv-worker && node scripts/clean.ts dist && pnpm build:esm && pnpm build:browser:bundle && node scripts/run-browser-tests.ts",
     "test:packages": "pnpm --filter \"./packages/*\" test",
     "test:watch": "vitest",
     "type": "tsc --noEmit",

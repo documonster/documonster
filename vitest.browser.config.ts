@@ -22,7 +22,9 @@ export default defineConfig({
     // time and left a detached copy behind per file; Chromium does not reclaim
     // that promptly (https://issues.chromium.org/issues/530892387), and the
     // renderer eventually died mid-run with `Browser connection was closed`.
-    // The two tests load the bundle themselves through `loadIife` now.
+    // The two tests load the bundle themselves through `loadIife` now. The same
+    // leak is why `pnpm test:browser` runs this config in sequential shards
+    // (`scripts/run-browser-tests.ts`), each in a fresh browser.
     browser: {
       enabled: true,
       provider: playwright(),

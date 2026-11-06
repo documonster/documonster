@@ -176,4 +176,15 @@ describe("eta-reduced lambdas: Excel's XLSB", () => {
     // `NA` here is a name the workbook does not define, which XLSB cannot encode — not `_xleta.NA`.
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(/the name NA/);
   });
+
+  it("does not read a function name as a function outside the argument a LAMBDA goes in", async () => {
+    for (const formula of ["BYROW(SUM,LAMBDA(x,x))", "GROUPBY(B1:B3,C1:C3,MAX,SUM)"]) {
+      const workbook = Workbook.create();
+      const sheet = Workbook.addWorksheet(workbook, "S");
+      Cell.setValue(sheet, "A1", { formula, result: 0 });
+      await expect(Workbook.toBuffer(workbook, { format: "xlsb" }), formula).rejects.toThrow(
+        /the name SUM/
+      );
+    }
+  });
 });

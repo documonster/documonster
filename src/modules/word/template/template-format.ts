@@ -13,6 +13,7 @@
 
 import type { DateNames, FieldDate, FieldFormat, NumberSymbols } from "@word/core/field-format";
 import {
+  fieldDate,
   fieldSwitchArgument,
   formatFieldResult,
   isGeneralFormat,
@@ -114,6 +115,10 @@ export function splitSwitches(expr: string): { path: string; switches: string } 
 /** What is wrong with `switches` as a placeholder's switches, or `undefined`. */
 export function checkSwitches(switches: string): string | undefined {
   const tokens = tokenizeFieldCode(switches);
+  const open = tokens.find(t => t.unterminated);
+  if (open !== undefined) {
+    return `the quote before "${open.text}" is not closed`;
+  }
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
     if (t.quoted || !t.text.startsWith("\\")) {
@@ -163,8 +168,10 @@ function isoText(d: FieldDate): string {
 
 /**
  * `text` as a date, read the ways data writes one: what Word reads (ISO, US),
- * an XML Schema `dateTime` with fractional seconds and a zone (taken as
- * written — the zone does not move the time), and SAP's `YYYYMMDD`.
+ * an XML Schema `date` or `dateTime` — with fractional seconds, a zone or both,
+ * the time taken as written (the zone does not move it), and `24:00:00` as the
+ * start of the next day — and SAP's `YYYYMMDD`. A part out of range (a 30
+ * February, a minute 60, a zone `+15:00`) is not a date.
  */
 function readDate(text: string): FieldDate | undefined {
   const t = text.trim();
@@ -172,16 +179,50 @@ function readDate(text: string): FieldDate | undefined {
   if (word) {
     return word;
   }
+  // The zone is optional: .NET and Java write `2026-11-07T10:00:00.123` without one. Fractional seconds follow
+  // seconds, as XML Schema writes them.
   const xs =
-    /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(t);
+    /^(\d{4,})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?)?(Z|[+-](\d{2}):(\d{2}))?$/.exec(
+      t
+    );
   if (xs) {
-    return parseFieldDate(xs[2] ? `${xs[1]}T${xs[2]}` : xs[1]!);
+    const [, y, mo, d, h, mi, sec, fraction, zone, zh, zm] = xs;
+    if (zone !== undefined && zone !== "Z") {
+      const hours = Number(zh);
+      const minutes = Number(zm);
+      if (minutes > 59 || hours > 14 || (hours === 14 && minutes !== 0)) {
+        return undefined;
+      }
+    }
+    if (h === "24") {
+      // XML Schema's end of day: only `24:00:00`, the next day's midnight.
+      if (mi !== "00" || sec !== "00" || !/^0*$/.test(fraction ?? "")) {
+        return undefined;
+      }
+      const day = fieldDate(Number(y), Number(mo), Number(d));
+      return day === undefined ? undefined : nextDay(day);
+    }
+    return fieldDate(
+      Number(y),
+      Number(mo),
+      Number(d),
+      Number(h ?? 0),
+      Number(mi ?? 0),
+      Number(sec ?? 0)
+    );
   }
   const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(t);
   if (compact) {
-    return parseFieldDate(`${compact[1]}-${compact[2]}-${compact[3]}`);
+    return fieldDate(Number(compact[1]), Number(compact[2]), Number(compact[3]));
   }
   return undefined;
+}
+
+/** Midnight of the day after `date`. */
+function nextDay(date: FieldDate): FieldDate {
+  const d = new Date(0);
+  d.setUTCFullYear(date.year, date.month - 1, date.day + 1);
+  return fieldDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate())!;
 }
 
 /**

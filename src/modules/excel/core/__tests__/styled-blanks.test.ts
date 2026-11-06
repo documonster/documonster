@@ -189,4 +189,68 @@ describe("StyledBlankGrid", () => {
       }
     }
   });
+
+  it("answers between takes without being rebuilt, and agrees once it is", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const next = random(seed);
+      const grid = StyledBlankGrid.from([
+        { firstRow: 0, lastRow: 29, firstColumn: 0, lastColumn: 2, style: STYLES[0] },
+        { firstRow: 10, lastRow: 39, firstColumn: 4, lastColumn: 4, style: STYLES[1] }
+      ]);
+      const live = new Set(Array.from({ length: 40 }, (_, row) => row));
+      for (let step = 0; step < 45; step++) {
+        const row = Math.floor(next() * 42);
+        expect(grid.takeRow(row).length > 0, `seed ${seed} row ${row}`).toBe(live.delete(row));
+        expect(grid.runsAt(row)).toEqual([]);
+        expect(grid.isEmpty()).toBe(live.size === 0);
+      }
+      for (let row = 0; row < 42; row++) {
+        expect(grid.at(row, 0) !== undefined).toBe(live.has(row) && row < 30);
+        expect(grid.at(row, 4) !== undefined).toBe(live.has(row) && row >= 10);
+      }
+      const lastRow = Math.max(-1, ...live);
+      expect(grid.extent()?.lastRow).toBe(lastRow === -1 ? undefined : lastRow);
+      const rows = new Set(
+        grid
+          .ranges()
+          .flatMap(r =>
+            Array.from({ length: r.lastRow - r.firstRow + 1 }, (_, i) => r.firstRow + i)
+          )
+      );
+      expect(rows).toEqual(live);
+    }
+  });
+
+  it("takes every row of a tall band in any order, and agrees with the cells at each half", () => {
+    // Each take only records the row; the bands are cut once, when the grid is asked as a whole. Splitting the band per
+    // row instead spliced the band array on every take.
+    const rows = 20_000;
+    const grid = StyledBlankGrid.from([
+      { firstRow: 0, lastRow: rows - 1, firstColumn: 0, lastColumn: 3, style: STYLES[0] }
+    ]);
+    const order = Array.from({ length: rows }, (_, row) => row);
+    const next = random(7);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(next() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const half = new Set(order.slice(0, rows / 2));
+    for (const row of half) {
+      expect(grid.takeRow(row)).toHaveLength(1);
+    }
+    let covered = 0;
+    for (const range of grid.ranges()) {
+      for (let row = range.firstRow; row <= range.lastRow; row++) {
+        expect(half.has(row)).toBe(false);
+        covered++;
+      }
+    }
+    expect(covered).toBe(rows / 2);
+    for (const row of order.slice(rows / 2)) {
+      expect(grid.takeRow(row)).toHaveLength(1);
+    }
+    expect(grid.isEmpty()).toBe(true);
+    expect(grid.ranges()).toEqual([]);
+    expect(grid.extent()).toBeUndefined();
+  });
 });

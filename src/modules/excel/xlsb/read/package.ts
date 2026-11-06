@@ -964,18 +964,35 @@ async function readInto(
     // the whole row back. Taking just the annotated cells is what the XLSX reader does (`restoreAnnotatedBlanks`), which
     // has no worksheet to settle yet, and a workbook must read to the same sheet from either container.
     const annotated: { row: number; column: number }[] = [];
-    for (const comment of comments) {
-      const { r, c } = decodeCell(comment.ref);
-      annotated.push({ row: r, column: c });
-    }
-    for (const link of read.hyperlinks) {
-      for (let row = link.ref.firstRow; row <= link.ref.lastRow; row++) {
-        for (let column = link.ref.firstColumn; column <= link.ref.lastColumn; column++) {
-          annotated.push({ row, column });
+    // Only where a rectangle can be: a hyperlink names a range, and expanding all of one — a whole column, or a link
+    // whose relationship is missing — cost a cell for every address it spans, with nothing collapsed under most of them.
+    const blanks = read.styledBlanks;
+    if (blanks.length > 0) {
+      let top = Infinity;
+      let bottom = -1;
+      let left = Infinity;
+      let right = -1;
+      for (const range of blanks) {
+        top = Math.min(top, range.firstRow);
+        bottom = Math.max(bottom, range.lastRow);
+        left = Math.min(left, range.firstColumn);
+        right = Math.max(right, range.lastColumn);
+      }
+      for (const comment of comments) {
+        const { r, c } = decodeCell(comment.ref);
+        annotated.push({ row: r, column: c });
+      }
+      for (const link of read.hyperlinks) {
+        const lastRow = Math.min(link.ref.lastRow, bottom);
+        const lastColumn = Math.min(link.ref.lastColumn, right);
+        for (let row = Math.max(link.ref.firstRow, top); row <= lastRow; row++) {
+          for (let column = Math.max(link.ref.firstColumn, left); column <= lastColumn; column++) {
+            annotated.push({ row, column });
+          }
         }
       }
     }
-    const { ranges: styledBlanks, taken } = takeStyledBlanks(read.styledBlanks, annotated);
+    const { ranges: styledBlanks, taken } = takeStyledBlanks(blanks, annotated);
     // As the sheet reader builds a `BrtCellBlank` it keeps.
     const restored: ReadCell[] = taken.map(({ cell, range }) => {
       const numberFormat = styles?.numberFormats[range.styleIndex];

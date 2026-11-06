@@ -16,6 +16,7 @@
  */
 
 import { isForbiddenKey } from "@utils/object";
+import { escapeRegExp } from "@utils/regexp";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 import { checkHandle, checkNamedValues, checkRecord } from "@word/core/argument-checks";
@@ -350,8 +351,35 @@ function fillInPlace(
     strict,
     data,
     format: localeFieldFormat(options?.locale),
+    validSwitches: new Set(),
     rich
   };
+
+  // Every placeholder's switches are checked before anything is filled, so a
+  // mistaken one is reported wherever it stands — in a branch not taken or a
+  // loop with no items too — and the document is left as it was.
+  checkTemplateSwitches(doc.body, ctx, "body");
+  for (const [key, def] of doc.headers ?? []) {
+    checkTemplateSwitches(def.content.children, ctx, `header:${key}`);
+  }
+  for (const [key, def] of doc.footers ?? []) {
+    checkTemplateSwitches(def.content.children, ctx, `footer:${key}`);
+  }
+  for (const note of doc.footnotes ?? []) {
+    if (note.id > 0) {
+      checkTemplateSwitches(note.content, ctx, `footnote:${note.id}`);
+    }
+  }
+  for (const note of doc.endnotes ?? []) {
+    if (note.id > 0) {
+      checkTemplateSwitches(note.content, ctx, `endnote:${note.id}`);
+    }
+  }
+  if (scope.comments) {
+    for (const comment of doc.comments ?? []) {
+      checkTemplateSwitches(comment.content, ctx, `comment:${comment.id}`);
+    }
+  }
 
   // Process body
   const newBody = processBodyContent(doc.body as BodyContent[], ctx, "body");
@@ -435,6 +463,12 @@ interface TemplateContext {
   readonly data: Record<string, unknown>;
   /** The symbols and names format switches write with. */
   readonly format: FieldFormat;
+  /**
+   * The switch strings already found valid in this fill, by
+   * {@link checkTemplateSwitches} — so a placeholder in a loop is not checked
+   * once per item.
+   */
+  readonly validSwitches: Set<string>;
   /** Set when rich placeholders are resolved. */
   readonly rich?: RichState;
 }
@@ -639,8 +673,70 @@ function valueToString(value: unknown): string {
 }
 
 /**
+ * Throw for the first placeholder in `blocks` — the paragraphs, tables and
+ * content controls a fill reaches — whose switches are not Word's (see
+ * `checkSwitches`), and remember every valid set in `ctx.validSwitches`.
+ */
+function checkTemplateSwitches(
+  blocks: readonly unknown[],
+  ctx: TemplateContext,
+  location: string
+): void {
+  blocks.forEach((item, i) => {
+    const block = item as BodyContent;
+    if (block.type === "paragraph") {
+      const where = `${location} paragraph ${i}`;
+      for (const token of tokenize(collectFreeText(block).text, ctx.open, ctx.close)) {
+        if (
+          token.type === TokenType.Variable &&
+          token.switches !== undefined &&
+          // A rich placeholder is resolved as a whole block, not written.
+          !(ctx.rich && /^[%&>^!]/.test(token.path))
+        ) {
+          validateSwitches(token.path, token.switches, ctx, where);
+        }
+      }
+    } else if (block.type === "table") {
+      block.rows.forEach((row, r) =>
+        row.cells.forEach((cell, c) =>
+          checkTemplateSwitches(cell.content, ctx, `${location} table ${i} row ${r} cell ${c}`)
+        )
+      );
+    } else if (block.type === "sdt") {
+      checkTemplateSwitches(block.content, ctx, `${location} sdt ${i}`);
+    }
+  });
+}
+
+/** Throw unless `switches` are Word's; a valid set is remembered for the fill. */
+function validateSwitches(
+  path: string,
+  switches: string,
+  ctx: TemplateContext,
+  location: string
+): void {
+  if (ctx.validSwitches.has(switches)) {
+    return;
+  }
+  const wrong = checkSwitches(switches);
+  if (wrong !== undefined) {
+    throw new DocxTemplateError(
+      `Invalid placeholder {{${path} ${switches}}}: ${wrong}`,
+      path,
+      location,
+      {
+        tagName: path,
+        sectionPath: location
+      }
+    );
+  }
+  ctx.validSwitches.add(switches);
+}
+
+/**
  * `value` written by the Word field switches of its placeholder. A switch that
- * is not one is the template's mistake and always throws; a value the switch
+ * is not one is the template's mistake and throws before the fill starts
+ * ({@link checkTemplateSwitches}); a value the switch
  * cannot apply to — `\#` on a value that is not a number, `\@` on one that is
  * not a date — throws in strict mode and is written as it is otherwise, as Word
  * leaves it.
@@ -653,13 +749,9 @@ function formattedValue(
   location: string
 ): string {
   const tag = `{{${path} ${switches}}}`;
-  const wrong = checkSwitches(switches);
-  if (wrong !== undefined) {
-    throw new DocxTemplateError(`Invalid placeholder ${tag}: ${wrong}`, path, location, {
-      tagName: path,
-      sectionPath: location
-    });
-  }
+  // Checked before the fill for the template's own text; this reaches what a
+  // fill inserts and fills in turn, a sub-document's blocks.
+  validateSwitches(path, switches, ctx, location);
   const text = valueToString(value);
   const out = applySwitches(textOf(value), text, switches, ctx.format);
   if ("text" in out) {
@@ -1036,16 +1128,23 @@ function applySegments(
   segments: readonly TextSegment[]
 ): Paragraph {
   const replaced = new Map<string, string>();
+  // Both lists are in text order and the segments do not overlap, so each item walks only the segments that reach it:
+  // linear in the paragraph rather than items × segments.
+  let first = 0;
   for (const item of items) {
+    while (first < segments.length && segments[first]!.end <= item.start) {
+      first++;
+    }
     let out = "";
-    for (const seg of segments) {
+    for (let k = first; k < segments.length && segments[k]!.start < item.end; k++) {
+      const seg = segments[k]!;
       if (seg.output === undefined) {
         const from = Math.max(seg.start, item.start);
         const to = Math.min(seg.end, item.end);
         if (from < to) {
           out += text.slice(from, to);
         }
-      } else if (seg.start >= item.start && seg.start < item.end) {
+      } else if (seg.start >= item.start) {
         out += seg.output;
       }
     }
@@ -1460,10 +1559,10 @@ function rowParagraphs(row: TableRow): { c: number; b: number; para: Paragraph }
 
 /** The `{{#each …}}` (capturing its argument) and `{{/each}}` tags, spacing inside the delimiters allowed. */
 function eachTagPatterns(ctx: TemplateContext): { open: RegExp; close: RegExp } {
-  const open = escapeRegex(ctx.open);
-  const close = escapeRegex(ctx.close);
+  const open = escapeRegExp(ctx.open);
+  const close = escapeRegExp(ctx.close);
   return {
-    open: new RegExp(`${open}\\s*#each\\s+([^${escapeRegex(ctx.close.charAt(0))}]*)${close}`, "g"),
+    open: new RegExp(`${open}\\s*#each\\s+([^${escapeRegExp(ctx.close.charAt(0))}]*)${close}`, "g"),
     close: new RegExp(`${open}\\s*/each\\s*${close}`, "g")
   };
 }
@@ -1934,10 +2033,6 @@ function countOccurrences(text: string, search: string): number {
   return count;
 }
 
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 // =============================================================================
 // Tag Listing: discover all template placeholders in a document
 // =============================================================================
@@ -2319,7 +2414,9 @@ function resolveRichParagraph(
         );
       }
       const nested: TemplateContext = { ...ctx, rich: { ...rich, depth: rich.depth + 1 } };
-      return replaceBlock(processBodyItems(cloneModel([...value]), nested, location));
+      const inserted = cloneModel([...value]);
+      checkTemplateSwitches(inserted, nested, location);
+      return replaceBlock(processBodyItems(inserted, nested, location));
     }
   }
   // Image placeholder, optionally conditional: {{%?condPath.imagePath}}
@@ -2473,14 +2570,17 @@ function processTableColumnLoop(
   const items = loopItems(value);
 
   const colsOpenRegex = new RegExp(
-    escapeRegex(open) +
+    escapeRegExp(open) +
       "\\s*#cols\\s+[^" +
-      escapeRegex(close.charAt(0)) +
+      escapeRegExp(close.charAt(0)) +
       "]*" +
-      escapeRegex(close),
+      escapeRegExp(close),
     "g"
   );
-  const colsCloseRegex = new RegExp(escapeRegex(open) + "\\s*/cols\\s*" + escapeRegex(close), "g");
+  const colsCloseRegex = new RegExp(
+    escapeRegExp(open) + "\\s*/cols\\s*" + escapeRegExp(close),
+    "g"
+  );
 
   // For each row, duplicate the template columns for each item
   const newRows: TableRow[] = [];

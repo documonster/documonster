@@ -196,6 +196,17 @@ function spliceLines(
   return out;
 }
 
+/** Rows the bands cover with at least one run. */
+function countRows(bands: readonly StyledBlankBand[]): number {
+  let rows = 0;
+  for (const band of bands) {
+    if (band.runs.length > 0) {
+      rows += band.last - band.first + 1;
+    }
+  }
+  return rows;
+}
+
 /**
  * The styled blanks of a sheet that holds them as rectangles, indexed for the questions the sheet asks of them.
  *
@@ -205,9 +216,11 @@ function spliceLines(
  * row, and a walk per cell turned reading the format of every cell, or writing a value down a column, into
  * rectangles × cells. The rectangles are what a model and the writers carry, so they are rebuilt on the way out.
  *
- * Bands are disjoint and in row order. Taking a row off a band's edge shortens it in place, and taking a band's only row
- * empties it rather than removing it, so settling a sheet row by row — which is how a sheet is edited — costs nothing per
- * row beyond the row; only a row from the middle of a band splits it.
+ * Bands are disjoint and in row order, and never change while rows are taken out: a taken row is only recorded
+ * (`taken`), and every question about a row asks that set first. Splitting the band instead cost a splice of the band
+ * array per row, which is quadratic once rows are settled in no particular order — every other row of a tall region, or
+ * the targets of a formula's writeback. The bands are cut at the taken rows (`compact`) only when the grid is asked as a
+ * whole — for its rectangles, its extent, or to move — which happens once per write or structural edit.
  *
  * **Never larger than the cells it stands for.** A band holds one run for each rectangle crossing its rows, so a sheet
  * whose rectangles overlap in rows without lining up — styles side by side, starting on different rows — has more runs
@@ -217,9 +230,14 @@ function spliceLines(
 export class StyledBlankGrid {
   private bands: StyledBlankBand[];
   private cachedRanges: StyledBlankRangeModel[] | undefined;
+  /** Rows (zero-based) taken out of a band since the bands were last cut — see {@link compact}. */
+  private readonly taken = new Set<number>();
+  /** Rows that hold a blank and are not taken. */
+  private liveRows: number;
 
   private constructor(bands: StyledBlankBand[]) {
     this.bands = bands;
+    this.liveRows = countRows(bands);
   }
 
   /** The grid the rectangles describe. They are taken as exact: no cell in two of them. */
@@ -262,6 +280,7 @@ export class StyledBlankGrid {
     if (this.cachedRanges !== undefined) {
       return this.cachedRanges;
     }
+    this.compact();
     type Open = {
       firstRow: number;
       lastRow: number;
@@ -314,11 +333,12 @@ export class StyledBlankGrid {
   }
 
   isEmpty(): boolean {
-    return !this.bands.some(band => band.runs.length > 0);
+    return this.liveRows === 0;
   }
 
   /** The last row and the last column (zero-based) any blank reaches, or `undefined` when there is none. */
   extent(): { readonly lastRow: number; readonly lastColumn: number } | undefined {
+    this.compact();
     let lastRow = -1;
     let lastColumn = -1;
     for (const band of this.bands) {
@@ -332,6 +352,9 @@ export class StyledBlankGrid {
 
   /** The runs in a row (zero-based); empty when it holds no blank. */
   runsAt(row: number): readonly StyledBlankRun[] {
+    if (this.taken.has(row)) {
+      return [];
+    }
     const index = this.bandIndex(row);
     return index === -1 ? [] : this.bands[index].runs;
   }
@@ -355,23 +378,14 @@ export class StyledBlankGrid {
 
   /** Take a row (zero-based) out of the grid, returning the runs it held. */
   takeRow(row: number): readonly StyledBlankRun[] {
-    const index = this.bandIndex(row);
-    if (index === -1 || this.bands[index].runs.length === 0) {
-      return [];
+    const runs = this.runsAt(row);
+    if (runs.length === 0) {
+      return runs;
     }
-    const band = this.bands[index];
-    if (band.first === row && band.last === row) {
-      // Emptied in place: removing it would move every band after it.
-      this.bands[index] = { first: row, last: row, runs: [] };
-    } else if (band.first === row) {
-      this.bands[index] = { ...band, first: row + 1 };
-    } else if (band.last === row) {
-      this.bands[index] = { ...band, last: row - 1 };
-    } else {
-      this.bands.splice(index, 1, { ...band, last: row - 1 }, { ...band, first: row + 1 });
-    }
+    this.taken.add(row);
+    this.liveRows--;
     this.cachedRanges = undefined;
-    return band.runs;
+    return runs;
   }
 
   /**
@@ -388,6 +402,7 @@ export class StyledBlankGrid {
     inserted: number,
     lastLine: number
   ): void {
+    this.compact();
     const bands: StyledBlankBand[] = [];
     for (const band of this.bands) {
       if (band.runs.length === 0) {
@@ -420,7 +435,38 @@ export class StyledBlankGrid {
       }
     }
     this.bands = bands;
+    this.liveRows = countRows(bands);
     this.cachedRanges = undefined;
+  }
+
+  /** Cut the bands at the taken rows, so they describe the grid by themselves again. */
+  private compact(): void {
+    if (this.taken.size === 0) {
+      return;
+    }
+    const rows = [...this.taken].sort((left, right) => left - right);
+    const bands: StyledBlankBand[] = [];
+    let next = 0;
+    for (const band of this.bands) {
+      if (band.runs.length === 0) {
+        continue;
+      }
+      while (next < rows.length && rows[next] < band.first) {
+        next++;
+      }
+      let first = band.first;
+      for (; next < rows.length && rows[next] <= band.last; next++) {
+        if (rows[next] > first) {
+          bands.push({ first, last: rows[next] - 1, runs: band.runs });
+        }
+        first = rows[next] + 1;
+      }
+      if (first <= band.last) {
+        bands.push({ first, last: band.last, runs: band.runs });
+      }
+    }
+    this.bands = bands;
+    this.taken.clear();
   }
 
   /** The band holding a row (zero-based), or -1. */

@@ -228,26 +228,35 @@ export function isWorksheetFunctionName(name: string): boolean {
   return FUNCTION_ID_BY_NAME.has(bare) || FUTURE_FUNCTION_PREFIXES.has(bare);
 }
 
-/** The built-in functions that take a `LAMBDA` argument, so a function name may be passed to them. */
-const LAMBDA_TAKING_FUNCTIONS: ReadonlySet<string> = new Set([
-  "BYCOL",
-  "BYROW",
-  "GROUPBY",
-  "MAKEARRAY",
-  "MAP",
-  "PIVOTBY",
-  "REDUCE",
-  "SCAN"
+/**
+ * Where each built-in that takes a `LAMBDA` takes it, by zero-based argument index — `-1` for the last argument, which
+ * is where `MAP` takes it after any number of arrays. Only there can a function be passed by name: `BYROW(SUM,…)` names
+ * an array `SUM`, and `GROUPBY`'s fourth argument is a header setting, so neither is `_xleta.`.
+ */
+const LAMBDA_ARGUMENTS: ReadonlyMap<string, number> = new Map([
+  ["BYCOL", 1],
+  ["BYROW", 1],
+  ["GROUPBY", 2],
+  ["MAKEARRAY", 2],
+  ["MAP", -1],
+  ["PIVOTBY", 3],
+  ["REDUCE", 2],
+  ["SCAN", 2]
 ]);
 
 /**
- * Whether a call to `name` can be passed a function by name: a built-in that takes a `LAMBDA`, or a function that is
- * not a worksheet function — a `LAMBDA` behind a defined name. In any other call a bare function name is not a
- * function: `COS(NA)` refers to a name `NA`, and Excel reports `#NAME?` for it rather than reading `_xleta.NA`.
+ * Whether argument `argument` (zero-based) of `count` in a call to `name` can be passed a function by name: the
+ * argument a built-in takes its `LAMBDA` in, or any argument of a function that is not a worksheet function — a
+ * `LAMBDA` behind a defined name. Anywhere else a bare function name is a name: `COS(NA)` refers to a name `NA`, and
+ * Excel reports `#NAME?` for it rather than reading `_xleta.NA`.
  */
-export function acceptsFunctionArgument(name: string): boolean {
+export function acceptsFunctionArgument(name: string, argument: number, count: number): boolean {
   const bare = bareFunctionName(name.replace(/^_xlpm\./i, ""));
-  return LAMBDA_TAKING_FUNCTIONS.has(bare) || !isWorksheetFunctionName(bare);
+  const at = LAMBDA_ARGUMENTS.get(bare);
+  if (at !== undefined) {
+    return argument === (at === -1 ? count - 1 : at);
+  }
+  return !isWorksheetFunctionName(bare);
 }
 
 /** The workbook's defined names, by `excelNameKey`, while one of its parts is rendered — see {@link withFormulaNames}. */
@@ -800,14 +809,14 @@ export function toFileFormula(
   const declared = declarations(pieces, shapes);
   const loneArguments = new Set<number>();
   for (const [call, { lone }] of shapes) {
-    if (!acceptsFunctionArgument(pieces[call]!.text)) {
-      continue;
-    }
-    for (const piece of lone) {
-      if (piece !== undefined) {
+    lone.forEach((piece, argument) => {
+      if (
+        piece !== undefined &&
+        acceptsFunctionArgument(pieces[call]!.text, argument, lone.length)
+      ) {
         loneArguments.add(piece);
       }
-    }
+    });
   }
   /** Scopes open at the current point: the call they belong to, its argument index, and what they declare. */
   interface Scope {

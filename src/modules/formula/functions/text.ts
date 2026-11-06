@@ -22,14 +22,11 @@ import {
 } from "@formula/runtime/values";
 import { parseNumberFormat } from "@utils/number-format";
 import { tryRenderNumberFormat } from "@utils/number-format-render";
+import { escapeRegExp } from "@utils/regexp";
 
 // ============================================================================
 // Local utility
 // ============================================================================
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /** Type alias for a native text function. */
 type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
@@ -303,7 +300,7 @@ export function fnSUBSTITUTE(args: RuntimeValue[]): RuntimeValue {
     const instanceNum = Math.trunc(instanceNumRV.value);
     let count = 0;
     return rvString(
-      text.replace(new RegExp(escapeRegex(oldText), "g"), match => {
+      text.replace(new RegExp(escapeRegExp(oldText), "g"), match => {
         count++;
         return count === instanceNum ? newText : match;
       })

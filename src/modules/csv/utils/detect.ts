@@ -28,13 +28,6 @@ import { isRecordArgument } from "@utils/object";
 // =============================================================================
 
 /**
- * Escape special regex characters
- */
-export function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
  * Normalize quote option to { enabled, char } form.
  * Centralizes the quote/false/null handling logic.
  */

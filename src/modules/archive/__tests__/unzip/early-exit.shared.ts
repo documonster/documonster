@@ -87,7 +87,6 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 export const PORTABLE_SOURCES: Record<string, SourceFactory> = {
   "Web ReadableStream": bytes => {
     const parts = chunks(bytes);
-    const done = deferred();
     let index = 0;
     const stream = new ReadableStream<Uint8Array>(
       {
@@ -96,11 +95,7 @@ export const PORTABLE_SOURCES: Record<string, SourceFactory> = {
             controller.enqueue(parts[index++]!);
           } else {
             controller.close();
-            done.resolve();
           }
-        },
-        cancel() {
-          done.resolve();
         }
       },
       { highWaterMark: 0 }
@@ -108,8 +103,10 @@ export const PORTABLE_SOURCES: Record<string, SourceFactory> = {
     return {
       source: stream,
       async released() {
-        await done.promise;
-        // Cancelled or read to the end — and handed back unlocked either way
+        // Handed back unlocked — the contract for a caller's stream. Whether it was also cancelled or read to the end
+        // is up to the reader: `parseTarGzStream` borrows the stream and releases it where it stopped, so requiring
+        // the end as well held only when the decompressor had already pulled the whole source before the loop was
+        // left — a matter of timing.
         await waitUntil(() => !stream.locked);
       }
     };

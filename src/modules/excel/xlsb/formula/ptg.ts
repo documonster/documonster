@@ -2587,7 +2587,8 @@ export function isFunctionArgument(node: AstNode, parent: AstNode | undefined): 
   if (parent.invocations?.some(list => list.includes(node))) {
     return true;
   }
-  return parent.args.includes(node) && acceptsFunctionArgument(parent.name);
+  const argument = parent.args.indexOf(node);
+  return argument !== -1 && acceptsFunctionArgument(parent.name, argument, parent.args.length);
 }
 
 /**

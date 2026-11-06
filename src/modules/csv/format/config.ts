@@ -8,16 +8,9 @@
 import { CsvArgumentError } from "@csv/errors";
 import type { CsvFormatOptions, TypeTransformMap } from "@csv/types";
 import { checkFormatOptions } from "@csv/utils/check-options";
-import { escapeRegex, normalizeQuoteOption, normalizeEscapeOption } from "@csv/utils/detect";
+import { normalizeQuoteOption, normalizeEscapeOption } from "@csv/utils/detect";
 import type { DecimalSeparator } from "@csv/utils/number";
-
-/**
- * Escape a string for use inside a regex character class [...].
- * Handles all special characters: \ ] ^ -
- */
-function escapeForCharClass(str: string): string {
-  return str.replace(/[\\\]^-]/g, "\\$&");
-}
+import { escapeRegExp } from "@utils/regexp";
 
 // =============================================================================
 // Types
@@ -181,13 +174,13 @@ export function createFormatRegex(options: FormatRegexOptions): CsvFormatRegex {
       ? null // Will use fast check instead
       : (() => {
           // Build character class content using dedicated char-class escaping
-          const classContent = `${escapeForCharClass(delimiter)}${escapeForCharClass(quote)}${escape !== quote ? escapeForCharClass(escape) : ""}${escapeForCharClass(extraBreakChars)}\r\n`;
+          const classContent = `${escapeRegExp(delimiter)}${escapeRegExp(quote)}${escape !== quote ? escapeRegExp(escape) : ""}${escapeRegExp(extraBreakChars)}\r\n`;
           return new RegExp(`[${classContent}]`);
         })(),
     escapeQuoteRegex:
       escape !== quote
-        ? new RegExp(`${escapeRegex(quote)}|${escapeRegex(escape)}`, "g")
-        : new RegExp(escapeRegex(quote), "g"),
+        ? new RegExp(`${escapeRegExp(quote)}|${escapeRegExp(escape)}`, "g")
+        : new RegExp(escapeRegExp(quote), "g"),
     escapedQuote: escape + quote,
     quoteEnabled: true,
     quote,
