@@ -67,28 +67,17 @@ interface RowModel {
 /**
  * Whether a parsed cell carries formatting and nothing else.
  *
- * A style and no value. A cell with a formula, a hyperlink or a comment is not blank however empty its value looks —
- * `null` is a value a formula can produce — so all of those are checked rather than only the value.
+ * **Asked of the type `CellXform` gave the cell, not of its fields.** That parser types a cell `Null` exactly when it
+ * has a style and nothing else — no value, and no `<f>` — and it is the one place that knows: listing the fields here
+ * instead missed a cell that only points at a shared formula, `<f t="shared" si="0"/>`, which has no formula text and
+ * no `sharedFormula` until `reconcile`, so it was collapsed as a blank.
  *
- * **A formula is recognised by the type the cell parser gave it, not by its text.** This runs while the row is parsed,
- * before `reconcile`: a cell that only points at a shared formula, `<f t="shared" si="0"/>`, has no formula text yet
- * and no `sharedFormula` until then, so checking those fields took it for a blank. `CellXform` has already typed it as
- * a formula from its `<f>` — by the text, or by the `t` attribute when there is none.
+ * A hyperlink or a comment cannot be seen from here at all: both reach the cell after `<sheetData>` is read.
+ * `WorkSheetXform.reconcile` takes such a cell back out of its rectangle (`restoreAnnotatedBlanks`) before attaching
+ * either.
  */
-function isStyledBlank(cell: {
-  readonly value?: unknown;
-  readonly type?: number;
-  readonly hyperlink?: unknown;
-  readonly comment?: unknown;
-  readonly styleId?: number;
-}): boolean {
-  return (
-    cell.styleId !== undefined &&
-    cell.value === undefined &&
-    cell.type !== Enums.ValueType.Formula &&
-    cell.hyperlink === undefined &&
-    cell.comment === undefined
-  );
+function isStyledBlank(cell: { readonly type?: number }): boolean {
+  return cell.type === Enums.ValueType.Null;
 }
 
 class RowXform extends BaseXform<RowModel> {

@@ -49,6 +49,119 @@ export interface StyledBlankRangeModel {
 }
 
 /**
+ * The extent a styled blank rectangle covers, whatever else it carries — the collector's index or the model's style.
+ * Zero-based, inclusive.
+ */
+export interface StyledBlankArea {
+  readonly firstRow: number;
+  readonly lastRow: number;
+  readonly firstColumn: number;
+  readonly lastColumn: number;
+}
+
+/** A cell, zero-based, as the rectangles address one. */
+export interface StyledBlankCell {
+  readonly row: number;
+  readonly column: number;
+}
+
+/**
+ * Take cells back out of the rectangles they were collapsed into.
+ *
+ * **A rectangle may only cover cells that hold nothing but their format**, and whether a cell does is not always known
+ * when it is collapsed: a hyperlink or a comment reaches a cell only after the cells have been read, from a later part of
+ * the sheet or from a part of its own. A cell that turns out to carry one is no longer a styled blank, so it is taken out
+ * here and handed back to the reader, which gives it a cell — with its style, as `"keep"` would have — before attaching
+ * the annotation. Left inside the rectangle, an XLSX hyperlink found no cell and was dropped, and every other annotation
+ * was given a new cell without the format — which the writers kept, since they fill in only cells that do not exist.
+ *
+ * Returns the rectangles that remain, still exact, and each taken cell with the rectangle it came from. A cell outside
+ * every rectangle is not taken, and one named twice is taken once. A rectangle with a cell removed is split into at most
+ * four: the rows above the cell, the rows below it, and the two runs beside it in its own row.
+ */
+export function takeStyledBlanks<R extends StyledBlankArea, C extends StyledBlankCell>(
+  ranges: readonly R[],
+  cells: Iterable<C>
+): { readonly ranges: R[]; readonly taken: { readonly cell: C; readonly range: R }[] } {
+  // Sorted by row so each rectangle finds the cells in its rows by binary search: the cost is a search per rectangle
+  // plus the cells actually taken, rather than every cell against every rectangle.
+  const wanted = [...cells].sort(
+    (left, right) => left.row - right.row || left.column - right.column
+  );
+  const remaining: R[] = [];
+  const taken: { cell: C; range: R }[] = [];
+  if (wanted.length === 0) {
+    return { ranges: [...ranges], taken };
+  }
+  for (const range of ranges) {
+    let low = 0;
+    let high = wanted.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (wanted[middle].row < range.firstRow) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    const inside: C[] = [];
+    for (let index = low; index < wanted.length && wanted[index].row <= range.lastRow; index++) {
+      const cell = wanted[index];
+      const previous = inside[inside.length - 1];
+      if (
+        cell.column >= range.firstColumn &&
+        cell.column <= range.lastColumn &&
+        (previous === undefined || previous.row !== cell.row || previous.column !== cell.column)
+      ) {
+        inside.push(cell);
+      }
+    }
+    if (inside.length === 0) {
+      remaining.push(range);
+      continue;
+    }
+    for (const cell of inside) {
+      taken.push({ cell, range });
+    }
+    carve(range, inside, remaining);
+  }
+  return { ranges: remaining, taken };
+}
+
+/** Split `range` around `cells` (all inside it, sorted, distinct) and push the pieces that are left. */
+function carve<R extends StyledBlankArea>(
+  range: R,
+  cells: readonly StyledBlankCell[],
+  out: R[]
+): void {
+  const piece = (firstRow: number, lastRow: number, firstColumn: number, lastColumn: number): R =>
+    ({ ...range, firstRow, lastRow, firstColumn, lastColumn }) as R;
+  // Row by row: the rows between two cells' rows are whole, and a cell's own row is cut into the runs beside it.
+  let nextRow = range.firstRow;
+  let index = 0;
+  while (index < cells.length) {
+    const row = cells[index].row;
+    if (row > nextRow) {
+      out.push(piece(nextRow, row - 1, range.firstColumn, range.lastColumn));
+    }
+    let column = range.firstColumn;
+    for (; index < cells.length && cells[index].row === row; index++) {
+      if (cells[index].column > column) {
+        out.push(piece(row, row, column, cells[index].column - 1));
+      }
+      column = cells[index].column + 1;
+    }
+    if (column <= range.lastColumn) {
+      out.push(piece(row, row, column, range.lastColumn));
+    }
+    nextRow = row + 1;
+  }
+  if (nextRow <= range.lastRow) {
+    out.push(piece(nextRow, range.lastRow, range.firstColumn, range.lastColumn));
+  }
+}
+
+/**
  * Styled blank cells, accumulated into as few rectangles as describe them exactly.
  *
  * **Two passes, and both are needed for the shape real files have.** Cells arrive row by row in ascending column

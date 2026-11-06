@@ -25,6 +25,7 @@ import { imageCreate } from "@excel/core/image";
 import { loadDefinedNamesModel, loadWorkbookModel } from "@excel/core/model-load";
 import type { OpaqueSourceRelationship } from "@excel/core/opaque-part";
 import { applyPrintName, isPrintName, type PrintSetup } from "@excel/core/print-names";
+import { takeStyledBlanks } from "@excel/core/styled-blanks";
 import { adoptLoadedTotals, createTable, tableSetModel, type TableModel } from "@excel/core/table";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
@@ -51,7 +52,7 @@ import { getValue, setStyle, setValue } from "@excel/surface/cell";
 import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/surface/column";
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
 import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
-import { decodeRange, encodeCol } from "@excel/utils/address";
+import { decodeCell, decodeRange, encodeCol } from "@excel/utils/address";
 import { containerReadError, containerReadLimits } from "@excel/utils/container-errors";
 import type { ContainerReadOptions } from "@excel/utils/container-errors";
 import { mediaFromDrawingAnchors } from "@excel/utils/drawing-utils";
@@ -929,7 +930,61 @@ async function readInto(
         .filter(cell => cell.shareType === "array")
         .map(cell => `${cell.row}:${cell.column}`)
     );
-    for (const cell of read.cells) {
+
+    // Comments. The sheet's `BrtLegacyDrawing` names the VML, not the comments part — that one is reached
+    // implicitly, exactly as `poi-comments.xlsb` does it: its `rId3` targets `../comments1.bin` and no
+    // record refers to it. So the part is found through the relationship *type* rather than through an id
+    // some record supplied. Read before the cells are applied and attached after them, with the hyperlinks.
+    const commentsRel = (relationshipsBySource.get(path) ?? []).find(
+      relationship => relationship.type === RelType.Comments
+    );
+    const commentsTarget =
+      commentsRel === undefined
+        ? undefined
+        : resolveRelationshipTarget(path, commentsRel.target, commentsRel.targetMode);
+    const commentsPart =
+      commentsTarget === undefined ? undefined : findPart(entries, commentsTarget);
+    const comments =
+      commentsPart === undefined
+        ? []
+        : [
+            ...readCommentsPart(
+              commentsPart,
+              commentsTarget!,
+              iterateInterpretableRecords,
+              id => recordSpec(id)?.name
+            )
+          ];
+
+    // **A styled blank a comment or a hyperlink lands on is not a blank**, and is given its cell back before the
+    // cells are applied — the same cell `"keep"` reads, style and all. The annotations are separate records and a
+    // separate part, so the collapse could not see them; left in a rectangle, the note or link was attached to a new
+    // cell with no format, and the cell the model showed had lost it.
+    const annotated: { row: number; column: number }[] = [];
+    for (const comment of comments) {
+      const { r, c } = decodeCell(comment.ref);
+      annotated.push({ row: r, column: c });
+    }
+    for (const link of read.hyperlinks) {
+      for (let row = link.ref.firstRow; row <= link.ref.lastRow; row++) {
+        for (let column = link.ref.firstColumn; column <= link.ref.lastColumn; column++) {
+          annotated.push({ row, column });
+        }
+      }
+    }
+    const { ranges: styledBlanks, taken } = takeStyledBlanks(read.styledBlanks, annotated);
+    // As the sheet reader builds a `BrtCellBlank` it keeps.
+    const restored: ReadCell[] = taken.map(({ cell, range }) => {
+      const numberFormat = styles?.numberFormats[range.styleIndex];
+      return {
+        row: cell.row,
+        column: cell.column,
+        value: null,
+        styleIndex: range.styleIndex,
+        ...(numberFormat === undefined ? {} : { numberFormat })
+      };
+    });
+    for (const cell of restored.length === 0 ? read.cells : [...read.cells, ...restored]) {
       applyCell(worksheet, cell, name, sharedFormulaCells, date1904, styles, arrayMasters);
     }
 
@@ -943,9 +998,9 @@ async function readInto(
     // costs nothing in fidelity. The style is assembled here rather than carried as an index because the writer
     // works in style objects — and doing it per rectangle rather than per cell is the whole saving: one object for
     // a formatted column instead of one per row.
-    if (read.styledBlanks.length > 0) {
+    if (styledBlanks.length > 0) {
       (worksheet as unknown as { _styledBlankRanges: unknown[] })._styledBlankRanges =
-        read.styledBlanks.map(range => ({
+        styledBlanks.map(range => ({
           firstRow: range.firstRow,
           lastRow: range.lastRow,
           firstColumn: range.firstColumn,
@@ -1244,30 +1299,12 @@ async function readInto(
       }
     }
 
-    // Comments. The sheet's `BrtLegacyDrawing` names the VML, not the comments part — that one is reached
-    // implicitly, exactly as `poi-comments.xlsb` does it: its `rId3` targets `../comments1.bin` and no
-    // record refers to it. So the part is found through the relationship *type* rather than through an id
-    // some record supplied.
-    const commentsRel = (relationshipsBySource.get(path) ?? []).find(
-      relationship => relationship.type === RelType.Comments
-    );
-    if (commentsRel !== undefined) {
-      const target = resolveRelationshipTarget(path, commentsRel.target, commentsRel.targetMode);
-      const commentsPart = target === undefined ? undefined : findPart(entries, target);
-      if (commentsPart !== undefined) {
-        for (const comment of readCommentsPart(
-          commentsPart,
-          target!,
-          iterateInterpretableRecords,
-          id => recordSpec(id)?.name
-        )) {
-          // Through the cell rather than the model: a note is attached to a `CellData`, and the setter
-          // owns the default margins, protection and `editAs` block that Excel expects alongside the
-          // text. Assigning `comment` directly would produce a note Excel renders without a box.
-          const cell = getCell(worksheet, comment.ref);
-          cellSetNote(cell, { texts: [...comment.texts] });
-        }
-      }
+    for (const comment of comments) {
+      // Through the cell rather than the model: a note is attached to a `CellData`, and the setter
+      // owns the default margins, protection and `editAs` block that Excel expects alongside the
+      // text. Assigning `comment` directly would produce a note Excel renders without a box.
+      const cell = getCell(worksheet, comment.ref);
+      cellSetNote(cell, { texts: [...comment.texts] });
     }
 
     // Hyperlinks. `BrtHLink` names a relationship, not a URL: the destination is a

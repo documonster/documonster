@@ -1388,7 +1388,12 @@ export function readWorksheetPart(
     // With `blankCells: "collapse"` they are accumulated into rectangles instead, which the writer expands again.
     // That is the difference from simply dropping them: the run is a *representation* of the same records rather
     // than a loss, so an XLSB read and written back is unchanged and no fidelity report is owed.
-    if (collapseBlanks && value === null && formula === undefined && richText === undefined) {
+    //
+    // **Recognised by the record, not by a `null` value.** A `BrtFmlaError` whose code is not in the table also reads
+    // as `null`, and when its formula is a shared follower (`sharedFormulaOrigin`) or could not be decoded, nothing
+    // else told it from a blank — so the formula was collapsed away and written back as a `BrtCellBlank`. The
+    // rectangles promise to reproduce `BrtCellBlank` records; only those may go into them.
+    if (collapseBlanks && spec.name === "BrtCellBlank") {
       blankRuns.add(currentRow, cell.column, cell.styleIndex);
       continue;
     }

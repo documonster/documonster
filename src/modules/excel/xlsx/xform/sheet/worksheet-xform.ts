@@ -3,7 +3,7 @@ import type { LegacyControlModel } from "@excel/core/form-control";
 import { formCheckboxPlacement } from "@excel/core/form-control-placement";
 import type { ImageModel } from "@excel/core/image";
 import { rangeCreate, rangeExpand } from "@excel/core/range";
-import { StyledBlankRuns } from "@excel/core/styled-blanks";
+import { StyledBlankRuns, takeStyledBlanks } from "@excel/core/styled-blanks";
 import type { ConditionalFormattingRule } from "@excel/types";
 import { decodeCol, encodeCol } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
@@ -406,6 +406,67 @@ function appendCommentCells(
       // reaches `rowSetModel` as a cell of unknown kind and throws.
       (row.cells ??= []).push({ address, type: 0, comment: entry.comment });
     }
+  }
+}
+
+/** A single cell's address as a `<c r>` spells it, which is the only form `attachAnnotations` matches. */
+const CELL_ADDRESS = /^([A-Z]{1,3})([1-9][0-9]*)$/;
+
+/**
+ * Give each collapsed styled blank that a hyperlink or a comment names its cell back, before either is attached.
+ *
+ * Collapsing is decided while the row is parsed, and the annotations are not known then — `<hyperlinks>` follows
+ * `<sheetData>`, and comments are a part of their own — so such a cell went into a rectangle. The hyperlink then found
+ * no cell and was dropped, and the comment got a new cell without the format, which the writer kept in place of the
+ * rectangle's. The cell restored here is the one the parser would have produced, so the rest of `reconcile` treats it
+ * exactly as it treats the cell under `"keep"`.
+ */
+function restoreAnnotatedBlanks(
+  model: { rows: ReconcileRowModel[]; styledBlankRanges?: readonly StyledBlankRangeModel[] },
+  addresses: Iterable<string>
+): void {
+  const ranges = model.styledBlankRanges;
+  if (ranges === undefined || ranges.length === 0) {
+    return;
+  }
+  const cells: { row: number; column: number; address: string }[] = [];
+  for (const address of addresses) {
+    const match = CELL_ADDRESS.exec(address);
+    if (match !== null) {
+      cells.push({ row: Number(match[2]) - 1, column: colCache.decodeCol(match[1]) - 1, address });
+    }
+  }
+  const { ranges: remaining, taken } = takeStyledBlanks(ranges, cells);
+  if (taken.length === 0) {
+    return;
+  }
+  model.styledBlankRanges = remaining;
+  const byNumber = new Map(model.rows.map(row => [row.number, row]));
+  let rowsAdded = false;
+  for (const { cell, range } of taken) {
+    let row = byNumber.get(cell.row + 1);
+    if (row === undefined) {
+      row = { number: cell.row + 1, cells: [] };
+      model.rows.push(row);
+      byNumber.set(row.number, row);
+      rowsAdded = true;
+    }
+    const rowCells = (row.cells ??= []);
+    const at = rowCells.findIndex(
+      other => other?.address !== undefined && colCache.decodeCol(other.address) > cell.column + 1
+    );
+    // The fields `CellXform` gives a parsed `<c r="…" s="…"/>`, in its order — see its `parseOpen`.
+    const restored = {
+      address: cell.address,
+      type: Enums.ValueType.Null,
+      value: undefined,
+      styleId: range.styleIndex,
+      style: undefined
+    };
+    rowCells.splice(at === -1 ? rowCells.length : at, 0, restored);
+  }
+  if (rowsAdded) {
+    model.rows.sort((left, right) => left.number - right.number);
   }
 }
 
@@ -1843,6 +1904,11 @@ class WorkSheetXform extends BaseXform {
       }
     } else {
       model.rows = [];
+    }
+
+    // Before the rectangles' styles are resolved, so the cells taken out of them are reconciled like any other.
+    if (hyperlinkMap.size > 0 || commentsMap.size > 0) {
+      restoreAnnotatedBlanks(model, [...hyperlinkMap.keys(), ...commentsMap.keys()]);
     }
 
     // **A style index is only meaningful against the table it came from.**

@@ -11,10 +11,15 @@
  * written back produces the *same bytes* as one read with `"keep"`. Everything else here supports that claim.
  */
 import { extractAll } from "@archive/unzip/extract";
-import { Cell, Workbook } from "@excel";
-import { iterateInterpretableRecords } from "@excel/xlsb/binary";
+import { createZipSync } from "@archive/zip/zip-bytes";
+import { Cell, Range, Workbook, type Worksheet } from "@excel";
+import {
+  encodeBiffRecord,
+  iterateBiffRecords,
+  iterateInterpretableRecords
+} from "@excel/xlsb/binary";
 import { commitXlsbRead, parseXlsbPackage } from "@excel/xlsb/read/package";
-import { recordSpec } from "@excel/xlsb/spec/records";
+import { RECORD_BY_NAME, recordSpec } from "@excel/xlsb/spec/records";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /** Rows 1–20 hold data; rows 21–400 carry a fill and nothing else, across ten columns. */
@@ -133,6 +138,118 @@ describe("collapse changes the model, not the file", () => {
     const collapsed = await readAs("collapse");
     const sheet = Workbook.listWorksheets(collapsed.handle)[0];
     expect(Cell.getValue(sheet, "A1")).toBe(1);
+  });
+});
+
+describe("collapse takes only what is a styled blank", () => {
+  const SHEET = "xl/worksheets/sheet1.bin";
+
+  /** The bytes a workbook is written as, with its sheet part's records passed through `edit`. */
+  async function written(
+    build: (sheet: Worksheet.Handle) => void,
+    edit: (record: { readonly id: number; readonly payload: Uint8Array }) => Uint8Array = record =>
+      encodeBiffRecord(record.id, record.payload)
+  ): Promise<Uint8Array> {
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Range.setStyle(sheet, "A1:C3", { numFmt: "@" });
+    build(sheet);
+    const bytes = await Workbook.toBuffer(handle, { format: "xlsb", unsupported: "ignore" });
+    const entries = await extractAll(bytes);
+    const part = entries.get(SHEET)!.data;
+    const rebuilt = [...iterateBiffRecords(part, SHEET)].map(edit);
+    return createZipSync(
+      [...entries.values()].map(entry => ({
+        name: entry.path,
+        data: entry.path === SHEET ? concatBytes(rebuilt) : entry.data
+      }))
+    );
+  }
+
+  function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+    const out = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+    let at = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, at);
+      at += chunk.length;
+    }
+    return out;
+  }
+
+  function idOf(name: string): number {
+    return RECORD_BY_NAME.get(name)!.id;
+  }
+
+  async function both(bytes: Uint8Array) {
+    const read = async (blankCells: "keep" | "collapse") => {
+      const handle = Workbook.create();
+      await Workbook.read(handle, bytes, { blankCells });
+      return {
+        sheet: Workbook.listWorksheets(handle)[0],
+        written: await Workbook.toBuffer(handle, { format: "xlsb", unsupported: "ignore" })
+      };
+    };
+    return Promise.all([read("keep"), read("collapse")]);
+  }
+
+  async function expectSameSheet(left: Uint8Array, right: Uint8Array): Promise<void> {
+    const sheetOf = async (bytes: Uint8Array) =>
+      records((await extractAll(bytes)).get(SHEET)!.data);
+    expect(await sheetOf(right)).toEqual(await sheetOf(left));
+  }
+
+  it("gives a blank its cell back when a comment lands on it", async () => {
+    // The comments part is read after the sheet, so the blank under the note was collapsed with its neighbours and
+    // the note attached to a new cell without the format.
+    const bytes = await written(sheet => Cell.setNote(sheet, "B2", "a note"));
+    const [kept, collapsed] = await both(bytes);
+    expect(Cell.getNote(kept.sheet, "B2")).toBe("a note");
+    for (const facet of [Cell.getValue, Cell.getNote, Cell.getNumFmt]) {
+      expect(facet(collapsed.sheet, "B2")).toEqual(facet(kept.sheet, "B2"));
+    }
+    await expectSameSheet(kept.written, collapsed.written);
+  });
+
+  it("gives a blank its cell back when a hyperlink lands on it", async () => {
+    // `BrtHLink` follows the cells, so the same applies. Written with a label, then the label's record replaced by the
+    // `BrtCellBlank` Excel writes for a linked cell that holds nothing.
+    const bytes = await written(
+      sheet => Cell.setValue(sheet, "B2", { text: "x", hyperlink: "https://example.com" }),
+      record =>
+        record.id === idOf("BrtCellIsst")
+          ? encodeBiffRecord(idOf("BrtCellBlank"), record.payload.subarray(0, 8))
+          : encodeBiffRecord(record.id, record.payload)
+    );
+    const [kept, collapsed] = await both(bytes);
+    expect(Cell.getHyperlink(kept.sheet, "B2")).toBe("https://example.com");
+    for (const facet of [Cell.getValue, Cell.getHyperlink, Cell.getNumFmt]) {
+      expect(facet(collapsed.sheet, "B2")).toEqual(facet(kept.sheet, "B2"));
+    }
+    await expectSameSheet(kept.written, collapsed.written);
+  });
+
+  it("does not take a formula whose cached error it cannot read", async () => {
+    // An error code outside the table reads as `null`, as a blank does. For a shared follower nothing else told the two
+    // apart, so the formula was collapsed and written back as a `BrtCellBlank`.
+    const bytes = await written(
+      sheet => {
+        Cell.setValue(sheet, "B2", { formula: "1/0", result: { error: "#DIV/0!" } });
+        Cell.setValue(sheet, "B3", { sharedFormula: "B2", result: { error: "#DIV/0!" } });
+      },
+      record => {
+        if (record.id !== idOf("BrtFmlaError")) {
+          return encodeBiffRecord(record.id, record.payload);
+        }
+        const payload = Uint8Array.from(record.payload);
+        // `BrtFmlaError` is the cell header (8 bytes) and then the `BErr` byte; `0x99` is no error at all.
+        payload[8] = 0x99;
+        return encodeBiffRecord(record.id, payload);
+      }
+    );
+    const [kept, collapsed] = await both(bytes);
+    expect(Cell.getValue(kept.sheet, "B3")).toMatchObject({ sharedFormula: "B2" });
+    expect(Cell.getValue(collapsed.sheet, "B3")).toEqual(Cell.getValue(kept.sheet, "B3"));
+    await expectSameSheet(kept.written, collapsed.written);
   });
 });
 

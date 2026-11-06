@@ -19,7 +19,7 @@
  */
 import { extractAll } from "@archive/unzip/extract";
 import { createZipSync } from "@archive/zip/zip-bytes";
-import { Cell, Workbook } from "@excel";
+import { Cell, Range, Workbook, Worksheet } from "@excel";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /** Rows 1–20 hold data; rows 21–400 carry a fill and nothing else, across eight columns. */
@@ -43,6 +43,24 @@ async function readAs(
 
 function physicalRows(handle: Workbook.Handle): number {
   return (Workbook.getModel(handle).worksheets[0].rows ?? []).length;
+}
+
+/** `bytes` with its first sheet's XML passed through `patch`, for a shape this library's writer does not produce. */
+async function withSheetXml(
+  bytes: Uint8Array,
+  patch: (xml: string) => string
+): Promise<Uint8Array> {
+  const part = "xl/worksheets/sheet1.xml";
+  const entries = await extractAll(bytes);
+  return createZipSync(
+    [...entries.values()].map(entry => ({
+      name: entry.path,
+      data:
+        entry.path === part
+          ? new TextEncoder().encode(patch(new TextDecoder().decode(entry.data)))
+          : entry.data
+    }))
+  );
 }
 
 beforeAll(async () => {
@@ -170,22 +188,16 @@ describe("collapse keeps a styled cell that points at a shared formula", () => {
     Cell.setValue(sheet, "A2", 1);
     Cell.setValue(sheet, "B2", { formula: "A2" });
     Cell.setValue(sheet, "B3", { sharedFormula: "B2" });
-    const written = Uint8Array.from(
-      await Workbook.toBuffer(handle, { format: "xlsx", validate: false })
-    );
-    const entries = await extractAll(written);
-    const part = "xl/worksheets/sheet1.xml";
-    const xml = new TextDecoder().decode(entries.get(part)!.data);
-    const patched = xml.replace(
-      '<c r="B3"><f t="shared" si="0"/>',
-      '<c r="B3" s="0"><f t="shared" si="0"/>'
-    );
-    expect(patched).not.toBe(xml);
-    const bytes = createZipSync(
-      [...entries.values()].map(entry => ({
-        name: entry.path,
-        data: entry.path === part ? new TextEncoder().encode(patched) : entry.data
-      }))
+    const bytes = await withSheetXml(
+      Uint8Array.from(await Workbook.toBuffer(handle, { format: "xlsx", validate: false })),
+      xml => {
+        const patched = xml.replace(
+          '<c r="B3"><f t="shared" si="0"/>',
+          '<c r="B3" s="0"><f t="shared" si="0"/>'
+        );
+        expect(patched).not.toBe(xml);
+        return patched;
+      }
     );
 
     const read = Workbook.create();
@@ -208,6 +220,94 @@ describe("the two containers agree", () => {
     const sheet = Workbook.listWorksheets(viaXlsb)[0];
     expect(Cell.getValue(sheet, "A1")).toBe(1);
     expect(Cell.getValue(sheet, "H20")).toBe(160);
+  });
+});
+
+describe("collapse gives a styled blank with a hyperlink or a comment its cell back", () => {
+  /**
+   * A 3×3 block in one format with B2 inside it, written as `<c r="B2" s="N"/>` — an empty cell, as Excel writes one —
+   * and then annotated by `annotate`. The annotation is only attached after `<sheetData>` is read, which is what
+   * the collapse has to cope with.
+   */
+  async function blockWith(
+    annotate: (sheet: Worksheet.Handle) => void,
+    patch: (xml: string) => string = xml => xml
+  ): Promise<Uint8Array> {
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Range.setStyle(sheet, "A1:C3", { numFmt: "@" });
+    annotate(sheet);
+    return withSheetXml(
+      Uint8Array.from(await Workbook.toBuffer(handle, { format: "xlsx", validate: false })),
+      xml => {
+        const patched = patch(xml);
+        expect(patched).toMatch(/<c r="B2" s="\d+"\/>/);
+        return patched;
+      }
+    );
+  }
+
+  async function read(bytes: Uint8Array, blankCells: "keep" | "collapse") {
+    const handle = Workbook.create();
+    await Workbook.read(handle, bytes, { blankCells });
+    const written = await extractAll(
+      Uint8Array.from(await Workbook.toBuffer(handle, { format: "xlsx", validate: false }))
+    );
+    return { sheet: Workbook.listWorksheets(handle)[0], written };
+  }
+
+  /** Every part both writes have, compared as text; the timestamped core properties aside. */
+  function expectSameParts(
+    left: Awaited<ReturnType<typeof read>>["written"],
+    right: typeof left
+  ): void {
+    expect([...right.keys()].sort()).toEqual([...left.keys()].sort());
+    for (const path of left.keys()) {
+      if (path !== "docProps/core.xml") {
+        const decode = (data: Uint8Array): string => new TextDecoder().decode(data);
+        expect(decode(right.get(path)!.data), path).toBe(decode(left.get(path)!.data));
+      }
+    }
+  }
+
+  it("keeps the hyperlink and the format", async () => {
+    // Written with a label, then the label taken out: what remains is an empty, formatted cell that a `<hyperlink>`
+    // names — which `"collapse"` used to fold into the block, dropping the link.
+    const bytes = await blockWith(
+      sheet => Cell.setValue(sheet, "B2", { text: "x", hyperlink: "https://example.com" }),
+      xml => xml.replace(/<c r="B2"( s="\d+")[^>]*>.*?<\/c>/, '<c r="B2"$1/>')
+    );
+    const [kept, collapsed] = await Promise.all([read(bytes, "keep"), read(bytes, "collapse")]);
+    expect(Cell.getHyperlink(kept.sheet, "B2")).toBe("https://example.com");
+    for (const facet of [Cell.getValue, Cell.getHyperlink, Cell.getNumFmt]) {
+      expect(facet(collapsed.sheet, "B2")).toEqual(facet(kept.sheet, "B2"));
+    }
+    expectSameParts(kept.written, collapsed.written);
+  });
+
+  it("keeps the comment and the format", async () => {
+    // The comments part is read separately from the sheet, so the collapse could not see this one either; the note
+    // survived on a new cell, without the format.
+    const bytes = await blockWith(sheet => Cell.setNote(sheet, "B2", "a note"));
+    const [kept, collapsed] = await Promise.all([read(bytes, "keep"), read(bytes, "collapse")]);
+    expect(Cell.getNote(kept.sheet, "B2")).toBe("a note");
+    for (const facet of [Cell.getValue, Cell.getNote, Cell.getNumFmt]) {
+      expect(facet(collapsed.sheet, "B2")).toEqual(facet(kept.sheet, "B2"));
+    }
+    expectSameParts(kept.written, collapsed.written);
+  });
+
+  it("still collapses the rest of the block", async () => {
+    const bytes = await blockWith(sheet => Cell.setNote(sheet, "B2", "a note"));
+    const collapsed = await read(bytes, "collapse");
+    expect(Cell.getNumFmt(collapsed.sheet, "A1")).toBeUndefined();
+    expect(
+      Worksheet.getModel(collapsed.sheet).styledBlankRanges?.reduce(
+        (cells, range) =>
+          cells + (range.lastRow - range.firstRow + 1) * (range.lastColumn - range.firstColumn + 1),
+        0
+      )
+    ).toBe(8);
   });
 });
 
