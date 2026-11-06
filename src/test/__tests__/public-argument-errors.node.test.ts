@@ -296,7 +296,7 @@ const PENDING_BOUND_MS = 3_000;
 async function sweep(
   entry: Record<string, unknown>,
   owns: ErrorGuard
-): Promise<{ name: string; construct: boolean; leak?: Leak }[]> {
+): Promise<{ name: string; construct: boolean; leak?: Leak; undecided?: boolean }[]> {
   const results: {
     name: string;
     construct: boolean;
@@ -328,7 +328,8 @@ async function sweep(
         return { name, construct, leak: { args, error, fault } };
       }
     }
-    return { name, construct };
+    // A call still pending at the bound has not said how it fails, so it decides nothing.
+    return { name, construct, undecided: pending.some(({ late }) => late.outcome === undefined) };
   });
 }
 
@@ -356,14 +357,19 @@ function membersOf(entry: Record<string, unknown>): [string, AnyFunction, boolea
 
 const leaksByName = new Map<string, string>();
 const seen = new Set<string>();
+/** Members with a call still pending at the bound: whether they need their exemption is unknown. */
+const undecided = new Set<string>();
 
 describe("a wrong argument to a public function is the module's own error", () => {
   it.each(Object.entries(ENTRIES))(
     "%s",
     async (_name, { entry, owns }) => {
       const leaks: string[] = [];
-      for (const { name, construct, leak } of await sweep(entry, owns)) {
+      for (const { name, construct, leak, undecided: open } of await sweep(entry, owns)) {
         seen.add(name);
+        if (open) {
+          undecided.add(name);
+        }
         if (!leak) {
           continue;
         }
@@ -403,7 +409,12 @@ describe("a wrong argument to a public function is the module's own error", () =
   });
 
   it("every exemption still names a member, and that member still needs it", () => {
-    const stale = Object.keys(EXEMPT).filter(name => !seen.has(name) || !leaksByName.has(name));
+    // An exemption is stale only when its member was called and every call settled without the
+    // leak. A refusal that comes back through the I/O pool (`Fs.readFileBytes("x")`) can outlast
+    // the bound on a loaded runner, and that is not evidence the exemption went unused.
+    const stale = Object.keys(EXEMPT).filter(
+      name => !seen.has(name) || (!leaksByName.has(name) && !undecided.has(name))
+    );
     expect(stale).toEqual([]);
   });
 });
