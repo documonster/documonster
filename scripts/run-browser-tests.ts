@@ -12,16 +12,32 @@
  *
  * Six, not three: at ~240 files a shard the renderer still died on a Windows runner, at file 201 of 237.
  *
+ * **And a garbage collection between files, on every platform.** Vitest ships the workaround for that bug — a
+ * `HeapProfiler.collectGarbage` after each file — but arms it only on Linux, and there only when the disk under `TMPDIR`
+ * has less than 4 GB free. The CI matrix raised the threshold, which did nothing on Windows and macOS, where the
+ * renderer kept dying: the platform check comes first. So this sets all three things it needs —
+ * `VITEST_CHROMIUM_GC_FORCE` past the platform check, a threshold no disk reaches past the space check, and on Windows a
+ * `TMPDIR`, because the check `statfs`es `TMPDIR` or `/tmp`, which is not a path there, and a failed check skips the
+ * collection. It costs about 6 ms a file. Remove it when the Chromium bug is fixed.
+ *
  * Shards run sequentially: running them at once would put the same total in memory at the same time.
  * `--passWithNoTests` keeps a filtered run (`pnpm test:browser some-file`) from failing on the shards it leaves empty.
  */
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
 const SHARDS = 6;
 const VITEST = join(process.cwd(), "node_modules", "vitest", "vitest.mjs");
 const forwarded = process.argv.slice(2).filter(arg => arg !== "--");
+const env = {
+  ...process.env,
+  VITEST_CHROMIUM_GC_FORCE: process.env.VITEST_CHROMIUM_GC_FORCE ?? "1",
+  VITEST_CHROMIUM_GC_DISK_THRESHOLD_GB:
+    process.env.VITEST_CHROMIUM_GC_DISK_THRESHOLD_GB ?? "1048576",
+  TMPDIR: process.env.TMPDIR ?? tmpdir()
+};
 
 let failed = false;
 for (let shard = 1; shard <= SHARDS; shard++) {
@@ -37,7 +53,7 @@ for (let shard = 1; shard <= SHARDS; shard++) {
       "--passWithNoTests",
       ...forwarded
     ],
-    { stdio: "inherit" }
+    { stdio: "inherit", env }
   );
   if (result.status !== 0) {
     // `error` is set when the shard never ran (Node not found, spawn refused); `status` is then null too.

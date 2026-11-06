@@ -158,6 +158,11 @@ function isNamespace(value: unknown): value is Record<string, unknown> {
   );
 }
 
+/** An object the sweep walks as it walks an entry's `export * as` namespace. */
+function makeNamespace(members: Record<string, unknown>): Record<string, unknown> {
+  return Object.defineProperty({ ...members }, Symbol.toStringTag, { value: "Module" });
+}
+
 /** A class is constructed rather than called; both are swept, each in its own form. */
 function isClass(fn: AnyFunction): boolean {
   return /^class\b/.test(Function.prototype.toString.call(fn)) || /^[A-Z]/.test(fn.name);
@@ -185,22 +190,62 @@ function faultOf(error: unknown, owns: ErrorGuard): string | undefined {
   return undefined;
 }
 
+/** How a call's outcome is known: settled now, or still pending, with its outcome when it comes. */
+interface Late {
+  /** Set once the pending call settles; `error` is absent when it fulfilled. */
+  outcome?: { readonly error?: unknown };
+  readonly done: Promise<void>;
+}
+
+/** Keep watching `promise` past the quick look, so a rejection that arrives later is still seen. */
+function watch(promise: Promise<unknown>): Late {
+  const late: Late = {
+    done: promise.then(
+      () => {
+        late.outcome = {};
+      },
+      (error: unknown) => {
+        late.outcome = { error };
+      }
+    )
+  };
+  return late;
+}
+
 /**
  * Settle what a call returned, as far as a wrong argument would show: a rejection, or a throw on
  * first pull — of an async iterable, or of a synchronous iterator such as a generator's, whose body
  * (and so any check in it) runs only when it is pulled. A pulled iterator is closed again.
+ *
+ * A promise still pending after a moment is returned rather than waited for: many members wait for
+ * input that never comes, and waiting for each would stall the sweep. But a pending promise is not
+ * known to be fine — a file system's refusal (`Fs.readFileBytes("x")` is ENOENT) comes back through
+ * the I/O thread pool, which on a loaded CI runner took longer than the moment, so the refusal was
+ * missed and the check below reported `Fs.readFileBytes`'s exemption as stale. The caller waits for
+ * all of an entry's pending calls together, once — see {@link sweep}.
  */
-async function settle(result: unknown): Promise<void> {
+async function settle(result: unknown): Promise<Late | undefined> {
+  const quickly = async (promise: Promise<unknown>): Promise<Late | undefined> => {
+    const late = watch(promise);
+    await Promise.race([late.done, new Promise(resolve => setTimeout(resolve, 10))]);
+    if (late.outcome === undefined) {
+      return late;
+    }
+    if (late.outcome.error !== undefined) {
+      throw late.outcome.error;
+    }
+    return undefined;
+  };
   if (result instanceof Promise) {
-    // A promise still pending after a moment is not a leak: an argument check rejects at once.
-    await Promise.race([result, new Promise(resolve => setTimeout(resolve, 10))]);
-  } else if (
+    return quickly(result);
+  }
+  if (
     result &&
     typeof (result as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
   ) {
-    const it = (result as AsyncIterable<unknown>)[Symbol.asyncIterator]();
-    await Promise.race([it.next(), new Promise(resolve => setTimeout(resolve, 10))]);
-  } else if (result && typeof (result as { next?: unknown }).next === "function") {
+    return quickly((result as AsyncIterable<unknown>)[Symbol.asyncIterator]().next());
+  }
+  if (result && typeof (result as { next?: unknown }).next === "function") {
     const it = result as Iterator<unknown>;
     try {
       it.next();
@@ -208,26 +253,83 @@ async function settle(result: unknown): Promise<void> {
       it.return?.();
     }
   }
+  return undefined;
 }
 
-/** The first wrong argument list a member reports badly, with what was wrong. */
+type Leak = { args: unknown[]; error: unknown; fault: string };
+
+/**
+ * The first wrong argument list a member reports badly, with what was wrong — or, when no call
+ * failed badly at once, the calls still pending, for {@link sweep} to look at once they settle.
+ */
 async function leakOf(
   fn: AnyFunction,
   construct: boolean,
   owns: ErrorGuard
-): Promise<{ args: unknown[]; error: unknown; fault: string } | undefined> {
+): Promise<{ leak?: Leak; pending: { args: unknown[]; late: Late }[] }> {
+  const pending: { args: unknown[]; late: Late }[] = [];
   for (const args of wrongArguments()) {
     try {
       const Ctor = fn as unknown as new (...a: unknown[]) => unknown;
-      await settle(construct ? new Ctor(...args) : fn(...args));
+      const late = await settle(construct ? new Ctor(...args) : fn(...args));
+      if (late !== undefined) {
+        pending.push({ args, late });
+      }
     } catch (error) {
       const fault = faultOf(error, owns);
       if (fault !== undefined) {
-        return { args, error, fault };
+        return { leak: { args, error, fault }, pending };
       }
     }
   }
-  return undefined;
+  return { pending };
+}
+
+/**
+ * How long an entry's pending calls are given, together, to settle. Every call that settles at all
+ * does so in milliseconds on an idle machine; the bound only keeps the calls that wait for input
+ * forever from stalling the sweep, and it is paid once per entry, not once per call.
+ */
+const PENDING_BOUND_MS = 3_000;
+
+/** Each member of `entry` with the first wrong argument list it reports badly, if any. */
+async function sweep(
+  entry: Record<string, unknown>,
+  owns: ErrorGuard
+): Promise<{ name: string; construct: boolean; leak?: Leak }[]> {
+  const results: {
+    name: string;
+    construct: boolean;
+    leak?: Leak;
+    pending: { args: unknown[]; late: Late }[];
+  }[] = [];
+  for (const [name, fn, construct] of membersOf(entry)) {
+    results.push({ name, construct, ...(await leakOf(fn, construct, owns)) });
+  }
+  const waiting = results.flatMap(result => (result.leak ? [] : result.pending));
+  if (waiting.length > 0) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(waiting.map(({ late }) => late.done)),
+      new Promise(resolve => {
+        timer = setTimeout(resolve, PENDING_BOUND_MS);
+      })
+    ]);
+    clearTimeout(timer);
+  }
+  return results.map(({ name, construct, leak, pending }) => {
+    if (leak !== undefined) {
+      return { name, construct, leak };
+    }
+    for (const { args, late } of pending) {
+      const error = late.outcome?.error;
+      const fault = error === undefined ? undefined : faultOf(error, owns);
+      if (fault !== undefined) {
+        return { name, construct, leak: { args, error, fault } };
+      }
+    }
+    return { name, construct };
+  });
 }
 
 /** Every function and class reachable through the namespaces an entry publishes, by dotted name. */
@@ -260,9 +362,8 @@ describe("a wrong argument to a public function is the module's own error", () =
     "%s",
     async (_name, { entry, owns }) => {
       const leaks: string[] = [];
-      for (const [name, fn, construct] of membersOf(entry)) {
+      for (const { name, construct, leak } of await sweep(entry, owns)) {
         seen.add(name);
-        const leak = await leakOf(fn, construct, owns);
         if (!leak) {
           continue;
         }
@@ -286,7 +387,17 @@ describe("a wrong argument to a public function is the module's own error", () =
       }
       yield value;
     }
-    expect((await leakOf(checksLate, false, () => true))?.fault).toBe(
+    expect((await leakOf(checksLate, false, () => true)).leak?.fault).toBe(
+      "not one of the library's errors"
+    );
+  });
+
+  it("sees a rejection that arrives after the first look", async () => {
+    // A file system's refusal comes back through the I/O thread pool, later than an argument check.
+    const rejectsLate = (): Promise<never> =>
+      new Promise((_, reject) => setTimeout(() => reject(new TypeError("late")), 50));
+    const results = await sweep({ Late: makeNamespace({ rejectsLate }) }, () => true);
+    expect(results.find(r => r.name === "Late.rejectsLate")?.leak?.fault).toBe(
       "not one of the library's errors"
     );
   });

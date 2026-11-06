@@ -18,8 +18,9 @@ jobs:
 
   test:
     needs: should-run
-    # Node, packages and six browser shards in sequence: the Windows runners take
-    # about 20 minutes for it, which 15 cut off in the middle of the browser run.
+    # Node and package tests on every cell; the browser suite on one Node version
+    # per OS (see "Browser tests"). The cell that runs it takes about 20 minutes on a
+    # Windows runner, which 15 cut off in the middle of the browser run.
     timeout-minutes: 30
     name: Node v${{ matrix.node-version }} on ${{ matrix.os }}
     strategy:
@@ -70,25 +71,53 @@ jobs:
       - name: Install dependencies
         run: pnpm i --frozen-lockfile
 
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Run tests
-        run: pnpm test
+      - name: Node tests
+        run: pnpm exec vitest run
         env:
           CI: true
-          # Chromium does not reclaim what a finished browser-mode test file left
-          # behind (https://issues.chromium.org/issues/530892387), so a long run
-          # accumulates until the renderer is killed — reported by Vitest as
-          # `Browser connection was closed while running tests`, with the whole
-          # run abandoned at whichever file happened to be in flight. Vitest
-          # ships the workaround (a `HeapProfiler.collectGarbage` between files)
-          # but only arms it below 4 GB free in TMPDIR, and a runner here has
-          # more than that while still dying. A threshold larger than any disk
-          # arms it unconditionally; it costs a `statfs` plus a CDP round trip
-          # per file, about 6 ms, and applies only to linux + playwright +
-          # chromium. Remove this when the Chromium bug is fixed.
-          VITEST_CHROMIUM_GC_DISK_THRESHOLD_GB: 1048576
+
+      - name: Package tests
+        run: pnpm build:esm && pnpm test:packages
+        env:
+          CI: true
+
+      # **The browser suite runs once per OS, on Node 24.** It executes in Chromium, so
+      # the Node version only decides what starts Vitest — running it on all three
+      # versions repeated the same ~700 files twice more per OS, about half of every
+      # cell's time, and tripled the chance of meeting the Chromium memory bug that
+      # `scripts/run-browser-tests.ts` works around. The OS still matters (paths,
+      # line endings, the renderer itself), so each one keeps a run.
+      - name: Playwright version
+        id: playwright
+        if: matrix.node-version == '24.x'
+        shell: bash
+        run: echo "version=$(pnpm exec playwright --version)" >> "$GITHUB_OUTPUT"
+
+      # The browser download is cached per Playwright version: it was fetched again in
+      # every cell, three to four minutes on a Windows runner. On Linux the system
+      # libraries still come from apt (`install-deps`), which a cache cannot hold.
+      - name: Cache Playwright browsers
+        if: matrix.node-version == '24.x'
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: matrix.node-version == '24.x'
+        shell: bash
+        run: |
+          pnpm exec playwright install chromium
+          if [ "$RUNNER_OS" = "Linux" ]; then pnpm exec playwright install-deps chromium; fi
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+
+      - name: Browser tests
+        if: matrix.node-version == '24.x'
+        run: pnpm test:browser
+        env:
+          CI: true
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
 
   timezone:
     # **The whole suite outside UTC.**

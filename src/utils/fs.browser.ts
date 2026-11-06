@@ -121,6 +121,13 @@ export function readFileBytesSync(_filePath: string): Uint8Array {
   throw new Error(NOT_AVAILABLE);
 }
 
+export function readFileRegionsSync(
+  _filePath: string,
+  _select: (read: (offset: number, length: number) => Uint8Array, size: number) => void
+): Uint8Array {
+  throw new Error(NOT_AVAILABLE);
+}
+
 export async function writeFileBytes(_filePath: string, _data: Uint8Array): Promise<void> {
   throw new Error(NOT_AVAILABLE);
 }

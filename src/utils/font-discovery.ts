@@ -61,7 +61,7 @@ import type { CjkLanguage } from "./cjk";
 import { isGlyphlessControl } from "./cjk";
 import { countTtfFaces, parseTtf } from "./font-ttf";
 import type { TtfFont } from "./font-ttf";
-import { readFileBytesSync, traverseDirectorySync } from "./fs";
+import { readFileBytesSync, readFileRegionsSync, traverseDirectorySync } from "./fs";
 import type { FileEntry } from "./fs";
 
 /**
@@ -778,9 +778,93 @@ const _faceCounts = new Map<string, number>();
  */
 let _lastRead: { path: string; data: Uint8Array } | undefined;
 
-/** Drop the read buffer. Called when a search completes. */
+/** Drop the read buffers. Called when a search completes. */
 function releaseFontReadBuffer(): void {
   _lastRead = undefined;
+  _lastScreened = undefined;
+}
+
+/**
+ * The tables `parseTtf` reads. Everything else in a font file — the outlines (`glyf`), bitmaps, layout and hinting —
+ * is most of its size, and none of it decides whether a face can draw a text or which face ranks first.
+ */
+const SCREENING_TABLES: ReadonlySet<string> = new Set([
+  "head",
+  "hhea",
+  "maxp",
+  "OS/2",
+  "post",
+  "name",
+  "cmap",
+  "hmtx",
+  "loca"
+]);
+
+/** The font file being screened right now — see {@link readFontForScreening}. */
+let _lastScreened: { path: string; data: Uint8Array } | undefined;
+
+/**
+ * A font file with only what `parseTtf` reads taken off the disk: the header, each face's table directory and the
+ * tables in {@link SCREENING_TABLES}, at their own offsets in a buffer the size of the file.
+ *
+ * **Screening is where a search spends its time, and it used to read every file whole.** A text with a code point no
+ * installed face maps sends the search through every font on the host before it can say so, and on Windows that is a few
+ * hundred files including several CJK collections of tens of megabytes — measured at 8 to 30 s on a CI runner, where
+ * the tables screened are about a megabyte per CJK file. The face finally chosen is read whole
+ * ({@link completeFace}), because its outlines are what gets drawn or embedded.
+ */
+function readFontForScreening(path: string): Uint8Array | null {
+  if (_lastScreened?.path === path) {
+    return _lastScreened.data;
+  }
+  let data: Uint8Array;
+  try {
+    data = readFileRegionsSync(path, (read, size) => {
+      const u32 = (bytes: Uint8Array, at: number): number =>
+        new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(at, false);
+      const header = read(0, 12);
+      if (header.length < 12) {
+        return;
+      }
+      const faces: number[] = [];
+      if (u32(header, 0) === 0x74746366) {
+        // 'ttcf'. A count the file cannot hold is left for `parseTtf` to refuse.
+        const count = u32(header, 8);
+        if (count <= Math.floor((size - 12) / 4)) {
+          const offsets = read(12, count * 4);
+          for (let i = 0; i + 4 <= offsets.length; i += 4) {
+            faces.push(u32(offsets, i));
+          }
+        }
+      } else {
+        faces.push(0);
+      }
+      const done = new Set<string>();
+      for (const at of faces) {
+        const offsetTable = read(at, 12);
+        if (offsetTable.length < 12) {
+          continue;
+        }
+        const tables = (offsetTable[4]! << 8) | offsetTable[5]!;
+        const directory = read(at + 12, tables * 16);
+        for (let i = 0; i + 16 <= directory.length; i += 16) {
+          const tag = String.fromCharCode(...directory.subarray(i, i + 4));
+          const offset = u32(directory, i + 8);
+          const length = u32(directory, i + 12);
+          const key = `${offset}:${length}`;
+          // The faces of a collection share most of their tables; each is read once.
+          if (SCREENING_TABLES.has(tag) && !done.has(key)) {
+            done.add(key);
+            read(offset, length);
+          }
+        }
+      }
+    });
+  } catch {
+    return null;
+  }
+  _lastScreened = { path, data };
+  return data;
 }
 
 function readFontCached(path: string): Uint8Array | null {
@@ -810,10 +894,11 @@ function faceKey(path: string, index: number): string {
 function* expandFacesAtPath(
   path: string,
   preferred: boolean
-): Generator<SystemFontCandidate, void, void> {
+): Generator<ScreenableCandidate, void, void> {
   let faces = _faceCounts.get(path);
   if (faces === undefined) {
-    const data = readFontCached(path);
+    // The collection header is all a count needs, and screening reads it.
+    const data = readFontForScreening(path);
     if (!data) {
       return;
     }
@@ -837,9 +922,35 @@ function* expandFacesAtPath(
       path,
       get data(): Uint8Array {
         return readFontCached(path) ?? new Uint8Array(0);
+      },
+      get screen(): Uint8Array {
+        return readFontForScreening(path) ?? new Uint8Array(0);
       }
     };
   }
+}
+
+/**
+ * A candidate that can also be read for screening only: the tables `parseTtf` reads, without the rest of the file — see
+ * {@link readFontForScreening}. Absent for a candidate already in memory, which has nothing to save.
+ */
+interface ScreenableCandidate extends SystemFontCandidate {
+  readonly screen?: Uint8Array;
+}
+
+/**
+ * The candidate each face parsed for screening came from, so the one chosen can be read whole. Weak, so a face that is
+ * not chosen takes nothing with it.
+ */
+const _screenedFrom = new WeakMap<TtfFont, SystemFontCandidate>();
+
+/**
+ * `ttf` with its file's bytes, when it was parsed from the screening read: the tables are the same, so it is the face
+ * the search chose, and the outlines it lacked are what drawing or embedding it needs.
+ */
+function completeFace(ttf: TtfFont): TtfFont {
+  const candidate = _screenedFrom.get(ttf);
+  return candidate === undefined ? ttf : parseTtf(candidate.data, candidate.collectionIndex);
 }
 
 /** Faces of an in-memory font, for test-injected candidates. */
@@ -870,7 +981,7 @@ function* expandFaces(
  */
 function* iterateSystemFontCandidates(
   language?: CjkLanguage
-): Generator<SystemFontCandidate, void, void> {
+): Generator<ScreenableCandidate, void, void> {
   // Fast path: a previous call already produced the full snapshot.
   if (_cachedCandidates !== undefined) {
     for (const c of _cachedCandidates) {
@@ -1094,7 +1205,8 @@ export function findSystemFontForCodePoints(
   options: FindFaceOptions = {}
 ): TtfFont | null {
   try {
-    return selectSystemFont(codePoints, options);
+    const chosen = selectSystemFont(codePoints, options);
+    return chosen === null ? null : completeFace(chosen);
   } finally {
     // The chosen face keeps its own bytes; nothing else needs the read buffer.
     releaseFontReadBuffer();
@@ -1185,9 +1297,13 @@ function selectSystemFont(
   const coversEssential = (ttf: TtfFont): boolean =>
     essential.length === 0 ? covers(ttf) : missingEssential(ttf) === 0;
 
-  const parse = (candidate: SystemFontCandidate): TtfFont | null => {
+  const parse = (candidate: ScreenableCandidate): TtfFont | null => {
     try {
-      const ttf = parseTtf(candidate.data, candidate.collectionIndex);
+      const screen = candidate.screen;
+      const ttf = parseTtf(screen ?? candidate.data, candidate.collectionIndex);
+      if (screen !== undefined) {
+        _screenedFrom.set(ttf, candidate);
+      }
       if (candidate.path !== undefined) {
         // Remember what this face *is*, so a later search can rank it without
         // reading and parsing the file again. Two strings and a number per face,

@@ -134,9 +134,7 @@ describe("diagram_render", () => {
 
     expect(text).toContain("U+10FFFD");
     expect(text.toLowerCase()).toContain("blank");
-    // A code point nothing maps sends font discovery through every installed face before it can
-    // say so. That is a few hundred files on a Windows runner and took 15–30 s there, cold.
-  }, 120_000);
+  });
 
   it("reports an uncovered label when the configured face is unusable", async () => {
     // Constructing the right options object is not the same as passing it, and a test that

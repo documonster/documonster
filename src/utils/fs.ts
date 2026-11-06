@@ -525,6 +525,42 @@ export function readFileBytesSync(filePath: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
+ * Synchronously read only the parts of a file `select` asks for.
+ *
+ * The result is a buffer the size of the file in which every byte `select` read sits at its own offset and every other
+ * byte is zero, so a parser that addresses the file by absolute offset can work on it unchanged. `select` is given the
+ * file's size and `read(offset, length)`, which copies that range (clamped to the file) into the buffer and returns
+ * it — so it can read a header, see where it points, and read that. Nothing outside the ranges comes off the disk.
+ */
+export function readFileRegionsSync(
+  filePath: string,
+  select: (read: (offset: number, length: number) => Uint8Array, size: number) => void
+): Uint8Array<ArrayBuffer> {
+  const fd = _fs.openSync(filePath, "r");
+  try {
+    const size = _fs.fstatSync(fd).size;
+    const out = new Uint8Array(size);
+    const read = (offset: number, length: number): Uint8Array => {
+      const start = Math.max(0, Math.min(offset, size));
+      const end = Math.max(start, Math.min(start + Math.max(0, length), size));
+      let at = start;
+      while (at < end) {
+        const n = _fs.readSync(fd, out, at, end - at, at);
+        if (n === 0) {
+          break;
+        }
+        at += n;
+      }
+      return out.subarray(start, at);
+    };
+    select(read, size);
+    return out;
+  } finally {
+    _fs.closeSync(fd);
+  }
+}
+
+/**
  * Write bytes to a file.
  */
 export async function writeFileBytes(filePath: string, data: Uint8Array): Promise<void> {
