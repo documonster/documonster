@@ -44,6 +44,7 @@ import type {
 } from "@formula/materialize/writeback-plan";
 import type { RuntimeValue, ScalarValue, ArrayValue } from "@formula/runtime/values";
 import { RVKind } from "@formula/runtime/values";
+import { sheetNameKey } from "@utils/name-key";
 
 // ============================================================================
 // Spill Tracking State
@@ -325,6 +326,44 @@ function buildCSEWrite(inst: FormulaInstance, result: RuntimeValue): CSEWrite | 
   };
 }
 
+/**
+ * The spill regions of the previous calculation, plus the spill a file stored for each dynamic-array formula that has
+ * not been calculated yet: Excel saves a spilled master with `ref` over its spill and the spill's cells as cached
+ * values, which a host marks as that master's ghosts. Seen as the previous region, they are reused by the spill and
+ * cleared where it no longer reaches, as Excel does — instead of blocking it with `#SPILL!`.
+ */
+export function withStoredSpills(
+  calculated: ReadonlyMap<string, SpillRegion>,
+  compiled: readonly CompiledFormula[]
+): ReadonlyMap<string, SpillRegion> {
+  let merged: Map<string, SpillRegion> | undefined;
+  for (const { instance: inst } of compiled) {
+    if (!inst.isDynamicArray || inst.kind !== "dynamic-array" || inst.targetRef === undefined) {
+      continue;
+    }
+    const key = spillCellKeyFromId(inst.sheetId, inst.row, inst.col);
+    const range = parseRefRange(inst.targetRef);
+    if (
+      calculated.has(key) ||
+      range === null ||
+      range.top !== inst.row ||
+      range.left !== inst.col ||
+      (range.bottom === range.top && range.right === range.left)
+    ) {
+      continue;
+    }
+    merged ??= new Map(calculated);
+    merged.set(key, {
+      worksheetId: inst.sheetId,
+      sourceRow: inst.row,
+      sourceCol: inst.col,
+      rows: range.bottom - range.top + 1,
+      cols: range.right - range.left + 1
+    });
+  }
+  return merged ?? calculated;
+}
+
 // ============================================================================
 // Spill Write
 // ============================================================================
@@ -348,7 +387,7 @@ function buildSpillWrite(
    */
   activeSpillTargets: Set<string>
 ): "ok" | "error" {
-  const ws = snapshot.worksheetsByName.get(inst.sheetName.toLowerCase());
+  const ws = snapshot.worksheetsByName.get(sheetNameKey(inst.sheetName));
   if (!ws) {
     return "error";
   }
@@ -613,7 +652,7 @@ export function shouldPreserveCompileFailure(
     return false;
   }
   // Check if cell has a cached result in the snapshot
-  const ws = snapshot.worksheetsByName.get(inst.sheetName.toLowerCase());
+  const ws = snapshot.worksheetsByName.get(sheetNameKey(inst.sheetName));
   if (!ws) {
     return false;
   }

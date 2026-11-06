@@ -13,6 +13,7 @@
  * raster fallback if a caller wants to go that way.
  */
 
+import { checkArray, checkString, checkSurfaceCall } from "@draw/arguments";
 import { escapeXmlAttribute, escapeXmlText } from "@draw/escape";
 import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
@@ -36,8 +37,12 @@ export interface ToSvgOptions {
    */
   readonly width?: number;
   readonly height?: number;
-  /** Background fill. Omitted means transparent. */
-  readonly background?: string;
+  /**
+   * Background fill: a CSS colour string or an IR colour `{ r, g, b, a }` — the same two forms
+   * `RasterizeOptions.background` takes. Omitted, `"none"` or `"transparent"` means
+   * transparent.
+   */
+  readonly background?: string | Rgba01;
   /**
    * XML comment placed at the top of the document, before any drawing.
    *
@@ -65,12 +70,13 @@ export function toSvg(list: DrawList, options: ToSvgOptions = {}): string {
     // `--` cannot appear inside an XML comment; collapse any run of dashes.
     parts.push(`<!-- ${options.comment.replace(/-{2,}/g, "-")} -->`);
   }
-  if (options.background !== undefined) {
+  const background = backgroundAttrs(options.background);
+  if (background !== undefined) {
     parts.push(
-      `<rect x="0" y="0" width="${num(list.width)}" height="${num(list.height)}" fill="${escapeXmlAttribute(options.background)}"/>`
+      `<rect x="0" y="0" width="${num(list.width)}" height="${num(list.height)}"${background}/>`
     );
   }
-  parts.push(surface.markup());
+  parts.push(surface.format());
   parts.push("</svg>");
   return parts.join("");
 }
@@ -82,15 +88,26 @@ export class SvgSurface implements DrawSurface {
   private clipDepth = 0;
   private filterDepth = 0;
 
-  /** The accumulated elements, without a wrapping `<svg>`. */
-  markup(): string {
+  /**
+   * Serialise the accumulated elements, without a wrapping `<svg>`.
+   *
+   * `format` rather than `toSvg`: the result is a fragment to place inside an `<svg>`
+   * element, not the document `Draw.toSvg` returns.
+   */
+  format(): string {
     // Close any group the producer left open rather than emit invalid markup.
     const trailing = "</g>".repeat(this.clipDepth + this.filterDepth);
     const defs = this.defs.length > 0 ? `<defs>${this.defs.join("")}</defs>` : "";
     return defs + this.parts.join("") + trailing;
   }
 
+  /** @deprecated Use {@link format}. Removed in 1.0. */
+  markup(): string {
+    return this.format();
+  }
+
   pushClip(clip: DrawClip): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#pushClip", "pushClip", [clip]);
     const id = `dc${this.defs.length}`;
     this.defs.push(
       `<clipPath id="${id}"><rect x="${num(clip.x)}" y="${num(clip.y)}"` +
@@ -108,6 +125,7 @@ export class SvgSurface implements DrawSurface {
   }
 
   pushFilter(id: string): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#pushFilter", "pushFilter", [id]);
     this.parts.push(`<g filter="url(#${escapeXmlAttribute(id)})">`);
     this.filterDepth++;
   }
@@ -121,10 +139,14 @@ export class SvgSurface implements DrawSurface {
 
   /** Add raw `<defs>` content, e.g. filter definitions. */
   addDefs(markup: readonly string[]): void {
+    const where = "Draw.Backend.SvgSurface#addDefs";
+    checkArray(where, "markup", markup);
+    markup.forEach((def, i) => checkString(where, `markup[${i}]`, def));
     this.defs.push(...markup);
   }
 
   rect(x: number, y: number, width: number, height: number, rx: number, paint: DrawPaint): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#rect", "rect", [x, y, width, height, rx, paint]);
     if (width <= 0 || height <= 0) {
       return;
     }
@@ -137,6 +159,7 @@ export class SvgSurface implements DrawSurface {
   }
 
   ellipse(cx: number, cy: number, rx: number, ry: number, paint: DrawPaint): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#ellipse", "ellipse", [cx, cy, rx, ry, paint]);
     if (rx <= 0 || ry <= 0) {
       return;
     }
@@ -159,6 +182,15 @@ export class SvgSurface implements DrawSurface {
     endAngle: number,
     paint: DrawPaint
   ): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#sector", "sector", [
+      cx,
+      cy,
+      radius,
+      innerRadius,
+      startAngle,
+      endAngle,
+      paint
+    ]);
     if (radius <= 0) {
       return;
     }
@@ -214,6 +246,7 @@ export class SvgSurface implements DrawSurface {
   }
 
   polyline(points: readonly DrawPoint[], closed: boolean, paint: DrawPaint): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#polyline", "polyline", [points, closed, paint]);
     if (points.length < 2) {
       return;
     }
@@ -224,6 +257,7 @@ export class SvgSurface implements DrawSurface {
   }
 
   path(commands: readonly DrawPathCommand[], paint: DrawPaint): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#path", "path", [commands, paint]);
     if (commands.length === 0) {
       return;
     }
@@ -254,6 +288,7 @@ export class SvgSurface implements DrawSurface {
     style: DrawTextStyle,
     rotate: number
   ): void {
+    checkSurfaceCall("Draw.Backend.SvgSurface#text", "text", [x, y, lines, style, rotate]);
     const visible = lines.filter(line => line.text !== "");
     if (visible.length === 0 || !style.fill) {
       return;
@@ -295,6 +330,25 @@ function num(value: number): string {
   }
   const rounded = Math.round(value * 100) / 100;
   return Object.is(rounded, -0) ? "0" : String(rounded);
+}
+
+/**
+ * The fill attributes of the background rectangle, or `undefined` for none. A string is
+ * written as given, as it always was (the public entry has checked that it is a colour); an
+ * IR colour is written as `fill` and `fill-opacity`, and a fully transparent one draws
+ * nothing.
+ */
+function backgroundAttrs(background: string | Rgba01 | undefined): string | undefined {
+  if (background === undefined) {
+    return undefined;
+  }
+  if (typeof background === "string") {
+    return ` fill="${escapeXmlAttribute(background)}"`;
+  }
+  return background.a <= 0
+    ? undefined
+    : ` fill="${colour(background)}"` +
+        (background.a < 1 ? ` fill-opacity="${num(background.a)}"` : "");
 }
 
 /** `#rrggbb` for a colour's channels. */

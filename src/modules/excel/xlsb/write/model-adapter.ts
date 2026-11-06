@@ -7,6 +7,7 @@ import type {
   Fill,
   Font,
   HeaderFooter,
+  IgnoredError,
   Margins,
   Protection,
   RichText,
@@ -14,8 +15,22 @@ import type {
   TableStyleProperties
 } from "@excel/types";
 import { decodeCell, encodeCol } from "@excel/utils/address";
+import { needsArrayEvaluation } from "@excel/utils/array-evaluation";
+import {
+  claimArrayRange,
+  enclosingArrayRange,
+  overlappingArrayReason,
+  parseArrayRefBounds,
+  type ArrayRange
+} from "@excel/utils/array-ranges";
+import { hasUnnamedThisRow, toFileFormula } from "@excel/utils/future-functions";
+import { slideFormula } from "@excel/utils/shared-formula";
+import { isStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
+import { tableNameAt, type TableExtent } from "@excel/utils/table-at";
+import { mergeValidations } from "@excel/utils/validation-anchor";
 import { tryDecodeRange, type BiffRange } from "@excel/xlsb/binary";
 import type { SheetComment } from "@excel/xlsb/comments";
+import type { SheetConditionalFormatting } from "@excel/xlsb/conditional-format";
 import type { SheetValidation } from "@excel/xlsb/data-validation";
 /**
  * Turning a `WorkbookModel` into the shapes the part writers take.
@@ -30,11 +45,17 @@ import type { SheetValidation } from "@excel/xlsb/data-validation";
  * it could not express alongside the ones it could, because a merge that silently disappears is a
  * workbook that comes back subtly rearranged with nothing said.
  */
-import type { PrintOptionsLike, WorksheetViewLike } from "@excel/xlsb/defaults";
+import type {
+  PrintOptionsLike,
+  SheetProtectionLike,
+  WorksheetViewLike
+} from "@excel/xlsb/defaults";
+import { referencesAnotherSheet } from "@excel/xlsb/formula/ptg";
 import type { SheetBreak } from "@excel/xlsb/page-breaks";
 import type { ReadPageSetup, SheetFormatInfo } from "@excel/xlsb/page-setup";
 import type { SheetPane } from "@excel/xlsb/pane";
 import type { SheetProperties } from "@excel/xlsb/sheet-properties";
+import type { SheetSparklineGroup } from "@excel/xlsb/sparkline";
 import type { SheetTable } from "@excel/xlsb/tables";
 import {
   formulaCachedResultLoss,
@@ -44,10 +65,14 @@ import {
   writableValue
 } from "@excel/xlsb/write/cells";
 import type { CellLike, SheetCell, SheetColumn, SheetRow } from "@excel/xlsb/write/types";
+import type { WriteWorksheetPartOptions } from "@excel/xlsb/write/worksheet";
 import {
   normalisePrintAreaRange,
   normalisePrintTitlesAxis
 } from "@excel/xlsx/xform/book/workbook-xform";
+import type { RegisteredFunctions } from "@formula/syntax/array-result";
+import { parse } from "@formula/syntax/parser";
+import { tokenize } from "@formula/syntax/tokenizer";
 
 /**
  * Rows from a workbook model's worksheet, in the shape the part writer wants.
@@ -60,23 +85,59 @@ import {
  */
 export function sheetRowsFromModel(
   worksheet: WorkbookModel["worksheets"][number],
-  date1904 = false
+  date1904 = false,
+  /**
+   * Shared formulas this writer is writing cell by cell, by master address — see {@link unsharedFormulaCell}.
+   *
+   * A parameter so the streaming writer can keep one across the rows it hands over one at a time: a follower is
+   * usually in a later row than its master, and only the master says what the formula is.
+   */
+  unshared: Map<string, string> = new Map(),
+  /** The array ranges already written, kept across rows for the same reason — see {@link expandArrayRanges}. */
+  arrayRanges: ArrayRange[] = [],
+  /** The workbook's registered functions, whose `returnsArray` decides for a formula calling one. */
+  functions?: RegisteredFunctions
 ): SheetRow[] {
   const sharedRanges = sharedFormulaRanges(worksheet);
+  const tableAt = tableNameAt((worksheet as unknown as { tables?: readonly TableExtent[] }).tables);
   const rows: SheetRow[] = [];
   for (const row of worksheet.rows ?? []) {
     const cells: SheetCell[] = [];
-    for (const cell of row.cells ?? []) {
-      const column = columnIndex(cell.address);
+    for (const modelCell of row.cells ?? []) {
+      const column = columnIndex(modelCell.address);
       if (column === undefined) {
         continue;
       }
+      const cell = thisRowQualified(
+        unsharedFormulaCell(modelCell, sharedRanges, unshared, functions),
+        tableAt
+      );
       // The shared-formula fields are resolved *before* the cell is classified, because the classifier's
       // question — "is there a range for this share type?" — is answered by that resolution and not by the
       // model. Asking first reported every hand-written shared master as unwritable, since the XLSX writer's
       // `prepare` had given it a `shareType` while leaving the range somewhere this writer does not read.
-      const shared = sharedFormulaFacets(cell, sharedRanges);
-      const unsupported = unsupportedKind({ ...cell, ...shared });
+      const facets = unshared.has(cell.address ?? "")
+        ? {}
+        : sharedFormulaFacets(cell, sharedRanges);
+      // A dynamic array is an array formula over its spill range, which is what Excel stores: `BrtArrFmla` after the
+      // master. One with no range of its own is the range Excel writes for a dynamic array that does not spill — its
+      // own cell. Excel recomputes the spill on open either way.
+      // An ordinary formula Excel would evaluate with implicit intersection where this library evaluates over arrays is
+      // a dynamic array over its own cell, as the XLSX writer writes it — see `needsArrayEvaluation`.
+      const dynamic =
+        (cell.isDynamicArray === true ||
+          (facets.shareType === undefined &&
+            (cell as { shareType?: string }).shareType === undefined &&
+            !isStoredOrdinaryFormula(modelCell) &&
+            cell.formula !== undefined &&
+            needsArrayEvaluation(cell.formula, functions))) &&
+        cell.formula !== undefined &&
+        facets.sharedFormula === undefined &&
+        facets.shareType !== "shared";
+      const shared = dynamic
+        ? { shareType: "array", ref: facets.ref ?? cell.address, isDynamicArray: true }
+        : facets;
+      const unsupported = unsupportedKind({ ...cell, ...shared }) ?? cell.thisRowOutsideTable;
       cells.push({
         row: row.number - 1,
         column,
@@ -97,7 +158,9 @@ export function sheetRowsFromModel(
         // A shared or array formula, in both its roles. The master carries `shareType` and the `ref` its
         // range covers; a follower carries only `sharedFormula`, the master's address. Both were dropped
         // here, so the writer never saw them and reported the cell as unsupported instead.
-        ...shared,
+        // Withheld from an unsupported cell for the same reason: a blanked master that kept its `ref` would
+        // still have its range expanded into followers, each a `PtgExp` at a cell with no `BrtArrFmla`.
+        ...(unsupported === undefined ? shared : {}),
         // The destination and the display text. Carried together because the text *is* the cell's
         // content for such a cell — `value` is empty — while the destination becomes a separate
         // `BrtHLink` and an external relationship.
@@ -126,10 +189,30 @@ export function sheetRowsFromModel(
     });
   }
   // Every cell an array formula covers must carry its own forwarding record — see `expandArrayRanges`.
-  expandArrayRanges(rows, date1904);
+  expandArrayRanges(rows, date1904, arrayRanges);
   // The styled blanks a collapsed read folded into rectangles, put back as the records they came from.
   expandStyledBlanks(rows, worksheet, date1904);
   return rows;
+}
+
+/**
+ * A cell whose formula names its table in every this-row reference.
+ *
+ * An unnamed `[@x]` means the table the cell sits in, and a file can only store it with that table's name — Excel's
+ * own `sb-tbl.xlsb` writes `Tb[[#This Row],[x]]` as a `PtgList` naming the table's id. Outside every table it means
+ * nothing, and the cell is reported rather than encoded against an empty table name.
+ */
+function thisRowQualified<T extends { readonly address?: string; readonly formula?: string }>(
+  cell: T,
+  tableAt: (address: string) => string | undefined
+): T & { readonly thisRowOutsideTable?: string } {
+  if (cell.formula === undefined || !hasUnnamedThisRow(cell.formula)) {
+    return cell;
+  }
+  const table = tableAt(cell.address ?? "");
+  return table === undefined
+    ? { ...cell, thisRowOutsideTable: "formula (an unnamed this-row reference outside any table)" }
+    : { ...cell, formula: toFileFormula(cell.formula, { table }) };
 }
 
 /**
@@ -248,7 +331,7 @@ interface StyledBlankRectangle {
  * that happen to exist. The caller said `J1:K2`, and a writer that quietly narrowed that to `J1` would produce
  * a file that opens and is wrong, which is worse than one that crashes.
  */
-function expandArrayRanges(rows: SheetRow[], date1904: boolean): void {
+function expandArrayRanges(rows: SheetRow[], date1904: boolean, ranges: ArrayRange[]): void {
   const masters = rows.flatMap(row =>
     row.cells.filter(
       (cell): cell is SheetCell & { shareType: "array"; ref: string } =>
@@ -264,11 +347,27 @@ function expandArrayRanges(rows: SheetRow[], date1904: boolean): void {
   const cellsByRow = new Map(rows.map(row => [row.row, [...row.cells]]));
   const indexByRow = new Map(rows.map((row, at) => [row.row, at]));
   for (const master of masters) {
-    const bounds = parseRefBounds(master.ref);
+    // An array whose range intersects an earlier one — how a damaged file reads back — loses: the earlier range is
+    // kept whole and this formula is reported. Its master is written as its cached result and it gets no followers;
+    // a master inside the earlier range is one of *that* range's cells, so it becomes the earlier master's follower.
+    const address = `${encodeCol(master.column)}${master.row + 1}`;
+    const outer = claimArrayRange(ranges, address, master.ref);
+    if (outer !== undefined) {
+      const inside = enclosingArrayRange([outer], master.row, master.column) !== undefined;
+      Object.assign(master, {
+        sharedFormula: inside ? outer.address : undefined,
+        formula: undefined,
+        shareType: undefined,
+        ref: undefined,
+        isDynamicArray: undefined,
+        unsupported: overlappingArrayReason(outer)
+      });
+      continue;
+    }
+    const bounds = parseArrayRefBounds(master.ref);
     if (bounds === undefined) {
       continue;
     }
-    const address = `${encodeCol(master.column)}${master.row + 1}`;
     for (let row = bounds.top; row <= bounds.bottom; row++) {
       let cells = cellsByRow.get(row);
       if (cells === undefined) {
@@ -282,6 +381,10 @@ function expandArrayRanges(rows: SheetRow[], date1904: boolean): void {
           continue;
         }
         const existing = cells.find(cell => cell.column === column);
+        // A master is left for its own turn above, which reports what it loses.
+        if ((existing as { shareType?: string } | undefined)?.shareType === "array") {
+          continue;
+        }
         if (existing === undefined) {
           cells.push({
             row,
@@ -292,18 +395,7 @@ function expandArrayRanges(rows: SheetRow[], date1904: boolean): void {
           } as SheetCell);
           continue;
         }
-        // An existing cell keeps its own cached value — the caller may have supplied a real one per cell — and
-        // becomes a follower. A literal value inside a declared array range is the contradiction Excel choked
-        // on, so this replaces the classification rather than adding to it.
-        Object.assign(existing, {
-          sharedFormula: address,
-          formula: undefined,
-          shareType: undefined,
-          ref: undefined,
-          ...(existing.value === undefined || existing.value === null
-            ? { value: master.value }
-            : {})
-        });
+        makeFollower(existing, address, master.value);
       }
     }
   }
@@ -320,22 +412,41 @@ function expandArrayRanges(rows: SheetRow[], date1904: boolean): void {
   }
 }
 
-/** `"E1:E4"` as zero-based bounds, or `undefined` when it is not a range this writer can read. */
-function parseRefBounds(
-  ref: string
-): { top: number; left: number; bottom: number; right: number } | undefined {
-  const [start, end = start] = ref.split(":");
-  const first = tryDecodeCell(start);
-  const last = tryDecodeCell(end);
-  if (first === undefined || last === undefined) {
-    return undefined;
+/**
+ * Turn a cell inside an array range into the master's follower.
+ *
+ * An existing cell keeps its own cached value — the caller may have supplied a real one per cell — and becomes a
+ * follower. A literal value inside a declared array range is the contradiction Excel choked on, so this replaces the
+ * classification rather than adding to it.
+ */
+function makeFollower(cell: SheetCell, master: string, value: SheetCell["value"]): void {
+  Object.assign(cell, {
+    sharedFormula: master,
+    formula: undefined,
+    shareType: undefined,
+    ref: undefined,
+    ...(cell.value === undefined || cell.value === null ? { value } : {})
+  });
+}
+
+/**
+ * A row with the followers an array range above it left for it, as the buffered writer would have written it.
+ *
+ * The streaming writer cannot emit a range's later rows with its master's: they would go out early and again when
+ * committed, and MS-XLSB requires each `BrtRowHdr` once, in ascending order. So it holds the followers and merges them
+ * here — a cell the row already has becomes the follower, as {@link expandArrayRanges} does to it.
+ */
+export function withFollowers(row: SheetRow, followers: SheetRow): SheetRow {
+  const cells = [...row.cells];
+  for (const follower of followers.cells) {
+    const existing = cells.find(cell => cell.column === follower.column);
+    if (existing === undefined) {
+      cells.push(follower);
+    } else if (follower.sharedFormula !== undefined) {
+      makeFollower(existing, follower.sharedFormula, follower.value);
+    }
   }
-  return {
-    top: Math.min(first.row, last.row),
-    left: Math.min(first.column, last.column),
-    bottom: Math.max(first.row, last.row),
-    right: Math.max(first.column, last.column)
-  };
+  return { ...row, cells: cells.sort((left, right) => left.column - right.column) };
 }
 
 /**
@@ -344,8 +455,12 @@ function parseRefBounds(
  * Only columns with an explicit width are emitted. A column that never had one set does not
  * need a record, and writing one would pin the default as though the author had chosen it.
  */
-/** Excel's default column width in characters, for a column that carries flags but no width of its own. */
-const DEFAULT_COLUMN_WIDTH_CHARACTERS = 8.43;
+/**
+ * The width written for a column that carries flags or a style but no width of its own — `BrtColInfo` has no way to
+ * leave it out. The model's default (9), which every such column had in the model until a column read without a
+ * width stopped being given one, so the same width is written as before and reads back as the default.
+ */
+const DEFAULT_COLUMN_WIDTH_CHARACTERS = 9;
 
 export function columnsFromModel(worksheet: WorkbookModel["worksheets"][number]): SheetColumn[] {
   const columns: SheetColumn[] = [];
@@ -362,21 +477,25 @@ export function columnsFromModel(worksheet: WorkbookModel["worksheets"][number])
       outlineLevel?: number;
       collapsed?: boolean;
     };
+    const style = styleOf(column as { style?: CellLike["style"] });
+    // A style is a setting too: a styled column with no width of its own still needs its record.
     const hasFlags =
       settings.hidden === true ||
       settings.bestFit === true ||
       settings.collapsed === true ||
-      (settings.outlineLevel ?? 0) > 0;
+      (settings.outlineLevel ?? 0) > 0 ||
+      Object.keys(style).length > 0;
     // A column with no width used to be skipped outright, which meant a *hidden* column with no explicit
     // width produced no `BrtColInfo` at all — the flags had nowhere to live. Excel's own default width stands
     // in, and `fUserSet` is left clear for it below so the width is not claimed as deliberate.
     if (typeof width !== "number" && !hasFlags) {
       return;
     }
-    // `isCustomWidth` rather than "is `width` a number": `setModel` fills the default width into every column
-    // it normalises, so by the time this runs a column that was never given one is indistinguishable by
-    // presence. The model records the distinction itself, and this is the field that carries it.
-    const custom = (column as { isCustomWidth?: boolean }).isCustomWidth;
+    // `isCustomWidth` rather than "is `width` a number": a column whose width is the default one is not a width
+    // the author chose. The model records the distinction itself, and this is the field that carries it.
+    const custom =
+      (column as { customWidth?: boolean }).customWidth ??
+      (column as { isCustomWidth?: boolean }).isCustomWidth;
     columns.push({
       firstColumn: min - 1,
       lastColumn: (typeof max === "number" ? max : min) - 1,
@@ -386,7 +505,7 @@ export function columnsFromModel(worksheet: WorkbookModel["worksheets"][number])
       ...(settings.bestFit === true ? { bestFit: true } : {}),
       ...((settings.outlineLevel ?? 0) > 0 ? { outlineLevel: settings.outlineLevel } : {}),
       ...(settings.collapsed === true ? { collapsed: true } : {}),
-      ...styleOf(column as { style?: CellLike["style"] })
+      ...style
     });
   });
   return columns;
@@ -622,10 +741,8 @@ interface WorksheetRowLike {
  * designed for. Ungrouped, a list validation dragged across a column would emit fifty records carrying
  * the same string four times each.
  *
- * Grouping is by the rule's serialised form. That is exact for this purpose: two rules that stringify
- * identically produce identical bytes, which is the only property being relied on. Key order could in
- * principle differ between two equal rules built by different paths, which would merely split a group
- * that could have been merged — a larger file, not a wrong one.
+ * Grouping is by the rule once its relative references are measured from the group's corner. Grouping by
+ * text alone merged two entries whose `C2` meant different cells, and then stated it once for both.
  */
 export function validationsFromModel(
   worksheet: WorkbookModel["worksheets"][number]
@@ -635,8 +752,8 @@ export function validationsFromModel(
   if (validations === undefined) {
     return [];
   }
-  const groups = new Map<string, { rule: DataValidationRule; ranges: string[] }>();
-  for (const [key_, rule] of Object.entries(validations)) {
+  const entries: { ranges: string[]; rule: DataValidationRule }[] = [];
+  for (const [key, rule] of Object.entries(validations)) {
     if (rule === null || typeof rule !== "object") {
       continue;
     }
@@ -645,16 +762,16 @@ export function validationsFromModel(
     // cell. Stripping the prefix here rather than treating it as part of the reference is the whole
     // difference between one record covering `A1:B2` and one covering a range literally named
     // `range:A1:B2`, which decodes to nothing and drops the validation.
-    const address = key_.startsWith("range:") ? key_.slice("range:".length) : key_;
-    const key = JSON.stringify(rule);
-    const group = groups.get(key);
-    if (group === undefined) {
-      groups.set(key, { rule, ranges: [address] });
-    } else {
-      group.ranges.push(address);
-    }
+    //
+    // A key may name several ranges, space-separated as a `sqref` does (`range:B2:B4 D6:D8`) — the XLSX writer writes
+    // it as the `sqref` verbatim. Each is a range of the one record; passing the whole text as one range kept only the
+    // first, because a range decodes from its leading `A1:B2`.
+    const sqref = key.startsWith("range:") ? key.slice("range:".length) : key;
+    entries.push({ ranges: sqref.split(/\s+/).filter(range => range !== ""), rule });
   }
-  return [...groups.values()].map(group => ({ ranges: group.ranges, rule: group.rule }));
+  // Each entry's formulae are relative to its own corner, and a record's to the corner of all its ranges, so two
+  // entries are one rule when they agree once measured from the same place — not when their texts match.
+  return mergeValidations(entries);
 }
 
 /**
@@ -741,7 +858,7 @@ function isPaneName(value: unknown): value is SheetPane["activePane"] {
  *
  * **The one address decoder in this file, and there were two returning the same shape.** The other scanned its own
  * regex and checked no bounds, so `AAAAA1` yielded column 475,254 — the sheet's last is 16,383 — while this one raises
- * `ColumnOutOfBoundsError` through the shared parser and reports `undefined`. They also disagreed about a
+ * `ExcelColumnOutOfBoundsError` through the shared parser and reports `undefined`. They also disagreed about a
  * sheet-qualified reference. Two functions with one signature, one of them silently wrong, in a file whose other
  * duplicate pair (`columnLetter` against the `encodeCol` it imported) differed the same way.
  *
@@ -793,6 +910,11 @@ export function hyperlinksFromModel(worksheet: WorkbookModel["worksheets"][numbe
   readonly column: number;
   readonly target: string;
   /**
+   * The relationship id a streamed sheet's part already names for this link. A streamed sheet is closed before the
+   * package allocates relationships, so it declares the ids and the package honours them — as for its notes' VML.
+   */
+  readonly relationshipId?: string;
+  /**
    * Set for a link *within the workbook*, which has no relationship at all.
    *
    * OOXML writes one as `<hyperlink ref="E4" location="Linked!A1"/>` — no `r:id` — and BIFF12 puts the same string in
@@ -802,6 +924,12 @@ export function hyperlinksFromModel(worksheet: WorkbookModel["worksheets"][numbe
    */
   readonly location?: string;
 }[] {
+  // A streamed sheet has no rows left, so it carries its links directly — see `commentsFromModel`.
+  const retained = (worksheet as { retainedHyperlinks?: readonly HyperlinkLike[] })
+    .retainedHyperlinks;
+  if (retained !== undefined && retained.length > 0) {
+    return retained;
+  }
   const links: { row: number; column: number; target: string; location?: string }[] = [];
   for (const row of worksheet.rows ?? []) {
     for (const cell of row.cells ?? []) {
@@ -822,6 +950,9 @@ export function hyperlinksFromModel(worksheet: WorkbookModel["worksheets"][numbe
   }
   return links;
 }
+
+/** One element of {@link hyperlinksFromModel}. */
+export type HyperlinkLike = ReturnType<typeof hyperlinksFromModel>[number];
 
 /**
  * A cell's hyperlink destination, when it has one.
@@ -1004,7 +1135,7 @@ function sharedFormulaRanges(
       // **`tryDecodeRange`, not `decodeCell`, because the guard below is unreachable otherwise.**
       //
       // `decodeCell` throws on a malformed address; it never returns `undefined`. So a follower whose `sharedFormula` was
-      // empty raised `InvalidAddressError` out of `Workbook.toBuffer` rather than being skipped, and the `=== undefined`
+      // empty raised `ExcelInvalidAddressError` out of `Workbook.toBuffer` rather than being skipped, and the `=== undefined`
       // test read as protection that was not there. The same shape appeared twice more in `write/cells.ts`. A single cell
       // decodes to a 1×1 range, which is what these two addresses are.
       const hereRange = tryDecodeRange(cell.address ?? "");
@@ -1026,6 +1157,62 @@ function sharedFormulaRanges(
     }
   }
   return ranges;
+}
+
+/**
+ * A cell of a shared formula that cannot be a `BrtShrFmla`, as an ordinary formula cell; any other cell as it is.
+ *
+ * **A shared formula's body is a template, and a template cannot name another sheet** — `SharedParsedFormula`
+ * forbids `PtgRef3d` and `PtgArea3d` (MS-XLSB 2.5.98.98), and there is no relative 3D token to use instead. So
+ * `Worksheet.fillFormula(ws, "B1:B9", "Other!A1")` cannot be shared in this container at all, and Excel writes such
+ * a fill cell by cell. This does the same: the master keeps its formula and loses its share type, and each
+ * follower gets the master's formula slid to its own address — the text the XLSX reader reports for it.
+ *
+ * It used to go out as a `BrtShrFmla` holding a `PtgRef3d`, with the reference's positions and no way to shift
+ * them: a record the specification rules out, which only this library's own reader accepted.
+ */
+function unsharedFormulaCell<T extends { readonly address?: string; readonly formula?: string }>(
+  cell: T,
+  ranges: ReadonlyMap<string, { top: number; left: number; bottom: number; right: number }>,
+  unshared: Map<string, string>,
+  functions: RegisteredFunctions | undefined
+): T {
+  const source = cell as T & { shareType?: string; ref?: string; sharedFormula?: string };
+  if (source.sharedFormula !== undefined) {
+    const formula = unshared.get(source.sharedFormula);
+    if (formula === undefined || cell.address === undefined) {
+      return cell;
+    }
+    const { sharedFormula: _master, ...rest } = source;
+    return { ...rest, formula: slideFormula(formula, source.sharedFormula, cell.address) } as T;
+  }
+  const address = cell.address ?? "";
+  const isMaster =
+    source.formula !== undefined &&
+    source.shareType !== "array" &&
+    (source.ref !== undefined || ranges.has(address));
+  // A dynamic array cannot be shared, so a group whose formula has to be one is written cell by cell too.
+  if (
+    !isMaster ||
+    !(
+      namesAnotherSheet(source.formula!) ||
+      (!isStoredOrdinaryFormula(cell) && needsArrayEvaluation(source.formula!, functions))
+    )
+  ) {
+    return cell;
+  }
+  unshared.set(address, source.formula!);
+  const { shareType: _type, ref: _ref, ...rest } = source;
+  return rest as T;
+}
+
+/** Whether a formula's text references another sheet. A formula that does not parse is left to the encoder. */
+function namesAnotherSheet(formula: string): boolean {
+  try {
+    return referencesAnotherSheet(parse(tokenize(formula)));
+  } catch {
+    return false;
+  }
 }
 
 /** A cell's shared-formula fields, in the one spelling the writer reads. */
@@ -1200,4 +1387,48 @@ function maxOutlineLevel(items: readonly { readonly outlineLevel?: number }[] | 
     }
   }
   return depth;
+}
+
+/**
+ * The sheet features the epilogue writes straight off the model — the auto filter and its criteria, ignored errors,
+ * sparklines, conditional formats and sheet protection — as the part writer's options.
+ *
+ * One mapping for the buffered and the streamed writer. The streamed one used to pass none of these, so a streamed
+ * sheet lost every one of them without a word while the buffered sheet of the same model kept them.
+ */
+export function sheetFeaturesFromModel(
+  worksheet: WorkbookModel["worksheets"][number]
+): Pick<
+  WriteWorksheetPartOptions,
+  | "autoFilter"
+  | "autoFilterCriteriaXml"
+  | "ignoredErrors"
+  | "sparklineGroups"
+  | "conditionalFormattings"
+  | "sheetProtectionSettings"
+> {
+  // Read straight off the model: an auto filter is a range string and an ignored-error entry already carries its own
+  // range, so neither needs an adapter.
+  const sheet = worksheet as unknown as {
+    autoFilter?: string;
+    autoFilterCriteria?: { readonly xml?: string };
+    ignoredErrors?: readonly IgnoredError[];
+    sparklineGroups?: readonly SheetSparklineGroup[];
+    conditionalFormattings?: readonly SheetConditionalFormatting[];
+    sheetProtection?: SheetProtectionLike;
+  };
+  return {
+    ...(sheet.autoFilter === undefined ? {} : { autoFilter: sheet.autoFilter }),
+    ...(sheet.autoFilterCriteria?.xml === undefined
+      ? {}
+      : { autoFilterCriteriaXml: sheet.autoFilterCriteria.xml }),
+    ...(sheet.sparklineGroups === undefined ? {} : { sparklineGroups: sheet.sparklineGroups }),
+    ...(sheet.conditionalFormattings === undefined
+      ? {}
+      : { conditionalFormattings: sheet.conditionalFormattings }),
+    ...(sheet.ignoredErrors === undefined ? {} : { ignoredErrors: sheet.ignoredErrors }),
+    ...(sheet.sheetProtection === undefined
+      ? {}
+      : { sheetProtectionSettings: sheet.sheetProtection })
+  };
 }

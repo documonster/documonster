@@ -1,8 +1,10 @@
+import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { ByteQueue } from "@archive/core/byte-queue";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ZipCrc32MismatchError, ZipParseError } from "@archive/core/errors";
 import { decodeZipPath, resolveZipStringCodec } from "@archive/core/text";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
-import type { Readable } from "@stream";
+import type { Readable, TransformCallback } from "@stream";
 import { Duplex, PassThrough, Transform, pipeline, finished } from "@stream";
 import { concatUint8Arrays, textEncoder as utf8Encoder } from "@utils/binary";
 import { toError } from "@utils/errors";
@@ -40,19 +42,34 @@ function isPrematureCloseError(err: unknown): boolean {
  * — the compressed data has been fully read from the ZIP cursor, so we
  * can safely continue.
  */
-async function awaitEntryCompletion(entry: PassThrough): Promise<void> {
+async function awaitEntryCompletion(entry: ZipEntry): Promise<void> {
   try {
     await finished(entry, { readable: false });
   } catch (err) {
-    if (!isPrematureCloseError(err)) {
+    if (!isPrematureCloseError(err) && !isEntryOwnFailure(entry, err)) {
       throw err;
     }
     // Entry was destroyed/autodraining — treat as normal completion.
   }
 }
 
+/**
+ * Whether `error` is the entry's own failure to deliver to its reader rather than the parse's.
+ *
+ * A CRC-32 mismatch is found once all of an entry's data has been read from the archive —
+ * and its data descriptor too — so the parser can go on to the next entry exactly as if the
+ * entry had been fine. Whether it should is the consumer's to say: one that listens to the
+ * entry sets {@link ZipEntry.reportsOwnFailures}, and the mismatch then fails only that
+ * entry, as reading a corrupt entry does from an archive in memory. For any other consumer
+ * the parse fails instead, because nobody else would hear of it.
+ */
+function isEntryOwnFailure(entry: ZipEntry, error: unknown): boolean {
+  return entry.reportsOwnFailures === true && error instanceof ZipCrc32MismatchError;
+}
+
 import type {
   CrxHeader,
+  DataDescriptorVars,
   EntryProps,
   EntryVars,
   ParseDriverState,
@@ -73,6 +90,7 @@ import {
   runParseLoopCore,
   isValidZipRecordSignature
 } from "@archive/unzip/parser-core";
+import { DATA_DESCRIPTOR_SIG } from "@archive/zip-spec/zip-records";
 
 export const DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK = 256 * 1024;
 
@@ -119,6 +137,11 @@ export function bufferStream(entry: Readable): Promise<Uint8Array> {
 }
 
 export type PullFn = (length: number) => Promise<Uint8Array>;
+
+/** The input ended inside a ZIP record. The message is the parser's historical one, kept for callers matching it. */
+export function fileEndedError(): ZipParseError {
+  return new ZipParseError("FILE_ENDED");
+}
 
 const STR_FUNCTION = "function";
 
@@ -223,7 +246,7 @@ export class PullStream<TRead = unknown> extends Duplex {
     while (remaining > 0) {
       while (queue.length === 0) {
         if (this.finished) {
-          throw new Error("FILE_ENDED");
+          throw fileEndedError();
         }
         await this._waitForChunkSignal();
       }
@@ -263,6 +286,23 @@ export class PullStream<TRead = unknown> extends Duplex {
   }
 
   _read(): void {}
+
+  /**
+   * A parser torn down while it waits for input — its consumer left, or the input failed —
+   * must not stay parked on that wait: whatever is pulling is woken to find the input over,
+   * and a write held back for backpressure is let go, so the producer feeding it settles too.
+   */
+  override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+    this.finished = true;
+    this._notifyPendingChunkWaiter();
+    this.emit("chunk", false);
+    const held = this.cb;
+    this.cb = undefined;
+    if (typeof held === STR_FUNCTION) {
+      (held as () => void)();
+    }
+    callback(error);
+  }
 
   protected _maybeReleaseWriteCallback(): void {
     // Only release a deferred write callback when we've drained enough data.
@@ -382,7 +422,7 @@ export class PullStream<TRead = unknown> extends Duplex {
         if (this.finished) {
           this.removeListener("chunk", pull);
           cb();
-          p.destroy(new Error("FILE_ENDED"));
+          p.destroy(fileEndedError());
         }
         return;
       }
@@ -428,13 +468,14 @@ export class PullStream<TRead = unknown> extends Duplex {
       };
 
       if (this.finished) {
-        reject(new Error("FILE_ENDED"));
+        reject(fileEndedError());
         return;
       }
 
       const cleanup = (): void => {
         this.removeListener("chunk", onChunk);
         this.removeListener("finish", onFinish);
+        this.removeListener("close", onFinish);
         this.removeListener("error", pullStreamRejectHandler);
       };
 
@@ -480,7 +521,7 @@ export class PullStream<TRead = unknown> extends Duplex {
 
         if (!settled) {
           cleanup();
-          reject(new Error("FILE_ENDED"));
+          reject(fileEndedError());
         }
       };
 
@@ -528,6 +569,8 @@ export class PullStream<TRead = unknown> extends Duplex {
       this.once("error", pullStreamRejectHandler);
       this.on("chunk", onChunk);
       this.once("finish", onFinish);
+      // A parser destroyed without an error never finishes; it closes
+      this.once("close", onFinish);
 
       // Attempt immediate fulfillment from any already-buffered data.
       onChunk();
@@ -791,25 +834,28 @@ export function streamUntilValidatedDataDescriptor(
           if (available <= keepTailBytes) {
             source.maybeReleaseWriteCallback?.();
           }
+        } else {
+          const ok = output.write(source.read(flushLen));
+          bytesEmitted += flushLen;
+          available -= flushLen;
+          scanner.onConsume(flushLen);
 
+          if (available <= keepTailBytes) {
+            source.maybeReleaseWriteCallback?.();
+          }
+
+          if (!ok) {
+            waitingDrain = true;
+            output.once("drain", onDrain);
+          }
+        }
+
+        if (waitingDrain) {
           return;
         }
-
-        const ok = output.write(source.read(flushLen));
-        bytesEmitted += flushLen;
-        available -= flushLen;
-        scanner.onConsume(flushLen);
-
-        if (available <= keepTailBytes) {
-          source.maybeReleaseWriteCallback?.();
-        }
-
-        if (!ok) {
-          waitingDrain = true;
-          output.once("drain", onDrain);
-        }
-
-        return;
+        // Look at what is left rather than wait for more: once the input has finished, no further `chunk` arrives
+        // to call this again, and an entry cut short would wait for its descriptor forever.
+        continue;
       }
 
       // Need more data.
@@ -823,7 +869,7 @@ export function streamUntilValidatedDataDescriptor(
     if (!done && source.isFinished()) {
       done = true;
       cleanup();
-      output.destroy(new Error(errorMessage));
+      output.destroy(new ZipParseError(errorMessage));
     }
   };
 
@@ -848,6 +894,11 @@ export interface ZipEntry extends PassThrough {
   extraFields: ZipExtraFields;
   size?: number;
   __autodraining?: boolean;
+  /**
+   * Set by a consumer that listens for this entry's `error`: a CRC-32 mismatch then fails
+   * the entry alone and the parser goes on to the next one. See `isEntryOwnFailure`.
+   */
+  reportsOwnFailures?: boolean;
   autodrain: () => DrainStream;
   buffer: () => Promise<Uint8Array>;
 }
@@ -908,9 +959,14 @@ async function pumpKnownCompressedSizeToEntry(
   const onError = (e: Error): void => {
     err = e;
   };
+  const onEntryError = (e: Error): void => {
+    if (!isEntryOwnFailure(entry, e)) {
+      err = e;
+    }
+  };
 
-  inflater.once("error", onError);
-  entry.once("error", onError);
+  inflater.on("error", onError);
+  entry.once("error", onEntryError);
 
   let skipping = false;
   let waitResolve: (() => void) | null = null;
@@ -1019,7 +1075,7 @@ async function pumpKnownCompressedSizeToEntry(
       const toPull = Math.min(CHUNK_SIZE, remaining);
       const chunk = await io.pull(toPull);
       if (chunk.length !== toPull) {
-        throw new Error("FILE_ENDED");
+        throw fileEndedError();
       }
 
       remaining -= chunk.length;
@@ -1036,12 +1092,43 @@ async function pumpKnownCompressedSizeToEntry(
       inflater.end();
     }
 
-    // Wait for all writes to complete (not for consumption).
-    await awaitEntryCompletion(entry);
+    // Wait for all writes to complete (not for consumption) — or for the inflater to fail, which leaves the entry
+    // unfinished for good: `pipe` does not end its destination on an error.
+    await new Promise<void>((resolve, reject) => {
+      if (err) {
+        reject(toError(err));
+        return;
+      }
+      const stopWatching = (): void => {
+        inflater.removeListener("error", onInflaterError);
+      };
+      const onInflaterError = (e: Error): void => {
+        stopWatching();
+        reject(toError(e));
+      };
+      inflater.once("error", onInflaterError);
+      awaitEntryCompletion(entry).then(
+        () => {
+          stopWatching();
+          resolve();
+        },
+        (e: unknown) => {
+          stopWatching();
+          reject(toError(e));
+        }
+      );
+    });
   } finally {
     inflater.removeListener("error", onError);
-    entry.removeListener("error", onError);
+    // A destroyed (skipped) or failed inflater can still report an error for input it
+    // was processing; with no listener left that would crash the process
+    inflater.on("error", ignoreLateInflaterError);
+    entry.removeListener("error", onEntryError);
   }
+}
+
+function ignoreLateInflaterError(): void {
+  // The entry has already been ended, skipped or given the failure
 }
 
 async function readFileRecord(
@@ -1081,10 +1168,55 @@ async function readFileRecord(
   // Decode filename: UTF-8 flag → Unicode extra field → CP437 (or custom decoder)
   const fileName = decodeZipPath(fileNameBuffer, vars.flags, extra, decoder);
 
+  // Encrypted entries store raw ciphertext in place of compressed data.
+  // Decompression must be skipped here; decryption + decompression — and the CRC-32
+  // check — are handled downstream by processEntryData / processEntryDataStream.
+  const isEncrypted = ((vars.flags ?? 0) & 0x01) !== 0 || vars.compressionMethod === 99;
+  const verifyCrc32 = opts.checkCrc32 !== false && !isEncrypted;
+  const pull = (length: number): Promise<Uint8Array> => io.pull(length);
+  let crc = 0xffffffff;
+  // Set once the entry's own flush has read the data descriptor that follows the data
+  let descriptor: DataDescriptorVars | undefined;
+
+  // The entry checks its CRC-32 before it ends, so a mismatch reaches whoever reads it as
+  // an `error` instead of an `end` — every consumer of the parser, not only `UnzipEntry`.
+  // When the CRC is in a data descriptor, that is read here too: the data has all been
+  // pulled by then, so the descriptor is next, and nothing else is reading.
   const entry = new PassThrough({
-    highWaterMark: DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK
+    highWaterMark: DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK,
+    transform(chunk: Uint8Array, _encoding: string, callback: TransformCallback) {
+      if (verifyCrc32) {
+        crc = crc32Update(crc, chunk);
+      }
+      callback(null, chunk);
+    },
+    flush(callback: TransformCallback) {
+      // An autodrained entry passes its raw (compressed) bytes through, unchecked
+      if (!verifyCrc32 || entry.__autodraining) {
+        callback();
+        return;
+      }
+      checkEntryCrc32().then(
+        () => callback(),
+        (error: unknown) => callback(toError(error))
+      );
+    }
   }) as ZipEntry;
   let autodraining = false;
+
+  async function checkEntryCrc32(): Promise<void> {
+    let expected: number | null | undefined = vars.crc32;
+    if (hasDataDescriptorFlag(vars.flags)) {
+      descriptor = await readDataDescriptor(pull);
+      // Without its signature the descriptor's layout is uncertain; do not guess
+      expected =
+        descriptor.dataDescriptorSignature === DATA_DESCRIPTOR_SIG ? descriptor.crc32 : undefined;
+    }
+    const actual = crc32Finalize(crc);
+    if (expected !== null && expected !== undefined && expected >>> 0 !== actual) {
+      throw new ZipCrc32MismatchError(entry.path, expected >>> 0, actual);
+    }
+  }
 
   entry.autodrain = function () {
     autodraining = true;
@@ -1094,6 +1226,12 @@ async function readFileRecord(
     entry.emit("__autodrain");
     return autodrain(entry);
   };
+
+  // A failure of an entry is a failure of the parse too — unless the entry's consumer reports it (see
+  // `isEntryOwnFailure`): the wait for the entry to finish, or the pump feeding it, rethrows it, and the parser reports
+  // it on its own channel. So a consumer that has stopped listening — or never listened — must not receive it a second
+  // time as an unhandled `error`, which Node turns into a process crash however carefully the caller catches the parse.
+  entry.on("error", ignoreErrorReportedByParser);
 
   entry.buffer = function () {
     return bufferStream(entry);
@@ -1149,11 +1287,45 @@ async function readFileRecord(
     });
   }
 
-  // Encrypted entries store raw ciphertext in place of compressed data.
-  // Decompression must be skipped here; decryption + decompression is handled
-  // downstream by processEntryData / processEntryDataStream.
-  const isEncrypted = ((vars.flags ?? 0) & 0x01) !== 0 || vars.compressionMethod === 99;
+  state.currentEntry = entry;
+  try {
+    await pumpEntryData(io, entry, vars, inflateFactory, isEncrypted, autodraining, {
+      thresholdBytes,
+      fileSizeKnown,
+      inflateRawSync,
+      readDescriptor: async () => descriptor ?? (await readDataDescriptor(pull))
+    });
+  } catch (error) {
+    // The data stopped short — truncated, undecodable, or the archive was torn down. An entry left open would make
+    // whoever is reading it wait for an `end` that can never come, so it fails with the same error the parser
+    // reports. An entry whose data all arrived is left alone: what failed came after it.
+    if (!entry.destroyed && !entry.writableFinished) {
+      entry.destroy(toError(error));
+    }
+    throw error;
+  } finally {
+    if (state.currentEntry === entry) {
+      state.currentEntry = undefined;
+    }
+  }
+}
 
+interface EntryDataOptions {
+  thresholdBytes: number;
+  fileSizeKnown: boolean;
+  inflateRawSync?: InflateRawSync;
+  readDescriptor: () => Promise<DataDescriptorVars>;
+}
+
+async function pumpEntryData(
+  io: ParseIO,
+  entry: ZipEntry,
+  vars: EntryVars,
+  inflateFactory: InflateFactory,
+  isEncrypted: boolean,
+  autodraining: boolean,
+  { thresholdBytes, fileSizeKnown, inflateRawSync, readDescriptor }: EntryDataOptions
+): Promise<void> {
   // Whether the entry payload requires inflate (deflate decompression).
   // False for STORE (method 0), encrypted entries, and autodraining.
   const needsInflate = vars.compressionMethod !== 0 && !isEncrypted && !autodraining;
@@ -1194,12 +1366,18 @@ async function readFileRecord(
     : new PassThrough({ highWaterMark: DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK });
 
   if (fileSizeKnown) {
-    await pumpKnownCompressedSizeToEntry(io, inflater, entry, vars.compressedSize ?? 0);
+    try {
+      await pumpKnownCompressedSizeToEntry(io, inflater, entry, vars.compressedSize ?? 0);
+    } catch (error) {
+      // Nothing will write to or end it now; release its native state rather than leave it open.
+      inflater.destroy();
+      throw error;
+    }
     // If the entry has a data descriptor flag, consume it after pumping.
     // compressedSize > 0 made us take this path, but the data descriptor
     // still follows the compressed data in the stream and must be skipped.
     if (hasDataDescriptorFlag(vars.flags)) {
-      const dd = await readDataDescriptor(async l => io.pull(l));
+      const dd = await readDescriptor();
       if (!entry.size) {
         entry.size = dd.uncompressedSize ?? 0;
       }
@@ -1215,6 +1393,12 @@ async function readFileRecord(
   try {
     await pipeline(io.streamUntilDataDescriptor(), inflater, entry);
   } catch (pipelineErr) {
+    if (isEntryOwnFailure(entry, pipelineErr)) {
+      // All the data and its descriptor were read before the check failed: carry on
+      const dd = await readDescriptor();
+      entry.size = dd.uncompressedSize ?? 0;
+      return;
+    }
     if (!isPrematureCloseError(pipelineErr)) {
       throw pipelineErr;
     }
@@ -1222,13 +1406,30 @@ async function readFileRecord(
     // fails (cursor misaligned), swallow the error since the entry was
     // abandoned and the operation is ending.
     try {
-      const dd = await readDataDescriptor(async l => io.pull(l));
+      const dd = await readDescriptor();
       entry.size = dd.uncompressedSize ?? 0;
     } catch {
       // Cursor misaligned — not recoverable but not worth surfacing.
     }
     return;
   }
-  const dd = await readDataDescriptor(async l => io.pull(l));
+  const dd = await readDescriptor();
   entry.size = dd.uncompressedSize ?? 0;
+}
+
+function ignoreErrorReportedByParser(): void {
+  // See the listener's registration in `readFileRecord`
+}
+
+/**
+ * Fail the entry a torn-down parser was in the middle of, so its reader is not left waiting
+ * for the rest. An entry whose data has all been written is left alone: its reader can still
+ * have it.
+ */
+export function failCurrentEntry(state: ParseDriverState, error: Error | null): void {
+  const entry = state.currentEntry;
+  state.currentEntry = undefined;
+  if (entry && !entry.destroyed && !entry.writableFinished) {
+    entry.destroy(error ?? undefined);
+  }
 }

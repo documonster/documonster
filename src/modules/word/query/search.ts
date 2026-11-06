@@ -4,9 +4,17 @@
  * Functions for searching, counting, and extracting text from a DocxDocument.
  */
 
+import type { SchemaMatches } from "@utils/schema";
+import {
+  checkHandle,
+  checkInteger,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
 import { extractParagraphText } from "@word/core/text-utils";
-import { walkDocument } from "@word/core/walker";
-import type { DocxVisitor } from "@word/core/walker";
+import { walkDocument, walkOptionsShape } from "@word/core/walker";
+import type { DocxVisitor, WalkOptions } from "@word/core/walker";
 import { resolveHeadingLevel } from "@word/query/heading";
 import { indexStyles } from "@word/query/style-resolve";
 import type {
@@ -15,6 +23,7 @@ import type {
   Table,
   Hyperlink,
   BookmarkStart,
+  RangeMarker,
   CommentDef,
   ImageDef,
   SectionProperties
@@ -82,6 +91,7 @@ export function paragraphText(para: Paragraph): string {
  * Count all top-level paragraphs in the document body.
  */
 export function paragraphCount(doc: DocxDocument): number {
+  checkHandle(doc, "document", "doc", "Query.getParagraphCount");
   let count = 0;
   for (const block of doc.body) {
     if (block.type === "paragraph") {
@@ -97,6 +107,7 @@ export function paragraphCount(doc: DocxDocument): number {
  * is counted as one "word" to approximate meaningful unit count.
  */
 export function countWords(doc: DocxDocument): number {
+  checkHandle(doc, "document", "doc", "Query.getWordCount");
   let count = 0;
   const cjkRe = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g;
   const visitor: DocxVisitor = {
@@ -132,6 +143,7 @@ export function countWords(doc: DocxDocument): number {
  * Word's own TOC (`\o`) excludes it.
  */
 export function getHeadings(doc: DocxDocument): DocumentHeading[] {
+  checkHandle(doc, "document", "doc", "Query.listHeadings");
   const out: DocumentHeading[] = [];
   const styles = indexStyles(doc);
   doc.body.forEach((block, i) => {
@@ -152,16 +164,61 @@ export function getHeadings(doc: DocxDocument): DocumentHeading[] {
 }
 
 /**
- * Find a bookmark by name.
+ * Where {@link findBookmark} found a bookmark. For a bookmark inside a
+ * paragraph, `paragraphIndex` is the body index of that paragraph and
+ * `childIndex` the index of the start among its children.
+ *
+ * Word also starts a bookmark that spans whole blocks (a table, say) between
+ * them. Such a bookmark is reported with `between` set: `"before"` when it is
+ * in `doc.body[paragraphIndex].rangeMarkersBefore` — the range starts at the
+ * beginning of that block, which may be a table rather than a paragraph — and
+ * `"after"` when it is in `doc.bodyRangeMarkersAfter`, after the last block
+ * (`paragraphIndex` is then that block's index). `childIndex` is `0`, the
+ * start of the block, and `markerIndex` the index within that marker list.
+ */
+export interface BookmarkLocation {
+  readonly bookmark: BookmarkStart;
+  readonly paragraphIndex: number;
+  readonly childIndex: number;
+  /** Set when the bookmark starts between body blocks rather than inside a paragraph. */
+  readonly between?: "before" | "after";
+  /** With `between`: the index of the start within its marker list. */
+  readonly markerIndex?: number;
+}
+
+/**
+ * Find a bookmark by name, in the body's paragraphs or between its blocks
+ * (see {@link BookmarkLocation}).
  *
  * @returns The bookmark start marker + its location, or `undefined` if not found.
  */
-export function findBookmark(
-  doc: DocxDocument,
-  name: string
-): { bookmark: BookmarkStart; paragraphIndex: number; childIndex: number } | undefined {
+export function findBookmark(doc: DocxDocument, name: string): BookmarkLocation | undefined {
+  checkHandle(doc, "document", "doc", "Query.getBookmark");
+  checkString(name, "name", "Query.getBookmark");
+  const inMarkers = (
+    markers: readonly RangeMarker[] | undefined,
+    paragraphIndex: number,
+    between: "before" | "after"
+  ): BookmarkLocation | undefined => {
+    const markerIndex = (markers ?? []).findIndex(
+      m => m.type === "bookmarkStart" && m.name === name
+    );
+    return markerIndex < 0
+      ? undefined
+      : {
+          bookmark: markers![markerIndex] as BookmarkStart,
+          paragraphIndex,
+          childIndex: 0,
+          between,
+          markerIndex
+        };
+  };
   for (let i = 0; i < doc.body.length; i++) {
     const block = doc.body[i];
+    const before = inMarkers(block.rangeMarkersBefore, i, "before");
+    if (before) {
+      return before;
+    }
     if (block.type !== "paragraph") {
       continue;
     }
@@ -172,13 +229,15 @@ export function findBookmark(
       }
     }
   }
-  return undefined;
+  return inMarkers(doc.bodyRangeMarkersAfter, Math.max(0, doc.body.length - 1), "after");
 }
 
 /**
  * Find a comment by its ID.
  */
 export function findComment(doc: DocxDocument, id: number): CommentDef | undefined {
+  checkHandle(doc, "document", "doc", "Query.getComment");
+  checkInteger(id, "id", "Query.getComment");
   return doc.comments?.find(c => c.id === id);
 }
 
@@ -186,8 +245,26 @@ export function findComment(doc: DocxDocument, id: number): CommentDef | undefin
  * List all images registered in the document.
  */
 export function listImages(doc: DocxDocument): readonly ImageDef[] {
+  checkHandle(doc, "document", "doc", "Query.listImages");
   return doc.images ?? [];
 }
+
+/**
+ * Options for {@link listTables}. Every `include*` flag defaults to `false`, so
+ * by default only the document body is searched.
+ */
+export interface ListTablesOptions extends WalkOptions {
+  /** Only direct children of the body — no nested tables, no other parts. */
+  readonly topLevelOnly?: boolean;
+}
+
+const listTablesOptionsSchema = w.record({
+  ...walkOptionsShape,
+  topLevelOnly: w.boolean().optional()
+});
+const _listTablesOptionsMatch: SchemaMatches<typeof listTablesOptionsSchema, ListTablesOptions> =
+  true;
+void _listTablesOptionsMatch;
 
 /**
  * List all tables in the document.
@@ -197,13 +274,13 @@ export function listImages(doc: DocxDocument): readonly ImageDef[] {
  * paragraphs). For top-level only behavior pass `{ topLevelOnly: true }`.
  *
  * @example
- * listTables(doc)                          // all tables (consistent with tableCount)
+ * listTables(doc)                          // all body tables (consistent with countTables)
+ * listTables(doc, { includeHeaders: true, includeFooters: true }) // also headers/footers
  * listTables(doc, { topLevelOnly: true })  // direct children of body only
  */
-export function listTables(
-  doc: DocxDocument,
-  options?: { readonly topLevelOnly?: boolean }
-): readonly Table[] {
+export function listTables(doc: DocxDocument, options?: ListTablesOptions): readonly Table[] {
+  checkHandle(doc, "document", "doc", "Query.listTables");
+  checkSchema(listTablesOptionsSchema.optional(), options, "Query.listTables");
   if (options?.topLevelOnly) {
     return doc.body.filter((b): b is Table => b.type === "table");
   }
@@ -217,10 +294,11 @@ export function listTables(
       }
     },
     {
-      includeHeaders: false,
-      includeFooters: false,
-      includeFootnotes: false,
-      includeEndnotes: false
+      includeHeaders: options?.includeHeaders ?? false,
+      includeFooters: options?.includeFooters ?? false,
+      includeFootnotes: options?.includeFootnotes ?? false,
+      includeEndnotes: options?.includeEndnotes ?? false,
+      includeComments: options?.includeComments ?? false
     }
   );
   return out;
@@ -230,6 +308,7 @@ export function listTables(
  * Collect all hyperlinks in the document body.
  */
 export function listHyperlinks(doc: DocxDocument): readonly Hyperlink[] {
+  checkHandle(doc, "document", "doc", "Query.listHyperlinks");
   const out: Hyperlink[] = [];
   walkDocument(
     doc,
@@ -253,6 +332,7 @@ export function listHyperlinks(doc: DocxDocument): readonly Hyperlink[] {
  * Get the total number of tables (top-level) and nested tables.
  */
 export function tableCount(doc: DocxDocument): number {
+  checkHandle(doc, "document", "doc", "Query.getTableCount");
   let count = 0;
   const visitor: DocxVisitor = {
     enterTable() {
@@ -280,6 +360,7 @@ export function tableCount(doc: DocxDocument): number {
  * @returns Array of section definitions in document order.
  */
 export function listSections(doc: DocxDocument): DocumentSection[] {
+  checkHandle(doc, "document", "doc", "Query.listSections");
   const sections: DocumentSection[] = [];
   for (let i = 0; i < doc.body.length; i++) {
     const block = doc.body[i];
@@ -303,12 +384,15 @@ export function listSections(doc: DocxDocument): DocumentSection[] {
 }
 
 /**
- * Extract plain text from the entire document: body, headers, footers,
- * footnotes, and endnotes.
+ * Extract plain text from the entire document: body (with tables, content
+ * controls and text boxes), headers, footers, footnotes, and endnotes.
+ * Comments are not part of the document's text and are left out — read them
+ * from `doc.comments`, or with `Query.listParagraphs(doc, { includeComments: true })`.
  *
  * Paragraphs are separated by `\n`. Tables render as tab-separated cell text.
  */
 export function extractText(doc: DocxDocument): string {
+  checkHandle(doc, "document", "doc", "Query.getText");
   const lines: string[] = [];
 
   // State stack for nested table handling.
@@ -389,13 +473,20 @@ export function extractText(doc: DocxDocument): string {
 
 /**
  * Search for text occurrences across the entire document: body, tables, SDTs,
- * headers, footers, footnotes, and endnotes.
+ * text boxes, headers, footers, footnotes, and endnotes — the text
+ * {@link extractText} returns. Comments are not searched, unlike
+ * `Document.replaceText`, which also replaces inside comments: a match a
+ * search did not report may still be replaced there.
  *
  * @param doc - The document model to search.
  * @param query - String or RegExp to search for.
  * @returns Array of search results.
  */
 export function searchText(doc: DocxDocument, query: string | RegExp): SearchResult[] {
+  checkHandle(doc, "document", "doc", "Query.searchText");
+  if (typeof query !== "string" && !(query instanceof RegExp)) {
+    invalidArgument("Query.searchText", "query", "a string or a RegExp", query);
+  }
   const results: SearchResult[] = [];
   let idx = 0;
 

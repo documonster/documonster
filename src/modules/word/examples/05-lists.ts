@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Document, Build } from "../index";
 import type {
   AbstractNumbering,
   NumberingInstance,
@@ -97,13 +97,12 @@ const legalAbstract: AbstractNumbering = {
 const legalNumId = 100;
 const legalInstance: NumberingInstance = { numId: legalNumId, abstractNumId: 100 };
 
-const docModel = Document.build(doc);
 const merged = {
-  ...docModel,
-  abstractNumberings: [...(docModel.abstractNumberings ?? []), legalAbstract],
-  numberingInstances: [...(docModel.numberingInstances ?? []), legalInstance],
+  ...doc,
+  abstractNumberings: [...(doc.abstractNumberings ?? []), legalAbstract],
+  numberingInstances: [...(doc.numberingInstances ?? []), legalInstance],
   body: [
-    ...docModel.body,
+    ...doc.body,
     Build.textParagraph("Article one — overview.", {
       numbering: { numId: legalNumId, level: 0 }
     }),
@@ -247,6 +246,6 @@ const final = {
   ]
 };
 
-const buf = await Io.toBuffer(final);
+const buf = await Document.toBuffer(final);
 fs.writeFileSync(path.join(outDir, "05-lists.docx"), buf);
 console.log(`  → 05-lists.docx (${buf.length} bytes)`);

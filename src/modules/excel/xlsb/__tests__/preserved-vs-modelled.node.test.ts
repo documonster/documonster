@@ -77,7 +77,7 @@ describe("what the XLSB reader preserves", () => {
       } catch {
         continue;
       }
-      const first = Workbook.getWorksheets(workbook)[0];
+      const first = Workbook.listWorksheets(workbook)[0];
       if (first === undefined) {
         continue;
       }

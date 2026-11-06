@@ -216,17 +216,33 @@ function assertPage(value: number): number {
 }
 
 /**
- * Whether a PDF can receive a genuine incremental update.
+ * How `out` relates to `original` — read off the output, because that is the only
+ * reliable way to know:
  *
- * `PdfEditor.saveIncremental()` silently falls back to a full rebuild for
- * xref-stream files (PDF 1.5+ without a `trailer` keyword). A full rebuild
- * renumbers objects and invalidates any existing signature, so a tool must not
- * claim "signature preserved" without checking — and callers deserve to know
- * when structure may be reorganised.
+ * - `"unchanged"`: byte-identical — nothing was saved over the original;
+ * - `"appended"`: `original` followed by an incremental update;
+ * - `"rewritten"`: anything else — the file was rebuilt.
+ *
+ * Asked of the input instead ("does it have a `trailer`?"), the answer was wrong for
+ * every cross-reference-stream file: the editor appends an xref-stream section to
+ * those, so tools reported a rebuild, and a broken signature, for a file whose
+ * signed bytes were untouched. The editor may also fall back to a rewrite for reasons
+ * no byte sniff can see (recovered cross-reference data, an inline page), so the
+ * question can only be answered after the save.
  */
-export function supportsIncrementalUpdate(bytes: Uint8Array): boolean {
-  const tail = bytes.subarray(Math.max(0, bytes.length - 1024));
-  return new TextDecoder().decode(tail).includes("trailer");
+export function saveKind(
+  original: Uint8Array,
+  out: Uint8Array
+): "unchanged" | "appended" | "rewritten" {
+  if (out.length < original.length) {
+    return "rewritten";
+  }
+  for (let i = 0; i < original.length; i++) {
+    if (out[i] !== original[i]) {
+      return "rewritten";
+    }
+  }
+  return out.length === original.length ? "unchanged" : "appended";
 }
 
 /** Cap on how many pages a selector may name, before it is expanded. */

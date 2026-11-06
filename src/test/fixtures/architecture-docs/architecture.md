@@ -16,7 +16,7 @@ through published entry points.
 | Runtime dependencies   | 0                                                |
 | Module count           | 11                                               |
 | Published entry points | 19                                               |
-| Formula functions      | 448                                              |
+| Formula functions      | 467                                              |
 | Package type           | ESM only (`require(esm)` for CommonJS consumers) |
 
 ## Repository Layout
@@ -69,15 +69,16 @@ flowchart TD
 
 ### Bridge Exceptions
 
-Exactly five bridge files are registered exceptions. The authoritative list is the
+Exactly six bridge files are registered exceptions. The authoritative list is the
 `EXCEPTIONS` map in `scripts/verify-layers.ts`; `pnpm verify:layers` rejects other upward or
 sideways imports.
 
-| Boundary      | Purpose                       |
-| ------------- | ----------------------------- |
-| PDF to Excel  | Workbook and chart rendering  |
-| PDF to Word   | Document layout and rendering |
-| Word to Excel | Embedded workbook support     |
+| Boundary        | Purpose                       |
+| --------------- | ----------------------------- |
+| PDF to Excel    | Workbook and chart rendering  |
+| PDF to Word     | Document layout and rendering |
+| Word to Excel   | Embedded workbook support     |
+| Draw to Archive | PNG encoding (`Draw.toPng`)   |
 
 ## Drawing Pipeline
 

@@ -1,6 +1,7 @@
-import type { FormCheckboxModel } from "@excel/core/form-control";
+import type { CheckboxState, FormCheckboxModel } from "@excel/core/form-control";
+import { formCheckboxStateFromValue } from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 /**
@@ -9,6 +10,19 @@ import { XmlWriter } from "@xml/writer";
  * Each form control (checkbox, button, etc.) has an associated ctrlProp file
  * that stores its properties like objectType, checked state, and linked cell.
  */
+
+/** The properties of one control, as `xl/ctrlProps/ctrlPropN.xml` states them. */
+interface CtrlPropModel {
+  /** `CheckBox`, `Button`, `Drop`, … */
+  objectType?: string;
+  checked: CheckboxState;
+  link?: string;
+  noThreeD: boolean;
+  /** The part as read, kept for a control this library does not model. */
+  xml?: string;
+  /** Every attribute of `formControlPr`, for matching the part to the VML shape it describes. */
+  attributes?: Record<string, string>;
+}
 
 class CtrlPropXform extends BaseXform<FormCheckboxModel> {
   private _checkedToXmlValue(checked: FormCheckboxModel["checked"]): string {
@@ -62,18 +76,34 @@ class CtrlPropXform extends BaseXform<FormCheckboxModel> {
     return xmlStream.xml;
   }
 
-  // Parsing not implemented - form controls are write-only for now
-  parseOpen(): boolean {
+  /** What a parsed `formControlPr` says; read by the worksheet reconcile. */
+  parsed?: CtrlPropModel;
+
+  parseOpen(node: ParseOpenTag): boolean {
+    // The part's default namespace is x14's, which the read normalises to its `x14:` prefix.
+    if (node.name === this.tag || node.name === `x14:${this.tag}`) {
+      const { objectType, checked, fmlaLink, noThreeD } = node.attributes;
+      this.parsed = {
+        objectType,
+        checked: formCheckboxStateFromValue(checked),
+        ...(fmlaLink ? { link: fmlaLink } : {}),
+        noThreeD: noThreeD === "1" || noThreeD === "true",
+        attributes: Object.fromEntries(
+          Object.entries(node.attributes).filter(([name]) => !name.startsWith("xmlns"))
+        )
+      };
+    }
     return true;
   }
 
   parseText(): void {
-    // Not implemented
+    // formControlPr carries everything a checkbox needs in attributes.
   }
 
-  parseClose(): boolean {
-    return false;
+  parseClose(name: string): boolean {
+    return name !== this.tag && name !== `x14:${this.tag}`;
   }
 }
 
 export { CtrlPropXform };
+export type { CtrlPropModel };

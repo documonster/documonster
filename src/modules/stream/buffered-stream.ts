@@ -5,23 +5,30 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import { StreamStateError } from "@stream/errors";
-import type { BufferedStreamOptions, DataChunk } from "@stream/types";
-import { textEncoder } from "@utils/binary";
+import {
+  bufferedStreamOptionsSchema,
+  byteArraySchema,
+  checkStreamArgument
+} from "@stream/arguments";
+import { StreamStateError, StreamArgumentError } from "@stream/errors";
+import type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
+import { textEncoder, asPlainBytes } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
+import { s } from "@utils/schema";
 
-export type { BufferedStreamOptions, DataChunk } from "@stream/types";
+export type { BufferedStreamOptions, StreamDataChunk } from "@stream/types";
 
 /**
  * Create a string-backed data chunk.
  */
-export function createStringChunk(data: string): DataChunk {
+export function createStringChunk(data: string): StreamDataChunk {
+  checkStreamArgument(s.string(), data, "Streams.createStringChunk", "data");
   let buffer: Uint8Array | undefined;
-  function toUint8Array(): Uint8Array {
+  function toUint8Array(): Uint8Array<ArrayBuffer> {
     if (!buffer) {
       buffer = textEncoder.encode(data);
     }
-    return buffer;
+    return asPlainBytes(buffer);
   }
   return {
     get length(): number {
@@ -41,7 +48,8 @@ export function createStringChunk(data: string): DataChunk {
 /**
  * Create a Uint8Array-backed data chunk.
  */
-export function createByteChunk(data: Uint8Array): DataChunk {
+export function createByteChunk(data: Uint8Array): StreamDataChunk {
+  checkStreamArgument(byteArraySchema, data, "Streams.createByteChunk", "data");
   return {
     get length(): number {
       return data.length;
@@ -51,8 +59,8 @@ export function createByteChunk(data: Uint8Array): DataChunk {
       target.set(data.subarray(offset, offset + copyLength), targetOffset);
       return copyLength;
     },
-    toUint8Array(): Uint8Array {
-      return data;
+    toUint8Array(): Uint8Array<ArrayBuffer> {
+      return asPlainBytes(data);
     }
   };
 }
@@ -83,7 +91,7 @@ class ReadWriteBuffer {
     return this.iWrite === this.size;
   }
 
-  read(size?: number): Uint8Array | null {
+  read(size?: number): Uint8Array<ArrayBuffer> | null {
     if (size === 0) {
       return null;
     }
@@ -100,19 +108,19 @@ class ReadWriteBuffer {
     return buf;
   }
 
-  write(chunk: DataChunk, offset: number, length: number): number {
+  write(chunk: StreamDataChunk, offset: number, length: number): number {
     const size = Math.min(length, this.size - this.iWrite);
     chunk.copy(this.buffer, this.iWrite, offset, size);
     this.iWrite += size;
     return size;
   }
 
-  toUint8Array(): Uint8Array {
+  toUint8Array(): Uint8Array<ArrayBuffer> {
     if (this.iRead === 0 && this.iWrite === this.size) {
-      return this.buffer;
+      return asPlainBytes(this.buffer);
     }
     // Use subarray for zero-copy view when returning whole remaining buffer
-    return this.buffer.subarray(this.iRead, this.iWrite);
+    return asPlainBytes(this.buffer.subarray(this.iRead, this.iWrite));
   }
 }
 
@@ -120,7 +128,7 @@ class ReadWriteBuffer {
  * Browser-compatible Buffered Stream with efficient chunk management
  */
 export class BufferedStream extends EventEmitter {
-  private _chunks: DataChunk[] = [];
+  private _chunks: StreamDataChunk[] = [];
   private _chunkReadIndex: number = 0;
   private _buffers: ReadWriteBuffer[] = [];
   private _bufferReadIndex: number = 0;
@@ -131,13 +139,31 @@ export class BufferedStream extends EventEmitter {
 
   constructor(options: BufferedStreamOptions = {}) {
     super();
-    this._batchSize = options.batchSize ?? 16384; // 16KB default
+    checkStreamArgument(bufferedStreamOptionsSchema, options, "Streams.BufferedStream", "options");
+    const { batchSize } = options;
+    this._batchSize = batchSize ?? 16384; // 16KB default
   }
 
   /**
    * Write data to the stream
    */
   write(chunk: Uint8Array | string): boolean {
+    if (
+      typeof chunk !== "string" &&
+      !(
+        ArrayBuffer.isView(chunk) &&
+        (chunk as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
+      )
+    ) {
+      throw new StreamArgumentError(
+        "a Uint8Array or a string",
+        chunk === null ? "null" : typeof chunk,
+        {
+          field: "chunk",
+          where: "Streams.BufferedStream#write"
+        }
+      );
+    }
     if (this._destroyed) {
       this.emit("error", new StreamStateError("write", "stream is destroyed"));
       return false;
@@ -157,7 +183,7 @@ export class BufferedStream extends EventEmitter {
   /**
    * Read data from the stream
    */
-  read(size?: number): Uint8Array | null {
+  read(size?: number): Uint8Array<ArrayBuffer> | null {
     // Try to satisfy the read from existing buffers
     let buffer = this._getBuffer(size);
 
@@ -180,7 +206,7 @@ export class BufferedStream extends EventEmitter {
       buffer = this._getBuffer(size);
     }
 
-    return buffer;
+    return buffer && asPlainBytes(buffer);
   }
 
   /**
@@ -272,9 +298,17 @@ export class BufferedStream extends EventEmitter {
   }
 
   /**
+   * @deprecated Use {@link readAll}, which does the same: despite the `to` name this
+   * consumes the buffered data. Removed in 1.0.
+   */
+  toUint8Array(): Uint8Array<ArrayBuffer> {
+    return this.readAll();
+  }
+
+  /**
    * Add chunk to internal buffers
    */
-  private _addChunkToBuffers(chunk: DataChunk): void {
+  private _addChunkToBuffers(chunk: StreamDataChunk): void {
     let chunkOffset = 0;
     let chunkLength = chunk.length;
 
@@ -292,10 +326,12 @@ export class BufferedStream extends EventEmitter {
   }
 
   /**
-   * Get all buffered data as a single Uint8Array.
-   * Consumes the internal buffers — after this call, `bufferedLength` is 0.
+   * Take all buffered data as a single Uint8Array — a read, like {@link read}, so it consumes
+   * what it returns: afterwards `bufferedLength` is 0. Unlike `read()`, which returns at most
+   * one internal batch, it returns everything, and an empty array (not `null`) when nothing is
+   * buffered.
    */
-  toUint8Array(): Uint8Array {
+  readAll(): Uint8Array<ArrayBuffer> {
     // Fast path: no data
     if (this._totalLength === 0) {
       return new Uint8Array(0);

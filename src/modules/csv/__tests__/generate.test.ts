@@ -861,12 +861,46 @@ describe("createCsvGenerator enhanced API", () => {
     expect(result.csv.endsWith("\n")).toBe(true);
   });
 
-  it("should support asyncRows()", async () => {
+  it("should support rowsAsync()", async () => {
     const gen = createCsvGenerator({ columns: 2 });
     const rows: string[] = [];
-    for await (const row of gen.asyncRows({ rows: 3, delay: 5 })) {
+    for await (const row of gen.rowsAsync({ rows: 3, delay: 5 })) {
       rows.push(row);
     }
     expect(rows).toHaveLength(4); // 1 header + 3 data rows
+  });
+
+  it("keeps the deprecated asyncRows() yielding what rowsAsync() yields", async () => {
+    const gen = createCsvGenerator({ columns: 2, seed: 7 });
+    const collect = async (it: AsyncIterable<string>) => {
+      const out: string[] = [];
+      for await (const row of it) {
+        out.push(row);
+      }
+      return out;
+    };
+    expect(await collect(gen.asyncRows({ rows: 3 }))).toEqual(
+      await collect(gen.rowsAsync({ rows: 3 }))
+    );
+  });
+});
+
+describe("Csv.generate — argument checks", () => {
+  it("refuses an unknown column type instead of generating strings for it", async () => {
+    const { Csv, CsvError } = await import("@csv/index");
+    expect(() => Csv.generate({ rows: 1, columns: ["bogus" as never] })).toThrow(CsvError);
+    expect(() => Csv.generate({ rows: 1, columns: [{ type: "bogus" as never }] })).toThrow(
+      CsvError
+    );
+  });
+
+  it("refuses options that are not an object", async () => {
+    const { Csv, CsvError } = await import("@csv/index");
+    expect(() => Csv.generate(42 as never)).toThrow(CsvError);
+  });
+
+  it("names the public functions in its messages", async () => {
+    const { Csv } = await import("@csv/index");
+    expect(() => Csv.generate({ rows: -1 })).toThrow(/Csv\.generateRows\(\)/);
   });
 });

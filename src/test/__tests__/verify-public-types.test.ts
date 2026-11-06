@@ -92,6 +92,39 @@ function soundTree(): void {
 }
 
 describe("the public type surface gate", () => {
+  it("holds a satellite package to the same rule, through its ESM `.js` specifiers", () => {
+    soundTree();
+    file("packages/sat/src/options.ts", "export interface SatOptions {\n  flag?: boolean;\n}\n");
+    file(
+      "packages/sat/src/index.ts",
+      [
+        'import type { SatOptions } from "./options.js";',
+        "export function start(options?: SatOptions): void {",
+        "  void options;",
+        "}"
+      ].join("\n")
+    );
+    const entries = {
+      demo: { file: "src/modules/demo/index.ts", platform: "both" },
+      sat: { file: "packages/sat/src/index.ts", platform: "node" }
+    };
+    const hole = run(config({ entries }));
+    expect(hole.code).not.toBe(0);
+    expect(hole.output).toContain("sat exposes `SatOptions`");
+
+    file(
+      "packages/sat/src/index.ts",
+      [
+        'import type { SatOptions } from "./options.js";',
+        'export type { SatOptions } from "./options.js";',
+        "export function start(options?: SatOptions): void {",
+        "  void options;",
+        "}"
+      ].join("\n")
+    );
+    expect(run(config({ entries })).code).toBe(0);
+  });
+
   it("passes a surface with no holes", () => {
     soundTree();
     const { code, output } = run(config());
@@ -118,6 +151,49 @@ describe("the public type surface gate", () => {
     expect(code).toBe(1);
     expect(output).toContain("R2");
     expect(output).toContain("Detail");
+  });
+
+  it("R2 — reads a browser entry the way the browser build resolves it", () => {
+    // A shared surface that imports a module with a `.browser.ts` sibling reaches the
+    // sibling's declarations in the browser build (`#platform/*`), so the browser entry
+    // must export the sibling's type — and exporting it is enough.
+    file("src/modules/demo/codec.ts", "export interface Stream {\n  node: true;\n}\n");
+    file("src/modules/demo/codec.browser.ts", "export interface Stream {\n  web: true;\n}\n");
+    file(
+      "src/modules/demo/surface.ts",
+      'import type { Stream } from "@demo/codec";\nexport function open(): Stream {\n  return null!;\n}\n'
+    );
+    file(
+      "src/modules/demo/index.ts",
+      'export * as Codec from "@demo/surface";\nexport type { Stream } from "@demo/codec";\n'
+    );
+    const browserEntry = (typeExport: string) =>
+      file(
+        "src/modules/demo/index.browser.ts",
+        `export * as Codec from "@demo/surface";\n${typeExport}`
+      );
+    file("src/modules/demo/types.ts", "export interface Widget {\n  id: string;\n}\n");
+    const entries = {
+      entries: {
+        demo: { file: "src/modules/demo/index.ts", platform: "node" },
+        "demo (browser)": { file: "src/modules/demo/index.browser.ts", platform: "browser" }
+      },
+      vocabularyEntries: []
+    };
+
+    browserEntry('export type { Stream } from "@demo/codec.browser";\n');
+    expect(run(config(entries)).code).toBe(0);
+
+    // The specifier the build rewrites to the sibling counts as the sibling.
+    browserEntry('export type { Stream } from "@demo/codec";\n');
+    expect(run(config(entries)).code).toBe(0);
+
+    browserEntry("");
+    const { code, output } = run(config(entries));
+    expect(code).toBe(1);
+    expect(output).toContain(
+      "demo (browser) exposes `Stream` (declared in modules/demo/codec.browser.ts)"
+    );
   });
 
   it("R2 — accepts a type re-exported under a different name", () => {

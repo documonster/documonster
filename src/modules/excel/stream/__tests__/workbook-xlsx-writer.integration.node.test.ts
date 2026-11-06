@@ -5,7 +5,7 @@ import { testUtils } from "@excel/__tests__/shared";
 import type { NoteConfig } from "@excel/core/cell";
 import { cellSetNote, cellSetValue, cellGetValue, cellName, cellSetName } from "@excel/core/cell";
 import { columnAlignment, columnFont } from "@excel/core/column";
-import { rowFont, rowSetFont } from "@excel/core/row";
+import { rowSetFont } from "@excel/core/row";
 import { getImage } from "@excel/core/workbook";
 import {
   getBackgroundImageId,
@@ -15,7 +15,8 @@ import {
   rowCommit,
   rowGetCell
 } from "@excel/core/worksheet";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { beforeEach, describe, it, expect } from "vitest";
@@ -260,9 +261,7 @@ describe("WorkbookWriter", () => {
 
       expect(Column.getWidth(ws2, 4)).toBe(undefined);
 
-      expect(rowFont(Worksheet.getRow(ws2, 2))).toEqual(
-        testUtils.styles.fonts.broadwayRedOutline20
-      );
+      expect(Row.getFont(ws2, 2)).toEqual(testUtils.styles.fonts.broadwayRedOutline20);
     });
 
     it("rich text", async () => {
@@ -276,11 +275,11 @@ describe("WorkbookWriter", () => {
       cellSetValue(ws.getCell("A1"), {
         richText: [
           {
-            font: { color: { argb: "FF0000" } },
+            font: { color: { argb: "FFFF0000" } },
             text: "red "
           },
           {
-            font: { color: { argb: "00FF00" }, bold: true },
+            font: { color: { argb: "FF00FF00" }, bold: true },
             text: " bold green"
           }
         ]
@@ -296,11 +295,11 @@ describe("WorkbookWriter", () => {
       expect(Cell.getValue(ws2, "A1")).toEqual({
         richText: [
           {
-            font: { color: { argb: "FF0000" } },
+            font: { color: { argb: "FFFF0000" } },
             text: "red "
           },
           {
-            font: { color: { argb: "00FF00" }, bold: true },
+            font: { color: { argb: "FF00FF00" }, bold: true },
             text: " bold green"
           }
         ]
@@ -667,7 +666,7 @@ describe("WorkbookWriter", () => {
       const cellValue = "abcdefghij".repeat(40); // 400 chars per cell
       const ws = await writeAndReadBack({ trueStreaming: true }, worksheet => {
         for (let i = 0; i < 5000; i++) {
-          const row = Worksheet.getRow(worksheet, i + 1);
+          const row = getRow(worksheet, i + 1);
           for (let c = 1; c <= 9; c++) {
             cellSetValue(rowGetCell(row, c), cellValue);
           }
@@ -675,14 +674,14 @@ describe("WorkbookWriter", () => {
         }
       });
 
-      expect(Worksheet.rowCount(ws)).toBe(5000);
+      expect(Row.getCount(ws)).toBe(5000);
       expect(cellGetValue(getCell(ws, "A1"))).toBe(cellValue);
     }, 30000);
 
     it("does not accumulate worksheet data in memory with default streaming (#88)", async () => {
       const ws = await writeAndReadBack({}, worksheet => {
         for (let i = 0; i < 5000; i++) {
-          const row = Worksheet.getRow(worksheet, i + 1);
+          const row = getRow(worksheet, i + 1);
           for (let c = 1; c <= 9; c++) {
             cellSetValue(rowGetCell(row, c), "abcdefghij".repeat(40));
           }
@@ -690,14 +689,14 @@ describe("WorkbookWriter", () => {
         }
       });
 
-      expect(Worksheet.rowCount(ws)).toBe(5000);
+      expect(Row.getCount(ws)).toBe(5000);
     }, 30000);
 
     it("handles very large cell values in trueStreaming mode without crashing (#89)", async () => {
       const largeCellValue = "x".repeat(36_000); // ~36KB per cell × 9 cells = ~324KB per row
       const ws = await writeAndReadBack({ trueStreaming: true }, worksheet => {
         for (let i = 0; i < 100; i++) {
-          const row = Worksheet.getRow(worksheet, i + 1);
+          const row = getRow(worksheet, i + 1);
           for (let c = 1; c <= 9; c++) {
             cellSetValue(rowGetCell(row, c), largeCellValue);
           }
@@ -705,7 +704,7 @@ describe("WorkbookWriter", () => {
         }
       });
 
-      expect(Worksheet.rowCount(ws)).toBe(100);
+      expect(Row.getCount(ws)).toBe(100);
       expect(cellGetValue(getCell(ws, "A1"))).toBe(largeCellValue);
     }, 30000);
 
@@ -767,7 +766,7 @@ describe("WorkbookWriter", () => {
       const readBack = Workbook.create();
       await Workbook.read(readBack, xlsxBuffer);
       const ws = Workbook.getWorksheet(readBack, "Sheet 1")!;
-      expect(Worksheet.rowCount(ws!)).toBe(20_000);
+      expect(Row.getCount(ws!)).toBe(20_000);
       expect(Cell.getValue(ws!, "A1")).toBe(bigValue);
       expect(Cell.getValue(ws!, "I20000")).toBe(bigValue);
 
@@ -784,13 +783,13 @@ describe("WorkbookWriter", () => {
       // mode is decided. This verifies the sampling → decision → flush cycle.
       const ws = await writeAndReadBack({ trueStreaming: true }, worksheet => {
         for (let i = 0; i < 5; i++) {
-          const row = Worksheet.getRow(worksheet, i + 1);
+          const row = getRow(worksheet, i + 1);
           cellSetValue(rowGetCell(row, 1), "tiny");
           rowCommit(row);
         }
       });
 
-      expect(Worksheet.rowCount(ws)).toBe(5);
+      expect(Row.getCount(ws)).toBe(5);
       expect(cellGetValue(getCell(ws, "A1"))).toBe("tiny");
       expect(cellGetValue(getCell(ws, "A5"))).toBe("tiny");
     });
@@ -1386,7 +1385,7 @@ describe("WorkbookWriter", () => {
       cellSetValue(rowGetCell(row2, 1), "data2");
       rowCommit(row2);
 
-      // Should NOT throw RowOutOfBoundsError even though rows 1-2 are committed
+      // Should NOT throw ExcelRowOutOfBoundsError even though rows 1-2 are committed
       ws.addImage(imageId, "A1:C3");
 
       await wb.commit();

@@ -15,7 +15,9 @@
  */
 
 import { crc32 } from "@archive/compression/crc32";
+import { OPTIONS, checkArchiveArgument, limitSchema } from "@archive/core/arguments";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { checkEntryPath } from "@archive/core/entry-checks";
 import type { ZipStringEncoding } from "@archive/core/text";
 import { resolveZipStringCodec } from "@archive/core/text";
 import {
@@ -47,6 +49,10 @@ import {
   parseCentralDirectory
 } from "@archive/zip-spec/zip-parser-core";
 import { LOCAL_FILE_HEADER_SIG } from "@archive/zip-spec/zip-records";
+import { globToRegex } from "@utils/glob";
+import { isRecordArgument } from "@utils/object";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /**
  * Options for RemoteZipReader
@@ -72,16 +78,31 @@ export interface RemoteZipReaderOptions {
   signal?: AbortSignal;
 
   /**
-   * Whether to validate CRC32 checksum after extraction.
-   * @default false
+   * Whether to verify each extracted entry against its recorded CRC-32
+   * (`ZipCrc32MismatchError`). Set `false` to read damaged archives as far as they go.
+   * @default true
    */
   checkCrc32?: boolean;
+
+  /**
+   * Largest uncompressed size, in bytes, of one entry an extraction inflates into memory
+   * (`ArchiveFileTooLargeError`), as `unpackZip`'s `maxEntrySize`; `extractToStream` streams and is
+   * not bounded by it.
+   * @default 536870912 (512 MiB)
+   */
+  maxEntrySize?: number;
+
+  /**
+   * Most entries the central directory may declare (`ArchiveLimitExceededError`), checked when the
+   * reader opens. Unbounded by default.
+   */
+  maxEntries?: number;
 }
 
 /**
  * Options for extracting entries
  */
-export interface ExtractOptions {
+export interface RemoteZipExtractOptions {
   /**
    * Password for encrypted entries (overrides constructor password).
    */
@@ -97,6 +118,9 @@ export interface ExtractOptions {
    * Progress callback for large file extraction.
    * Called with current bytes processed and total bytes.
    */
+  onProgress?: (current: number, total: number) => void;
+
+  /** @deprecated Use {@link onProgress}. Removed in 1.0. */
   onprogress?: (current: number, total: number) => void;
 }
 
@@ -140,13 +164,42 @@ export interface RemoteZipStats {
 /**
  * Error thrown when CRC32 validation fails
  */
-export { Crc32MismatchError } from "@archive/core/errors";
+export { ZipCrc32MismatchError } from "@archive/core/errors";
 import {
+  ArchiveArgumentError,
   ArchiveError,
-  Crc32MismatchError,
-  EocdNotFoundError,
+  ZipCrc32MismatchError,
+  ZipEocdNotFoundError,
   throwIfAborted
 } from "@archive/core/errors";
+import { asPlainBytes } from "@utils/binary";
+
+const remoteZipReaderOptionsSchema = s.object(
+  {
+    password: s
+      .union([s.string(), s.custom<Uint8Array>(v => v instanceof Uint8Array, "a Uint8Array")], {
+        expected: "a string or a Uint8Array"
+      })
+      .optional(),
+    decodeStrings: s.boolean().optional(),
+    encoding: s.unknown<ZipStringEncoding>().optional(),
+    signal: s.abortSignal().optional(),
+    checkCrc32: s.boolean().optional(),
+    maxEntrySize: limitSchema.optional(),
+    maxEntries: limitSchema.optional()
+  },
+  OPTIONS
+);
+
+const _remoteZipReaderOptionsMatch: SchemaMatches<
+  typeof remoteZipReaderOptionsSchema,
+  RemoteZipReaderOptions
+> = true;
+void _remoteZipReaderOptionsMatch;
+
+function checkReaderLimits(where: string, options: RemoteZipReaderOptions): void {
+  checkArchiveArgument(remoteZipReaderOptionsSchema.optional(), options, where, "options");
+}
 
 /**
  * Remote ZIP Reader
@@ -157,7 +210,7 @@ import {
  * @example
  * ```ts
  * // Open a remote ZIP file
- * const reader = await RemoteZipReader.open("https://example.com/large-archive.zip");
+ * const reader = await Archive.RemoteZipReader.open("https://example.com/large-archive.zip");
  *
  * // List entries without downloading file content
  * for (const entry of reader.getEntries()) {
@@ -165,7 +218,7 @@ import {
  * }
  *
  * // Extract just one file
- * const data = await reader.extract("important-file.txt");
+ * const data = await reader.extract("important-file.txt"); // undefined if absent
  *
  * // Check how much was downloaded
  * console.log(reader.getStats());
@@ -211,6 +264,7 @@ export class RemoteZipReader {
    * @returns Initialized RemoteZipReader
    */
   static async open(url: string, options: RemoteZipOpenOptions = {}): Promise<RemoteZipReader> {
+    checkReaderLimits("Archive.RemoteZipReader.open", options);
     const httpReader = await HttpRangeReader.open(url, options);
     const instance = new RemoteZipReader(httpReader, options, httpReader);
     await instance.init();
@@ -228,6 +282,19 @@ export class RemoteZipReader {
     reader: RandomAccessReader,
     options: RemoteZipReaderOptions = {}
   ): Promise<RemoteZipReader> {
+    const r = reader as Partial<RandomAccessReader> | null;
+    if (
+      typeof r !== "object" ||
+      r === null ||
+      typeof r.size !== "number" ||
+      typeof r.read !== "function"
+    ) {
+      throw new ArchiveArgumentError(
+        "reader",
+        "Archive.RemoteZipReader.fromReader: reader must be a RandomAccessReader ({ size, read(start, end) })"
+      );
+    }
+    checkReaderLimits("Archive.RemoteZipReader.fromReader", options);
     const instance = new RemoteZipReader(reader, options);
     await instance.init();
     return instance;
@@ -263,7 +330,7 @@ export class RemoteZipReader {
     // Search backwards for EOCD signature with validation
     const eocdLocalOffset = findEOCDSignature(tailData, true);
     if (eocdLocalOffset === -1) {
-      throw new EocdNotFoundError();
+      throw new ZipEocdNotFoundError();
     }
 
     // Parse EOCD using shared function
@@ -323,7 +390,7 @@ export class RemoteZipReader {
 
     // Handle empty archives
     if (eocd.totalEntries === 0 || eocd.centralDirSize === 0) {
-      this.entries = [];
+      this.entries = Object.freeze([]) as unknown as ZipEntryRecord[];
       return;
     }
 
@@ -333,11 +400,15 @@ export class RemoteZipReader {
       eocd.centralDirOffset + eocd.centralDirSize
     );
 
-    // Use shared parsing function
-    this.entries = parseCentralDirectory(centralDirData, eocd.totalEntries, {
-      decodeStrings,
-      encoding: this.options.encoding
-    });
+    // Use shared parsing function. Frozen, record and list alike, because the readers below
+    // hand them out: a caller's edit would otherwise change what this reader extracts.
+    this.entries = Object.freeze(
+      parseCentralDirectory(centralDirData, eocd.totalEntries, {
+        decodeStrings,
+        encoding: this.options.encoding,
+        maxEntries: this.options.maxEntries
+      }).map(entry => Object.freeze(entry))
+    ) as ZipEntryRecord[];
 
     // Build entryMap
     for (let i = 0; i < this.entries.length; i++) {
@@ -349,6 +420,7 @@ export class RemoteZipReader {
   /**
    * Get all entries in the ZIP file.
    */
+  /** Every entry's record, in central-directory order; the list and records are frozen. */
   getEntries(): readonly ZipEntryRecord[] {
     return this.entries;
   }
@@ -357,14 +429,20 @@ export class RemoteZipReader {
    * Get entry by path.
    */
   getEntry(path: string): ZipEntryRecord | undefined {
-    return this.entryMap.get(path);
+    return this._lookup("getEntry", path);
   }
 
   /**
    * Check if entry exists.
    */
   hasEntry(path: string): boolean {
-    return this.entryMap.has(path);
+    return this._lookup("hasEntry", path) !== undefined;
+  }
+
+  /** The entry a public read is asked for by name, refusing a name that is not a string. */
+  private _lookup(method: string, path: string, field = "path"): ZipEntryRecord | undefined {
+    checkEntryPath(`Archive.RemoteZipReader#${method}`, path, field);
+    return this.entryMap.get(path);
   }
 
   /**
@@ -385,10 +463,13 @@ export class RemoteZipReader {
   async getRawCompressedData(
     pathOrEntry: string | ZipEntryRecord,
     options: RawEntryReadOptions = {}
-  ): Promise<Uint8Array | null> {
-    const entry = typeof pathOrEntry === "string" ? this.entryMap.get(pathOrEntry) : pathOrEntry;
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
+    const entry =
+      typeof pathOrEntry === "string"
+        ? this._lookup("getRawCompressedData", pathOrEntry)
+        : pathOrEntry;
     if (!entry) {
-      return null;
+      return undefined;
     }
 
     const signal = options.signal ?? this.options.signal;
@@ -401,7 +482,7 @@ export class RemoteZipReader {
     const dataOffset = await this.getEntryDataOffset(entry);
     throwIfAborted(signal);
 
-    return this.reader.read(dataOffset, dataOffset + entry.compressedSize);
+    return asPlainBytes(await this.reader.read(dataOffset, dataOffset + entry.compressedSize));
   }
 
   /**
@@ -412,10 +493,13 @@ export class RemoteZipReader {
   getRawCompressedStream(
     pathOrEntry: string | ZipEntryRecord,
     options: RawEntryStreamOptions = {}
-  ): AsyncIterable<Uint8Array> | null {
-    const entry = typeof pathOrEntry === "string" ? this.entryMap.get(pathOrEntry) : pathOrEntry;
+  ): AsyncIterable<Uint8Array<ArrayBuffer>> | undefined {
+    const entry =
+      typeof pathOrEntry === "string"
+        ? this._lookup("getRawCompressedStream", pathOrEntry)
+        : pathOrEntry;
     if (!entry) {
-      return null;
+      return undefined;
     }
 
     const signal = options.signal ?? this.options.signal;
@@ -437,7 +521,7 @@ export class RemoteZipReader {
           throwIfAborted(signal);
 
           const end = Math.min(entry.compressedSize, offset + chunkSize);
-          yield await reader.read(dataOffset + offset, dataOffset + end);
+          yield asPlainBytes(await reader.read(dataOffset + offset, dataOffset + end));
           offset = end;
         }
       }
@@ -450,14 +534,14 @@ export class RemoteZipReader {
   async getRawEntry(
     path: string,
     options: RawEntryReadOptions = {}
-  ): Promise<{ entry: ZipEntryRecord; compressedData: Uint8Array } | null> {
-    const entry = this.entryMap.get(path);
+  ): Promise<{ entry: ZipEntryRecord; compressedData: Uint8Array<ArrayBuffer> } | undefined> {
+    const entry = this._lookup("getRawEntry", path);
     if (!entry) {
-      return null;
+      return undefined;
     }
     const compressedData = await this.getRawCompressedData(entry, options);
     if (!compressedData) {
-      return null;
+      return undefined;
     }
     return { entry, compressedData };
   }
@@ -468,23 +552,30 @@ export class RemoteZipReader {
   getRawEntryStream(
     path: string,
     options: RawEntryStreamOptions = {}
-  ): { entry: ZipEntryRecord; compressedData: AsyncIterable<Uint8Array> } | null {
-    const entry = this.entryMap.get(path);
+  ): { entry: ZipEntryRecord; compressedData: AsyncIterable<Uint8Array<ArrayBuffer>> } | undefined {
+    const entry = this._lookup("getRawEntryStream", path);
     if (!entry) {
-      return null;
+      return undefined;
     }
     const compressedData = this.getRawCompressedStream(entry, options);
     if (!compressedData) {
-      return null;
+      return undefined;
     }
     return { entry, compressedData };
   }
 
   /**
-   * List all file paths.
+   * The paths of the file entries (directories excluded), in central-directory order — one
+   * per entry, so its length is {@link getFileCount}.
    */
   listFiles(): string[] {
-    return [...this.entryMap.keys()];
+    const paths: string[] = [];
+    for (const entry of this.entries) {
+      if (entry.type !== "directory") {
+        paths.push(entry.path);
+      }
+    }
+    return paths;
   }
 
   /**
@@ -531,23 +622,16 @@ export class RemoteZipReader {
   }
 
   /**
-   * Find entries matching a glob-like pattern.
-   * Supports * (any characters) and ? (single character).
+   * Find entries matching a glob pattern, by the rules `Fs.matchGlob` uses: `*` matches within
+   * one path segment, `**` across segments (`**\/x` includes a root-level `x`), `?` one character
+   * other than `/`, plus `[abc]` and `{a,b}`; letters match without regard to case. Names starting
+   * with a dot are matched like any other.
    *
    * @param pattern - Glob pattern (e.g., "*.txt", "folder/*", "**\/data.json")
    * @returns Array of matching entries
    */
   findEntries(pattern: string): ZipEntryRecord[] {
-    const regex = new RegExp(
-      "^" +
-        pattern
-          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-          .replace(/\*\*/g, "{{GLOBSTAR}}")
-          .replace(/\*/g, "[^/]*")
-          .replace(/\?/g, ".")
-          .replace(/\{\{GLOBSTAR\}\}/g, ".*") +
-        "$"
-    );
+    const regex = globToRegex(pattern, { dot: true });
     const results: ZipEntryRecord[] = [];
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
@@ -580,16 +664,25 @@ export class RemoteZipReader {
    * Extract a single file.
    *
    * @param path - File path within the archive
-   * @param options - Extract options or password
-   * @returns File data, or null if entry not found
+   * @param options - Password, CRC-32 check and progress callback
+   * @returns File data, or undefined if entry not found
    */
+  extract(
+    path: string,
+    options?: RemoteZipExtractOptions
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  extract(
+    path: string,
+    password: string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
   async extract(
     path: string,
-    options?: ExtractOptions | string | Uint8Array
-  ): Promise<Uint8Array | null> {
-    const entry = this.entryMap.get(path);
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
+    const entry = this._lookup("extract", path);
     if (!entry) {
-      return null;
+      return undefined;
     }
     const opts = this.normalizeExtractOptions(options);
     return this.extractEntry(entry, opts);
@@ -602,13 +695,22 @@ export class RemoteZipReader {
    * @param options - Extract options or password
    * @returns File data
    */
+  extractEntry(
+    entry: ZipEntryRecord,
+    options?: RemoteZipExtractOptions
+  ): Promise<Uint8Array<ArrayBuffer>>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  extractEntry(
+    entry: ZipEntryRecord,
+    password: string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer>>;
   async extractEntry(
     entry: ZipEntryRecord,
-    options?: ExtractOptions | string | Uint8Array
-  ): Promise<Uint8Array> {
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<Uint8Array<ArrayBuffer>> {
     const opts = this.normalizeExtractOptions(options);
     const password = opts.password ?? this.options.password;
-    const shouldCheckCrc = opts.checkCrc32 ?? this.options.checkCrc32 ?? false;
+    const shouldCheckCrc = opts.checkCrc32 ?? this.options.checkCrc32 ?? true;
 
     if (entry.type === "directory") {
       return EMPTY_UINT8ARRAY;
@@ -624,7 +726,9 @@ export class RemoteZipReader {
     // Report progress for download
     opts.onprogress?.(entry.compressedSize, entry.compressedSize);
 
-    return this.processEntryCompressedData(entry, compressedData, password, shouldCheckCrc);
+    return asPlainBytes(
+      await this.processEntryCompressedData(entry, compressedData, password, shouldCheckCrc)
+    );
   }
 
   private async processEntryCompressedData(
@@ -634,20 +738,38 @@ export class RemoteZipReader {
     shouldCheckCrc: boolean
   ): Promise<Uint8Array> {
     // Use shared extraction core logic
-    return processEntryData(entry, compressedData, password, shouldCheckCrc);
+    return processEntryData(
+      entry,
+      compressedData,
+      password,
+      shouldCheckCrc,
+      true,
+      this.options.maxEntrySize
+    );
   }
 
   /**
    * Normalize extract options from various input formats.
    */
-  private normalizeExtractOptions(options?: ExtractOptions | string | Uint8Array): ExtractOptions {
+  private normalizeExtractOptions(
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): RemoteZipExtractOptions {
     if (!options) {
       return {};
     }
-    if (typeof options === "string" || options instanceof Uint8Array) {
+    // A password from another realm fails `instanceof Uint8Array`; it is still not an options object.
+    if (!isRecordArgument(options)) {
       return { password: options };
     }
-    return options;
+    const onProgress = options.onProgress ?? options.onprogress;
+    if (onProgress !== undefined && typeof onProgress !== "function") {
+      throw new ArchiveArgumentError(
+        options.onProgress === undefined ? "options.onprogress" : "options.onProgress",
+        "Archive.RemoteZipReader: options.onProgress must be a function"
+      );
+    }
+    // `onprogress` is the deprecated spelling; every read below calls this one
+    return onProgress === options.onprogress ? options : { ...options, onprogress: onProgress };
   }
 
   /**
@@ -657,9 +779,12 @@ export class RemoteZipReader {
    * @param options - Extract options or password
    * @returns Map of path to file data (directories are excluded)
    */
+  extractAll(options?: RemoteZipExtractOptions): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  extractAll(password: string | Uint8Array): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
   async extractAll(
-    options?: ExtractOptions | string | Uint8Array
-  ): Promise<Map<string, Uint8Array>> {
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>> {
     const filePaths: string[] = [];
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
@@ -667,7 +792,7 @@ export class RemoteZipReader {
         filePaths.push(entry.path);
       }
     }
-    return this.extractMultiple(filePaths, options);
+    return this.extractMultiple(filePaths, this.normalizeExtractOptions(options));
   }
 
   /**
@@ -678,18 +803,33 @@ export class RemoteZipReader {
    * @param options - Extract options or password
    * @returns Map of path to file data
    */
+  extractMultiple(
+    paths: readonly string[],
+    options?: RemoteZipExtractOptions
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  extractMultiple(
+    paths: readonly string[],
+    password: string | Uint8Array
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>>;
   async extractMultiple(
-    paths: string[],
-    options?: ExtractOptions | string | Uint8Array
-  ): Promise<Map<string, Uint8Array>> {
-    const result = new Map<string, Uint8Array>();
+    paths: readonly string[],
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<Map<string, Uint8Array<ArrayBuffer>>> {
+    const result = new Map<string, Uint8Array<ArrayBuffer>>();
+    if (!Array.isArray(paths)) {
+      throw new ArchiveArgumentError(
+        "paths",
+        "Archive.RemoteZipReader#extractMultiple: paths must be an array of entry paths"
+      );
+    }
     const opts = this.normalizeExtractOptions(options);
 
     // Get entries and sort by offset for efficient sequential reading
     const entriesToExtract: Array<{ path: string; entry: ZipEntryRecord }> = [];
     for (let i = 0; i < paths.length; i++) {
       const path = paths[i]!;
-      const entry = this.entryMap.get(path);
+      const entry = this._lookup("extractMultiple", path, `paths[${i}]`);
       if (entry) {
         entriesToExtract.push({ path, entry });
       }
@@ -771,7 +911,7 @@ export class RemoteZipReader {
 
     // Pre-compute options that are the same for all entries
     const password = opts.password ?? this.options.password;
-    const shouldCheckCrc = opts.checkCrc32 ?? this.options.checkCrc32 ?? false;
+    const shouldCheckCrc = opts.checkCrc32 ?? this.options.checkCrc32 ?? true;
 
     for (let i = 0; i < entriesToExtract.length;) {
       // Skip directories (no data to read)
@@ -839,7 +979,7 @@ export class RemoteZipReader {
           password,
           shouldCheckCrc
         );
-        result.set(path, data);
+        result.set(path, asPlainBytes(data));
         processedSize += entry.compressedSize;
       }
 
@@ -855,14 +995,31 @@ export class RemoteZipReader {
    * @param callback - Callback for each entry. Return false to stop iteration.
    * @param options - Extract options or password
    */
+  forEach(
+    callback: (
+      entry: ZipEntryRecord,
+      getData: () => Promise<Uint8Array>
+    ) => Promise<boolean | void>,
+    options?: RemoteZipExtractOptions
+  ): Promise<void>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  forEach(
+    callback: (
+      entry: ZipEntryRecord,
+      getData: () => Promise<Uint8Array>
+    ) => Promise<boolean | void>,
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<void>;
   async forEach(
     callback: (
       entry: ZipEntryRecord,
       getData: () => Promise<Uint8Array>
     ) => Promise<boolean | void>,
-    options?: ExtractOptions | string | Uint8Array
+    options?: RemoteZipExtractOptions | string | Uint8Array
   ): Promise<void> {
-    for await (const { entry, getData } of this.entriesGenerator(options)) {
+    for await (const { entry, getData } of this.entriesGenerator(
+      this.normalizeExtractOptions(options)
+    )) {
       const shouldContinue = await callback(entry, getData);
       if (shouldContinue === false) {
         break;
@@ -884,14 +1041,21 @@ export class RemoteZipReader {
    * }
    * ```
    */
+  entriesGenerator(
+    options?: RemoteZipExtractOptions
+  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array<ArrayBuffer>> }>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  entriesGenerator(
+    password: string | Uint8Array
+  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array<ArrayBuffer>> }>;
   async *entriesGenerator(
-    options?: ExtractOptions | string | Uint8Array
-  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array> }> {
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): AsyncGenerator<{ entry: ZipEntryRecord; getData: () => Promise<Uint8Array<ArrayBuffer>> }> {
     const opts = this.normalizeExtractOptions(options);
 
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
-      let dataPromise: Promise<Uint8Array> | null = null;
+      let dataPromise: Promise<Uint8Array<ArrayBuffer>> | null = null;
       const getData = () => {
         if (!dataPromise) {
           dataPromise = this.extractEntry(entry, opts);
@@ -912,7 +1076,7 @@ export class RemoteZipReader {
    * @returns true if password is correct, false if incorrect, null if entry not found or not encrypted
    */
   async checkPassword(path: string, password: string | Uint8Array): Promise<boolean | null> {
-    const entry = this.entryMap.get(path);
+    const entry = this._lookup("checkPassword", path);
     if (!entry) {
       return null;
     }
@@ -993,12 +1157,23 @@ export class RemoteZipReader {
    * @param options - Extract options or password
    * @returns true if extraction succeeded, false if entry not found
    */
+  extractToStream(
+    path: string,
+    writable: WritableStream<Uint8Array>,
+    options?: RemoteZipExtractOptions
+  ): Promise<boolean>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  extractToStream(
+    path: string,
+    writable: WritableStream<Uint8Array>,
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<boolean>;
   async extractToStream(
     path: string,
     writable: WritableStream<Uint8Array>,
-    options?: ExtractOptions | string | Uint8Array
+    options?: RemoteZipExtractOptions | string | Uint8Array
   ): Promise<boolean> {
-    const entry = this.entryMap.get(path);
+    const entry = this._lookup("extractToStream", path);
     if (!entry) {
       return false;
     }
@@ -1019,7 +1194,7 @@ export class RemoteZipReader {
       return true;
     }
 
-    const checkCrc32 = opts.checkCrc32 ?? this.options.checkCrc32 ?? false;
+    const checkCrc32 = opts.checkCrc32 ?? this.options.checkCrc32 ?? true;
     const password = opts.password ?? this.options.password;
 
     const raw = this.getRawCompressedStream(entry, { signal });
@@ -1050,15 +1225,18 @@ export class RemoteZipReader {
    *
    * @param path - File path within the archive
    * @param options - Extract options (password if encrypted)
-   * @returns true if CRC32 matches, throws Crc32MismatchError if not, null if entry not found
+   * @returns true if CRC32 matches, throws ZipCrc32MismatchError if not, undefined if entry not found
    */
+  verifyCrc32(path: string, options?: RemoteZipExtractOptions): Promise<true | undefined>;
+  /** @deprecated Pass the password as `{ password }`. Removed in 1.0. */
+  verifyCrc32(path: string, password: string | Uint8Array): Promise<true | undefined>;
   async verifyCrc32(
     path: string,
-    options?: ExtractOptions | string | Uint8Array
-  ): Promise<boolean | null> {
-    const entry = this.entryMap.get(path);
+    options?: RemoteZipExtractOptions | string | Uint8Array
+  ): Promise<true | undefined> {
+    const entry = this._lookup("verifyCrc32", path);
     if (!entry) {
-      return null;
+      return undefined;
     }
 
     // AES-encrypted entries don't use CRC32
@@ -1071,7 +1249,7 @@ export class RemoteZipReader {
     const actualCrc = crc32(data);
 
     if (actualCrc !== entry.crc32) {
-      throw new Crc32MismatchError(entry.path, entry.crc32, actualCrc);
+      throw new ZipCrc32MismatchError(entry.path, entry.crc32, actualCrc);
     }
 
     return true;
@@ -1105,3 +1283,6 @@ export class RemoteZipReader {
     await this.reader.close?.();
   }
 }
+
+/** @deprecated Use {@link RemoteZipExtractOptions}. Removed in 1.0. */
+export type ExtractOptions = RemoteZipExtractOptions;

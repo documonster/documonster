@@ -6,11 +6,28 @@
  */
 
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { ArchiveError, FileTooLargeError, createAbortError } from "@archive/core/errors";
+import { checkReadOptions, TAR_READ_LIMITS } from "@archive/core/entry-checks";
+import {
+  ArchiveArgumentError,
+  ArchiveError,
+  ArchiveFileTooLargeError,
+  createAbortError
+} from "@archive/core/errors";
+import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
+import {
+  archiveBytesToUint8Array,
+  isArchiveBytes,
+  isArchiveSource,
+  isInMemoryArchiveSource,
+  iterateArchiveSource,
+  toUint8Array
+} from "@archive/io/archive-source";
 import { TAR_BLOCK_SIZE, TAR_TYPE } from "@archive/tar/tar-constants";
 import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
 import { decodeHeader, isZeroBlock, calculatePadding } from "@archive/tar/tar-header";
-import { textDecoder } from "@utils/binary";
+import { isReadableStream } from "@stream/core/type-guards";
+import { textDecoder, asPlainBytes } from "@utils/binary";
+import { describeValue as describeSource } from "@utils/describe-value";
 
 // Helper to strip trailing null characters without using control char regex
 const NULL_CHAR = String.fromCharCode(0);
@@ -54,33 +71,138 @@ function applyPaxAttributes(info: TarEntryInfo, pax: Record<string, string>): vo
 }
 
 export interface TarParseOptions {
-  /** Maximum file size to extract into memory (default: 100MB) */
+  /**
+   * Largest entry, in bytes, that may be read into memory (`ArchiveFileTooLargeError`). The same
+   * option as ZIP's `maxEntrySize`.
+   * @default 104857600 (100 MiB)
+   */
+  maxEntrySize?: number;
+
+  /** @deprecated Use {@link maxEntrySize}. Removed in 1.0. */
   maxFileSize?: number;
 
   /** Abort signal for cancellation */
   signal?: AbortSignal;
 }
 
+/** The largest entry a parse reads into memory: `maxEntrySize`, else the deprecated `maxFileSize`. */
+export function entrySizeLimit(options: {
+  readonly maxEntrySize?: number;
+  readonly maxFileSize?: number;
+}): number {
+  return options.maxEntrySize ?? options.maxFileSize ?? DEFAULT_MAX_TAR_ENTRY_SIZE;
+}
+
+const DEFAULT_MAX_TAR_ENTRY_SIZE = 100 * 1024 * 1024;
+
+/**
+ * One entry of {@link parseTar} / {@link parseTarStream} (and their tar.gz forms). Its reading
+ * methods carry the names `TarReaderEntry` and `UnzipEntry` use.
+ */
 export interface TarEntry {
   /** Entry metadata */
   info: TarEntryInfo;
 
-  /** Extract entry data as Uint8Array */
-  data(): Promise<Uint8Array>;
+  /** The entry's data. */
+  bytes(): Promise<Uint8Array>;
 
-  /** Extract entry data as string (UTF-8) */
+  /** The entry's data as a string (UTF-8). */
   text(): Promise<string>;
 
-  /** Skip this entry without reading data */
+  /**
+   * Let go of this entry without reading it. A parse reads each entry's data as it reaches
+   * it, so there is nothing left to skip; this exists so code written against
+   * `TarReaderEntry` / `UnzipEntry` works unchanged.
+   */
+  discard(): void;
+
+  /** @deprecated Use {@link TarEntry.bytes}. Removed in 1.0. */
+  data(): Promise<Uint8Array>;
+
+  /** @deprecated Use {@link TarEntry.discard}. Removed in 1.0. */
   skip(): Promise<void>;
 }
 
+/** One entry of {@link untar} / {@link untarSync} (and their tar.gz forms): its header and its data. */
+export interface UnpackedTarEntry {
+  info: TarEntryInfo;
+  data: Uint8Array<ArrayBuffer>;
+}
+
+/** A parsed entry over data already read. */
+function createTarEntry(info: TarEntryInfo, entryData: Uint8Array): TarEntry {
+  return {
+    info,
+    async bytes(): Promise<Uint8Array> {
+      return entryData;
+    },
+    async text(): Promise<string> {
+      return textDecoder.decode(entryData);
+    },
+    discard(): void {
+      // Data already read
+    },
+    async data(): Promise<Uint8Array> {
+      return entryData;
+    },
+    async skip(): Promise<void> {
+      // Data already read
+    }
+  };
+}
+
 /**
- * Parse TAR archive from Uint8Array
+ * Parse TAR archive from bytes in memory (any `ArrayBufferView` or an `ArrayBuffer`).
+ * Synchronous; the entries' readers return promises so they match `parseTarStream`'s. An
+ * archive cut short is an `ArchiveError`.
  */
-export function parseTar(data: Uint8Array, options: TarParseOptions = {}): TarEntry[] {
-  const { maxFileSize = 100 * 1024 * 1024 } = options;
-  const entries: TarEntry[] = [];
+export function parseTar(data: ArchiveBytes, options: TarParseOptions = {}): TarEntry[] {
+  if (!isArchiveBytes(data)) {
+    throw new ArchiveArgumentError(
+      "data",
+      `Archive.parseTar: data must be bytes (an ArrayBufferView or ArrayBuffer), got ${describeSource(data)}; ` +
+        "use Archive.parseTarStream, Archive.unpackTar or Archive.openTar for other sources"
+    );
+  }
+  checkReadOptions("Archive.parseTar", options, TAR_READ_LIMITS);
+  return parseTarBytes(archiveBytesToUint8Array(data), options);
+}
+
+function parseTarBytes(data: Uint8Array, options: TarParseOptions): TarEntry[] {
+  return parseTarRecords(data, options).map(({ info, start, end }) =>
+    createTarEntry(info, data.subarray(start, end))
+  );
+}
+
+/** One entry located by {@link parseTarRecords}: its header and the byte range of its data. */
+interface TarRecord {
+  info: TarEntryInfo;
+  start: number;
+  end: number;
+}
+
+/** A gzip stream starts 0x1f 0x8b; no TAR header does (that would be a control character name). */
+export function refuseGzipTar(firstBlock: Uint8Array): void {
+  if (firstBlock[0] === 0x1f && firstBlock[1] === 0x8b) {
+    throw new ArchiveError(
+      "TAR data is gzip-compressed; read it with unpackTarGz, parseTarGz or openTarGz"
+    );
+  }
+}
+
+/** Bytes left over after the last whole block: an error unless they are padding (all zero). */
+function refusePartialBlock(rest: Uint8Array): void {
+  if (rest.some(byte => byte !== 0)) {
+    throw new ArchiveError("Unexpected end of TAR archive inside a header");
+  }
+}
+
+/** Walk an in-memory TAR and locate every data entry, resolving GNU/PAX headers. */
+function parseTarRecords(data: Uint8Array, options: TarParseOptions): TarRecord[] {
+  const maxFileSize = entrySizeLimit(options);
+  const entries: TarRecord[] = [];
+  refuseGzipTar(data);
+  let ended = false;
 
   let offset = 0;
   let pendingLongName: string | undefined;
@@ -92,11 +214,13 @@ export function parseTar(data: Uint8Array, options: TarParseOptions = {}): TarEn
 
     // Check for end of archive (two zero blocks)
     if (isZeroBlock(headerBlock)) {
+      ended = true;
       break;
     }
 
     const info = decodeHeader(headerBlock);
     if (!info) {
+      ended = true;
       break;
     }
 
@@ -106,6 +230,12 @@ export function parseTar(data: Uint8Array, options: TarParseOptions = {}): TarEn
     const dataSize = info.size;
     const padding = calculatePadding(dataSize);
     const totalSize = dataSize + padding;
+
+    // A record whose data runs past the end is a truncated archive, as the streaming parser
+    // reports it — not an entry to return shortened.
+    if (offset + totalSize > data.length) {
+      throw new ArchiveError(`Unexpected end of TAR archive reading "${info.path}"`);
+    }
 
     // Handle special entry types
     if (info.type === TAR_TYPE.GNU_LONG_NAME) {
@@ -154,45 +284,54 @@ export function parseTar(data: Uint8Array, options: TarParseOptions = {}): TarEn
 
     // Check file size limit
     if (dataSize > maxFileSize) {
-      throw new FileTooLargeError(
+      throw new ArchiveFileTooLargeError(
         info.path,
-        `exceeds maximum file size (${dataSize} > ${maxFileSize})`
+        `exceeds maximum file size (${dataSize} > ${maxFileSize})`,
+        { allowed: maxFileSize }
       );
     }
 
-    // Capture data range for this entry
-    const dataStart = offset;
-    const dataEnd = offset + dataSize;
-
-    // Create entry object
-    const entry: TarEntry = {
-      info,
-      async data(): Promise<Uint8Array> {
-        return data.subarray(dataStart, dataEnd);
-      },
-      async text(): Promise<string> {
-        return textDecoder.decode(data.subarray(dataStart, dataEnd));
-      },
-      async skip(): Promise<void> {
-        // No-op for in-memory parsing
-      }
-    };
-
-    entries.push(entry);
+    entries.push({ info, start: offset, end: offset + dataSize });
     offset += totalSize;
   }
 
+  if (!ended) {
+    refusePartialBlock(data.subarray(offset));
+  }
   return entries;
 }
 
 /**
- * Parse TAR archive from async iterable (streaming)
+ * Parse TAR archive from any archive source, streaming: one entry is held at a time. The
+ * source and options are checked when this is called, before it is iterated.
+ *
+ * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
+ *   read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
  */
-export async function* parseTarStream(
-  source: AsyncIterable<Uint8Array>,
+export function parseTarStream(
+  source: ArchiveSource | ArchiveBytes,
   options: TarParseOptions = {}
-): AsyncGenerator<TarEntry & { data(): Promise<Uint8Array> }> {
-  const { maxFileSize = 100 * 1024 * 1024, signal } = options;
+): AsyncGenerator<TarEntry> {
+  if (!isArchiveSource(source)) {
+    throw new ArchiveArgumentError(
+      "source",
+      `Archive.parseTarStream: source must be an archive source (bytes, a string, a Blob, a ReadableStream or an async iterable), got ${describeSource(source)}`
+    );
+  }
+  checkReadOptions("Archive.parseTarStream", options, TAR_READ_LIMITS);
+  return readTarStream(source, options);
+}
+
+/**
+ * {@link parseTarStream} without its argument checks, for readers that checked their own.
+ * @internal
+ */
+export async function* readTarStream(
+  source: ArchiveSource | ArchiveBytes,
+  options: TarParseOptions
+): AsyncGenerator<TarEntry> {
+  const { signal } = options;
+  const maxFileSize = entrySizeLimit(options);
 
   // Buffer for accumulating data
   const buffer: Uint8Array[] = [];
@@ -207,7 +346,7 @@ export async function* parseTarStream(
 
   // Helper to read exactly n bytes from buffer
   async function* readFromSource(): AsyncGenerator<Uint8Array> {
-    for await (const chunk of source) {
+    for await (const chunk of iterateArchiveSource(source, { signal })) {
       if (signal?.aborted) {
         throw createAbortError();
       }
@@ -216,11 +355,13 @@ export async function* parseTarStream(
   }
 
   const sourceIterator = readFromSource();
+  let sourceEnded = false;
 
   async function ensureBuffer(needed: number): Promise<boolean> {
     while (bufferSize - bufferOffset < needed) {
       const { value, done } = await sourceIterator.next();
       if (done) {
+        sourceEnded = true;
         return false;
       }
       buffer.push(value);
@@ -284,110 +425,126 @@ export async function* parseTarStream(
     }
   }
 
-  // Main parsing loop
-  while (true) {
-    // Read header block
-    if (!(await ensureBuffer(TAR_BLOCK_SIZE))) {
-      break;
-    }
-
-    const headerBlock = readBytes(TAR_BLOCK_SIZE);
-
-    // Check for end of archive
-    if (isZeroBlock(headerBlock)) {
-      break;
-    }
-
-    const info = decodeHeader(headerBlock);
-    if (!info) {
-      break;
-    }
-
-    // Calculate sizes
-    const dataSize = info.size;
-    const padding = calculatePadding(dataSize);
-
-    // Handle special entry types
-    if (info.type === TAR_TYPE.GNU_LONG_NAME) {
-      if (!(await ensureBuffer(dataSize + padding))) {
-        throw new ArchiveError("Unexpected end of TAR archive in long name");
+  try {
+    // Main parsing loop
+    let first = true;
+    while (true) {
+      // Read header block
+      if (!(await ensureBuffer(TAR_BLOCK_SIZE))) {
+        if (bufferSize - bufferOffset > 0) {
+          refusePartialBlock(readBytes(bufferSize - bufferOffset));
+        }
+        break;
       }
-      const nameData = readBytes(dataSize);
-      if (padding > 0) {
-        skipBytes(padding);
-      }
-      pendingLongName = stripTrailingNulls(textDecoder.decode(nameData));
-      continue;
-    }
 
-    if (info.type === TAR_TYPE.GNU_LONG_LINK) {
-      if (!(await ensureBuffer(dataSize + padding))) {
-        throw new ArchiveError("Unexpected end of TAR archive in long link");
+      const headerBlock = readBytes(TAR_BLOCK_SIZE);
+      if (first) {
+        refuseGzipTar(headerBlock);
+        first = false;
       }
-      const linkData = readBytes(dataSize);
-      if (padding > 0) {
-        skipBytes(padding);
-      }
-      pendingLongLink = stripTrailingNulls(textDecoder.decode(linkData));
-      continue;
-    }
 
-    if (info.type === TAR_TYPE.PAX_EXTENDED || info.type === TAR_TYPE.PAX_GLOBAL) {
-      if (!(await ensureBuffer(dataSize + padding))) {
-        throw new ArchiveError("Unexpected end of TAR archive in PAX header");
+      // Check for end of archive
+      if (isZeroBlock(headerBlock)) {
+        break;
       }
-      const paxData = textDecoder.decode(readBytes(dataSize));
-      if (padding > 0) {
-        skipBytes(padding);
+
+      const info = decodeHeader(headerBlock);
+      if (!info) {
+        break;
       }
-      pendingPax = parsePaxHeader(paxData);
-      if (info.type === TAR_TYPE.PAX_GLOBAL) {
+
+      // Calculate sizes
+      const dataSize = info.size;
+      const padding = calculatePadding(dataSize);
+
+      // Handle special entry types
+      if (info.type === TAR_TYPE.GNU_LONG_NAME) {
+        if (!(await ensureBuffer(dataSize + padding))) {
+          throw new ArchiveError("Unexpected end of TAR archive in long name");
+        }
+        const nameData = readBytes(dataSize);
+        if (padding > 0) {
+          skipBytes(padding);
+        }
+        pendingLongName = stripTrailingNulls(textDecoder.decode(nameData));
+        continue;
+      }
+
+      if (info.type === TAR_TYPE.GNU_LONG_LINK) {
+        if (!(await ensureBuffer(dataSize + padding))) {
+          throw new ArchiveError("Unexpected end of TAR archive in long link");
+        }
+        const linkData = readBytes(dataSize);
+        if (padding > 0) {
+          skipBytes(padding);
+        }
+        pendingLongLink = stripTrailingNulls(textDecoder.decode(linkData));
+        continue;
+      }
+
+      if (info.type === TAR_TYPE.PAX_EXTENDED || info.type === TAR_TYPE.PAX_GLOBAL) {
+        if (!(await ensureBuffer(dataSize + padding))) {
+          throw new ArchiveError("Unexpected end of TAR archive in PAX header");
+        }
+        const paxData = textDecoder.decode(readBytes(dataSize));
+        if (padding > 0) {
+          skipBytes(padding);
+        }
+        pendingPax = parsePaxHeader(paxData);
+        if (info.type === TAR_TYPE.PAX_GLOBAL) {
+          pendingPax = undefined;
+        }
+        continue;
+      }
+
+      // Apply pending metadata
+      if (pendingLongName) {
+        info.path = pendingLongName;
+        pendingLongName = undefined;
+      }
+      if (pendingLongLink) {
+        info.linkname = pendingLongLink;
+        pendingLongLink = undefined;
+      }
+      if (pendingPax) {
+        applyPaxAttributes(info, pendingPax);
         pendingPax = undefined;
       }
-      continue;
-    }
 
-    // Apply pending metadata
-    if (pendingLongName) {
-      info.path = pendingLongName;
-      pendingLongName = undefined;
-    }
-    if (pendingLongLink) {
-      info.linkname = pendingLongLink;
-      pendingLongLink = undefined;
-    }
-    if (pendingPax) {
-      applyPaxAttributes(info, pendingPax);
-      pendingPax = undefined;
-    }
-
-    // Check file size limit
-    if (dataSize > maxFileSize) {
-      throw new FileTooLargeError(info.path, `exceeds maximum file size`);
-    }
-
-    // Read entry data
-    if (!(await ensureBuffer(dataSize + padding))) {
-      throw new ArchiveError(`Unexpected end of TAR archive reading "${info.path}"`);
-    }
-
-    const entryData = readBytes(dataSize);
-    if (padding > 0) {
-      skipBytes(padding);
-    }
-
-    yield {
-      info,
-      async data(): Promise<Uint8Array> {
-        return entryData;
-      },
-      async text(): Promise<string> {
-        return textDecoder.decode(entryData);
-      },
-      async skip(): Promise<void> {
-        // Data already read
+      // Check file size limit
+      if (dataSize > maxFileSize) {
+        throw new ArchiveFileTooLargeError(
+          info.path,
+          `exceeds maximum file size (${dataSize} > ${maxFileSize})`,
+          { allowed: maxFileSize }
+        );
       }
-    };
+
+      // Read entry data
+      if (!(await ensureBuffer(dataSize + padding))) {
+        throw new ArchiveError(`Unexpected end of TAR archive reading "${info.path}"`);
+      }
+
+      const entryData = readBytes(dataSize);
+      if (padding > 0) {
+        skipBytes(padding);
+      }
+
+      yield createTarEntry(info, entryData);
+    }
+  } finally {
+    // The parse owns its source, so leaving it before the source's end — the consumer stopped
+    // early, the archive ended before its trailing bytes, or it failed — lets go of the source
+    // the way a `for await` over it does. Returning the iterator destroys a Node stream and
+    // returns an async iterator, but only releases a Web stream's reader (`toAsyncIterable`
+    // hands a stream back unlocked), so a Web stream is then cancelled here, as ZIP and
+    // tar.gz cancel theirs. It used to be iterated directly, which cancelled it.
+    await sourceIterator.return(undefined);
+    if (!sourceEnded && isReadableStream(source)) {
+      await source.cancel().catch(() => {
+        // Already errored or cancelled: nothing left to let go of
+      });
+    }
   }
 }
 
@@ -429,30 +586,59 @@ function parsePaxHeader(data: string): Record<string, string> {
 }
 
 /**
- * Parse TAR archive and return all entries with their data
+ * Parse TAR archive and return all entries with their data. Takes any `ArchiveSource`, as
+ * `unpackTarGz` does. For bytes in memory each `data` is a view into them, not a copy (as
+ * with {@link untarSync}); copy it (`data.slice()`) before mutating either. A streamed
+ * source yields fresh buffers. An archive cut short is an `ArchiveError`.
+ *
+ * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
+ *   read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
  */
 export async function untar(
-  source: Uint8Array | AsyncIterable<Uint8Array>,
+  source: ArchiveSource | ArchiveBytes,
   options: TarParseOptions = {}
-): Promise<Map<string, { info: TarEntryInfo; data: Uint8Array }>> {
-  const result = new Map<string, { info: TarEntryInfo; data: Uint8Array }>();
-
-  if (source instanceof Uint8Array) {
-    const entries = parseTar(source, options);
-    for (const entry of entries) {
-      result.set(entry.info.path, {
-        info: entry.info,
-        data: await entry.data()
-      });
-    }
-  } else {
-    for await (const entry of parseTarStream(source, options)) {
-      result.set(entry.info.path, {
-        info: entry.info,
-        data: await entry.data()
-      });
-    }
+): Promise<Map<string, UnpackedTarEntry>> {
+  if (!isArchiveSource(source)) {
+    throw new ArchiveArgumentError(
+      "source",
+      `Archive.unpackTar: unsupported archive source (${describeSource(source)})`
+    );
   }
+  checkReadOptions("Archive.unpackTar", options, TAR_READ_LIMITS);
+  if (isInMemoryArchiveSource(source)) {
+    return untarSync(await toUint8Array(source), options);
+  }
+  const result = new Map<string, UnpackedTarEntry>();
+  for await (const entry of readTarStream(source, options)) {
+    result.set(entry.info.path, {
+      info: entry.info,
+      data: asPlainBytes(await entry.bytes())
+    });
+  }
+  return result;
+}
 
+/**
+ * Parse an in-memory TAR archive synchronously and return every entry with its data —
+ * the synchronous form of {@link untar} for a `Uint8Array` source. Each `data` is a view
+ * into `source`, not a copy (unless `source` is in a `SharedArrayBuffer`, which is copied — see `asPlainBytes`).
+ */
+export function untarSync(
+  source: ArchiveBytes,
+  options: Omit<TarParseOptions, "signal"> = {}
+): Map<string, UnpackedTarEntry> {
+  if (!isArchiveBytes(source)) {
+    throw new ArchiveArgumentError(
+      "source",
+      `Archive.unpackTarSync: source must be bytes (an ArrayBufferView or ArrayBuffer), got ${describeSource(source)}; ` +
+        "use Archive.unpackTar for other sources"
+    );
+  }
+  checkReadOptions("Archive.unpackTarSync", options, TAR_READ_LIMITS);
+  const bytes = archiveBytesToUint8Array(source);
+  const result = new Map<string, UnpackedTarEntry>();
+  for (const { info, start, end } of parseTarRecords(bytes, options)) {
+    result.set(info.path, { info, data: asPlainBytes(bytes.subarray(start, end)) });
+  }
   return result;
 }

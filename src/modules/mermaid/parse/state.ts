@@ -9,7 +9,7 @@
  */
 
 import { normaliseDirection } from "@mermaid/parse/flowchart";
-import { decodeLabel, splitStatements, unquote } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, splitStatementsAt, unquote } from "@mermaid/parse/lex";
 import type {
   FlowDirection,
   FlowSubgraph,
@@ -63,7 +63,15 @@ export function parseState(source: string, direction: FlowDirection): StateDiagr
     return touch(stripStereotype(text));
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  // Inside a multi-line `note … end note`, whose lines are the note's text.
+  let inNote = false;
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
+    if (inNote) {
+      inNote = !/^end\s+note$/i.test(text);
+      continue;
+    }
     if (/^stateDiagram(-v2)?\b/i.test(text)) {
       continue;
     }
@@ -86,16 +94,20 @@ export function parseState(source: string, direction: FlowDirection): StateDiagr
     if (composite) {
       const id = composite[2];
       touch(id);
-      open.push({
-        id,
-        text: composite[1] !== undefined ? decodeLabel(composite[1]) : id,
-        nodeIds: []
-      });
+      // Re-entered, not nested, when it is already open, and merged rather than refused: like the flowchart parser,
+      // this one is lenient with malformed groups (an unterminated composite is kept too).
+      open.push(
+        open.find(group => group.id === id) ?? {
+          id,
+          text: composite[1] !== undefined ? decodeLabel(composite[1]) : id,
+          nodeIds: []
+        }
+      );
       continue;
     }
     if (text === "}") {
       const group = open.pop();
-      if (group) {
+      if (group && !open.includes(group)) {
         const parent = open.at(-1);
         composites.push({
           id: group.id,
@@ -142,13 +154,34 @@ export function parseState(source: string, direction: FlowDirection): StateDiagr
       continue;
     }
 
-    if (/^(note|classDef|class|click|accTitle|accDescr)\b/i.test(text)) {
+    // A bare `Name` or `state Name` declares a state with no transitions.
+    const declared = /^(?:state\s+)?([A-Za-z0-9_][A-Za-z0-9_.-]*)$/i.exec(text);
+    if (declared) {
+      touch(declared[1]);
       continue;
     }
+
+    if (/^note\b/i.test(text)) {
+      // `note right of A : text` is one statement; without the colon the text follows on
+      // its own lines, up to `end note`.
+      inNote = !text.includes(":");
+      continue;
+    }
+    // `--` separates the concurrent regions of a composite, which are drawn as one.
+    if (
+      text === "--" ||
+      /^(classDef|class|style|click|accTitle|accDescr|hide|scale)\b/i.test(text)
+    ) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   while (open.length > 0) {
     const group = open.pop()!;
+    if (open.includes(group)) {
+      continue;
+    }
     const parent = open.at(-1);
     composites.push({
       id: group.id,
@@ -171,7 +204,8 @@ export function parseState(source: string, direction: FlowDirection): StateDiagr
     ...(title === undefined ? {} : { title }),
     states: list,
     transitions,
-    composites
+    composites,
+    ...skipped.report()
   };
 }
 

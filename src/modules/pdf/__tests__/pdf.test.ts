@@ -9,7 +9,7 @@ import { readPdf } from "@pdf/reader/pdf-reader";
  * Verifies correct results, event loop yielding between pages,
  * and roundtrip (write → read) integrity.
  */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 
 import { pdfToString, expectValidPdf } from "./test-helpers";
 
@@ -49,24 +49,47 @@ describe("readPdf", () => {
     await expect(readPdf(new Uint8Array([1, 2, 3]))).rejects.toThrow();
   });
 
-  it("should yield to event loop between pages", async () => {
-    // Generate a multi-page PDF
-    const rows: [string, number][] = [];
-    for (let i = 0; i < 200; i++) {
-      rows.push([`Row ${i}`, i]);
+  describe("yielding to the event loop", () => {
+    let bigPdf: Uint8Array;
+    beforeAll(async () => {
+      const rows: [string, number][] = [];
+      for (let i = 0; i < 200; i++) {
+        rows.push([`Row ${i}`, i]);
+      }
+      bigPdf = await pdf([["Name", "Value"], ...rows]);
+      expect((await readPdf(bigPdf)).pages.length).toBeGreaterThan(2);
+    });
+
+    /** Count the macrotasks that run during a read, with the clock advancing `step` ms per look. */
+    async function turnsDuringRead(step: number): Promise<number> {
+      let clock = 0;
+      const now = vi.spyOn(performance, "now").mockImplementation(() => (clock += step));
+      let turns = 0;
+      let reading = true;
+      const tick = (): void => {
+        if (reading) {
+          turns++;
+          setImmediate(tick);
+        }
+      };
+      setImmediate(tick);
+      try {
+        await readPdf(bigPdf);
+      } finally {
+        reading = false;
+        now.mockRestore();
+      }
+      return turns;
     }
-    const bigPdf = await pdf([["Name", "Value"], ...rows]);
 
-    let yielded = false;
-    const timer = setTimeout(() => {
-      yielded = true;
-    }, 0);
+    it("lets the event loop run once a page has used up the time budget", async () => {
+      // Every look at the clock finds 20 ms gone, so every page boundary yields.
+      expect(await turnsDuringRead(20)).toBeGreaterThan(0);
+    });
 
-    await readPdf(bigPdf);
-    clearTimeout(timer);
-
-    // readPdf should have allowed setTimeout(0) callbacks to run
-    expect(yielded).toBe(true);
+    it("does not yield between pages that fit in the budget", async () => {
+      expect(await turnsDuringRead(0)).toBe(0);
+    });
   });
 });
 

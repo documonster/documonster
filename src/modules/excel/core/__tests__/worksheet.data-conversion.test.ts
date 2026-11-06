@@ -104,7 +104,7 @@ describe("Worksheet", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       const result = addJSON(ws, []);
       expect(result).toBe(ws);
-      expect(Worksheet.rowCount(ws)).toBe(0);
+      expect(Row.getCount(ws)).toBe(0);
     });
   });
 
@@ -398,7 +398,7 @@ describe("Worksheet", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       const result = addAOA(ws, []);
       expect(result).toBe(ws);
-      expect(Worksheet.rowCount(ws)).toBe(0);
+      expect(Row.getCount(ws)).toBe(0);
     });
   });
 
@@ -471,7 +471,7 @@ describe("Worksheet", () => {
       const ws1 = addJSON(Workbook.addWorksheet(wb1, "Source"), [{ name: "Alice", age: 30 }]);
 
       const wb2 = Workbook.create();
-      Workbook.importSheet(wb2, ws1, "Imported");
+      Workbook.importWorksheet(wb2, ws1, "Imported");
 
       expect(getWorksheets(wb2)).toHaveLength(1);
       expect(getSheetName(getWorksheets(wb2)[0])).toBe("Imported");
@@ -484,7 +484,7 @@ describe("Worksheet", () => {
       const ws1 = addAOA(Workbook.addWorksheet(wb1, "OriginalName"), [["data"]]);
 
       const wb2 = Workbook.create();
-      Workbook.importSheet(wb2, ws1);
+      Workbook.importWorksheet(wb2, ws1);
 
       expect(getSheetName(getWorksheets(wb2)[0])).toBe("OriginalName");
     });
@@ -497,7 +497,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws1, "A1", "data");
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(Column.getWidth(ws2, 1)).toBe(20);
       expect(Column.getWidth(ws2, 2)).toBe(40);
@@ -510,7 +510,7 @@ describe("Worksheet", () => {
       Cell.setStyle(ws1, "A1", { font: { bold: true, size: 16 } });
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(Cell.getValue(ws2, "A1")).toBe("styled");
       expect(Cell.getStyle(ws2, "A1").font!.bold).toBe(true);
@@ -524,7 +524,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws1, "A1:C3");
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(getSheetModel(ws2).mergeCells).toContain("A1:C3");
       expect(Cell.getValue(ws2, "A1")).toBe("merged");
@@ -538,7 +538,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws1, "A1", "tall row");
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(Row.getHeight(ws2, 1)).toBe(30);
       expect(Row.getHeight(ws2, 2)).toBe(50);
@@ -553,7 +553,7 @@ describe("Worksheet", () => {
       });
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(cellDataValidation(getCell(ws2, "A1"))).toEqual({
         type: "list",
@@ -568,7 +568,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws1, "A1", "header");
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(ws2.views).toHaveLength(1);
       const view = ws2.views[0] as WorksheetViewFrozen;
@@ -584,7 +584,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws1, "A1", "data");
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(ws2.state).toBe("hidden");
     });
@@ -597,7 +597,7 @@ describe("Worksheet", () => {
       ws1.autoFilter = "A1:B1";
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(ws2.autoFilter).toBe("A1:B1");
     });
@@ -610,7 +610,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws1, "A1", "data");
 
       const wb2 = Workbook.create();
-      const ws2 = Workbook.importSheet(wb2, ws1);
+      const ws2 = Workbook.importWorksheet(wb2, ws1);
 
       expect(ws2.pageSetup.orientation).toBe("landscape");
       expect(ws2.headerFooter.oddHeader).toBe("Page &P");

@@ -8,10 +8,10 @@
  * `cryptographicStatus: "not-verified"`.
  *
  * Covers:
- *   - hasDigitalSignatures(opaquePaths)
- *   - extractSignatures(opaqueParts)
- *   - parseSignatureXml(xmlStr, fileName)
- *   - isWellFormedSignature(info)
+ *   - WordCrypto.hasSignatures(doc)
+ *   - WordCrypto.listSignatures(doc)
+ *   - WordCrypto.parseSignature(xmlStr, fileName)
+ *   - WordCrypto.isWellFormedSignature(info)
  *
  * Output: tmp/word-examples/45-signatures.txt
  */
@@ -19,15 +19,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  hasDigitalSignatures,
-  parseSignatureXml,
-  extractSignatures,
-  isWellFormedSignature
-} from "../crypto";
+import { WordCrypto } from "../crypto";
 import { Document } from "../index";
 import type { OpaquePart } from "../index";
-import { packageDocx } from "../writer/docx-packager";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -79,17 +73,17 @@ const signatureXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </Signature>`;
 
 // ---------------------------------------------------------------------------
-// 2. parseSignatureXml on the snippet
+// 2. WordCrypto.parseSignature on the snippet
 // ---------------------------------------------------------------------------
-const parsed = parseSignatureXml(signatureXml, "sig1.xml");
-log(`  parseSignatureXml:`);
+const parsed = WordCrypto.parseSignature(signatureXml, "sig1.xml");
+log(`  parseSignature:`);
 log(`    fileName:               ${parsed.fileName}`);
-log(`    signer:                 ${parsed.signer ?? "(none)"}`);
+log(`    claimedSigner:          ${parsed.claimedSigner ?? "(none)"}`);
 log(`    signatureComments:      ${parsed.signatureComments ?? "(none)"}`);
 log(`    purpose:                ${parsed.purpose ?? "(none)"}`);
 log(`    providerUrl:            ${parsed.providerUrl ?? "(none)"}`);
 log(`    cryptographicStatus:    ${parsed.cryptographicStatus}`);
-log(`    isWellFormedSignature:  ${isWellFormedSignature(parsed)}`);
+log(`    isWellFormedSignature:  ${WordCrypto.isWellFormedSignature(parsed)}`);
 
 // ---------------------------------------------------------------------------
 // 3. Build a docx whose opaque parts contain the signature, then verify the
@@ -99,7 +93,7 @@ const baseDoc = (() => {
   const dd = Document.create();
   Document.useDefaultStyles(dd);
   Document.addParagraph(dd, "Document with a (synthetic) digital signature.");
-  return Document.build(dd);
+  return dd;
 })();
 const sigPart: OpaquePart = {
   path: "_xmlsignatures/sig1.xml",
@@ -108,13 +102,14 @@ const sigPart: OpaquePart = {
 };
 const docWithSig = { ...baseDoc, opaqueParts: [sigPart] };
 
-const opaquePaths = (docWithSig.opaqueParts ?? []).map(p => p.path);
-log(`\n  hasDigitalSignatures:    ${hasDigitalSignatures(opaquePaths)}`);
+log(`\n  hasSignatures:           ${WordCrypto.hasSignatures(docWithSig)}`);
 
-const sigs = extractSignatures(docWithSig.opaqueParts);
-log(`  extractSignatures count: ${sigs.length}`);
+const sigs = WordCrypto.listSignatures(docWithSig);
+log(`  listSignatures count:    ${sigs.length}`);
 for (const s of sigs) {
-  log(`    - ${s.fileName}: signer=${s.signer ?? "(?)"}, well-formed=${isWellFormedSignature(s)}`);
+  log(
+    `    - ${s.fileName}: claimedSigner=${s.claimedSigner ?? "(?)"}, well-formed=${WordCrypto.isWellFormedSignature(s)}`
+  );
 }
 
 // The default security policy strips _xmlsignatures/* on every save (since
@@ -122,7 +117,7 @@ for (const s of sigs) {
 // demo we pass dropSignaturesOnModify:false so the signature stays in the
 // resulting DOCX — note the signature is no longer cryptographically valid,
 // only structurally present.
-const bytes = await packageDocx(docWithSig, {
+const bytes = await Document.toBuffer(docWithSig, {
   securityPolicy: { dropSignaturesOnModify: false }
 });
 fs.writeFileSync(path.join(outDir, "45-signed.docx"), bytes);
@@ -131,16 +126,16 @@ log(`\n  → 45-signed.docx (${bytes.length} bytes)`);
 // ---------------------------------------------------------------------------
 // 4. Edge case: a malformed signature (missing SignatureValue) is detected
 // ---------------------------------------------------------------------------
-const broken = parseSignatureXml(
+const broken = WordCrypto.parseSignature(
   `<?xml version="1.0"?><Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo/></Signature>`,
   "sig-broken.xml"
 );
-log(`  isWellFormedSignature(broken): ${isWellFormedSignature(broken)}`);
+log(`  isWellFormedSignature(broken): ${WordCrypto.isWellFormedSignature(broken)}`);
 
 // ---------------------------------------------------------------------------
-// 5. Edge case: extractSignatures on a doc without opaqueParts → []
+// 5. Edge case: a doc without opaque parts has no signatures
 // ---------------------------------------------------------------------------
-log(`  extractSignatures(undefined): ${extractSignatures(undefined).length}`);
+log(`  listSignatures(baseDoc): ${WordCrypto.listSignatures(baseDoc).length}`);
 
 fs.writeFileSync(path.join(outDir, "45-signatures.txt"), lines.join("\n"));
 console.log(`  → 45-signatures.txt`);

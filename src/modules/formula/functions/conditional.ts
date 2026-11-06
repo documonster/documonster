@@ -3,22 +3,14 @@
  */
 
 import {
-  asArray,
+  asArrayArg,
   excelWildcardToRegex,
   getCell,
   hasUnescapedWildcard,
   unescapeExcelWildcard
 } from "@formula/functions/_shared";
 import type { RuntimeValue, ScalarValue, ArrayValue, ErrorValue } from "@formula/runtime/values";
-import {
-  RVKind,
-  ERRORS,
-  rvNumber,
-  toStringRV,
-  topLeft,
-  isArray,
-  isError
-} from "@formula/runtime/values";
+import { RVKind, ERRORS, rvNumber, toStringRV, topLeft, isError } from "@formula/runtime/values";
 
 // ============================================================================
 // Criteria Predicate Builder (RuntimeValue version)
@@ -170,16 +162,24 @@ export function buildCriteriaPredicateRV(criteria: ScalarValue): (v: ScalarValue
 // ============================================================================
 
 export function fnSUMIF(args: RuntimeValue[]): RuntimeValue {
-  const rangeArr = asArray(args[0]);
-  if (!rangeArr) {
-    return ERRORS.VALUE;
+  const rangeArr = asArrayArg(args[0]);
+  if (isError(rangeArr)) {
+    return rangeArr;
   }
   const criteriaScalar = topLeft(args[1]);
   if (isError(criteriaScalar)) {
     return criteriaScalar;
   }
   const pred = buildCriteriaPredicateRV(criteriaScalar);
-  const sumArr = args.length > 2 ? (asArray(args[2]) ?? rangeArr) : rangeArr;
+  const sumArr = args.length > 2 ? asArrayArg(args[2]) : rangeArr;
+  if (isError(sumArr)) {
+    return sumArr;
+  }
+  // A sum range given as a reference has already been stretched to the criteria range's shape
+  // by the evaluator; one given as values cannot be, so it must be that shape.
+  if (sumArr.height !== rangeArr.height || sumArr.width !== rangeArr.width) {
+    return ERRORS.VALUE;
+  }
   let sum = 0;
   for (let r = 0; r < rangeArr.height; r++) {
     for (let c = 0; c < rangeArr.width; c++) {
@@ -227,9 +227,9 @@ function collectCriteriaPairs(
 ): { pairs: CriteriaPair[] } | { error: ErrorValue } {
   const pairs: CriteriaPair[] = [];
   for (let i = startIdx; i < args.length - 1; i += 2) {
-    const critRange = asArray(args[i]);
-    if (!critRange) {
-      return { error: ERRORS.VALUE };
+    const critRange = asArrayArg(args[i]);
+    if (isError(critRange)) {
+      return { error: critRange };
     }
     if (critRange.height !== target.height || critRange.width !== target.width) {
       return { error: ERRORS.VALUE };
@@ -274,8 +274,11 @@ function iterateMultiCriteria(
 }
 
 export function fnSUMIFS(args: RuntimeValue[]): RuntimeValue {
-  const sumArr = asArray(args[0]);
-  if (!sumArr || args.length < 3) {
+  const sumArr = asArrayArg(args[0]);
+  if (isError(sumArr)) {
+    return sumArr;
+  }
+  if (args.length < 3) {
     return ERRORS.VALUE;
   }
   const pairs = collectCriteriaPairs(args, 1, sumArr);
@@ -304,9 +307,9 @@ export function fnSUMIFS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnCOUNTIF(args: RuntimeValue[]): RuntimeValue {
-  const rangeArr = asArray(args[0]);
-  if (!rangeArr) {
-    return ERRORS.VALUE;
+  const rangeArr = asArrayArg(args[0]);
+  if (isError(rangeArr)) {
+    return rangeArr;
   }
   const cs = topLeft(args[1]);
   if (isError(cs)) {
@@ -325,13 +328,16 @@ export function fnCOUNTIF(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnCOUNTIFS(args: RuntimeValue[]): RuntimeValue {
-  if (args.length < 2 || !isArray(args[0])) {
+  if (args.length < 2) {
     return ERRORS.VALUE;
+  }
+  const target = asArrayArg(args[0]);
+  if (isError(target)) {
+    return target;
   }
   // The first range defines the target shape; every subsequent criteria
   // range must match. `collectCriteriaPairs` also validates args[0]
   // against itself (trivially passes) as a nice-to-have for consistency.
-  const target = args[0];
   const pairs = collectCriteriaPairs(args, 0, target);
   if ("error" in pairs) {
     return pairs.error;
@@ -344,16 +350,24 @@ export function fnCOUNTIFS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnAVERAGEIF(args: RuntimeValue[]): RuntimeValue {
-  const rangeArr = asArray(args[0]);
-  if (!rangeArr) {
-    return ERRORS.VALUE;
+  const rangeArr = asArrayArg(args[0]);
+  if (isError(rangeArr)) {
+    return rangeArr;
   }
   const cs = topLeft(args[1]);
   if (isError(cs)) {
     return cs;
   }
   const pred = buildCriteriaPredicateRV(cs);
-  const avgArr = args.length > 2 ? (asArray(args[2]) ?? rangeArr) : rangeArr;
+  const avgArr = args.length > 2 ? asArrayArg(args[2]) : rangeArr;
+  if (isError(avgArr)) {
+    return avgArr;
+  }
+  // An average range given as a reference has already been stretched to the criteria range's
+  // shape by the evaluator; one given as values cannot be, so it must be that shape.
+  if (avgArr.height !== rangeArr.height || avgArr.width !== rangeArr.width) {
+    return ERRORS.VALUE;
+  }
   let sum = 0;
   let count = 0;
   for (let r = 0; r < rangeArr.height; r++) {
@@ -375,8 +389,11 @@ export function fnAVERAGEIF(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnAVERAGEIFS(args: RuntimeValue[]): RuntimeValue {
-  const avgArr = asArray(args[0]);
-  if (!avgArr || args.length < 3) {
+  const avgArr = asArrayArg(args[0]);
+  if (isError(avgArr)) {
+    return avgArr;
+  }
+  if (args.length < 3) {
     return ERRORS.VALUE;
   }
   const pairs = collectCriteriaPairs(args, 1, avgArr);
@@ -407,8 +424,11 @@ export function fnAVERAGEIFS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnMAXIFS(args: RuntimeValue[]): RuntimeValue {
-  const maxArr = asArray(args[0]);
-  if (!maxArr || args.length < 3) {
+  const maxArr = asArrayArg(args[0]);
+  if (isError(maxArr)) {
+    return maxArr;
+  }
+  if (args.length < 3) {
     return ERRORS.VALUE;
   }
   const pairs = collectCriteriaPairs(args, 1, maxArr);
@@ -441,8 +461,11 @@ export function fnMAXIFS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnMINIFS(args: RuntimeValue[]): RuntimeValue {
-  const minArr = asArray(args[0]);
-  if (!minArr || args.length < 3) {
+  const minArr = asArrayArg(args[0]);
+  if (isError(minArr)) {
+    return minArr;
+  }
+  if (args.length < 3) {
     return ERRORS.VALUE;
   }
   const pairs = collectCriteriaPairs(args, 1, minArr);

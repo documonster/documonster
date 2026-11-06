@@ -2,7 +2,7 @@
  * Word Example 26 — Markdown ↔ DOCX
  *
  * Covers:
- *   - markdownToDocx — full GFM features (async):
+ *   - WordMarkdown.toDocx — full GFM features (async):
  *     · ATX & Setext headings, paragraphs, hard line breaks
  *     · Inline emphasis, strong, strike-through, code, links, images
  *     · Bullet, ordered and task lists (`- [ ]`, `- [x]`)
@@ -11,9 +11,9 @@
  *     · Footnotes (`[^id]` references with `[^id]: …` definitions)
  *     · Custom image resolver (sync or async) — supply image data for
  *       `![](url)` and the image is embedded into word/media/
- *   - markdownToDocxBody — same pipeline returning body + supporting
+ *   - WordMarkdown.toDocxBody — same pipeline returning body + supporting
  *     numbering / footnote / image definitions for splicing
- *   - renderToMarkdown — DOCX → GFM Markdown, choice of heading style
+ *   - WordMarkdown.fromDocx — DOCX → GFM Markdown, choice of heading style
  *
  * Output:
  *   - 26-md-imported.docx
@@ -23,8 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Io, Units } from "../index";
-import { markdownToDocx, markdownToDocxBody, renderToMarkdown } from "../markdown";
+import { Document, Units } from "../index";
+import { WordMarkdown } from "../markdown";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -120,7 +120,7 @@ const lines: string[] = [
 ];
 const md = lines.join("\n");
 
-const importedDoc = await markdownToDocx(md, {
+const importedDoc = await WordMarkdown.toDocx(md, {
   defaultFont: "Calibri",
   defaultFontSize: 22,
   resolveImage(url, alt) {
@@ -136,9 +136,9 @@ const importedDoc = await markdownToDocx(md, {
     return undefined;
   }
 });
-const buf = await Io.toBuffer(importedDoc);
+const buf = await Document.toBuffer(importedDoc);
 fs.writeFileSync(path.join(outDir, "26-md-imported.docx"), buf);
-console.log(`  markdownToDocx → ${importedDoc.body.length} body items, ${buf.length} bytes`);
+console.log(`  WordMarkdown.toDocx → ${importedDoc.body.length} body items, ${buf.length} bytes`);
 console.log(
   `  embedded images: ${importedDoc.images?.length ?? 0}, footnotes: ${importedDoc.footnotes?.length ?? 0}`
 );
@@ -148,8 +148,8 @@ console.log(`  → 26-md-imported.docx`);
 // 2. DOCX → Markdown round-trip (re-read the just-written DOCX so the
 //    pipeline goes Markdown → DOCX → file → DOCX → Markdown)
 // ---------------------------------------------------------------------------
-const reread = await Io.read(buf);
-const mdRoundtrip = renderToMarkdown(reread, {
+const reread = await Document.read(buf);
+const mdRoundtrip = WordMarkdown.fromDocx(reread, {
   headingStyle: "atx",
   includeImages: true,
   includeNotes: true
@@ -160,7 +160,7 @@ console.log(`  → 26-md-roundtrip.md (${mdRoundtrip.length} chars)`);
 // ---------------------------------------------------------------------------
 // 3. Setext heading style
 // ---------------------------------------------------------------------------
-const mdSetext = renderToMarkdown(reread, { headingStyle: "setext" });
+const mdSetext = WordMarkdown.fromDocx(reread, { headingStyle: "setext" });
 fs.writeFileSync(path.join(outDir, "26-md-setext.md"), mdSetext);
 console.log(`  → 26-md-setext.md`);
 
@@ -178,13 +178,13 @@ console.log(`  → 26-md-setext.md`);
     ["Header 1", "Header 2"],
     ["1", "2"]
   ]);
-  const md2 = renderToMarkdown(Document.build(d));
+  const md2 = WordMarkdown.fromDocx(d);
   fs.writeFileSync(path.join(outDir, "26-md-from-docx.md"), md2);
   console.log(`  → 26-md-from-docx.md`);
 }
 
 // ---------------------------------------------------------------------------
-// 5. markdownToDocxBody — same parser, returns body content PLUS the
+// 5. WordMarkdown.toDocxBody — same parser, returns body content PLUS the
 //    supporting numbering / footnote / image definitions it references.
 //    Useful when you want to splice Markdown content into an existing
 //    DOCX you've already built (templates, headers/footers, etc.) rather
@@ -208,7 +208,7 @@ console.log(`  → 26-md-setext.md`);
     "",
     "Final paragraph — end of fragment."
   ].join("\n");
-  const fragment = await markdownToDocxBody(fragmentMd);
+  const fragment = await WordMarkdown.toDocxBody(fragmentMd);
 
   const host = Document.create();
   Document.useDefaultStyles(host);
@@ -218,8 +218,10 @@ console.log(`  → 26-md-setext.md`);
     Document.addContent(host, item);
   }
   Document.addParagraph(host, "(End of imported fragment.)");
-  const buf3 = await Io.toBuffer(Document.build(host));
+  const buf3 = await Document.toBuffer(host);
   fs.writeFileSync(path.join(outDir, "26-md-fragment-spliced.docx"), buf3);
-  console.log(`  markdownToDocxBody → ${fragment.body.length} body items spliced into host doc`);
+  console.log(
+    `  WordMarkdown.toDocxBody → ${fragment.body.length} body items spliced into host doc`
+  );
   console.log(`  → 26-md-fragment-spliced.docx`);
 }

@@ -105,12 +105,12 @@ export function ensureDirSync(_dirPath: string): void {
   throw new Error(NOT_AVAILABLE);
 }
 
-export async function safeStats(_filePath: string): Promise<null> {
-  return null;
+export async function safeStats(_filePath: string): Promise<undefined> {
+  return undefined;
 }
 
-export function safeStatsSync(_filePath: string): null {
-  return null;
+export function safeStatsSync(_filePath: string): undefined {
+  return undefined;
 }
 
 export async function readFileBytes(_filePath: string): Promise<Uint8Array> {

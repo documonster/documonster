@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Row, Stream, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import type { CellErrorValue } from "@excel/types";
 
 import { Pdf } from "../index";
@@ -40,7 +40,7 @@ const wb = Workbook.create();
 // =============================================================================
 
 const wsAlign = Workbook.addWorksheet(wb, "Default Alignment");
-Worksheet.setColumns(wsAlign, [
+Column.setDefinitions(wsAlign, [
   { header: "Type", width: 15 },
   { header: "Value", width: 20 },
   { header: "Expected", width: 15 }
@@ -79,7 +79,7 @@ Cell.setValue(wsAlign, "C8", "CENTER");
 // =============================================================================
 
 const wsMerge = Workbook.addWorksheet(wb, "Merge Borders");
-Worksheet.setColumns(wsMerge, [{ width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }]);
+Column.setDefinitions(wsMerge, [{ width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }]);
 
 // 4-column merge with different colored border per edge
 Worksheet.merge(wsMerge, "A1:D3");
@@ -144,7 +144,7 @@ Cell.setStyle(wsMerge, "C5", {
 // =============================================================================
 
 const wsOverflow = Workbook.addWorksheet(wb, "Overflow & Wrap");
-Worksheet.setColumns(wsOverflow, [{ width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }]);
+Column.setDefinitions(wsOverflow, [{ width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }]);
 
 // Overflow into empty neighbors
 Cell.setValue(wsOverflow, "A1", "This text overflows into B1 and C1");
@@ -170,7 +170,7 @@ Cell.setStyle(wsOverflow, "A7", { alignment: { wrapText: true } });
 // =============================================================================
 
 const wsZero = Workbook.addWorksheet(wb, "Zero Formats");
-Worksheet.setColumns(wsZero, [
+Column.setDefinitions(wsZero, [
   { header: "Format", width: 30 },
   { header: "Value=0", width: 20 }
 ]);
@@ -187,8 +187,8 @@ const zeroFormats: [string, string][] = [
   ["0.0?", '"0.0 " (trailing space)']
 ];
 for (const [fmt, desc] of zeroFormats) {
-  const row = Worksheet.addRow(wsZero, [`${fmt}  →  ${desc}`, 0]);
-  Stream.setCellNumFmt(Stream.rowCell(row, 2), fmt);
+  const row = Row.add(wsZero, [`${fmt}  →  ${desc}`, 0]);
+  Cell.setNumFmt(wsZero, { row, col: 2 }, fmt);
 }
 
 // =============================================================================
@@ -250,9 +250,9 @@ const wbFit = Workbook.create();
 const wsFit = Workbook.addWorksheet(wbFit, "20 Columns");
 for (let c = 1; c <= 20; c++) {
   Column.setWidth(wsFit, c, 12);
-  Cell.setValue(wsFit, 1, c, `Col ${c}`);
-  Cell.setStyle(wsFit, 1, c, { font: { bold: true } });
-  Cell.setValue(wsFit, 2, c, c * 100);
+  Cell.setValue(wsFit, { row: 1, col: c }, `Col ${c}`);
+  Cell.setStyle(wsFit, { row: 1, col: c }, { font: { bold: true } });
+  Cell.setValue(wsFit, { row: 2, col: c }, c * 100);
 }
 const fitPdf = await Pdf.fromExcel(wbFit, {
   showGridLines: true,

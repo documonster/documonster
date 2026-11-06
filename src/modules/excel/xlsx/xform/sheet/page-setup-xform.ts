@@ -1,41 +1,32 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
+import { parseXsdBoolean, parseXsdIntOrText } from "@excel/xlsx/xform/xsd-values";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean): string | undefined {
   return model ? "1" : undefined;
 }
-function pageOrderToXml(model: string): string | undefined {
-  switch (model) {
-    case "overThenDown":
-      return model;
-    default:
-      return undefined;
-  }
+// Each of these omits the schema's default and writes anything else as it is: a value outside the vocabulary that
+// reaches here is one a reader kept as read (`withKeptSheetSettings`), since a caller's is refused before.
+function pageOrderToXml(model: string | undefined): string | undefined {
+  return model === "downThenOver" ? undefined : model;
 }
-function cellCommentsToXml(model: string): string | undefined {
+function cellCommentsToXml(model: string | undefined): string | undefined {
   switch (model) {
-    case "atEnd":
+    case "None":
+    case "none":
+      return undefined;
+    // ST_CellComments spells it `asDisplayed`. `asDisplyed` is how this library used to spell it, and it was written
+    // out as given — a value Excel repairs — while the correct spelling, which the reader returns, was dropped.
+    case "asDisplayed":
     case "asDisplyed":
-      return model;
+      return "asDisplayed";
     default:
-      return undefined;
+      return model;
   }
 }
-function errorsToXml(model: string): string | undefined {
-  switch (model) {
-    case "dash":
-    case "blank":
-    case "NA":
-      return model;
-    default:
-      return undefined;
-  }
+function errorsToXml(model: string | undefined): string | undefined {
+  return model === "displayed" ? undefined : model;
 }
-function pageSizeToModel(value: string): number | undefined {
-  return value !== undefined ? parseInt(value, 10) : undefined;
-}
-
 interface PageSetupModel {
   paperSize?: number;
   orientation?: string;
@@ -80,15 +71,12 @@ interface PageSetupModel {
  * explicitly — `examples/data/test.xlsx` is one, and it was the single remaining offender out of 221
  * `BrtPageSetup` records once the examples were regenerated. One rule, applied wherever the value comes from.
  */
-function parseDpi(value: string | undefined): number | undefined {
-  if (value === undefined) {
+function parseDpi(value: string | undefined): number | string | undefined {
+  // The sentinel is outside `xsd:int`, so it is recognised before the value is parsed as one.
+  if (value === undefined || value.trim() === String(DPI_UNSET)) {
     return undefined;
   }
-  const parsed = parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed === DPI_UNSET) {
-    return undefined;
-  }
-  return parsed;
+  return parseXsdIntOrText(value);
 }
 
 /** `0xFFFFFFFF` — what a file writes into a DPI attribute when nothing chose one. */
@@ -99,11 +87,15 @@ class PageSetupXform extends BaseXform {
     return "pageSetup";
   }
 
-  private _dpiToXml(value: number | undefined): number | undefined {
+  private _dpiToXml(value: number | string | undefined): number | string | undefined {
     // Excel commonly omits these attributes. 4294967295 is used as a sentinel default
     // when parsing missing values; it should never be serialized back out.
     if (value === undefined) {
       return undefined;
+    }
+    // Text a reader kept as read (`withKeptSheetSettings`).
+    if (typeof value === "string") {
+      return value;
     }
     if (!Number.isFinite(value)) {
       return undefined;
@@ -122,11 +114,11 @@ class PageSetupXform extends BaseXform {
         orientation: model.orientation,
         horizontalDpi: this._dpiToXml(model.horizontalDpi),
         verticalDpi: this._dpiToXml(model.verticalDpi),
-        pageOrder: pageOrderToXml(model.pageOrder!),
+        pageOrder: pageOrderToXml(model.pageOrder),
         blackAndWhite: booleanToXml(model.blackAndWhite!),
         draft: booleanToXml(model.draft!),
-        cellComments: cellCommentsToXml(model.cellComments!),
-        errors: errorsToXml(model.errors!),
+        cellComments: cellCommentsToXml(model.cellComments),
+        errors: errorsToXml(model.errors),
         // Only output non-default values (matches Excel behavior)
         scale: model.scale !== 100 ? model.scale : undefined,
         fitToWidth: model.fitToWidth !== 1 ? model.fitToWidth : undefined,
@@ -157,7 +149,8 @@ class PageSetupXform extends BaseXform {
     switch (node.name) {
       case this.tag:
         this.model = {
-          paperSize: pageSizeToModel(node.attributes.paperSize),
+          // A number that is not one keeps its text, for the reader to set aside (`sheet-settings-checks`).
+          paperSize: parseXsdIntOrText(node.attributes.paperSize),
           orientation: node.attributes.orientation ?? "portrait",
           // **Absent is `undefined`, not a sentinel.** These used to parse to 4294967295 when the attribute was
           // missing, and `_dpiToXml` below knew to strip that on the way back out — which made an XLSX round
@@ -172,16 +165,13 @@ class PageSetupXform extends BaseXform {
           draft: node.attributes.draft === "1",
           cellComments: node.attributes.cellComments ?? "None",
           errors: node.attributes.errors ?? "displayed",
-          scale: parseInt(node.attributes.scale ?? "100", 10),
-          fitToWidth: parseInt(node.attributes.fitToWidth ?? "1", 10),
-          fitToHeight: parseInt(node.attributes.fitToHeight ?? "1", 10),
-          firstPageNumber:
-            node.attributes.firstPageNumber !== undefined
-              ? parseInt(node.attributes.firstPageNumber, 10)
-              : undefined,
+          scale: parseXsdIntOrText(node.attributes.scale) ?? 100,
+          fitToWidth: parseXsdIntOrText(node.attributes.fitToWidth) ?? 1,
+          fitToHeight: parseXsdIntOrText(node.attributes.fitToHeight) ?? 1,
+          firstPageNumber: parseXsdIntOrText(node.attributes.firstPageNumber),
           useFirstPageNumber: parseXsdBoolean(node.attributes.useFirstPageNumber) ?? false,
           usePrinterDefaults: node.attributes.usePrinterDefaults === "1",
-          copies: parseInt(node.attributes.copies ?? "1", 10),
+          copies: parseXsdIntOrText(node.attributes.copies) ?? 1,
           rId: node.attributes["r:id"]
         };
         return true;

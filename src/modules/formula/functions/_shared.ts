@@ -15,7 +15,7 @@ import type {
   ErrorValue,
   ArrayValue
 } from "@formula/runtime/values";
-import { RVKind, BLANK, toNumberRV, topLeft } from "@formula/runtime/values";
+import { RVKind, BLANK, ERRORS, rvArray, toNumberRV, topLeft } from "@formula/runtime/values";
 
 // ============================================================================
 // Error propagation
@@ -181,6 +181,27 @@ export function firstError(values: readonly (NumberValue | ErrorValue)[]): Error
  */
 export function asArray(v: RuntimeValue): ArrayValue | null {
   return v.kind === RVKind.Array ? v : null;
+}
+
+/**
+ * An argument Excel reads as an array — a range, an array constant, or a function's array
+ * result — as an `ArrayValue`. A single value is a 1×1 array: a one-cell reference reaches a
+ * function as the cell's value (see `dereferenceValue`), and Excel treats it, like any
+ * scalar, as a one-element array (`SORT(A1)` is A1, `MATCH(5,A1,0)` is 1). A single error
+ * value is returned as the error, which the caller propagates (`SORT(NA())` is #N/A); a
+ * LAMBDA, or a reference left unresolved, is no array at all and is #VALUE!.
+ */
+export function asArrayArg(v: RuntimeValue): ArrayValue | ErrorValue {
+  switch (v.kind) {
+    case RVKind.Array:
+    case RVKind.Error:
+      return v;
+    case RVKind.Lambda:
+    case RVKind.Reference:
+      return ERRORS.VALUE;
+    default:
+      return rvArray([[v]]);
+  }
 }
 
 /**

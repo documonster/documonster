@@ -26,7 +26,7 @@ import type { XmlSink } from "@xml/types";
  *
  * Empty / nullish input falls back to the supplied default.
  */
-function normaliseCheckState(
+export function normaliseCheckState(
   input: string | undefined,
   fallback: string
 ): { hex: string; glyph: string } {

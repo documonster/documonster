@@ -3,12 +3,12 @@
  *
  * Covers the lower-level helper functions exported from the Csv namespace that
  * the higher-level parse/format examples never exercise directly:
- * - RowHashArray helpers: Csv.isRowHashArray, Csv.rowHashArrayToValues,
- *   Csv.rowHashArrayToHeaders, Csv.rowHashArrayMapByHeaders
+ * - RowHashArray helpers: Csv.isRowHashArray, Csv.getRowValues,
+ *   Csv.getRowHeaders, Csv.getRowValuesByHeaders
  * - Column / header helpers: Csv.processColumns, Csv.deduplicateHeaders,
  *   Csv.deduplicateHeadersWithRenames
  * - Standalone dynamic typing: Csv.applyDynamicTyping, Csv.applyDynamicTypingToRow
- * - Quoting wrappers / guard: Csv.quoted, Csv.unquoted, Csv.isFormattedValue
+ * - Quoting wrappers / guard: Csv.forceQuote, Csv.preventQuote, Csv.isFormattedValue
  *
  * These are demonstrated purely with console.log (input → output); they produce
  * no files.
@@ -37,27 +37,27 @@ console.log("isRowHashArray(objectRow):", Csv.isRowHashArray(objectRow)); // fal
 console.log("isRowHashArray([]):", Csv.isRowHashArray([])); // false (empty)
 
 // =============================================================================
-// 2. Csv.rowHashArrayToValues — extract values in order
+// 2. Csv.getRowValues — extract values in order
 // =============================================================================
 
-console.log("\n=== 2. Csv.rowHashArrayToValues ===");
-console.log("Values:", Csv.rowHashArrayToValues(hashRow)); // ["Alice", 30, "NYC"]
+console.log("\n=== 2. Csv.getRowValues ===");
+console.log("Values:", Csv.getRowValues(hashRow)); // ["Alice", 30, "NYC"]
 
 // =============================================================================
-// 3. Csv.rowHashArrayToHeaders — extract keys in order
+// 3. Csv.getRowHeaders — extract keys in order
 // =============================================================================
 
-console.log("\n=== 3. Csv.rowHashArrayToHeaders ===");
-console.log("Headers:", Csv.rowHashArrayToHeaders(hashRow)); // ["name", "age", "city"]
+console.log("\n=== 3. Csv.getRowHeaders ===");
+console.log("Headers:", Csv.getRowHeaders(hashRow)); // ["name", "age", "city"]
 
 // =============================================================================
-// 4. Csv.rowHashArrayMapByHeaders — reorder/pick values by header list
+// 4. Csv.getRowValuesByHeaders — reorder/pick values by header list
 // =============================================================================
 
-console.log("\n=== 4. Csv.rowHashArrayMapByHeaders ===");
+console.log("\n=== 4. Csv.getRowValuesByHeaders ===");
 
 // Reorder to a desired column order; missing keys become undefined.
-const reordered = Csv.rowHashArrayMapByHeaders(hashRow, ["city", "name", "missing"]);
+const reordered = Csv.getRowValuesByHeaders(hashRow, ["city", "name", "missing"]);
 console.log("Mapped by [city, name, missing]:", reordered); // ["NYC", "Alice", undefined]
 
 // =============================================================================
@@ -151,20 +151,20 @@ console.log("Typed (per-column):", rowSelective);
 // { id: "1", score: 98.5, label: "42" }
 
 // With castDate: ISO date strings become Date objects on listed columns.
-const rowDates = Csv.applyDynamicTypingToRow({ joined: "2024-03-01", note: "2024-03-01" }, true, [
-  "joined"
-]);
+const rowDates = Csv.applyDynamicTypingToRow({ joined: "2024-03-01", note: "2024-03-01" }, true, {
+  castDate: ["joined"]
+});
 console.log("joined is Date:", rowDates.joined instanceof Date); // true
 console.log("note stays string:", rowDates.note); // 2024-03-01 (string)
 
 // =============================================================================
-// 10. Csv.quoted / Csv.unquoted / Csv.isFormattedValue
+// 10. Csv.forceQuote / Csv.preventQuote / Csv.isFormattedValue
 // =============================================================================
 
 console.log("\n=== 10. quoted / unquoted / isFormattedValue ===");
 
-const forceQuoted = Csv.quoted("00123");
-const forceUnquoted = Csv.unquoted('="00123"');
+const forceQuoted = Csv.forceQuote("00123");
+const forceUnquoted = Csv.preventQuote('="00123"');
 
 console.log("quoted('00123'):", forceQuoted); // { value: "00123", quote: true, ... }
 console.log("unquoted('=\"00123\"'):", forceUnquoted); // { value: '="00123"', quote: false, ... }
@@ -187,10 +187,10 @@ const formatted = Csv.format(
     typeTransform: {
       string: (value, ctx) => {
         if (ctx.column === "code") {
-          return Csv.quoted(value); // always wrap in quotes
+          return Csv.forceQuote(value); // always wrap in quotes
         }
         if (ctx.column === "id") {
-          return Csv.unquoted(`="${value}"`); // raw Excel text formula
+          return Csv.preventQuote(`="${value}"`); // raw Excel text formula
         }
         return value;
       }

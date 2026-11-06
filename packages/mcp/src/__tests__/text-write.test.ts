@@ -417,9 +417,12 @@ describe("text_write → doc_write", () => {
     }
     await run(docWriteTool, fx, { path: "doc.pdf", from: "doc.md" });
 
-    const parsed = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, "doc.pdf"))), {
-      extractText: true
-    });
+    const parsed = await Pdf.extract(
+      new Uint8Array(await readFile(path.join(fx.root, "doc.pdf"))),
+      {
+        extractText: true
+      }
+    );
     const text = parsed.pages.map(page => page.text).join("\n");
     expect(parsed.pages.length).toBeGreaterThan(10);
     expect(text).toContain("Section 1");

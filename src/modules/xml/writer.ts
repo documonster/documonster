@@ -13,8 +13,11 @@ import {
   xmlEncodeAttr,
   validateXmlName,
   xmlValue,
-  encodeCData,
-  validateCommentText,
+  cdataMarkup,
+  rawMarkup,
+  commentMarkup,
+  serializeXmlAttributes,
+  checkNewAttributes,
   StdDocAttributes
 } from "@xml/encode";
 import { XmlWriteError } from "@xml/errors";
@@ -24,19 +27,6 @@ import type { XmlAttributes, XmlSink } from "@xml/types";
 // Internal Helpers
 // =============================================================================
 
-function pushAttributes(parts: string[], attributes?: XmlAttributes): void {
-  if (!attributes) {
-    return;
-  }
-  for (const key in attributes) {
-    const value = attributes[key];
-    if (value !== undefined) {
-      validateXmlName(key);
-      parts.push(` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`);
-    }
-  }
-}
-
 // =============================================================================
 // Rollback Snapshot
 // =============================================================================
@@ -44,9 +34,14 @@ function pushAttributes(parts: string[], attributes?: XmlAttributes): void {
 interface Snapshot {
   partsLength: number;
   chunksLength: number;
-  stackLength: number;
+  /**
+   * The open elements, copied: an element closed after `snapshot()` has left the stack, so
+   * restoring only its length brought back a hole where the name was.
+   */
+  stack: string[];
   leaf: boolean;
   open: boolean;
+  openTagStart: number;
 }
 
 // =============================================================================
@@ -58,7 +53,7 @@ interface Snapshot {
  *
  * @example
  * ```ts
- * const w = new XmlWriter();
+ * const w = new Xml.Writer();
  * w.openXml();
  * w.openNode("root", { version: "1.0" });
  * w.leafNode("child", { id: "1" }, "text");
@@ -71,10 +66,14 @@ interface Snapshot {
 class XmlWriter implements XmlSink {
   private _parts: string[] = [];
   private _chunks: string[] = [];
+  /** How many parts were joined into `_chunks`, so `cursor` keeps counting them. */
+  private _consolidatedParts = 0;
   private _stack: string[] = [];
   private _snapshots: Snapshot[] = [];
   private _leaf = false;
   private _open = false;
+  /** Index in `_parts` where the open element's start tag begins. */
+  private _openTagStart = 0;
 
   /** Periodically consolidate small strings to reduce final join overhead. */
   private _consolidate(): void {
@@ -84,8 +83,14 @@ class XmlWriter implements XmlSink {
     }
     if (this._parts.length >= 10000) {
       this._chunks.push(this._parts.join(""));
+      this._consolidatedParts += this._parts.length;
       this._parts.length = 0;
     }
+  }
+
+  /** The open element's start tag so far: its name and every attribute written to it. */
+  private _openTag(): string {
+    return this._parts.slice(this._openTagStart).join("");
   }
 
   // ===========================================================================
@@ -103,41 +108,38 @@ class XmlWriter implements XmlSink {
   }
 
   /**
-   * Monotonic cursor that tracks how much content has been written.
-   * Useful for detecting whether a section produced any output.
+   * A position that grows with every write and moves back only on {@link rollback}.
+   * Compare it before and after a section to learn whether the section wrote anything.
    */
   get cursor(): number {
-    return this._chunks.length * 10000 + this._parts.length;
+    return this._consolidatedParts + this._parts.length;
   }
 
   // ===========================================================================
   // XmlSink Implementation
   // ===========================================================================
 
+  /**
+   * Write the XML declaration. XML allows it only at the very start of a document, so it is
+   * refused once anything has been written, including an earlier declaration.
+   */
   openXml(attributes?: XmlAttributes): void {
+    if (this.cursor > 0) {
+      throw new XmlWriteError("open xml", "the XML declaration must come first in the document");
+    }
     const merged = attributes ? { ...StdDocAttributes, ...attributes } : StdDocAttributes;
-    this._parts.push("<?xml");
-    pushAttributes(this._parts, merged);
-    this._parts.push("?>\n");
+    this._parts.push(`<?xml${serializeXmlAttributes(merged)}?>\n`);
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
     validateXmlName(name);
+    // Build the complete open tag first, so a refused attribute leaves the writer unchanged.
+    const s = "<" + name + serializeXmlAttributes(attributes);
     if (this._open) {
       this._parts.push(">");
     }
     this._stack.push(name);
-    // Build complete open tag as single string — reduces array push overhead
-    let s = "<" + name;
-    if (attributes) {
-      for (const key in attributes) {
-        const value = attributes[key];
-        if (value !== undefined) {
-          validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
-        }
-      }
-    }
+    this._openTagStart = this._parts.length;
     this._parts.push(s);
     this._leaf = true;
     this._open = true;
@@ -148,51 +150,56 @@ class XmlWriter implements XmlSink {
       throw new XmlWriteError("add attribute", "no element is open");
     }
     validateXmlName(name);
-    this._parts.push(` ${name}="${xmlEncodeAttr(xmlValue(value, name))}"`);
+    checkNewAttributes(this.currentElement, this._openTag(), { [name]: value }, () => "name");
+    this._parts.push(` ${name}="${xmlEncodeAttr(xmlValue(value, name, "value"))}"`);
   }
 
   addAttributes(attributes: XmlAttributes): void {
     if (!this._open) {
       throw new XmlWriteError("add attributes", "no element is open");
     }
-    pushAttributes(this._parts, attributes);
+    checkNewAttributes(this.currentElement, this._openTag(), attributes);
+    this._parts.push(serializeXmlAttributes(attributes));
   }
 
   writeText(text: string | number): void {
+    const encoded = xmlEncode(xmlValue(text, "#text"));
     if (this._open) {
       this._parts.push(">");
       this._open = false;
     }
     this._leaf = false;
-    this._parts.push(xmlEncode(xmlValue(text, "#text")));
+    this._parts.push(encoded);
   }
 
   writeRaw(xml: string): void {
+    const markup = rawMarkup(xml);
     if (this._open) {
       this._parts.push(">");
       this._open = false;
     }
     this._leaf = false;
-    this._parts.push(xml);
+    this._parts.push(markup);
   }
 
   writeCData(text: string): void {
+    const markup = cdataMarkup(text);
     if (this._open) {
       this._parts.push(">");
       this._open = false;
     }
     this._leaf = false;
-    this._parts.push(encodeCData(text));
+    this._parts.push(markup);
   }
 
   writeComment(text: string): void {
+    const markup = commentMarkup(text);
     if (this._open) {
       this._parts.push(">");
       this._open = false;
     }
     this._leaf = false;
-    validateCommentText(text);
-    this._parts.push(`<!--${text}-->`);
+    this._parts.push(markup);
   }
 
   closeNode(): void {
@@ -212,25 +219,16 @@ class XmlWriter implements XmlSink {
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
     validateXmlName(name);
-    if (this._open) {
-      this._parts.push(">");
-      this._open = false;
-    }
-    // Build complete leaf element as single string — reduces 3-7 pushes to 1
-    let s = "<" + name;
-    if (attributes) {
-      for (const key in attributes) {
-        const value = attributes[key];
-        if (value !== undefined) {
-          validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
-        }
-      }
-    }
+    // Build the complete leaf element as one string before touching any state.
+    let s = "<" + name + serializeXmlAttributes(attributes);
     if (text !== undefined) {
       s += ">" + xmlEncode(xmlValue(text, "#text")) + "</" + name + ">";
     } else {
       s += "/>";
+    }
+    if (this._open) {
+      this._parts.push(">");
+      this._open = false;
     }
     this._parts.push(s);
     this._leaf = false;
@@ -255,7 +253,7 @@ class XmlWriter implements XmlSink {
     return this._chunks.join("") + this._parts.join("");
   }
 
-  /** Alias for toString(). */
+  /** @deprecated Use {@link toString}. Removed in 1.0. */
   get xml(): string {
     return this.toString();
   }
@@ -265,19 +263,26 @@ class XmlWriter implements XmlSink {
   // ===========================================================================
 
   /**
-   * Save a snapshot of the current writer state.
-   * Call {@link commit} to discard the snapshot or {@link rollback} to restore it.
+   * Take a snapshot of the current writer state.
+   * Call {@link commit} to keep what was written since and drop the snapshot, or
+   * {@link rollback} to return to it — as `Streams.ChunkedBuilder` marks, keeps and undoes.
    *
    * Snapshots can be nested.
    */
-  save(): void {
+  snapshot(): void {
     this._snapshots.push({
       partsLength: this._parts.length,
       chunksLength: this._chunks.length,
-      stackLength: this._stack.length,
+      stack: this._stack.slice(),
       leaf: this._leaf,
-      open: this._open
+      open: this._open,
+      openTagStart: this._openTagStart
     });
+  }
+
+  /** @deprecated Use {@link snapshot}. Removed in 1.0. */
+  save(): void {
+    this.snapshot();
   }
 
   /** Discard the most recent snapshot (keep current state). */
@@ -288,7 +293,7 @@ class XmlWriter implements XmlSink {
     this._snapshots.pop();
   }
 
-  /** Restore to the most recent snapshot (discard changes since save). */
+  /** Restore to the most recent snapshot (discard changes since {@link snapshot}). */
   rollback(): void {
     if (this._snapshots.length === 0) {
       throw new XmlWriteError("rollback", "no snapshot to rollback");
@@ -296,9 +301,10 @@ class XmlWriter implements XmlSink {
     const snap = this._snapshots.pop()!;
     this._parts.length = snap.partsLength;
     this._chunks.length = snap.chunksLength;
-    this._stack.length = snap.stackLength;
+    this._stack = snap.stack;
     this._leaf = snap.leaf;
     this._open = snap.open;
+    this._openTagStart = snap.openTagStart;
   }
 
   // ===========================================================================
@@ -309,10 +315,12 @@ class XmlWriter implements XmlSink {
   reset(): void {
     this._parts = [];
     this._chunks = [];
+    this._consolidatedParts = 0;
     this._stack = [];
     this._snapshots = [];
     this._leaf = false;
     this._open = false;
+    this._openTagStart = 0;
   }
 }
 

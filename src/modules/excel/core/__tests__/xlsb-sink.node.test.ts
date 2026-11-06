@@ -3,7 +3,7 @@
  *
  * `Workbook.writeStream(wb, sink, { format: "xlsb" })` used to resolve when the *producer* was done, not when
  * the sink was. For a file that meant the central directory could still be in flight, so a caller that read the
- * file immediately got `EocdNotFoundError` on a package that had been written perfectly — a race that passes on
+ * file immediately got `ZipEocdNotFoundError` on a package that had been written perfectly — a race that passes on
  * a fast machine and fails on a loaded one.
  *
  * ## Why the fix is here and not in the zip adapter

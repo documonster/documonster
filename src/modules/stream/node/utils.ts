@@ -2,11 +2,18 @@
  * Node.js Stream - utilities
  */
 
-import { Duplex, Readable, Transform, Writable, duplexPair as nodeDuplexPair } from "stream";
+import {
+  Duplex,
+  Readable,
+  Transform,
+  Writable,
+  duplexPair as nodeDuplexPair,
+  isReadable as nodeIsReadable,
+  isWritable as nodeIsWritable
+} from "stream";
 
 import { createAddAbortSignal } from "@stream/core/add-abort-signal";
 import { createConsumers } from "@stream/core/consumers";
-import { streamToString, streamToUint8Array } from "@stream/core/stream-helpers";
 import { createIsDuplex, createIsStream, createIsTransform } from "@stream/core/type-guards";
 import { finished, pipeline } from "@stream/node/pipeline";
 import type {
@@ -20,12 +27,28 @@ import type {
 export {
   drainStream,
   isDisturbed,
-  isReadable,
-  isWritable,
   streamToBuffer,
   streamToString,
   streamToUint8Array
 } from "@stream/core/stream-helpers";
+
+/**
+ * `true` for a stream that can still be read from — `node:stream`'s answer, Web
+ * `ReadableStream`s included. A type guard, so a value that is not a stream is `false`
+ * where Node's returns `null`.
+ */
+export function isReadable(stream: unknown): stream is ReadableLike {
+  return nodeIsReadable(stream as Readable) === true;
+}
+
+/**
+ * `true` for a stream that can still be written to — `node:stream`'s answer, Web
+ * `WritableStream`s included. A type guard, so a value that is not a stream is `false`
+ * where Node's returns `null`.
+ */
+export function isWritable(stream: unknown): stream is WritableLike {
+  return nodeIsWritable(stream as Writable) === true;
+}
 
 /** Resolve when a stream has finished. */
 export const streamToPromise = finished;
@@ -59,6 +82,8 @@ export function duplexPair<T = unknown>(
   return nodeDuplexPair(options) as unknown as [IDuplex<T, T>, IDuplex<T, T>];
 }
 
-export const consumers = createConsumers({ streamToUint8Array, streamToString });
+export const consumers = createConsumers({
+  toBuffer: bytes => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+});
 
 export const promises = { pipeline, finished };

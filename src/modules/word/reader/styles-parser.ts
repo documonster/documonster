@@ -10,10 +10,17 @@ import type { Mutable } from "@word/core/internal-utils";
 import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
 import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
-import { parseRunProperties, parseShading } from "@word/reader/properties-parsers";
+import {
+  namespacesInScope,
+  preservedRootXml,
+  unmodelledChildren,
+  wordLocalName
+} from "@word/reader/preserved-xml";
+import { parseRowHeight, parseRunProperties, parseShading } from "@word/reader/properties-parsers";
 import { parseTableBorders, parseTableProperties } from "@word/reader/table-properties-parsers";
 import type {
   DocDefaults,
+  PreservedXml,
   StyleDef,
   TableCellProperties,
   TableRowProperties,
@@ -23,9 +30,10 @@ import type {
 export function parseStyles(
   xmlStr: string,
   maxDepth?: number
-): { docDefaults?: DocDefaults; styles: StyleDef[] } {
+): { docDefaults?: DocDefaults; styles: StyleDef[]; preservedXml?: PreservedXml } {
   const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
+  const rootScope = namespacesInScope({}, root);
   let docDefaults: DocDefaults | undefined;
   const styles: StyleDef[] = [];
 
@@ -104,6 +112,14 @@ export function parseStyles(
     if (pPrEl) {
       s.paragraphProperties = parseParagraphProperties(pPrEl);
     }
+    // Earlier versions of this writer put `w:outlineLvl` directly under
+    // `w:style`, where the schema has no place for it: read it as the
+    // paragraph property it is.
+    const misplacedOutline = findChildNs(styleEl, "outlineLvl");
+    const misplacedLevel = misplacedOutline ? attrInt(misplacedOutline, "val") : undefined;
+    if (misplacedLevel !== undefined && s.paragraphProperties?.outlineLevel === undefined) {
+      s.paragraphProperties = { ...s.paragraphProperties, outlineLevel: misplacedLevel };
+    }
 
     const rPrEl = findChildNs(styleEl, "rPr");
     if (rPrEl) {
@@ -141,10 +157,7 @@ export function parseStyles(
           const rp: Mutable<TableRowProperties> = {};
           const hEl = findChildNs(ctrPr, "trHeight");
           if (hEl) {
-            rp.height = {
-              value: attrInt(hEl, "val") ?? 0,
-              rule: attrVal(hEl, "hRule") as NonNullable<TableRowProperties["height"]>["rule"]
-            };
+            rp.height = parseRowHeight(hEl);
           }
           cond.rowProperties = rp;
         }
@@ -166,8 +179,41 @@ export function parseStyles(
       s.tableStyleConditions = conditions;
     }
 
+    const preservedXml = unmodelledChildren(styleEl, rootScope, child => {
+      const local = wordLocalName(child);
+      return local !== undefined && MODELLED_STYLE_CHILDREN.has(local);
+    });
+    if (preservedXml.length > 0) {
+      s.preservedXml = preservedXml;
+    }
+
     styles.push(s);
   }
 
-  return { docDefaults, styles };
+  const preservedXml = preservedRootXml(root, child => {
+    const local = wordLocalName(child);
+    return local === "docDefaults" || local === "style";
+  });
+  return { docDefaults, styles, ...(preservedXml ? { preservedXml } : {}) };
 }
+
+/** The `w:style` children read into the model; the writer writes them back. */
+const MODELLED_STYLE_CHILDREN = new Set([
+  "name",
+  "basedOn",
+  "next",
+  "link",
+  "autoRedefine",
+  "hidden",
+  "uiPriority",
+  "semiHidden",
+  "unhideWhenUsed",
+  "qFormat",
+  "locked",
+  "pPr",
+  "rPr",
+  "tblPr",
+  "tblStylePr",
+  // Misplaced by earlier versions of this writer; read into `w:pPr`.
+  "outlineLvl"
+]);

@@ -6,7 +6,7 @@
  *
  * Migrated from the excel module's parse-sax.ts into the standalone XML module.
  * Enhancements over the original:
- * - Uses @xml/types for event types (SaxTag, SaxEvent, SaxHandlers)
+ * - Uses @xml/types for event types (XmlSaxTag, XmlSaxEvent, XmlSaxHandlers)
  * - Uses @xml/errors for parse errors (XmlParseError)
  * - Exposes CDATA, comment, and processing-instruction event handlers
  * - Provides both callback API and async-generator API
@@ -15,9 +15,17 @@
  */
 
 import { toError } from "@utils/errors";
-import { XmlParseError } from "@xml/errors";
+import { check, s } from "@utils/schema";
+import { checkSaxOptions, xmlArgument } from "@xml/arguments";
+import { XmlArgumentError, XmlLimitExceededError, XmlParseError } from "@xml/errors";
 import type { XmlParseLimit } from "@xml/errors";
-import type { InvalidCharHandling, SaxEvent, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
+import type {
+  XmlInvalidCharHandling,
+  XmlSaxEvent,
+  XmlSaxHandlers,
+  XmlSaxOptions,
+  XmlSaxTag
+} from "@xml/types";
 
 // =============================================================================
 // Character Codes
@@ -163,6 +171,25 @@ function isChar10(c: number): boolean {
 // Built-in XML Entities
 // =============================================================================
 
+const SAX_EVENTS: ReadonlySet<string> = new Set([
+  "opentag",
+  "text",
+  "closetag",
+  "cdata",
+  "comment",
+  "pi",
+  "error"
+]);
+
+function checkEventName(method: string, name: unknown): void {
+  if (typeof name !== "string" || !SAX_EVENTS.has(name)) {
+    throw new XmlArgumentError(
+      "name",
+      `Xml.SaxParser#${method}: unknown event ${JSON.stringify(name)}; expected one of ${[...SAX_EVENTS].join(", ")}`
+    );
+  }
+}
+
 const XML_ENTITIES: Record<string, string> = {
   amp: "&",
   gt: ">",
@@ -230,7 +257,7 @@ class SaxParser {
   private xmlns: boolean;
   private maxDepth: number;
   private maxEntityExpansions: number;
-  private invalidCharHandling: InvalidCharHandling;
+  private invalidCharHandling: XmlInvalidCharHandling;
 
   // Security counters
   private _entityExpansionCount: number = 0;
@@ -246,8 +273,8 @@ class SaxParser {
   private text: string = "";
   private name: string = "";
   private q: number | null = null;
-  private tags: SaxTag[] = [];
-  private tag: SaxTag | null = null;
+  private tags: XmlSaxTag[] = [];
+  private tag: XmlSaxTag | null = null;
   /** Names repeated on the tag being opened, reported when it opens — `null` until the first one. */
   private duplicateAttributes: string[] | null = null;
   private entity: string = "";
@@ -262,18 +289,47 @@ class SaxParser {
   private reportedTextAfterRoot: boolean = false;
 
   // Position tracking
+  /** 1-based line of the parser's current position (when `position` is on). */
   line: number = 1;
+  /** 0-based column of the parser's current position (when `position` is on). */
   column: number = 0;
   private positionAtNewLine: number = 0;
   private chunkPosition: number = 0;
 
-  // Entity storage
+  /**
+   * Named entities this parser expands: the five XML predefines them (`lt`, `gt`, `amp`,
+   * `quot`, `apos`). Add to it before writing to define more — entities declared in a
+   * DOCTYPE internal subset are not read. Expansions of entities other than the five count
+   * against `maxEntityExpansions`.
+   */
   ENTITIES: Record<string, string> = { ...XML_ENTITIES };
+  /**
+   * Whether the document's DOCTYPE carried an internal subset. Its declarations are skipped, not read — an entity
+   * declared there is not defined here — so an undefined entity says why rather than looking like a typo.
+   */
+  private sawInternalSubset = false;
 
   // Event handlers
-  private _handlers: SaxHandlers = {};
+  private _handlers: XmlSaxHandlers = {};
 
-  constructor(options?: SaxOptions) {
+  /**
+   * Whether to keep `prefixedAttributes`. Off unless a consumer asks, so a parse that does not need it pays one
+   * field test per attribute.
+   *
+   * @internal
+   */
+  countPrefixedAttributes = false;
+  /**
+   * How many attribute names with a prefix (`a:b`, `xmlns:a`) have been read while `countPrefixedAttributes` is
+   * set. A consumer compares it across an `opentag` to learn whether that tag has one without enumerating its
+   * attributes — the namespace-prefix normaliser, which would otherwise search the text for them.
+   *
+   * @internal
+   */
+  prefixedAttributes = 0;
+
+  constructor(options?: XmlSaxOptions) {
+    checkSaxOptions("Xml.SaxParser", options);
     this.trackPosition = options?.position !== false;
     this.fileName = options?.fileName;
     this.fragment = options?.fragment ?? false;
@@ -285,10 +341,12 @@ class SaxParser {
     this._init();
   }
 
+  /** Whether {@link close} has ended the document. A later {@link write} starts a new one. */
   get closed(): boolean {
     return this._closed;
   }
 
+  /** Characters consumed so far, counted across every chunk written. */
   get position(): number {
     return this.chunkPosition + this.i;
   }
@@ -326,29 +384,44 @@ class SaxParser {
         ]
       : [];
     this._entityExpansionCount = 0;
+    this.sawInternalSubset = false;
   }
 
   // ===========================================================================
   // Event Registration
   // ===========================================================================
 
-  on(name: "opentag", handler: (tag: SaxTag) => void): void;
+  /**
+   * Set the handler for an event. Each event has **one** handler: a second `on` for the same
+   * event replaces the first (it does not add a listener, as `EventEmitter.on` would).
+   * Without an `error` handler, the first error is thrown out of {@link write} / {@link close}.
+   */
+  on(name: "opentag", handler: (tag: XmlSaxTag) => void): void;
   on(name: "text", handler: (text: string) => void): void;
-  on(name: "closetag", handler: (tag: SaxTag) => void): void;
+  on(name: "closetag", handler: (tag: XmlSaxTag) => void): void;
   on(name: "cdata", handler: (text: string) => void): void;
   on(name: "comment", handler: (text: string) => void): void;
   on(name: "pi", handler: (target: string, body: string) => void): void;
   on(name: "error", handler: (err: Error) => void): void;
-  on<K extends keyof SaxHandlers>(name: K, handler: SaxHandlers[K]): void {
+  on<K extends keyof XmlSaxHandlers>(name: K, handler: XmlSaxHandlers[K]): void {
+    checkEventName("on", name);
+    if (typeof handler !== "function") {
+      throw new XmlArgumentError(
+        "handler",
+        `Xml.SaxParser#on: the ${String(name)} handler must be a function`
+      );
+    }
     this._handlers[name] = handler;
   }
 
-  off(name: keyof SaxHandlers): void {
+  /** Remove the handler for an event. */
+  off(name: keyof XmlSaxHandlers): void {
+    checkEventName("off", name);
     delete this._handlers[name];
   }
 
   /** Return the currently-registered handler for an event, if any. */
-  getHandler<K extends keyof SaxHandlers>(name: K): SaxHandlers[K] {
+  getHandler<K extends keyof XmlSaxHandlers>(name: K): XmlSaxHandlers[K] {
     return this._handlers[name];
   }
 
@@ -357,14 +430,23 @@ class SaxParser {
   // ===========================================================================
 
   private makeError(message: string, limit?: XmlParseLimit): XmlParseError {
-    return new XmlParseError(message, {
+    const context = {
       line: this.trackPosition ? this.line : undefined,
       column: this.trackPosition ? this.column : undefined,
-      fileName: this.fileName,
-      limit
-    });
+      fileName: this.fileName
+    };
+    if (limit !== undefined) {
+      const allowed = limit === "depth" ? this.maxDepth : this.maxEntityExpansions;
+      return new XmlLimitExceededError(message, limit, allowed, context);
+    }
+    return new XmlParseError(message, context);
   }
 
+  /**
+   * Report a parse error at the current position: to the `error` handler if one is set,
+   * otherwise by throwing it. For a consumer that validates content as it is parsed and wants
+   * its own errors to carry the parser's position.
+   */
   fail(message: string, limit?: XmlParseLimit): this {
     const err = this.makeError(message, limit);
     if (this._handlers.error) {
@@ -379,7 +461,17 @@ class SaxParser {
   // Main Write Method
   // ===========================================================================
 
+  /**
+   * Parse the next chunk of the document; `null` ends it, like {@link close}. Writing after
+   * the document has been closed starts a new document.
+   */
   write(chunk: string | null): this {
+    if (chunk !== null && typeof chunk !== "string") {
+      throw new XmlArgumentError(
+        "chunk",
+        `Xml.SaxParser#write: chunk must be a string or null, got ${typeof chunk} (decode bytes first, or use Xml.feedSax)`
+      );
+    }
     // Auto-reset for parser reuse: if previously closed, start fresh.
     if (this._closed) {
       if (chunk === null) {
@@ -430,6 +522,7 @@ class SaxParser {
     return end ? this.end() : this;
   }
 
+  /** End the document: report anything left unclosed and flush the last text. */
   close(): this {
     return this.write(null);
   }
@@ -1754,6 +1847,7 @@ class SaxParser {
       this.q = c;
       this.state = S_DOCTYPE_QUOTE;
     } else if (c === OPEN_BRACKET) {
+      this.sawInternalSubset = true;
       this.state = S_DOCTYPE_DTD;
     } else {
       this.text += charFromCode(c);
@@ -1867,7 +1961,13 @@ class SaxParser {
         }
         return resolved;
       }
-      this.fail("undefined entity: " + entity);
+      this.fail(
+        "undefined entity: " +
+          entity +
+          (this.sawInternalSubset
+            ? " (entities declared in a DOCTYPE internal subset are not supported)"
+            : "")
+      );
       return "&" + entity + ";";
     }
 
@@ -1932,7 +2032,7 @@ class SaxParser {
   }
 
   /** Extract xmlns declarations from tag attributes and populate tag namespace fields. */
-  private applyNamespaces(tag: SaxTag): void {
+  private applyNamespaces(tag: XmlSaxTag): void {
     const XML_NS = "http://www.w3.org/XML/1998/namespace";
     const XMLNS_NS = "http://www.w3.org/2000/xmlns/";
 
@@ -2031,6 +2131,10 @@ class SaxParser {
    * positions are unchanged. Only a tag that has one pays for the list.
    */
   private addAttribute(name: string, value: string): void {
+    // `a:b` is the shortest prefixed name; most of a worksheet's (`r`, `s`, `t`) are not looked into.
+    if (this.countPrefixedAttributes && name.length > 2 && name.indexOf(":") !== -1) {
+      this.prefixedAttributes++;
+    }
     const attributes = this.tag!.attributes;
     if (name in attributes) {
       (this.duplicateAttributes ??= []).push(name);
@@ -2163,10 +2267,34 @@ class SaxParser {
 // Async Generator - parseSax
 // =============================================================================
 
+function checkChunkSource(where: string, iterable: unknown): void {
+  if (
+    typeof iterable !== "object" ||
+    iterable === null ||
+    (typeof (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] !==
+      "function" &&
+      typeof (iterable as { [Symbol.iterator]?: unknown })[Symbol.iterator] !== "function")
+  ) {
+    throw new XmlArgumentError(
+      "iterable",
+      `${where}: iterable must be an iterable or async iterable of string or byte chunks`
+    );
+  }
+}
+
+/** Decode UTF-8 bytes, reporting malformed input as an {@link XmlParseError}. */
+function decodeUtf8(decoder: TextDecoder, chunk: Uint8Array | undefined, stream: boolean): string {
+  try {
+    return decoder.decode(chunk, { stream });
+  } catch (cause) {
+    throw new XmlParseError("the input is not valid UTF-8", undefined, { cause });
+  }
+}
+
 /**
  * Parse an async-iterable of XML chunks as a stream of SAX event batches.
  *
- * Yields an array of {@link SaxEvent} per input chunk. This is the
+ * Yields an array of {@link XmlSaxEvent} per input chunk. This is the
  * primary integration point for streaming XML parsing.
  *
  * @param iterable - Async iterable of string or Uint8Array chunks.
@@ -2174,17 +2302,29 @@ class SaxParser {
  *
  * @example
  * ```ts
- * for await (const events of parseSax(stream)) {
+ * for await (const events of Xml.parseSaxStream(stream)) {
  *   for (const event of events) {
  *     if (event.eventType === "opentag") console.log(event.value.name);
  *   }
  * }
  * ```
  */
-async function* parseSax(
+function parseSax(
   iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
-  options?: SaxOptions
-): AsyncGenerator<SaxEvent[]> {
+  options?: XmlSaxOptions
+): AsyncGenerator<XmlSaxEvent[], void, undefined> {
+  // Checked when called, not on the first `next()` a generator body would wait for, and under
+  // the call the caller made rather than the `Xml.SaxParser` it builds.
+  checkChunkSource("Xml.parseSaxStream", iterable);
+  checkSaxOptions("Xml.parseSaxStream", options);
+  return saxEvents(iterable, options);
+}
+
+/** {@link parseSax} once its arguments are checked. */
+async function* saxEvents(
+  iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
+  options?: XmlSaxOptions
+): AsyncGenerator<XmlSaxEvent[], void, undefined> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new SaxParser(options);
 
@@ -2193,7 +2333,7 @@ async function* parseSax(
     error = err;
   });
 
-  let events: SaxEvent[] = [];
+  let events: XmlSaxEvent[] = [];
   parser.on("opentag", value => events.push({ eventType: "opentag", value }));
   parser.on("text", value => events.push({ eventType: "text", value }));
   parser.on("closetag", value => events.push({ eventType: "closetag", value }));
@@ -2202,7 +2342,7 @@ async function* parseSax(
   parser.on("pi", (target, body) => events.push({ eventType: "pi", value: { target, body } }));
 
   for await (const chunk of iterable) {
-    const chunkStr = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+    const chunkStr = typeof chunk === "string" ? chunk : decodeUtf8(decoder, chunk, true);
     parser.write(chunkStr);
     if (error) {
       throw toError(error);
@@ -2215,7 +2355,7 @@ async function* parseSax(
 
   // Flush any trailing bytes from the streaming decoder
   if (typeof iterable !== "string") {
-    const trailing = decoder.decode();
+    const trailing = decodeUtf8(decoder, undefined, false);
     if (trailing) {
       parser.write(trailing);
     }
@@ -2234,6 +2374,8 @@ async function* parseSax(
 // Direct SAX Stream - saxStream
 // =============================================================================
 
+const saxParserSchema = s.custom(v => v instanceof SaxParser, "an Xml.SaxParser");
+
 /**
  * High-performance direct SAX streaming: feed an async-iterable to a
  * pre-configured SaxParser **without** creating intermediate event objects.
@@ -2248,17 +2390,19 @@ async function* parseSax(
  *
  * @example
  * ```ts
- * const parser = new SaxParser();
+ * const parser = new Xml.SaxParser();
  * parser.on("opentag", tag => handleOpen(tag));
  * parser.on("text", text => handleText(text));
  * parser.on("closetag", tag => handleClose(tag));
- * await saxStream(parser, stream);
+ * await Xml.feedSax(parser, stream);
  * ```
  */
 async function saxStream(
   parser: SaxParser,
   iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>
 ): Promise<void> {
+  check(saxParserSchema, parser, xmlArgument("Xml.feedSax", "parser"));
+  checkChunkSource("Xml.feedSax", iterable);
   const decoder = new TextDecoder("utf-8", { fatal: true });
 
   let error: Error | undefined;
@@ -2269,7 +2413,7 @@ async function saxStream(
   });
 
   for await (const chunk of iterable) {
-    const chunkStr = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+    const chunkStr = typeof chunk === "string" ? chunk : decodeUtf8(decoder, chunk, true);
     parser.write(chunkStr);
     if (error) {
       throw toError(error);
@@ -2277,7 +2421,7 @@ async function saxStream(
   }
 
   // Flush any trailing bytes from the streaming decoder
-  const trailing = decoder.decode();
+  const trailing = decodeUtf8(decoder, undefined, false);
   if (trailing) {
     parser.write(trailing);
   }

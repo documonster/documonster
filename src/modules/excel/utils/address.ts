@@ -8,6 +8,7 @@
  */
 
 import { colCache } from "@excel/utils/col-cache";
+import { quoteSheetName as quoteSheetNameShared } from "@utils/sheet-name";
 
 // =============================================================================
 // Types
@@ -161,12 +162,9 @@ export function encodeRange(startOrRange: CellAddress | SheetRange, end?: CellAd
  * @example quoteSheetName("My Sheet") // "'My Sheet'"
  * @example quoteSheetName("It's Fine") // "'It''s Fine'"
  * @example quoteSheetName("2023 Data") // "'2023 Data'" (leading digit → quoted)
+ * @example quoteSheetName("A1") // "'A1'" (reads as a cell reference → quoted)
  */
 export function quoteSheetName(sheetName: string): string {
-  // Leading digit forces quoting even with an otherwise clean name —
-  // Excel would otherwise parse `2023Data!A1` as a numeric literal.
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(sheetName)) {
-    return `'${sheetName.replace(/'/g, "''")}'`;
-  }
-  return sheetName;
+  // The rule lives in @utils/sheet-name, shared with the formula printer.
+  return quoteSheetNameShared(sheetName);
 }

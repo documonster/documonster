@@ -5,6 +5,32 @@ import { describe, it, expect } from "vitest";
 
 const expectations = [
   {
+    // An expression bound stays text. `parseInt` made `A1` and `$B$1+1` into `NaN`, so the constraint was lost on
+    // read — Excel writes such bounds whenever a validation compares against a cell.
+    title: "whole type bounded by expressions",
+    create: () => new DataValidationsXform(),
+    preparedModel: {
+      A1: {
+        type: "whole",
+        operator: "between",
+        allowBlank: true,
+        formulae: ["A1", "$B$1+1"]
+      }
+    },
+    get parsedModel() {
+      return this.preparedModel;
+    },
+    xml: `
+      <dataValidations count="1">
+        <dataValidation type="whole" allowBlank="1" sqref="A1">
+          <formula1>A1</formula1>
+          <formula2>$B$1+1</formula2>
+        </dataValidation>
+      </dataValidations>
+    `,
+    tests: ["parse"]
+  },
+  {
     title: "list type",
     create: () => new DataValidationsXform(),
     preparedModel: {

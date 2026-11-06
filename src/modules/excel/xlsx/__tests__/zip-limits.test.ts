@@ -1,17 +1,28 @@
 /**
- * Container limits the XLSX reader applies by default (`XlsxReadOptions.zip`).
+ * Container limits the XLSX reader applies by default (`XlsxReadOptions.zip`). A limit hit is an
+ * `ExcelLimitExceededError` naming the option, with the archive's error as its cause.
  */
 
-import { ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveLimitExceededError } from "@archive/core/errors";
 import { extractAll } from "@archive/unzip/extract";
 import { createZipSync } from "@archive/zip/zip-bytes";
-import { Cell, Workbook } from "@excel";
+import { Cell, ExcelLimitExceededError, Workbook, isExcelError } from "@excel";
 import { describe, expect, it } from "vitest";
 
 async function sampleXlsx(): Promise<Uint8Array> {
   const handle = Workbook.create();
-  Cell.setValue(Workbook.addWorksheet(handle, "S"), 1, 1, 1);
+  Cell.setValue(Workbook.addWorksheet(handle, "S"), { row: 1, col: 1 }, 1);
   return new Uint8Array(await Workbook.toBuffer(handle, { format: "xlsx" }));
+}
+
+function expectLimit(err: unknown, limit: string, allowed?: number): void {
+  expect(err).toBeInstanceOf(ExcelLimitExceededError);
+  expect(isExcelError(err)).toBe(true);
+  expect((err as ExcelLimitExceededError).limit).toBe(limit);
+  if (allowed !== undefined) {
+    expect((err as ExcelLimitExceededError).allowed).toBe(allowed);
+  }
+  expect((err as Error).cause).toBeInstanceOf(ArchiveLimitExceededError);
 }
 
 describe("xlsx container limits", () => {
@@ -20,8 +31,7 @@ describe("xlsx container limits", () => {
     const err = await Workbook.read(Workbook.create(), bytes, { zip: { maxEntries: 3 } }).catch(
       e => e
     );
-    expect(err).toBeInstanceOf(ArchiveLimitError);
-    expect((err as ArchiveLimitError).limit).toBe("maxEntries");
+    expectLimit(err, "maxEntries", 3);
   });
 
   it("rejects a package with more than 10,000 parts by default, and Infinity lifts it", async () => {
@@ -33,8 +43,7 @@ describe("xlsx container limits", () => {
     const padded = createZipSync(entries, { level: 0 });
 
     const err = await Workbook.read(Workbook.create(), padded).catch(e => e);
-    expect(err).toBeInstanceOf(ArchiveLimitError);
-    expect((err as ArchiveLimitError).allowed).toBe(10_000);
+    expectLimit(err, "maxEntries", 10_000);
 
     const wb = Workbook.create();
     await Workbook.read(wb, padded, { zip: { maxEntries: Infinity } });
@@ -45,7 +54,6 @@ describe("xlsx container limits", () => {
     const err = await Workbook.read(Workbook.create(), await sampleXlsx(), {
       zip: { maxTotalUncompressedSize: 100 }
     }).catch(e => e);
-    expect(err).toBeInstanceOf(ArchiveLimitError);
-    expect((err as ArchiveLimitError).limit).toBe("maxTotalUncompressedSize");
+    expectLimit(err, "maxTotalUncompressedSize", 100);
   });
 });

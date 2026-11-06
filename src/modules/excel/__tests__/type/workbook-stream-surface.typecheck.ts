@@ -3,15 +3,16 @@
 // It pins the public shape of the workbook stream surface: `toStream` must hand
 // back the platform's own readable byte stream (async-iterable, pipeline-
 // compatible, and on Node a nominal `stream.Readable`), `toBuffer` must promise
-// the `Buffer` it really returns, and `writeStream` must accept any duck-typed
+// a `Uint8Array` that Node sinks take as it is, and `writeStream` must accept any duck-typed
 // sink while returning a bare promise.
 
 import { createWriteStream } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline as nodePipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
-import { createCsvReadStream } from "@excel/bridge/csv.node";
+import { ExcelCsv } from "@excel/bridge/csv.node";
 import { Workbook } from "@excel/index";
 import type { IReadable } from "@stream";
 import { pipeline, Writable } from "@stream";
@@ -48,21 +49,23 @@ const nodeReadable: Readable = Workbook.toStream(wb);
 // returns (it is not the DOM `ReadableStream`).
 const webBody: NodeReadableStream = Readable.toWeb(Workbook.toStream(wb));
 
-// The Node entry must promise the `Buffer` it actually returns, so callers never
-// reach for a defensive (copying) `Buffer.from(...)`.
-declare function wantsBuffer(b: Buffer): void;
+// `toBuffer` resolves to a `Uint8Array` on Node as everywhere; it is not a `Buffer`,
+// and what Node's own sinks take it as is the point.
+declare function wantsBytes(b: Uint8Array): void;
 export async function bufferSurface(): Promise<void> {
-  const bytes: Buffer = await Workbook.toBuffer(wb);
-  wantsBuffer(await Workbook.toBuffer(wb));
-  void bytes;
+  const bytes: Uint8Array = await Workbook.toBuffer(wb);
+  wantsBytes(await Workbook.toBuffer(wb));
+  // @ts-expect-error a Buffer-only method is not promised
+  void bytes.readUInt32LE(0);
+  await writeFile("report.xlsx", bytes);
 }
 
-// `createCsvReadStream` is a byte stream, like `toStream` — chunks must be bytes,
+// `ExcelCsv.toStream` is a byte stream, like `toStream` — chunks must be bytes,
 // and a `string` element type must not typecheck.
 export async function csvIsBytes(): Promise<void> {
-  const csv: IReadable<Uint8Array> = createCsvReadStream(wb);
-  const nodeCsv: Readable = createCsvReadStream(wb);
-  const webCsv: NodeReadableStream = Readable.toWeb(createCsvReadStream(wb));
+  const csv: IReadable<Uint8Array> = ExcelCsv.toStream(wb);
+  const nodeCsv: Readable = ExcelCsv.toStream(wb);
+  const webCsv: NodeReadableStream = Readable.toWeb(ExcelCsv.toStream(wb));
   for await (const chunk of csv) {
     const bytes: Uint8Array = chunk;
     // @ts-expect-error a CSV chunk is bytes, never a string
@@ -78,7 +81,7 @@ export async function csvIsBytes(): Promise<void> {
 // underlying Transform must stay off the public type: writing to it would inject
 // rows into the output.
 export function csvIsReadOnly(): void {
-  const csv = createCsvReadStream(wb);
+  const csv = ExcelCsv.toStream(wb);
   // @ts-expect-error a CSV read stream must not expose the formatter's `write`
   csv.write(["injected", "row"]);
   // @ts-expect-error a CSV read stream must not expose the formatter's `end`

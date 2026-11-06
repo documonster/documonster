@@ -3,16 +3,16 @@
  */
 
 import {
+  asArrayArg,
   excelWildcardToRegex,
   getCell,
   hasUnescapedWildcard,
   unescapeExcelWildcard
 } from "@formula/functions/_shared";
-import type { RuntimeValue, ScalarValue, ArrayValue } from "@formula/runtime/values";
+import type { RuntimeValue, ScalarValue, ArrayValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
-  BLANK,
   rvNumber,
   rvString,
   rvArray,
@@ -73,72 +73,74 @@ export function fnCOLUMNS(args: RuntimeValue[]): RuntimeValue {
   return rvNumber(1);
 }
 
-export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
-  if (!isArray(args[0])) {
-    return topLeft(args[0]);
+/**
+ * The cells `INDEX(array, row_num, [column_num])` selects from a `height` × `width` source, as
+ * 0-based inclusive offsets — shared by the array form (which returns values) and the evaluator's
+ * reference form (which returns a reference to them). `whole` when both indexes are 0 (or
+ * omitted), which selects the source itself.
+ */
+export function selectIndexArea(
+  height: number,
+  width: number,
+  rowArg: RuntimeValue | undefined,
+  colArg: RuntimeValue | undefined
+): { top: number; left: number; bottom: number; right: number; whole: boolean } | ErrorValue {
+  // One row and no column_num: the one index counts along the row, as Microsoft documents
+  // ("If array contains only one row or column, the corresponding row_num or column_num
+  // argument is optional") — `INDEX({1,2},2)` is 2 and `INDEX(A1:C1,2)` is B1. A column
+  // works this way already, its index being the row.
+  if (height === 1 && width > 1 && rowArg !== undefined && colArg === undefined) {
+    return selectIndexArea(height, width, rvNumber(1), rowArg);
   }
-  const arr = args[0] as ArrayValue;
-  const rowNumV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
+  const rowNumV = rowArg !== undefined ? toNumberRV(topLeft(rowArg)) : rvNumber(0);
   if (isError(rowNumV)) {
     return rowNumV;
   }
   // Excel truncates fractional indices toward zero before bounds checks.
-  // Without this, `INDEX(a, 1.5, 1)` would index into `arr.rows[0.5]`, which
-  // in V8 silently returns `undefined` and corrupts downstream values.
   const rowNum = Math.trunc(rowNumV.value);
-  const colNumV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(0);
+  const colNumV = colArg !== undefined ? toNumberRV(topLeft(colArg)) : rvNumber(0);
   if (isError(colNumV)) {
     return colNumV;
   }
   const colNum = Math.trunc(colNumV.value);
-
   if (rowNum < 0 || colNum < 0) {
     return ERRORS.VALUE;
   }
-
-  if (rowNum === 0 && colNum === 0) {
-    return arr;
-  }
-
-  // rowNum=0: return entire column as array
-  if (rowNum === 0) {
-    const c = colNum - 1;
-    if (c < 0 || c >= arr.width) {
-      return ERRORS.REF;
-    }
-    // Single-row source: a whole-column extract collapses to the one cell.
-    if (arr.height === 1) {
-      return arr.rows[0][c];
-    }
-    const rows: ScalarValue[][] = [];
-    for (let r = 0; r < arr.height; r++) {
-      rows.push([getCell(arr, r, c)]);
-    }
-    return rvArray(rows);
-  }
-
-  // colNum=0: return entire row as array
-  if (colNum === 0) {
-    const r = rowNum - 1;
-    if (r < 0 || r >= arr.height) {
-      return ERRORS.REF;
-    }
-    // Single-column source: a whole-row extract collapses to the one cell.
-    // Matches Excel's convention — `INDEX(A1:A5, 2)` yields the scalar A2,
-    // not a 1×1 array that downstream arithmetic has to implicit-intersect.
-    if (arr.width === 1) {
-      return arr.rows[r][0];
-    }
-    return rvArray([[...arr.rows[r]]]);
-  }
-
-  // Single cell
-  const r = rowNum - 1;
-  const c = colNum - 1;
-  if (r < 0 || r >= arr.height || c < 0 || c >= arr.width) {
+  if (rowNum > height || colNum > width) {
     return ERRORS.REF;
   }
-  return arr.rows[r][c];
+  // 0 selects every row (column) — the whole column (row) of the other index.
+  return {
+    top: rowNum === 0 ? 0 : rowNum - 1,
+    bottom: rowNum === 0 ? height - 1 : rowNum - 1,
+    left: colNum === 0 ? 0 : colNum - 1,
+    right: colNum === 0 ? width - 1 : colNum - 1,
+    whole: rowNum === 0 && colNum === 0
+  };
+}
+
+export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
+  // A single value is a 1×1 array, so `INDEX(A1, 2)` is #REF! rather than A1.
+  const arr = asArrayArg(args[0]);
+  if (isError(arr)) {
+    return arr;
+  }
+  const sel = selectIndexArea(arr.height, arr.width, args[1], args[2]);
+  if ("kind" in sel) {
+    return sel;
+  }
+  if (sel.whole) {
+    return arr;
+  }
+  // One cell is its value: `INDEX(A1:A5, 2)` is A2, not a 1×1 array.
+  if (sel.top === sel.bottom && sel.left === sel.right) {
+    return arr.rows[sel.top][sel.left];
+  }
+  const rows: ScalarValue[][] = [];
+  for (let r = sel.top; r <= sel.bottom; r++) {
+    rows.push(arr.rows[r].slice(sel.left, sel.right + 1));
+  }
+  return rvArray(rows);
 }
 
 export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
@@ -146,10 +148,10 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
   if (lookupValue.kind === RVKind.Error) {
     return lookupValue;
   }
-  if (!isArray(args[1])) {
-    return ERRORS.NA;
+  const lookupArr = asArrayArg(args[1]);
+  if (isError(lookupArr)) {
+    return lookupArr;
   }
-  const lookupArr = args[1] as ArrayValue;
   // Blank `match_type` → Excel default 1 (largest value ≤ lookup, ascending sort).
   // Previously a blank coerced to 0 via toNumberRV and silently flipped the
   // function to exact-match mode — a behaviour gap vs. Excel's documented
@@ -160,6 +162,11 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
     return matchTypeV;
   }
   const matchType = matchTypeV.value;
+  // Microsoft: lookup_array is one row or one column. A 2-D one is #N/A — it used to be read
+  // row by row, answering a position in a range that has none.
+  if (lookupArr.height !== 1 && lookupArr.width !== 1) {
+    return ERRORS.NA;
+  }
 
   // Flatten to 1D
   const flat: ScalarValue[] = [];
@@ -264,10 +271,10 @@ export function fnVLOOKUP(args: RuntimeValue[]): RuntimeValue {
   if (lookupValue.kind === RVKind.Error) {
     return lookupValue;
   }
-  if (!isArray(args[1])) {
-    return ERRORS.NA;
+  const table = asArrayArg(args[1]);
+  if (isError(table)) {
+    return table;
   }
-  const table = args[1] as ArrayValue;
   const colIndexV = toNumberRV(topLeft(args[2]));
   if (isError(colIndexV)) {
     return colIndexV;
@@ -360,10 +367,10 @@ export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
   if (lookupValue.kind === RVKind.Error) {
     return lookupValue;
   }
-  if (!isArray(args[1])) {
-    return ERRORS.NA;
+  const table = asArrayArg(args[1]);
+  if (isError(table)) {
+    return table;
   }
-  const table = args[1] as ArrayValue;
   const rowIndexV = toNumberRV(topLeft(args[2]));
   if (isError(rowIndexV)) {
     return rowIndexV;
@@ -443,14 +450,14 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
   if (lookupValue.kind === RVKind.Error) {
     return lookupValue;
   }
-  if (!isArray(args[1])) {
-    return ERRORS.VALUE;
+  const lookupArr = asArrayArg(args[1]);
+  const returnArr = asArrayArg(args[2]);
+  if (isError(lookupArr)) {
+    return lookupArr;
   }
-  const lookupArr = args[1] as ArrayValue;
-  if (!isArray(args[2])) {
-    return ERRORS.VALUE;
+  if (isError(returnArr)) {
+    return returnArr;
   }
-  const returnArr = args[2] as ArrayValue;
   // Blank `if_not_found` → treat as omitted (default #N/A). Without
   // this guard, an explicitly-blank fourth slot would produce BLANK as
   // the fallback, which differs from Excel's "omitted → #N/A" default
@@ -478,9 +485,20 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.VALUE;
   }
 
+  // lookup_array is one column (a vertical lookup: return_array has as many rows, and any
+  // number of columns, which come back as a row) or one row (horizontal: as many columns,
+  // rows coming back as a column). Anything else is #VALUE!, as in Excel; a return_array of
+  // the wrong size used to read its missing cells as blank. A one-cell lookup_array is
+  // vertical when return_array is one row tall, otherwise horizontal.
+  const vertical = lookupArr.width === 1 && returnArr.height === lookupArr.height;
+  const horizontal = lookupArr.height === 1 && returnArr.width === lookupArr.width;
+  if (!vertical && !horizontal) {
+    return ERRORS.VALUE;
+  }
+  const isRow = !vertical;
+
   // Flatten lookup array to 1D
   const flat: ScalarValue[] = [];
-  const isRow = lookupArr.height === 1;
   if (isRow) {
     for (let c = 0; c < lookupArr.width; c++) {
       flat.push(getCell(lookupArr, 0, c));
@@ -642,9 +660,6 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
     // Horizontal lookup: the lookup axis is the column axis of the return
     // array, so `foundIdx` selects a column. A single-row return array
     // yields a scalar; a multi-row return array yields a column vector.
-    if (foundIdx >= returnArr.width) {
-      return BLANK;
-    }
     if (returnArr.height === 1) {
       return getCell(returnArr, 0, foundIdx);
     }
@@ -656,17 +671,14 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
   }
   // Vertical lookup: `foundIdx` selects a row; a single-column return
   // array yields a scalar; a multi-column array yields a row vector.
-  if (foundIdx < returnArr.height) {
-    if (returnArr.width === 1) {
-      return getCell(returnArr, foundIdx, 0);
-    }
-    const row: ScalarValue[] = [];
-    for (let c = 0; c < returnArr.width; c++) {
-      row.push(getCell(returnArr, foundIdx, c));
-    }
-    return rvArray([row]);
+  if (returnArr.width === 1) {
+    return getCell(returnArr, foundIdx, 0);
   }
-  return BLANK;
+  const row: ScalarValue[] = [];
+  for (let c = 0; c < returnArr.width; c++) {
+    row.push(getCell(returnArr, foundIdx, c));
+  }
+  return rvArray([row]);
 }
 
 export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
@@ -674,10 +686,15 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
   if (lookupValue.kind === RVKind.Error) {
     return lookupValue;
   }
-  if (!isArray(args[1])) {
+  const lookupArr = asArrayArg(args[1]);
+  if (isError(lookupArr)) {
+    return lookupArr;
+  }
+  // One row or one column, as for XLOOKUP; a 2-D lookup_array is #VALUE! (it was searched
+  // down its first column only).
+  if (lookupArr.height !== 1 && lookupArr.width !== 1) {
     return ERRORS.VALUE;
   }
-  const lookupArr = args[1] as ArrayValue;
   // Blank `match_mode` → 0 (exact). Same validation as XLOOKUP.
   const matchModeV =
     args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(0);
@@ -888,13 +905,16 @@ export function fnLOOKUP(args: RuntimeValue[]): RuntimeValue {
   if (lookupValue.kind === RVKind.Error) {
     return lookupValue;
   }
-  if (!isArray(args[1])) {
-    return ERRORS.NA;
+  const lookupArr = asArrayArg(args[1]);
+  if (isError(lookupArr)) {
+    return lookupArr;
   }
-  const lookupArr = args[1] as ArrayValue;
 
-  if (args.length > 2 && isArray(args[2])) {
-    const resultArr = args[2] as ArrayValue;
+  const resultArr = args.length > 2 ? asArrayArg(args[2]) : null;
+  if (resultArr && isError(resultArr)) {
+    return resultArr;
+  }
+  if (resultArr) {
     const flat: ScalarValue[] = [];
     const isRow = lookupArr.height === 1;
     if (isRow) {
@@ -910,16 +930,18 @@ export function fnLOOKUP(args: RuntimeValue[]): RuntimeValue {
     if (bestIdx === -1) {
       return ERRORS.NA;
     }
-    if (isRow) {
-      return resultArr.height === 1
-        ? bestIdx < resultArr.width
-          ? getCell(resultArr, 0, bestIdx)
-          : BLANK
-        : bestIdx < resultArr.height
-          ? getCell(resultArr, bestIdx, 0)
-          : BLANK;
+    // result_vector is one row or one column, of either orientation, and its cell at the found
+    // position is the result; a 2-D one, or a position past its end, is #N/A (as Excel answers).
+    // A reference has already been stretched from its first cell to the lookup's length by the
+    // evaluator, which is how Excel reads a shorter one; a missing cell used to be blank.
+    if (resultArr.height !== 1 && resultArr.width !== 1) {
+      return ERRORS.NA;
     }
-    return bestIdx < resultArr.height ? getCell(resultArr, bestIdx, 0) : BLANK;
+    const length = resultArr.height === 1 ? resultArr.width : resultArr.height;
+    if (bestIdx >= length) {
+      return ERRORS.NA;
+    }
+    return resultArr.height === 1 ? getCell(resultArr, 0, bestIdx) : getCell(resultArr, bestIdx, 0);
   }
 
   const rows = lookupArr.height;

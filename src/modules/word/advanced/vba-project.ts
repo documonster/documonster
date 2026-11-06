@@ -11,6 +11,9 @@
  * preserves the binary VBA project for round-trip fidelity.
  */
 
+import { asPlainBytes } from "@utils/binary";
+import { checkBytes, checkHandle, invalidArgument } from "@word/core/argument-checks";
+import { markDerived } from "@word/core/ownership";
 import type { DocxDocument, OpaquePart } from "@word/types";
 
 // =============================================================================
@@ -69,6 +72,7 @@ function findVbaBinary(doc: DocxDocument): Uint8Array | undefined {
  * @returns true if VBA macros are present.
  */
 export function hasVbaProject(doc: DocxDocument): boolean {
+  checkHandle(doc, "document", "doc", "Vba.has");
   return findVbaBinary(doc) !== undefined;
 }
 
@@ -79,6 +83,7 @@ export function hasVbaProject(doc: DocxDocument): boolean {
  * @returns VBA project info, or info with hasVba=false if not present.
  */
 export function getVbaProjectInfo(doc: DocxDocument): VbaProjectInfo {
+  checkHandle(doc, "document", "doc", "Vba.getInfo");
   const data = findVbaBinary(doc);
   if (!data) {
     return { hasVba: false };
@@ -99,8 +104,10 @@ export function getVbaProjectInfo(doc: DocxDocument): VbaProjectInfo {
  * @param doc - The parsed document.
  * @returns The vbaProject.bin bytes, or undefined if not present.
  */
-export function getVbaProjectData(doc: DocxDocument): Uint8Array | undefined {
-  return findVbaBinary(doc);
+export function getVbaProjectData(doc: DocxDocument): Uint8Array<ArrayBuffer> | undefined {
+  checkHandle(doc, "document", "doc", "Vba.getData");
+  const data = findVbaBinary(doc);
+  return data && asPlainBytes(data);
 }
 
 /**
@@ -117,16 +124,25 @@ export function getVbaProjectData(doc: DocxDocument): Uint8Array | undefined {
  * registers the relationship + content type. Any pre-existing copies in
  * `opaqueParts` are removed so we don't emit two conflicting parts.
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
  * @param doc - The document to add VBA to.
  * @param vbaProjectBin - The vbaProject.bin binary data (OLE2 compound).
  * @returns A new document with the VBA project embedded.
+ * @throws {DocxArgumentError} If `vbaProjectBin` is not an OLE2
+ * compound file.
  */
 export function addVbaProject(doc: DocxDocument, vbaProjectBin: Uint8Array): DocxDocument {
+  checkHandle(doc, "document", "doc", "Vba.add");
+  const where = "Vba.add";
+  vbaProjectBin = checkBytes(vbaProjectBin, "vbaProjectBin", where);
   if (!isOle2Header(vbaProjectBin)) {
-    throw new Error(
-      "addVbaProject: data does not start with the OLE2 compound document " +
-        "signature (D0 CF 11 E0 A1 B1 1A E1). vbaProject.bin must be a valid " +
-        "OLE2 compound file."
+    invalidArgument(
+      where,
+      "vbaProjectBin",
+      "an OLE2 compound file (vbaProject.bin begins D0 CF 11 E0 A1 B1 1A E1)",
+      vbaProjectBin
     );
   }
   const filteredParts = doc.opaqueParts
@@ -143,23 +159,30 @@ export function addVbaProject(doc: DocxDocument, vbaProjectBin: Uint8Array): Doc
   } else if (nextDocType === "template") {
     nextDocType = "macroEnabledTemplate";
   }
-  return {
-    ...doc,
-    docType: nextDocType,
-    vbaProject: vbaProjectBin,
-    ...(filteredParts !== undefined
-      ? { opaqueParts: filteredParts.length > 0 ? filteredParts : undefined }
-      : {})
-  };
+  return markDerived(
+    {
+      ...doc,
+      docType: nextDocType,
+      vbaProject: vbaProjectBin,
+      ...(filteredParts !== undefined
+        ? { opaqueParts: filteredParts.length > 0 ? filteredParts : undefined }
+        : {})
+    },
+    doc
+  );
 }
 
 /**
  * Remove VBA project from a document (converting .docm to .docx behavior).
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
  * @param doc - The macro-enabled document.
  * @returns A new document without VBA parts.
  */
 export function removeVbaProject(doc: DocxDocument): DocxDocument {
+  checkHandle(doc, "document", "doc", "Vba.remove");
   // Demote the content type alongside removing the binary so the package
   // is identified as a plain .docx/.dotx going forward.
   let nextDocType = doc.docType;
@@ -171,12 +194,12 @@ export function removeVbaProject(doc: DocxDocument): DocxDocument {
   const next: DocxDocument = { ...doc, docType: nextDocType, vbaProject: undefined };
   if (doc.opaqueParts) {
     const filteredParts = doc.opaqueParts.filter(p => !isVbaPart(p.path));
-    return {
-      ...next,
-      opaqueParts: filteredParts.length > 0 ? filteredParts : undefined
-    };
+    return markDerived(
+      { ...next, opaqueParts: filteredParts.length > 0 ? filteredParts : undefined },
+      doc
+    );
   }
-  return next;
+  return markDerived(next, doc);
 }
 
 /**
@@ -186,6 +209,7 @@ export function removeVbaProject(doc: DocxDocument): DocxDocument {
  * `opaqueParts`.
  */
 export function listVbaParts(doc: DocxDocument): readonly OpaquePart[] {
+  checkHandle(doc, "document", "doc", "Vba.listParts");
   const out: OpaquePart[] = [];
   if (doc.vbaProject) {
     out.push({

@@ -6,7 +6,8 @@ import {
   decodeCell,
   encodeCell,
   decodeRange,
-  encodeRange
+  encodeRange,
+  quoteSheetName
 } from "@excel/utils/address";
 import { describe, it, expect } from "vitest";
 
@@ -135,5 +136,52 @@ describe("Address utilities", () => {
     it("should return single cell for same start and end", () => {
       expect(encodeRange({ c: 0, r: 0 }, { c: 0, r: 0 })).toBe("A1");
     });
+  });
+});
+
+describe("quoteSheetName", () => {
+  it.each([
+    ["Sheet1", "Sheet1"],
+    ["My_Sheet", "My_Sheet"],
+    ["My Sheet", "'My Sheet'"],
+    ["It's", "'It''s'"],
+    ["2023Data", "'2023Data'"],
+    // A name a formula would read as a cell reference, an R1C1 reference or a boolean.
+    ["A1", "'A1'"],
+    ["XFD1048576", "'XFD1048576'"],
+    ["r1c1", "'r1c1'"],
+    ["R1C1", "'R1C1'"],
+    ["R", "'R'"],
+    ["C12", "'C12'"],
+    ["TRUE", "'TRUE'"],
+    ["false", "'false'"]
+  ])("%s → %s", (name, quoted) => {
+    expect(quoteSheetName(name)).toBe(quoted);
+  });
+
+  it("agrees with the reference rewriter", async () => {
+    const { Cell, Workbook, Worksheet } = await import("@excel/index");
+    for (const name of ["A1", "R1C1", "TRUE", "XFD1"]) {
+      const wb = Workbook.create();
+      const data = Workbook.addWorksheet(wb, "Data");
+      const calc = Workbook.addWorksheet(wb, "Calc");
+      Cell.setValue(calc, "A1", { formula: "Data!B2*2" });
+      Worksheet.setName(data, name);
+      expect(Cell.getFormula(calc, "A1")).toBe(`${quoteSheetName(name)}!B2*2`);
+    }
+  });
+
+  it("is the rule a defined name's reference is written with", async () => {
+    const { DefinedNames, Workbook } = await import("@excel/index");
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "2023");
+    Workbook.addWorksheet(wb, "A1");
+    const names = Workbook.getDefinedNames(wb);
+    DefinedNames.add(names, "'2023'!$A$1", "Year");
+    DefinedNames.add(names, "'A1'!$B$2", "Cell");
+    expect(DefinedNames.getModel(names).map(n => n.ranges[0])).toEqual([
+      "'2023'!$A$1",
+      "'A1'!$B$2"
+    ]);
   });
 });

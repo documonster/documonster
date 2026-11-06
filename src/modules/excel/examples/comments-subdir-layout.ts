@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Cell, Note, Workbook } from "@excel/index";
+import { Cell, Workbook } from "@excel/index";
 
 import { ArchiveFile } from "../../archive/fs/archive-file";
 
@@ -33,10 +33,10 @@ const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Sheet1");
 
 Cell.setValue(ws, "A1", "Hello");
-Cell.setComment(ws, "A1", Note.create({ texts: [{ text: "Comment by Alice" }] }, "Alice"));
+Cell.setNote(ws, "A1", { texts: [{ text: "Comment by Alice" }] }, { author: "Alice" });
 
 Cell.setValue(ws, "B2", "World");
-Cell.setComment(ws, "B2", Note.create({ texts: [{ text: "Comment by Bob" }] }, "Bob"));
+Cell.setNote(ws, "B2", { texts: [{ text: "Comment by Bob" }] }, { author: "Bob" });
 
 await writeBothFormats(wb, flatFile);
 console.log(`  Written flat-layout file: ${flatFile}`);
@@ -45,23 +45,22 @@ console.log(`  Written flat-layout file: ${flatFile}`);
 // Step 2: Read back the flat-layout file and verify
 // ---------------------------------------------------------------------------
 console.log("\nStep 2: Reading flat-layout file...");
-const wb2 = Workbook.create();
-await Workbook.readFile(wb2, flatFile);
+const wb2 = await Workbook.readFile(flatFile);
 const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
 console.log(
-  `  A1 note: ${JSON.stringify(Cell.getNote(ws2, "A1"))}, author: ${Cell.getComment(ws2, "A1")?.author}`
+  `  A1 note: ${JSON.stringify(Cell.getNote(ws2, "A1"))}, author: ${Cell.getNoteAuthor(ws2, "A1")}`
 );
 console.log(
-  `  B2 note: ${JSON.stringify(Cell.getNote(ws2, "B2"))}, author: ${Cell.getComment(ws2, "B2")?.author}`
+  `  B2 note: ${JSON.stringify(Cell.getNote(ws2, "B2"))}, author: ${Cell.getNoteAuthor(ws2, "B2")}`
 );
 console.log(`  A1 has comment: ${Cell.getNote(ws2, "A1") != null ? "YES" : "MISSING"}`);
 console.log(`  B2 has comment: ${Cell.getNote(ws2, "B2") != null ? "YES" : "MISSING"}`);
 console.log(
-  `  A1 author correct: ${Cell.getComment(ws2, "A1")?.author === "Alice" ? "YES" : `NO (got "${Cell.getComment(ws2, "A1")?.author}")`}`
+  `  A1 author correct: ${Cell.getNoteAuthor(ws2, "A1") === "Alice" ? "YES" : `NO (got "${Cell.getNoteAuthor(ws2, "A1")}")`}`
 );
 console.log(
-  `  B2 author correct: ${Cell.getComment(ws2, "B2")?.author === "Bob" ? "YES" : `NO (got "${Cell.getComment(ws2, "B2")?.author}")`}`
+  `  B2 author correct: ${Cell.getNoteAuthor(ws2, "B2") === "Bob" ? "YES" : `NO (got "${Cell.getNoteAuthor(ws2, "B2")}")`}`
 );
 
 // ---------------------------------------------------------------------------
@@ -123,23 +122,22 @@ console.log(`  Written subdirectory-layout file: ${subdirFile}`);
 // Step 4: Read the subdirectory-layout file and verify comments are parsed
 // ---------------------------------------------------------------------------
 console.log("\nStep 4: Reading subdirectory-layout file...");
-const wb3 = Workbook.create();
-await Workbook.readFile(wb3, subdirFile);
+const wb3 = await Workbook.readFile(subdirFile);
 const ws3 = Workbook.getWorksheet(wb3, "Sheet1")!;
 
 console.log(
-  `  A1 note: ${JSON.stringify(Cell.getNote(ws3, "A1"))}, author: ${Cell.getComment(ws3, "A1")?.author}`
+  `  A1 note: ${JSON.stringify(Cell.getNote(ws3, "A1"))}, author: ${Cell.getNoteAuthor(ws3, "A1")}`
 );
 console.log(
-  `  B2 note: ${JSON.stringify(Cell.getNote(ws3, "B2"))}, author: ${Cell.getComment(ws3, "B2")?.author}`
+  `  B2 note: ${JSON.stringify(Cell.getNote(ws3, "B2"))}, author: ${Cell.getNoteAuthor(ws3, "B2")}`
 );
 console.log(`  A1 has comment: ${Cell.getNote(ws3, "A1") != null ? "YES" : "MISSING"}`);
 console.log(`  B2 has comment: ${Cell.getNote(ws3, "B2") != null ? "YES" : "MISSING"}`);
 console.log(
-  `  A1 author correct: ${Cell.getComment(ws3, "A1")?.author === "Alice" ? "YES" : `NO (got "${Cell.getComment(ws3, "A1")?.author}")`}`
+  `  A1 author correct: ${Cell.getNoteAuthor(ws3, "A1") === "Alice" ? "YES" : `NO (got "${Cell.getNoteAuthor(ws3, "A1")}")`}`
 );
 console.log(
-  `  B2 author correct: ${Cell.getComment(ws3, "B2")?.author === "Bob" ? "YES" : `NO (got "${Cell.getComment(ws3, "B2")?.author}")`}`
+  `  B2 author correct: ${Cell.getNoteAuthor(ws3, "B2") === "Bob" ? "YES" : `NO (got "${Cell.getNoteAuthor(ws3, "B2")}")`}`
 );
 
 // ---------------------------------------------------------------------------
@@ -148,12 +146,12 @@ console.log(
 const allPassed =
   Cell.getNote(ws2, "A1") != null &&
   Cell.getNote(ws2, "B2") != null &&
-  Cell.getComment(ws2, "A1")?.author === "Alice" &&
-  Cell.getComment(ws2, "B2")?.author === "Bob" &&
+  Cell.getNoteAuthor(ws2, "A1") === "Alice" &&
+  Cell.getNoteAuthor(ws2, "B2") === "Bob" &&
   Cell.getNote(ws3, "A1") != null &&
   Cell.getNote(ws3, "B2") != null &&
-  Cell.getComment(ws3, "A1")?.author === "Alice" &&
-  Cell.getComment(ws3, "B2")?.author === "Bob";
+  Cell.getNoteAuthor(ws3, "A1") === "Alice" &&
+  Cell.getNoteAuthor(ws3, "B2") === "Bob";
 
 console.log(
   `\n${allPassed ? "SUCCESS" : "FAILURE"}: Comments and authors ${allPassed ? "correctly round-tripped" : "NOT fully preserved"} across both layouts.`

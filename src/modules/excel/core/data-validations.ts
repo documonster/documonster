@@ -1,4 +1,4 @@
-import { InvalidAddressError } from "@excel/errors";
+import { ExcelInvalidAddressError } from "@excel/errors";
 import type { DataValidationRule } from "@excel/types";
 import type { DecodedRange } from "@excel/utils/col-cache";
 import { colCache } from "@excel/utils/col-cache";
@@ -18,9 +18,30 @@ export interface DataValidationsData {
   model: DataValidationModel;
 }
 
-/** Create a data-validation registry, optionally seeded from a parsed model. */
-export function createDataValidations(model?: DataValidationModel): DataValidationsData {
-  return { model: model || {} };
+/**
+ * The sheet each collection a worksheet holds belongs to — kept beside the collection, so its published shape does not
+ * change. A collection made on its own (`DataValidation.create`) belongs to none.
+ */
+const owners = new WeakMap<DataValidationsData, object>();
+
+/**
+ * Create a data-validation registry, optionally seeded from a parsed model. `owner` is the worksheet that holds it, so
+ * an edit through the collection is refused as an edit through the sheet is once the sheet is removed.
+ */
+export function createDataValidations(
+  model?: DataValidationModel,
+  owner?: object
+): DataValidationsData {
+  const collection = { model: model || {} };
+  if (owner !== undefined) {
+    owners.set(collection, owner);
+  }
+  return collection;
+}
+
+/** The worksheet that holds `dv`, or `undefined` for a collection that belongs to no sheet. */
+export function dataValidationsOwner(dv: DataValidationsData): object | undefined {
+  return owners.get(dv);
 }
 
 /**
@@ -58,12 +79,12 @@ const CELL_RE = /^([A-Z]{1,3})(\d+)$/;
 function assertValidCell(cell: string, ref: string): void {
   const m = cell.match(CELL_RE);
   if (!m) {
-    throw new InvalidAddressError(ref, "not a valid cell or range reference");
+    throw new ExcelInvalidAddressError(ref, "not a valid cell or range reference");
   }
-  colCache.l2n(m[1]); // throws ColumnOutOfBoundsError if the column is > XFD
+  colCache.l2n(m[1]); // throws ExcelColumnOutOfBoundsError if the column is > XFD
   const row = Number(m[2]);
   if (row < 1 || row > EXCEL_MAX_ROW) {
-    throw new InvalidAddressError(ref, `row ${row} is outside 1..${EXCEL_MAX_ROW}`);
+    throw new ExcelInvalidAddressError(ref, `row ${row} is outside 1..${EXCEL_MAX_ROW}`);
   }
 }
 
@@ -92,11 +113,11 @@ function normaliseEndpoints(start: string, end: string, ref: string): string {
  * a validation applied to an entire column (`A1:A1048576`). Any leading
  * `Sheet!` qualifier is stripped, since data-validation `sqref` values are
  * sheet-local. Absolute `$` markers are dropped. Throws
- * {@link InvalidAddressError} for anything that is not a valid cell or range.
+ * {@link ExcelInvalidAddressError} for anything that is not a valid cell or range.
  */
 function normaliseRangeRef(ref: string): string {
   if (typeof ref !== "string" || ref.length === 0) {
-    throw new InvalidAddressError(String(ref), "range reference must be a non-empty string");
+    throw new ExcelInvalidAddressError(String(ref), "range reference must be a non-empty string");
   }
 
   // Strip a leading sheet qualifier: `Sheet1!A1:A10` / `'My Sheet'!A:A`.
@@ -117,7 +138,7 @@ function normaliseRangeRef(ref: string): string {
   const bare = local.replace(/\$/g, "");
   const endpoints = bare.split(":");
   if (endpoints.length > 2) {
-    throw new InvalidAddressError(ref, "not a valid cell or range reference");
+    throw new ExcelInvalidAddressError(ref, "not a valid cell or range reference");
   }
   if (endpoints.length === 2) {
     return normaliseEndpoints(endpoints[0], endpoints[1], ref);
@@ -178,6 +199,10 @@ export function dataValidationFind(
 }
 
 /** Clear the validation registered for a cell or A1 range. */
-export function dataValidationRemove(dv: DataValidationsData, ref: string): void {
-  dv.model[validationModelKey(ref)] = undefined;
+/** Remove the rule at `ref`. Returns `true` if there was one. */
+export function dataValidationRemove(dv: DataValidationsData, ref: string): boolean {
+  const key = validationModelKey(ref);
+  const existed = dv.model[key] !== undefined;
+  dv.model[key] = undefined;
+  return existed;
 }

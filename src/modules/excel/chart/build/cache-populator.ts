@@ -35,7 +35,9 @@ import type {
   StringReference,
   MultiLevelStringReference
 } from "@excel/chart/model/types";
+import { ExcelError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
 import { dateToExcel } from "@utils/utils.base";
 
 /**
@@ -615,7 +617,9 @@ function replaceObjectValue(
 function applyCacheWrites(writes: readonly ChartCacheWrite[]): void {
   for (const write of writes) {
     if (write.target.formula !== write.expectedFormula) {
-      throw new Error("Chart reference changed after cache planning");
+      // An invariant of the two-phase fill: nothing between planning and writing edits a
+      // reference. A typed error rather than a plain one, should a future path break it.
+      throw new ExcelError("A chart reference changed while its cached values were being filled.");
     }
   }
   for (const write of writes) {
@@ -986,7 +990,7 @@ function getDefinedNameRanges(
 ): string[] | undefined {
   const entry = snapshot.definedNames.find(
     candidate =>
-      candidate.name.toLowerCase() === name.toLowerCase() && candidate.localSheetId === localSheetId
+      excelNameKey(candidate.name) === excelNameKey(name) && candidate.localSheetId === localSheetId
   );
   return entry?.ranges.length ? [...entry.ranges] : undefined;
 }
@@ -1109,21 +1113,26 @@ function resolveStructuredReference(
   }
   const worksheets = [...ctx.snapshot.worksheets];
   if (preferredSheetName) {
-    // Move the preferred sheet to the front of the search (case-insensitive).
-    const target = preferredSheetName.toLowerCase();
-    const idx = worksheets.findIndex(ws => ws.name.toLowerCase() === target);
+    // Move the preferred sheet to the front of the search, compared as Excel compares sheet names.
+    const target = sheetNameKey(preferredSheetName);
+    const idx = worksheets.findIndex(ws => sheetNameKey(ws.name) === target);
     if (idx > 0) {
       worksheets.unshift(...worksheets.splice(idx, 1));
     }
   }
   for (const worksheet of worksheets) {
+    // Tables and their columns are compared as Excel compares names (`excelNameKey`).
+    const tableKey = excelNameKey(parsed.tableName);
     const table = worksheet.tables.find(
-      candidate => candidate.name === parsed.tableName || candidate.displayName === parsed.tableName
+      candidate =>
+        excelNameKey(candidate.name) === tableKey ||
+        (candidate.displayName !== undefined && excelNameKey(candidate.displayName) === tableKey)
     );
     if (!table) {
       continue;
     }
-    const columnIndex = table.columns.findIndex(column => column === parsed.columnName);
+    const columnKey = excelNameKey(parsed.columnName);
+    const columnIndex = table.columns.findIndex(column => excelNameKey(column) === columnKey);
     if (columnIndex < 0) {
       return undefined;
     }
@@ -1375,7 +1384,7 @@ function readCell(
   ctx: ResolverContext
 ): unknown {
   if (ctx.requestedCells) {
-    const sheetKey = ws.name.toLowerCase();
+    const sheetKey = sheetNameKey(ws.name);
     let cells = ctx.requestedCells.get(sheetKey);
     if (!cells) {
       cells = new Set();
@@ -1390,7 +1399,7 @@ function getSnapshotWorksheet(
   snapshot: ChartDataSnapshot,
   name: string
 ): ChartWorksheetSnapshot | undefined {
-  return snapshot.worksheetsByName.get(name.toLowerCase());
+  return snapshot.worksheetsByName.get(sheetNameKey(name));
 }
 
 function toNumber(v: unknown, date1904?: boolean): number | undefined {

@@ -2114,11 +2114,17 @@ function framePadding(
   group: FlowchartDiagram["subgraphs"][number],
   config: ResolvedOptions
 ): number {
-  const depth = (id: string): number => {
-    const children = diagram.subgraphs.filter(other => other.parent === id);
-    return children.length === 0 ? 0 : 1 + Math.max(...children.map(child => depth(child.id)));
+  // `seen` stops at a group already on the path: a `FlowchartDiagram` built by hand can name a cycle of parents.
+  const depth = (id: string, seen: ReadonlySet<string>): number => {
+    const children = diagram.subgraphs.filter(other => other.parent === id && !seen.has(other.id));
+    return children.length === 0
+      ? 0
+      : 1 + Math.max(...children.map(child => depth(child.id, new Set([...seen, child.id]))));
   };
-  return config.nodeGap / 2 + depth(group.id) * (config.nodeGap / 2 + GROUP_TITLE_HEIGHT);
+  return (
+    config.nodeGap / 2 +
+    depth(group.id, new Set([group.id])) * (config.nodeGap / 2 + GROUP_TITLE_HEIGHT)
+  );
 }
 
 /**

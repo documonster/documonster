@@ -7,7 +7,7 @@
  * them here means the chart *creation / mutation* surface (`registerChart`,
  * `chartMutate`, …) — which `worksheet.ts` and therefore `Workbook` statically
  * reach — never drags the renderers into a bundle. Only a consumer that
- * actually calls `Chart.toSVG` / `Chart.toPNG` pays for them.
+ * actually calls `Chart.toSvg` / `Chart.toPng` pays for them.
  *
  * This mirrors the module's "execute on call, never at load" contract:
  * renderers stay behind a leaf module that nothing on the create path pulls in.
@@ -21,8 +21,11 @@ import {
 import { renderChartExPng, renderChartExSvg } from "@excel/chart/render/chart-ex-renderer";
 import type { ChartRenderOptions } from "@excel/chart/render/chart-renderer";
 import { renderChartPng, renderChartSvg } from "@excel/chart/render/chart-renderer";
+import { workbookThemeColors } from "@excel/chart/render/workbook-theme";
+import { checkChart } from "@excel/core/feature-handles";
 import type { ChartHandle } from "@excel/core/worksheet-core";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
+import { asPlainBytes } from "@utils/binary";
 
 /**
  * Render this chart as a **zero-dependency deterministic preview** SVG.
@@ -41,16 +44,18 @@ import { ChartOptionsError } from "@excel/errors";
  * boundary list.
  */
 export function chartToSVG(c: ChartHandle, options: ChartRenderOptions = {}): string {
+  checkChart(c);
+  options = withWorkbookTheme(c, options);
   const model = chartChartModel(c);
   if (model) {
-    return renderChartSvg(model, options);
+    return renderChartSvg(model, options, "Chart.toSvg");
   }
   const chartEx = chartChartExModel(c);
   if (chartEx) {
     _chartRefreshChartExCaches(c);
-    return renderChartExSvg(chartEx, options);
+    return renderChartExSvg(chartEx, options, "Chart.toSvg");
   }
-  throw new ChartOptionsError("Cannot render chart because no chart model is available.");
+  throw new ExcelChartOptionsError("c", "Cannot render chart because no chart model is available.");
 }
 
 /**
@@ -69,17 +74,33 @@ export function chartToSVG(c: ChartHandle, options: ChartRenderOptions = {}): st
 export async function chartToPNG(
   c: ChartHandle,
   options: ChartRenderOptions = {}
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
+  checkChart(c);
+  options = withWorkbookTheme(c, options);
   // `async` makes the "no model" branch reject the returned promise instead of
   // throwing synchronously, honouring the `Promise<Uint8Array>` contract.
   const model = chartChartModel(c);
   if (model) {
-    return renderChartPng(model, options);
+    return asPlainBytes(await renderChartPng(model, options, "Chart.toPng"));
   }
   const chartEx = chartChartExModel(c);
   if (chartEx) {
     _chartRefreshChartExCaches(c);
-    return renderChartExPng(chartEx, options);
+    return asPlainBytes(await renderChartExPng(chartEx, options, "Chart.toPng"));
   }
-  throw new ChartOptionsError("Cannot render chart because no chart model is available.");
+  throw new ExcelChartOptionsError("c", "Cannot render chart because no chart model is available.");
+}
+
+/**
+ * `options` with the chart's workbook theme as `themeColors`, so the chart's scheme colours
+ * resolve as Excel resolves them; a `themeColors` the caller gives wins. Options that are not
+ * an object are left for the renderer to refuse.
+ */
+function withWorkbookTheme(c: ChartHandle, options: ChartRenderOptions): ChartRenderOptions {
+  if (options === null || typeof options !== "object" || options.themeColors !== undefined) {
+    return options;
+  }
+  const workbook = (c.worksheet as { _workbook?: unknown } | undefined)?._workbook;
+  const themeColors = workbookThemeColors(workbook as never);
+  return themeColors === undefined ? options : { ...options, themeColors };
 }

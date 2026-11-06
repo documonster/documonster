@@ -119,7 +119,7 @@ describe("header and footer reach the sheets that asked for them", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    expect(Workbook.getWorksheets(reopened)[0]!.headerFooter).toMatchObject(headerFooter);
+    expect(Workbook.listWorksheets(reopened)[0]!.headerFooter).toMatchObject(headerFooter);
   });
 
   it("writes no record for a sheet that prints nothing", async () => {

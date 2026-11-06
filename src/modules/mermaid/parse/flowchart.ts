@@ -22,7 +22,7 @@
  * from a box.
  */
 
-import { decodeLabel, indexOfUnquoted, splitStatements } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, indexOfUnquoted, splitStatementsAt } from "@mermaid/parse/lex";
 import type {
   ClassDef,
   EdgeEnd,
@@ -107,7 +107,9 @@ export function parseFlowchart(source: string, direction: FlowDirection): Flowch
     return entry;
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     // The header names the diagram and its direction; the dispatcher has already read
     // both. Left in, `flowchart TD` parses as a node whose id is `flowchart`.
     if (/^(?:flowchart|graph)\b/i.test(text)) {
@@ -133,12 +135,16 @@ export function parseFlowchart(source: string, direction: FlowDirection): Flowch
 
     const subgraphMatch = /^subgraph\s+(.+)$/i.exec(text);
     if (subgraphMatch) {
-      open.push(parseSubgraphHeader(subgraphMatch[1], subgraphs.length + open.length));
+      const header = parseSubgraphHeader(subgraphMatch[1], subgraphs.length + open.length);
+      // A group reopened inside itself is re-entered, not nested: nested, it would be its own ancestor. The same
+      // object goes on the stack again, so its `end` closes nothing. Merged rather than refused because this parser is
+      // lenient with malformed groups, as with an unterminated `subgraph` below.
+      open.push(open.find(group => group.id === header.id) ?? header);
       continue;
     }
     if (/^end$/i.test(text)) {
       const group = open.pop();
-      if (group) {
+      if (group && !open.includes(group)) {
         const parent = open.at(-1);
         subgraphs.push({
           id: group.id,
@@ -172,13 +178,18 @@ export function parseFlowchart(source: string, direction: FlowDirection): Flowch
       continue;
     }
 
-    parseChain(text, touch, edges);
+    if (!parseChain(text, touch, edges)) {
+      skipped.add(statement);
+    }
   }
 
   // An unterminated `subgraph` still describes a group; Mermaid errors, but dropping the
   // members would silently lose nodes the author did declare.
   while (open.length > 0) {
     const group = open.pop()!;
+    if (open.includes(group)) {
+      continue;
+    }
     const parent = open.at(-1);
     subgraphs.push({
       id: group.id,
@@ -234,7 +245,8 @@ export function parseFlowchart(source: string, direction: FlowDirection): Flowch
     nodes: list,
     edges,
     subgraphs: groups,
-    classDefs
+    classDefs,
+    ...skipped.report()
   };
 }
 
@@ -294,12 +306,18 @@ function parseClassDef(name: string, body: string): ClassDef {
   return def;
 }
 
-/** Walk one `A --> B --> C` chain, declaring nodes and recording edges. */
+/**
+ * Walk one `A --> B --> C` chain, declaring nodes and recording edges.
+ *
+ * @returns whether the whole statement was understood: `false` when something was left
+ *   unread (`A[Start --> B`, prose) or the chain ended on a link with no destination
+ *   (`A -->`). What could be read is still recorded.
+ */
 function parseChain(
   text: string,
   touch: (id: string) => { text?: string; shape?: FlowShape; classes: string[] },
   edges: FlowEdge[]
-): void {
+): boolean {
   let index = skipSpace(text, 0);
   // An edge can only be built once the node *after* the link is known, so the group just
   // read and the link leaving it are carried forward together. Threaded rather than held
@@ -310,7 +328,7 @@ function parseChain(
   while (index < text.length) {
     const group = readNodeGroup(text, index);
     if (!group) {
-      return;
+      return false;
     }
     for (const ref of group.refs) {
       const entry = touch(ref.id);
@@ -338,14 +356,15 @@ function parseChain(
 
     const link = readLink(text, index);
     if (!link) {
-      // Ended on a node, which is the ordinary case.
-      return;
+      // Ended on a node, which is the ordinary case — unless something follows it.
+      return index >= text.length;
     }
     pending = { from: targets, link };
     index = skipSpace(text, link.next);
   }
   // A chain may also end on a link with no destination (`A -->`), which declares nothing
   // beyond the nodes already recorded.
+  return false;
 }
 
 function buildEdge(from: string, to: string, link: LinkRef): FlowEdge {

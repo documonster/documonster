@@ -261,18 +261,25 @@ describe("Prototype pollution prevention", () => {
     expect(doc.root.children.length).toBe(1);
   });
 
-  it("should strip __proto__ from attribute names", () => {
+  // These attributes used to be stripped. The map has no prototype, so a `__proto__` or
+  // `constructor` attribute is an ordinary own property and cannot reach Object.prototype;
+  // stripping it only lost the document's data. The tests now pin both halves: the value is
+  // kept, and nothing is polluted.
+  it("keeps a __proto__ attribute as an own property without polluting", () => {
     const doc = parseXml('<root __proto__="polluted"/>');
-    // oxlint-disable-next-line no-proto
-    expect(doc.root.attributes.__proto__).toBeUndefined();
-    // oxlint-disable-next-line no-proto
-    expect(doc.root.attributes["__proto__"]).toBeUndefined();
+    expect(Object.getPrototypeOf(doc.root.attributes)).toBeNull();
+    expect(Object.keys(doc.root.attributes)).toEqual(["__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(doc.root.attributes, "__proto__")?.value).toBe(
+      "polluted"
+    );
+    expect(({} as any).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
   });
 
-  it("should strip constructor from attribute names", () => {
+  it("keeps a constructor attribute as an own property", () => {
     const doc = parseXml('<root constructor="polluted"/>');
-    // The attribute key "constructor" is dangerous and should be filtered
-    expect(doc.root.attributes["constructor"]).toBeUndefined();
+    expect(doc.root.attributes["constructor"]).toBe("polluted");
+    expect({}.constructor).toBe(Object);
   });
 
   it("should use null-prototype objects for attributes", () => {
@@ -497,29 +504,19 @@ describe("Nesting depth with self-closing tags", () => {
 // =============================================================================
 
 describe("Prototype pollution — extended dangerous keys", () => {
-  it("should strip __defineGetter__ from attribute names", () => {
-    const doc = parseXml('<root __defineGetter__="val"/>');
-    expect(doc.root.attributes["__defineGetter__"]).toBeUndefined();
-  });
-
-  it("should strip __defineSetter__ from attribute names", () => {
-    const doc = parseXml('<root __defineSetter__="val"/>');
-    expect(doc.root.attributes["__defineSetter__"]).toBeUndefined();
-  });
-
-  it("should strip __lookupGetter__ from attribute names", () => {
-    const doc = parseXml('<root __lookupGetter__="val"/>');
-    expect(doc.root.attributes["__lookupGetter__"]).toBeUndefined();
-  });
-
-  it("should strip __lookupSetter__ from attribute names", () => {
-    const doc = parseXml('<root __lookupSetter__="val"/>');
-    expect(doc.root.attributes["__lookupSetter__"]).toBeUndefined();
-  });
-
-  it("should strip prototype from attribute names", () => {
-    const doc = parseXml('<root prototype="val"/>');
-    expect(doc.root.attributes["prototype"]).toBeUndefined();
+  it.each([
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "prototype"
+  ])("keeps a %s attribute as an own property of a null-prototype map", name => {
+    const doc = parseXml(`<root ${name}="val"/>`);
+    expect(Object.getPrototypeOf(doc.root.attributes)).toBeNull();
+    expect(doc.root.attributes[name]).toBe("val");
+    expect(typeof (Object.prototype as unknown as Record<string, unknown>)[name]).not.toBe(
+      "string"
+    );
   });
 });
 

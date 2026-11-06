@@ -32,19 +32,25 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
   declare public map: { [key: string]: BaseXform };
   declare public parser?: BaseXform;
 
-  constructor() {
+  /**
+   * @param autoFilter - The declarations the enclosing `<autoFilter>` is written back with.
+   */
+  constructor(autoFilter?: () => Readonly<Record<string, string>> | undefined) {
     super();
 
+    // Criteria are written back inside this `<filterColumn>` and its `<autoFilter>`, which carry the
+    // declarations they were read with.
+    const enclosing = () => ({ ...autoFilter?.(), ...this.model?.namespaceAttributes });
     this.map = {
-      customFilters: new PreservedSubtreeXform(),
-      filters: new PreservedSubtreeXform(),
-      "x14:customFilters": new PreservedSubtreeXform(),
-      dynamicFilter: new PreservedLeafXform("dynamicFilter"),
-      top10: new PreservedLeafXform("top10"),
-      colorFilter: new PreservedLeafXform("colorFilter"),
-      iconFilter: new PreservedLeafXform("iconFilter"),
-      "x14:iconFilter": new PreservedSubtreeXform(),
-      extLst: new PreservedSubtreeXform()
+      customFilters: new PreservedSubtreeXform(enclosing),
+      filters: new PreservedSubtreeXform(enclosing),
+      "x14:customFilters": new PreservedSubtreeXform(enclosing),
+      dynamicFilter: new PreservedLeafXform("dynamicFilter", enclosing),
+      top10: new PreservedLeafXform("top10", enclosing),
+      colorFilter: new PreservedLeafXform("colorFilter", enclosing),
+      iconFilter: new PreservedLeafXform("iconFilter", enclosing),
+      "x14:iconFilter": new PreservedSubtreeXform(enclosing),
+      extLst: new PreservedSubtreeXform(enclosing)
     };
     this.model = { filterButton: false };
   }

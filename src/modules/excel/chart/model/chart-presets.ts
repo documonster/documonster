@@ -1,6 +1,6 @@
 import type { AddChartExOptions, ChartExType } from "@excel/chart/model/chart-ex-types";
 import type { AddChartOptions, AddChartSeriesOptions } from "@excel/chart/model/types";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 
 type PresetSeriesDefaults = Partial<Pick<AddChartSeriesOptions, "bubble3D" | "explosion">>;
 
@@ -209,7 +209,7 @@ export function applyChartPreset(
 ): AddChartOptions {
   const config: ChartPresetConfig | undefined = CHART_PRESETS[preset];
   if (!config) {
-    throw new ChartOptionsError(`Unknown chart preset: ${preset}.`);
+    throw new ExcelChartOptionsError("preset", `Unknown chart preset: ${preset}.`);
   }
   // `type` is required on `ChartPresetConfig.options`, so this assignment is
   // type-safe without a non-null assertion.
@@ -230,7 +230,7 @@ export function applyChartExPreset(
 ): AddChartExOptions {
   const config: ChartExPresetConfig | undefined = CHART_EX_PRESETS[preset];
   if (!config) {
-    throw new ChartOptionsError(`Unknown chartEx preset: ${preset}.`);
+    throw new ExcelChartOptionsError("preset", `Unknown chartEx preset: ${preset}.`);
   }
   return {
     ...config.options,

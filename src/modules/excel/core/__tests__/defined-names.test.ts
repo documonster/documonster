@@ -7,12 +7,12 @@ import {
   definedNamesGetRangesScoped,
   definedNamesModel,
   definedNamesRemove,
-  definedNamesSpliceColumns,
-  definedNamesSpliceRows
+  definedNamesApplyEdit
 } from "@excel/core/defined-names";
 import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
-import { Cell, Workbook } from "@excel/index";
+import { Cell, ConditionalFormatting, DataValidation, Workbook } from "@excel/index";
+import { excelNameKey } from "@utils/name-key";
 import { describe, it, expect } from "vitest";
 
 describe("DefinedNames", () => {
@@ -150,24 +150,29 @@ describe("DefinedNames", () => {
     definedNamesAdd(dn, "single!A4", "singleA4");
     definedNamesAdd(dn, "single!D4", "singleD4");
 
-    definedNamesSpliceRows(dn, "vertical", 2, 2, 1);
-    definedNamesSpliceColumns(dn, "horizontal", 2, 2, 1);
-    definedNamesSpliceRows(dn, "square", 2, 2, 1);
-    definedNamesSpliceColumns(dn, "square", 2, 2, 1);
-    definedNamesSpliceRows(dn, "single", 2, 2, 1);
-    definedNamesSpliceColumns(dn, "single", 2, 2, 1);
+    // Deleting two lines at 2 and inserting one there, as references see a splice.
+    const splice = (kind: "rows" | "columns", sheet: string): void =>
+      definedNamesApplyEdit(dn, { kind, sheet, at: 2, deleted: 2, inserted: 1 });
+    splice("rows", "vertical");
+    splice("columns", "horizontal");
+    splice("rows", "square");
+    splice("columns", "square");
+    splice("rows", "single");
+    splice("columns", "single");
 
+    // An area the inserted line falls inside grows over it, as Excel's names do; these used to be cut in two
+    // around the new line (`$A$1`, `$A$3`), which pinned the bug.
     expect(definedNamesGetRanges(dn, "vertical")).toEqual({
       name: "vertical",
-      ranges: ["vertical!$A$1", "vertical!$A$3"]
+      ranges: ["vertical!$A$1:$A$3"]
     });
     expect(definedNamesGetRanges(dn, "horizontal")).toEqual({
       name: "horizontal",
-      ranges: ["horizontal!$A$1", "horizontal!$C$1"]
+      ranges: ["horizontal!$A$1:$C$1"]
     });
     expect(definedNamesGetRanges(dn, "square")).toEqual({
       name: "square",
-      ranges: ["square!$A$1", "square!$C$1", "square!$A$3", "square!$C$3"]
+      ranges: ["square!$A$1:$C$3"]
     });
     expect(definedNamesGetRanges(dn, "singleA1")).toEqual({
       name: "singleA1",
@@ -284,9 +289,9 @@ describe("DefinedNames", () => {
       loadDefinedNamesModel(dn, [{ name: "MyCell", ranges: [], rawText: "'Budget (2024)'!$A$1" }]);
 
       // Should be in matrixMap, not formulaMap or opaqueMap
-      expect(dn.matrixMap["MyCell"]).toBeDefined();
-      expect(dn.formulaMap["MyCell"]).toBeUndefined();
-      expect(dn.opaqueMap["MyCell"]).toBeUndefined();
+      expect(dn.matrixMap[excelNameKey("MyCell")]).toBeDefined();
+      expect(dn.formulaMap[excelNameKey("MyCell")]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("MyCell")]).toBeUndefined();
     });
 
     it("classifies OFFSET formula as formula", () => {
@@ -295,57 +300,57 @@ describe("DefinedNames", () => {
         { name: "MyFormula", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }
       ]);
 
-      expect(dn.formulaMap["MyFormula"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
-      expect(dn.matrixMap["MyFormula"]).toBeUndefined();
-      expect(dn.opaqueMap["MyFormula"]).toBeUndefined();
+      expect(dn.formulaMap[excelNameKey("MyFormula")]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+      expect(dn.matrixMap[excelNameKey("MyFormula")]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("MyFormula")]).toBeUndefined();
     });
 
     it("classifies LAMBDA formula as formula", () => {
       const dn = createDefinedNames();
       loadDefinedNamesModel(dn, [{ name: "MyLambda", ranges: [], rawText: "LAMBDA(x,y,x+y)" }]);
 
-      expect(dn.formulaMap["MyLambda"]).toBe("LAMBDA(x,y,x+y)");
-      expect(dn.matrixMap["MyLambda"]).toBeUndefined();
-      expect(dn.opaqueMap["MyLambda"]).toBeUndefined();
+      expect(dn.formulaMap[excelNameKey("MyLambda")]).toBe("LAMBDA(x,y,x+y)");
+      expect(dn.matrixMap[excelNameKey("MyLambda")]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("MyLambda")]).toBeUndefined();
     });
 
     it("classifies #REF! as opaque", () => {
       const dn = createDefinedNames();
       loadDefinedNamesModel(dn, [{ name: "BadRef", ranges: [], rawText: "#REF!" }]);
 
-      expect(dn.opaqueMap["BadRef"]).toBeDefined();
-      expect(dn.opaqueMap["BadRef"].rawText).toBe("#REF!");
-      expect(dn.matrixMap["BadRef"]).toBeUndefined();
-      expect(dn.formulaMap["BadRef"]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("BadRef")]).toBeDefined();
+      expect(dn.opaqueMap[excelNameKey("BadRef")].rawText).toBe("#REF!");
+      expect(dn.matrixMap[excelNameKey("BadRef")]).toBeUndefined();
+      expect(dn.formulaMap[excelNameKey("BadRef")]).toBeUndefined();
     });
 
     it("classifies string literal as opaque", () => {
       const dn = createDefinedNames();
       loadDefinedNamesModel(dn, [{ name: "MyStr", ranges: [], rawText: '"hello world"' }]);
 
-      expect(dn.opaqueMap["MyStr"]).toBeDefined();
-      expect(dn.opaqueMap["MyStr"].rawText).toBe('"hello world"');
-      expect(dn.matrixMap["MyStr"]).toBeUndefined();
-      expect(dn.formulaMap["MyStr"]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("MyStr")]).toBeDefined();
+      expect(dn.opaqueMap[excelNameKey("MyStr")].rawText).toBe('"hello world"');
+      expect(dn.matrixMap[excelNameKey("MyStr")]).toBeUndefined();
+      expect(dn.formulaMap[excelNameKey("MyStr")]).toBeUndefined();
     });
 
     it("classifies array constant as opaque", () => {
       const dn = createDefinedNames();
       loadDefinedNamesModel(dn, [{ name: "MyArr", ranges: [], rawText: "{1,2;3,4}" }]);
 
-      expect(dn.opaqueMap["MyArr"]).toBeDefined();
-      expect(dn.opaqueMap["MyArr"].rawText).toBe("{1,2;3,4}");
-      expect(dn.matrixMap["MyArr"]).toBeUndefined();
-      expect(dn.formulaMap["MyArr"]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("MyArr")]).toBeDefined();
+      expect(dn.opaqueMap[excelNameKey("MyArr")].rawText).toBe("{1,2;3,4}");
+      expect(dn.matrixMap[excelNameKey("MyArr")]).toBeUndefined();
+      expect(dn.formulaMap[excelNameKey("MyArr")]).toBeUndefined();
     });
 
     it("classifies plain cell reference as reference", () => {
       const dn = createDefinedNames();
       loadDefinedNamesModel(dn, [{ name: "SingleCell", ranges: [], rawText: "Sheet1!$A$1" }]);
 
-      expect(dn.matrixMap["SingleCell"]).toBeDefined();
-      expect(dn.formulaMap["SingleCell"]).toBeUndefined();
-      expect(dn.opaqueMap["SingleCell"]).toBeUndefined();
+      expect(dn.matrixMap[excelNameKey("SingleCell")]).toBeDefined();
+      expect(dn.formulaMap[excelNameKey("SingleCell")]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("SingleCell")]).toBeUndefined();
     });
 
     it("classifies comma-separated ranges as reference", () => {
@@ -354,9 +359,9 @@ describe("DefinedNames", () => {
         { name: "MultiRange", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }
       ]);
 
-      expect(dn.matrixMap["MultiRange"]).toBeDefined();
-      expect(dn.formulaMap["MultiRange"]).toBeUndefined();
-      expect(dn.opaqueMap["MultiRange"]).toBeUndefined();
+      expect(dn.matrixMap[excelNameKey("MultiRange")]).toBeDefined();
+      expect(dn.formulaMap[excelNameKey("MultiRange")]).toBeUndefined();
+      expect(dn.opaqueMap[excelNameKey("MultiRange")]).toBeUndefined();
     });
 
     it("preserves opaque names in model getter output", () => {
@@ -409,10 +414,10 @@ describe("DefinedNames", () => {
     await Workbook.read(wb2, buffer);
 
     // Opaque names should survive round-trip
-    expect(getDefinedNames(wb2).opaqueMap["OpaqueError"]).toBeDefined();
-    expect(getDefinedNames(wb2).opaqueMap["OpaqueError"].rawText).toBe("#REF!");
-    expect(getDefinedNames(wb2).opaqueMap["OpaqueStr"]).toBeDefined();
-    expect(getDefinedNames(wb2).opaqueMap["OpaqueStr"].rawText).toBe('"hello"');
+    expect(getDefinedNames(wb2).opaqueMap[excelNameKey("OpaqueError")]).toBeDefined();
+    expect(getDefinedNames(wb2).opaqueMap[excelNameKey("OpaqueError")].rawText).toBe("#REF!");
+    expect(getDefinedNames(wb2).opaqueMap[excelNameKey("OpaqueStr")]).toBeDefined();
+    expect(getDefinedNames(wb2).opaqueMap[excelNameKey("OpaqueStr")].rawText).toBe('"hello"');
   });
 
   // ===========================================================================
@@ -497,6 +502,116 @@ describe("DefinedNames", () => {
 
       const scopedRanges = definedNamesGetRangesScoped(dn, "MyLambda", 0);
       expect(scopedRanges.ranges).toEqual(["LAMBDA(x,x*2)"]);
+    });
+  });
+
+  // ===========================================================================
+  // Size — a name costs its rectangles, not its cells
+  // ===========================================================================
+
+  describe("large and whole-axis areas", () => {
+    // Each cell used to be its own record: the whole-sheet name below allocated until the process aborted, and a
+    // whole-column name could not be represented at all and was dropped from the model.
+    it("holds a whole-sheet area without visiting its cells", () => {
+      const dn = createDefinedNames();
+      definedNamesAdd(dn, "S!$A$1:$XFD$1048576", "All");
+      expect(definedNamesGetNames(dn, "S!XFD1048576")).toEqual(["All"]);
+      expect(definedNamesRemove(dn, "S!B2", "All")).toBe(true);
+      expect(definedNamesGetNames(dn, "S!B2")).toEqual([]);
+      expect(definedNamesGetRanges(dn, "All").ranges).toEqual([
+        "S!$A:$A",
+        "S!$B$1:$XFD$1",
+        "S!$C$2:$XFD$1048576",
+        "S!$B$3:$B$1048576"
+      ]);
+    });
+
+    it("keeps whole-column and whole-row names through the model", () => {
+      const dn = createDefinedNames();
+      loadDefinedNamesModel(dn, [
+        { name: "Col", ranges: [], rawText: "S!$A:$B" },
+        { name: "Rows", ranges: [], rawText: "'My S'!$2:$3" },
+        { name: "Sheet", ranges: [], rawText: "S!$A$1:$XFD$1048576" }
+      ]);
+      expect(definedNamesModel(dn).map(n => [n.name, n.ranges])).toEqual([
+        ["Col", ["S!$A:$B"]],
+        ["Rows", ["'My S'!$2:$3"]],
+        ["Sheet", ["S!$1:$1048576"]]
+      ]);
+      expect(definedNamesGetNames(dn, "S!B1048576")).toEqual(["Col", "Sheet"]);
+    });
+
+    it("splices a whole column's rows without materialising them", () => {
+      const dn = createDefinedNames();
+      definedNamesAdd(dn, "S!$A$1:$A$1048576", "Col");
+      definedNamesApplyEdit(dn, { kind: "rows", sheet: "S", at: 3, deleted: 1, inserted: 0 });
+      // A whole column is still the whole column, as in Excel; this used to shrink to `$A$1:$A$1048575`.
+      expect(definedNamesGetRanges(dn, "Col").ranges).toEqual(["S!$A:$A"]);
+    });
+
+    it.each(["xlsx", "xlsb"] as const)(
+      "round-trips whole-sheet names, validations and formats through %s",
+      async format => {
+        const workbook = Workbook.create();
+        const sheet = Workbook.addWorksheet(workbook, "S");
+        Cell.setValue(sheet, "A1", 1);
+        definedNamesAdd(getDefinedNames(workbook), "S!$A$1:$XFD$1048576", "All");
+        definedNamesAdd(getDefinedNames(workbook), "S!$B$1:$B$1048576", "ColB");
+        DataValidation.add(sheet.dataValidations, "A1:XFD1048576", {
+          type: "whole",
+          operator: "between",
+          formulae: [1, 9]
+        });
+        ConditionalFormatting.add(sheet, {
+          ref: "A1:XFD1048576",
+          rules: [{ type: "expression", formulae: ["A1>1"], style: { font: { bold: true } } }]
+        });
+        const back = await Workbook.read(
+          Workbook.create(),
+          await Workbook.toBuffer(workbook, { format })
+        );
+        expect(definedNamesModel(getDefinedNames(back)).map(n => [n.name, n.ranges])).toEqual([
+          ["All", ["S!$1:$1048576"]],
+          ["ColB", ["S!$B:$B"]]
+        ]);
+      }
+    );
+
+    it("refuses a reference past the grid instead of modelling it", () => {
+      const dn = createDefinedNames();
+      definedNamesAdd(dn, "S!$A$1:$A$99999999", "TooFar");
+      expect(definedNamesModel(dn)).toEqual([]);
+      loadDefinedNamesModel(dn, [{ name: "TooFar", ranges: [], rawText: "S!$A$1:$A$99999999" }]);
+      expect(dn.matrixMap[excelNameKey("TooFar")]).toBeUndefined();
+    });
+  });
+
+  describe("relative and mixed references", () => {
+    // A name's relative reference resolves against the cell that uses it, so it is not a fixed set of cells and the
+    // region model cannot hold it. Read as a region it came out empty and the name was dropped on write; read as
+    // `$A$1` it would have changed what every formula using it computes.
+    it.each([
+      ["Rel", "S!A1"],
+      ["RelCol", "S!$A1:$A3"],
+      ["MixedEnd", "S!$A$1:B3"],
+      ["RelUnion", "S!$A$1,S!B2"],
+      ["RelRow", "S!1:1"],
+      ["SameSheet", "!$A$73:$E$140"]
+    ])("%s keeps its text exactly", (name, text) => {
+      const dn = createDefinedNames();
+      loadDefinedNamesModel(dn, [{ name, ranges: [], rawText: text }]);
+      expect(dn.matrixMap[name]).toBeUndefined();
+      const written = definedNamesModel(dn);
+      expect(written).toHaveLength(1);
+      const entry = written[0]!;
+      expect(entry.name).toBe(name);
+      expect(entry.formulaExpression ?? entry.rawText).toBe(text);
+    });
+
+    it("still models a fully absolute reference as a region", () => {
+      const dn = createDefinedNames();
+      loadDefinedNamesModel(dn, [{ name: "Abs", ranges: [], rawText: "S!$A$1:$B$3,S!$D:$D" }]);
+      expect(definedNamesModel(dn)).toEqual([{ name: "Abs", ranges: ["S!$A$1:$B$3", "S!$D:$D"] }]);
     });
   });
 });

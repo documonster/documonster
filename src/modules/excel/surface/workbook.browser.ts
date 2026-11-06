@@ -6,51 +6,105 @@
  * Node file-path `readFile` / `writeFile`). The `.browser` same-name swap
  * selects the browser xlsx binding.
  */
+import {
+  createStreamReader as createStreamReaderImpl,
+  createStreamWriter as createStreamWriterImpl
+} from "@excel/core/workbook.browser";
+import {
+  toBuffer as toBufferImpl,
+  toStream as toStreamImpl,
+  writeStream as writeStreamImpl
+} from "@excel/core/xlsx-io";
+import type {
+  XlsxReadable as XlsxReadableType,
+  XlsxWritable as XlsxWritableType
+} from "@excel/core/xlsx-io-types";
+import type { XlsxStreamOptions as XlsxStreamOptionsType } from "@excel/core/xlsx-stream";
+import { workbookOnly } from "@excel/surface/stream-targets";
+
 export {
-  createWorkbook as create,
   addWorksheet,
+  protect,
+  unprotect,
+  verifyPassword,
+  addExternalLink,
+  registerPerson,
   getWorksheet,
-  getWorksheets,
+  listWorksheets,
+  eachWorksheet,
+  getDefinedNames,
+  addCellStyle,
+  getCellStyle,
+  listCellStyles,
+  removeCellStyle,
+  useBuiltInCellStyle,
   removeWorksheet,
   addChartsheet,
   addPivotChartsheet,
   getChartsheet,
-  getChartsheets,
+  listChartsheets,
   removeChartsheet,
-  renameChartsheet,
   copyChartsheet,
   replaceChartsheetChart,
-  getDefinedNames,
-  eachSheet,
-  importSheet,
-  protectWorkbook as protect,
-  unprotectWorkbook as unprotect,
-  addExternalLink,
+  renameChartsheet,
+  importWorksheet,
+  listUnrecognizedValues,
+  discardUnrecognizedValues,
   getExternalLink,
-  registerPerson,
+  listExternalLinks,
+  listPersons,
+  getDefaultFont,
+  setDefaultFont,
   registerFunction,
   unregisterFunction,
+  getModel,
+  setModel,
+  getWorksheets,
+  getChartsheets,
+  eachSheet,
+  importSheet,
   defineCellStyle,
-  getCellStyle,
-  listCellStyles,
-  removeCellStyle,
-  useBuiltinCellStyle,
-  getWorkbookModel as getModel,
-  createStreamWriter,
-  createStreamReader
-} from "@excel/core/workbook.browser";
+  useBuiltinCellStyle
+} from "@excel/surface/workbook-edits";
 
-export {
-  toBuffer,
-  toStream,
-  read,
-  readWithDiagnostics,
-  readStream,
-  writeStream
-} from "@excel/core/xlsx-io";
-export type { XlsxReadable, XlsxWritable, XlsxStreamOptions } from "@excel/core/xlsx-io";
+export { createWorkbook as create } from "@excel/core/workbook.browser";
 
-export { loadWorkbookModel as setModel } from "@excel/core/model-load";
+export { read, readWithDiagnostics, readStream } from "@excel/core/xlsx-io";
+// A streaming writer is not written by these: it has written most of its file already, in the format it was made
+// with, and the options they take could change neither. It finishes itself, with `commit()` or `toBuffer()`.
+const WRITER_FINISHES = "is finished with its own commit() or toBuffer()";
 
-/** A workbook handle (opaque to consumers). */
+export const toBuffer = /* @__PURE__ */ workbookOnly(
+  "Workbook.toBuffer",
+  WRITER_FINISHES,
+  toBufferImpl
+);
+export const toStream = /* @__PURE__ */ workbookOnly(
+  "Workbook.toStream",
+  WRITER_FINISHES,
+  toStreamImpl
+);
+export const writeStream = /* @__PURE__ */ workbookOnly(
+  "Workbook.writeStream",
+  WRITER_FINISHES,
+  writeStreamImpl
+);
+// Published flat from `documonster/excel`; the namespace copies were a second name for each.
+/** @deprecated Use the flat `XlsxReadable` type. Removed in 1.0. */
+export type XlsxReadable = XlsxReadableType;
+/** @deprecated Use the flat `XlsxWritable` type. Removed in 1.0. */
+export type XlsxWritable = XlsxWritableType;
+/** @deprecated Use the flat `XlsxStreamOptions` type. Removed in 1.0. */
+export type XlsxStreamOptions = XlsxStreamOptionsType;
+
+/** @deprecated Use `new Stream.WorkbookWriter(options)`. Removed in 1.0. */
+export const createStreamWriter = createStreamWriterImpl;
+/** @deprecated Use `new Stream.WorkbookReader(input, options)`. Removed in 1.0. */
+export const createStreamReader = createStreamReaderImpl;
+
+/**
+ * A workbook handle. Its document properties (`title`, `creator`, `created`, …), `properties`,
+ * `calcProperties` and `views` are plain fields to read and assign; everything else is reached through
+ * the namespace functions. Internal state is marked `@deprecated` and leaves the published type in 1.0.
+ */
 export type { WorkbookData as Handle } from "@excel/core/workbook-core";

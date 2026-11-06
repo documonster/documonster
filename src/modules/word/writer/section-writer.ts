@@ -12,6 +12,8 @@ import {
   DEFAULT_HEADER_FOOTER_MARGIN,
   DEFAULT_COLUMN_SPACE
 } from "@word/constants";
+import { WRITTEN, writtenToken } from "@word/core/argument-checks";
+import { within } from "@word/core/node-path";
 import type {
   SectionProperties,
   SectionColumns,
@@ -20,7 +22,9 @@ import type {
   FootnoteProperties,
   EndnoteProperties
 } from "@word/types";
+import { writtenRevisionId } from "@word/writer/render-context";
 import { renderBorderElement } from "@word/writer/run-writer";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /** Render footnote/endnote properties. */
@@ -37,7 +41,7 @@ function renderNoteProperties(
     xml.leafNode("w:numFmt", { "w:val": props.numFmt });
   }
   if (props.numStart !== undefined) {
-    xml.leafNode("w:numStart", { "w:val": String(props.numStart) });
+    xml.leafNode("w:numStart", { "w:val": xmlValue(props.numStart, "w:val") });
   }
   if (props.numRestart) {
     xml.leafNode("w:numRestart", { "w:val": props.numRestart });
@@ -54,10 +58,13 @@ function renderHeaderFooterRef(xml: XmlSink, tagName: string, ref: HeaderFooterR
 function renderColumns(xml: XmlSink, cols: SectionColumns): void {
   const attrs: Record<string, string> = {};
   if (cols.space !== undefined) {
-    attrs["w:space"] = String(cols.space);
+    attrs["w:space"] = xmlValue(cols.space, "w:space");
   }
-  if (cols.count !== undefined) {
-    attrs["w:num"] = String(cols.count);
+  // Word takes the column count from `w:num` alone, so a list of columns
+  // states its length there too.
+  const count = cols.count ?? (cols.columns?.length || undefined);
+  if (count !== undefined) {
+    attrs["w:num"] = xmlValue(count, "w:num");
   }
   if (cols.equalWidth !== undefined) {
     attrs["w:equalWidth"] = cols.equalWidth ? "1" : "0";
@@ -69,9 +76,9 @@ function renderColumns(xml: XmlSink, cols: SectionColumns): void {
   if (cols.columns && cols.columns.length > 0) {
     xml.openNode("w:cols", attrs);
     for (const col of cols.columns) {
-      const colAttrs: Record<string, string> = { "w:w": String(col.width) };
+      const colAttrs: Record<string, string> = { "w:w": xmlValue(col.width, "w:w") };
       if (col.space !== undefined) {
-        colAttrs["w:space"] = String(col.space);
+        colAttrs["w:space"] = xmlValue(col.space, "w:space");
       }
       xml.leafNode("w:col", colAttrs);
     }
@@ -84,14 +91,17 @@ function renderColumns(xml: XmlSink, cols: SectionColumns): void {
 /** Render page borders (w:pgBorders). */
 function renderPageBorders(xml: XmlSink, borders: PageBorders): void {
   const attrs: Record<string, string> = {};
-  if (borders.display) {
-    attrs["w:display"] = borders.display;
+  const display = writtenToken(borders, "display", WRITTEN.pageBorderDisplay, "display");
+  if (display !== undefined) {
+    attrs["w:display"] = display;
   }
-  if (borders.offsetFrom) {
-    attrs["w:offsetFrom"] = borders.offsetFrom;
+  const offsetFrom = writtenToken(borders, "offsetFrom", WRITTEN.pageBorderOffset, "offsetFrom");
+  if (offsetFrom !== undefined) {
+    attrs["w:offsetFrom"] = offsetFrom;
   }
-  if (borders.zOrder) {
-    attrs["w:zOrder"] = borders.zOrder;
+  const zOrder = writtenToken(borders, "zOrder", WRITTEN.pageBorderZOrder, "zOrder");
+  if (zOrder !== undefined) {
+    attrs["w:zOrder"] = zOrder;
   }
   xml.openNode("w:pgBorders", Object.keys(attrs).length > 0 ? attrs : undefined);
   if (borders.top) {
@@ -153,8 +163,9 @@ export function renderSectionProperties(
   }
 
   // Section break type
-  if (sect.breakType) {
-    xml.leafNode("w:type", { "w:val": sect.breakType });
+  const breakType = writtenToken(sect, "breakType", WRITTEN.sectionBreak, "breakType");
+  if (breakType !== undefined) {
+    xml.leafNode("w:type", { "w:val": breakType });
   }
 
   // Page size
@@ -162,7 +173,7 @@ export function renderSectionProperties(
     const ps = sect.pageSize;
     const w = ps?.width ?? DEFAULT_PAGE_WIDTH;
     const h = ps?.height ?? DEFAULT_PAGE_HEIGHT;
-    const attrs: Record<string, string> = { "w:w": String(w), "w:h": String(h) };
+    const attrs: Record<string, string> = { "w:w": xmlValue(w, "w:w"), "w:h": xmlValue(h, "w:h") };
     if (ps?.orientation === "landscape") {
       attrs["w:orient"] = "landscape";
     }
@@ -173,35 +184,42 @@ export function renderSectionProperties(
   {
     const m = sect.margins;
     xml.leafNode("w:pgMar", {
-      "w:top": String(m?.top ?? DEFAULT_MARGIN),
-      "w:right": String(m?.right ?? DEFAULT_MARGIN),
-      "w:bottom": String(m?.bottom ?? DEFAULT_MARGIN),
-      "w:left": String(m?.left ?? DEFAULT_MARGIN),
-      "w:header": String(m?.header ?? DEFAULT_HEADER_FOOTER_MARGIN),
-      "w:footer": String(m?.footer ?? DEFAULT_HEADER_FOOTER_MARGIN),
-      "w:gutter": String(m?.gutter ?? 0)
+      "w:top": xmlValue(m?.top ?? DEFAULT_MARGIN, "w:top"),
+      "w:right": xmlValue(m?.right ?? DEFAULT_MARGIN, "w:right"),
+      "w:bottom": xmlValue(m?.bottom ?? DEFAULT_MARGIN, "w:bottom"),
+      "w:left": xmlValue(m?.left ?? DEFAULT_MARGIN, "w:left"),
+      "w:header": xmlValue(m?.header ?? DEFAULT_HEADER_FOOTER_MARGIN, "w:header"),
+      "w:footer": xmlValue(m?.footer ?? DEFAULT_HEADER_FOOTER_MARGIN, "w:footer"),
+      "w:gutter": xmlValue(m?.gutter ?? 0, "w:gutter")
     });
   }
 
   // Page borders
   if (sect.pageBorders) {
-    renderPageBorders(xml, sect.pageBorders);
+    const borders = sect.pageBorders;
+    within("pageBorders", () => renderPageBorders(xml, borders));
   }
 
   // Line numbers (must precede pgNumType per schema)
   if (sect.lineNumbers) {
     const attrs: Record<string, string> = {};
     if (sect.lineNumbers.countBy !== undefined) {
-      attrs["w:countBy"] = String(sect.lineNumbers.countBy);
+      attrs["w:countBy"] = xmlValue(sect.lineNumbers.countBy, "w:countBy");
     }
     if (sect.lineNumbers.start !== undefined) {
-      attrs["w:start"] = String(sect.lineNumbers.start);
+      attrs["w:start"] = xmlValue(sect.lineNumbers.start, "w:start");
     }
-    if (sect.lineNumbers.restart) {
-      attrs["w:restart"] = sect.lineNumbers.restart;
+    const restart = writtenToken(
+      sect.lineNumbers,
+      "restart",
+      WRITTEN.lineNumberRestart,
+      "lineNumbers.restart"
+    );
+    if (restart !== undefined) {
+      attrs["w:restart"] = restart;
     }
     if (sect.lineNumbers.distance !== undefined) {
-      attrs["w:distance"] = String(sect.lineNumbers.distance);
+      attrs["w:distance"] = xmlValue(sect.lineNumbers.distance, "w:distance");
     }
     xml.leafNode("w:lnNumType", attrs);
   }
@@ -210,7 +228,7 @@ export function renderSectionProperties(
   if (sect.pageNumbering) {
     const attrs: Record<string, string> = {};
     if (sect.pageNumbering.start !== undefined) {
-      attrs["w:start"] = String(sect.pageNumbering.start);
+      attrs["w:start"] = xmlValue(sect.pageNumbering.start, "w:start");
     }
     if (sect.pageNumbering.format) {
       attrs["w:fmt"] = sect.pageNumbering.format;
@@ -222,7 +240,7 @@ export function renderSectionProperties(
   if (sect.columns) {
     renderColumns(xml, sect.columns);
   } else {
-    xml.leafNode("w:cols", { "w:space": String(DEFAULT_COLUMN_SPACE) });
+    xml.leafNode("w:cols", { "w:space": xmlValue(DEFAULT_COLUMN_SPACE, "w:space") });
   }
 
   // Form protection
@@ -231,8 +249,14 @@ export function renderSectionProperties(
   }
 
   // Vertical alignment
-  if (sect.verticalAlign) {
-    xml.leafNode("w:vAlign", { "w:val": sect.verticalAlign });
+  const verticalAlign = writtenToken(
+    sect,
+    "verticalAlign",
+    WRITTEN.pageVerticalAlign,
+    "verticalAlign"
+  );
+  if (verticalAlign !== undefined) {
+    xml.leafNode("w:vAlign", { "w:val": verticalAlign });
   }
 
   // Title page (different first page header/footer) — schema places this
@@ -242,8 +266,9 @@ export function renderSectionProperties(
   }
 
   // Text direction
-  if (sect.textDirection) {
-    xml.leafNode("w:textDirection", { "w:val": sect.textDirection });
+  const textDirection = writtenToken(sect, "textDirection", WRITTEN.textDirection, "textDirection");
+  if (textDirection !== undefined) {
+    xml.leafNode("w:textDirection", { "w:val": textDirection });
   }
 
   // Section-level bidi (RTL)
@@ -259,13 +284,14 @@ export function renderSectionProperties(
   // Document grid
   if (sect.docGrid) {
     const gridAttrs: Record<string, string> = {
-      "w:linePitch": String(sect.docGrid.linePitch ?? 360)
+      "w:linePitch": xmlValue(sect.docGrid.linePitch ?? 360, "w:linePitch")
     };
     if (sect.docGrid.charSpace !== undefined) {
-      gridAttrs["w:charSpace"] = String(sect.docGrid.charSpace);
+      gridAttrs["w:charSpace"] = xmlValue(sect.docGrid.charSpace, "w:charSpace");
     }
-    if (sect.docGrid.type) {
-      gridAttrs["w:type"] = sect.docGrid.type;
+    const gridType = writtenToken(sect.docGrid, "type", WRITTEN.docGrid, "docGrid.type");
+    if (gridType !== undefined) {
+      gridAttrs["w:type"] = gridType;
     }
     xml.leafNode("w:docGrid", gridAttrs);
   } else {
@@ -276,7 +302,7 @@ export function renderSectionProperties(
   if (!insidePropertyChange && sect.propertyChange) {
     const rev = sect.propertyChange.revision;
     const attrs: Record<string, string> = {
-      "w:id": String(rev.id),
+      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
       "w:author": rev.author
     };
     if (rev.date) {
@@ -284,7 +310,10 @@ export function renderSectionProperties(
     }
     xml.openNode("w:sectPrChange", attrs);
     if (sect.propertyChange.previousProperties) {
-      renderSectionProperties(xml, sect.propertyChange.previousProperties, true);
+      const previous = sect.propertyChange.previousProperties;
+      within("propertyChange.previousProperties", () =>
+        renderSectionProperties(xml, previous, true)
+      );
     } else {
       xml.openNode("w:sectPr");
       xml.closeNode();

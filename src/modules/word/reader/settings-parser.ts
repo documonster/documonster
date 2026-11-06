@@ -8,7 +8,9 @@
 import type { Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
+  attrOnOff,
   attrVal,
+  boolToggle,
   findChildNs,
   findChildrenNs,
   parseNoteProperties,
@@ -16,22 +18,56 @@ import {
   sidToHashAlgorithm
 } from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
+import { preservedRootXml, wordLocalName } from "@word/reader/preserved-xml";
 import type {
   CompatFlag,
   CompatSetting,
   DocumentSettings,
   HyphenationSettings,
+  NoteSeparatorType,
   ProtectionType
 } from "@word/types";
+import type { XmlElement } from "@xml/types";
 
-export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSettings {
+/**
+ * Parse `word/settings.xml`. `noteTypes` maps each footnote/endnote id to its
+ * `w:type` in the notes parts, so the separator references in `w:footnotePr`
+ * and `w:endnotePr` can be kept by type — the writer renumbers those notes.
+ */
+export function parseSettingsXml(
+  xmlStr: string,
+  maxDepth?: number,
+  noteTypes?: {
+    readonly footnote?: ReadonlyMap<number, string>;
+    readonly endnote?: ReadonlyMap<number, string>;
+  }
+): DocumentSettings {
   const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const settings: Mutable<DocumentSettings> = {};
+  /** An on/off (`ST_OnOff`) setting element, when present: `w:val` false, 0 or off is false. */
+  const onOff = (name: string, set: (value: boolean) => void): void => {
+    const value = boolToggle(root, name);
+    if (value !== undefined) {
+      set(value);
+    }
+  };
 
   const zoomEl = findChildNs(root, "zoom");
   if (zoomEl) {
-    settings.zoom = attrInt(zoomEl, "percent");
+    const percent = attrInt(zoomEl, "percent");
+    if (percent !== undefined) {
+      settings.zoom = percent;
+    }
+    const zoomType = attrVal(zoomEl, "val");
+    if (
+      zoomType === "none" ||
+      zoomType === "fullPage" ||
+      zoomType === "bestFit" ||
+      zoomType === "textFit"
+    ) {
+      settings.zoomType = zoomType;
+    }
   }
   const tabEl = findChildNs(root, "defaultTabStop");
   if (tabEl) {
@@ -51,29 +87,13 @@ export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSet
   }
 
   // Extended settings
-  if (findChildNs(root, "doNotTrackMoves")) {
-    settings.doNotTrackMoves = true;
-  }
-  if (findChildNs(root, "doNotTrackFormatting")) {
-    settings.doNotTrackFormatting = true;
-  }
-  if (findChildNs(root, "doNotDemoteNonCombiningChars")) {
-    settings.doNotDemoteAsianTextFirstLine = true;
-  }
-  const ssFontsEl = findChildNs(root, "saveSubsetFonts");
-  if (ssFontsEl) {
-    const v = attrVal(ssFontsEl, "val");
-    settings.saveSubsetFonts = v !== "0" && v !== "false";
-  }
-  if (findChildNs(root, "noPunctuationKerning")) {
-    settings.noPunctuationKerning = true;
-  }
-  if (findChildNs(root, "bordersDoNotSurroundHeader")) {
-    settings.bordersDoNotSurroundHeader = true;
-  }
-  if (findChildNs(root, "bordersDoNotSurroundFooter")) {
-    settings.bordersDoNotSurroundFooter = true;
-  }
+  onOff("doNotTrackMoves", v => (settings.doNotTrackMoves = v));
+  onOff("doNotTrackFormatting", v => (settings.doNotTrackFormatting = v));
+  onOff("doNotDemoteNonCombiningChars", v => (settings.doNotDemoteAsianTextFirstLine = v));
+  onOff("saveSubsetFonts", v => (settings.saveSubsetFonts = v));
+  onOff("noPunctuationKerning", v => (settings.noPunctuationKerning = v));
+  onOff("bordersDoNotSurroundHeader", v => (settings.bordersDoNotSurroundHeader = v));
+  onOff("bordersDoNotSurroundFooter", v => (settings.bordersDoNotSurroundFooter = v));
   const clickStyleEl = findChildNs(root, "clickAndTypeStyle");
   if (clickStyleEl) {
     settings.clickAndTypeStyle = attrVal(clickStyleEl, "val");
@@ -137,33 +157,23 @@ export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSet
     }
   }
 
-  if (findChildNs(root, "evenAndOddHeaders")) {
-    settings.evenAndOddHeaders = true;
-  }
+  onOff("evenAndOddHeaders", v => (settings.evenAndOddHeaders = v));
 
-  if (findChildNs(root, "trackRevisions")) {
-    settings.trackRevisions = true;
-  }
+  onOff("trackRevisions", v => (settings.trackRevisions = v));
 
-  if (findChildNs(root, "mirrorMargins")) {
-    settings.mirrorMargins = true;
-  }
+  onOff("mirrorMargins", v => (settings.mirrorMargins = v));
 
-  if (findChildNs(root, "gutterAtTop")) {
-    settings.gutterAtTop = true;
-  }
+  onOff("gutterAtTop", v => (settings.gutterAtTop = v));
 
-  if (findChildNs(root, "displayBackgroundShape")) {
-    settings.displayBackgroundShape = true;
-  }
+  onOff("displayBackgroundShape", v => (settings.displayBackgroundShape = v));
 
-  if (findChildNs(root, "updateFields")) {
-    settings.updateFieldsOnOpen = true;
-  }
+  onOff("updateFields", v => (settings.updateFieldsOnOpen = v));
 
   // Hyphenation
-  const autoHyphEl = findChildNs(root, "autoHyphenation");
-  if (autoHyphEl) {
+  const autoHyphenation = boolToggle(root, "autoHyphenation");
+  if (autoHyphenation === false) {
+    settings.autoHyphenation = false;
+  } else if (autoHyphenation) {
     settings.autoHyphenation = true;
     const hyph: Mutable<HyphenationSettings> = { autoHyphenation: true };
     const hzEl = findChildNs(root, "hyphenationZone");
@@ -174,8 +184,9 @@ export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSet
     if (chlEl) {
       hyph.consecutiveHyphenLimit = attrInt(chlEl, "val");
     }
-    if (findChildNs(root, "doNotHyphenateCaps")) {
-      hyph.doNotHyphenateCaps = true;
+    const doNotHyphenateCaps = boolToggle(root, "doNotHyphenateCaps");
+    if (doNotHyphenateCaps !== undefined) {
+      hyph.doNotHyphenateCaps = doNotHyphenateCaps;
     }
     settings.hyphenation = hyph;
   }
@@ -186,8 +197,8 @@ export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSet
     settings.documentProtection = {
       type: (attrVal(protEl, "edit") ?? "none") as ProtectionType,
       edit: attrVal(protEl, "edit") ?? undefined,
-      enforcement: attrVal(protEl, "enforcement") === "1",
-      formatting: attrVal(protEl, "formatting") === "1" ? true : undefined,
+      enforcement: attrOnOff(protEl, "enforcement") === true,
+      formatting: attrOnOff(protEl, "formatting") === true ? true : undefined,
       hashAlgorithm: sidToHashAlgorithm(attrVal(protEl, "cryptAlgorithmSid")),
       hashValue: attrVal(protEl, "hash") ?? undefined,
       saltValue: attrVal(protEl, "salt") ?? undefined,
@@ -239,8 +250,7 @@ export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSet
   if (writeProtectionEl) {
     const wp: NonNullable<DocumentSettings["writeProtection"]> = {};
     const wpMut = wp as Mutable<NonNullable<DocumentSettings["writeProtection"]>>;
-    const recommended = attrVal(writeProtectionEl, "recommended");
-    if (recommended === "1" || recommended === "true") {
+    if (attrOnOff(writeProtectionEl, "recommended") === true) {
       wpMut.recommended = true;
     }
     const algName = attrVal(writeProtectionEl, "algorithmName");
@@ -294,5 +304,89 @@ export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSet
     }
   }
 
+  const footnoteSeparators = fnPrEl
+    ? separatorReferences(fnPrEl, "footnote", noteTypes?.footnote)
+    : [];
+  if (footnoteSeparators.length > 0) {
+    settings.footnoteSeparators = footnoteSeparators;
+  }
+  const endnoteSeparators = enPrEl
+    ? separatorReferences(enPrEl, "endnote", noteTypes?.endnote)
+    : [];
+  if (endnoteSeparators.length > 0) {
+    settings.endnoteSeparators = endnoteSeparators;
+  }
+
+  const hyphenationModelled = settings.hyphenation !== undefined;
+  const preservedXml = preservedRootXml(root, child => {
+    const local = wordLocalName(child);
+    return (
+      local !== undefined &&
+      (MODELLED_SETTINGS.has(local) || (hyphenationModelled && HYPHENATION_DETAIL.has(local)))
+    );
+  });
+  if (preservedXml) {
+    settings.preservedXml = preservedXml;
+  }
+
   return settings;
 }
+
+/** The types of the special notes a `w:footnotePr`/`w:endnotePr` references, in order. */
+function separatorReferences(
+  el: XmlElement,
+  kind: "footnote" | "endnote",
+  types: ReadonlyMap<number, string> | undefined
+): NoteSeparatorType[] {
+  const out: NoteSeparatorType[] = [];
+  for (const ref of findChildrenNs(el, kind)) {
+    const id = attrInt(ref, "id");
+    const type = id === undefined ? undefined : types?.get(id);
+    if (type === "separator" || type === "continuationSeparator" || type === "continuationNotice") {
+      out.push(type);
+    }
+  }
+  return out;
+}
+
+/** The `w:settings` children this parser reads into the model; the writer writes them back. */
+const MODELLED_SETTINGS = new Set([
+  "zoom",
+  "defaultTabStop",
+  "characterSpacingControl",
+  "doNotTrackMoves",
+  "doNotTrackFormatting",
+  "doNotDemoteNonCombiningChars",
+  "saveSubsetFonts",
+  "noPunctuationKerning",
+  "bordersDoNotSurroundHeader",
+  "bordersDoNotSurroundFooter",
+  "clickAndTypeStyle",
+  "stylePaneFormatFilter",
+  "stylePaneSortMethod",
+  "themeFontLang",
+  "decimalSymbol",
+  "listSeparator",
+  "rsids",
+  "evenAndOddHeaders",
+  "trackRevisions",
+  "mirrorMargins",
+  "gutterAtTop",
+  "displayBackgroundShape",
+  "updateFields",
+  "autoHyphenation",
+  "documentProtection",
+  "compat",
+  "mailMerge",
+  "writeProtection",
+  "docVars",
+  "footnotePr",
+  "endnotePr"
+]);
+
+/** Hyphenation details, read only while automatic hyphenation is on — kept verbatim otherwise. */
+const HYPHENATION_DETAIL = new Set([
+  "consecutiveHyphenLimit",
+  "hyphenationZone",
+  "doNotHyphenateCaps"
+]);

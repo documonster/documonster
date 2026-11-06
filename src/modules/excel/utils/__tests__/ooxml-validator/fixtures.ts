@@ -32,7 +32,7 @@ export function buildPackage(parts: PackageParts): Uint8Array {
   for (const [path, data] of Object.entries(parts)) {
     zip.add(path, typeof data === "string" ? TEXT.encode(data) : data);
   }
-  return zip.bytesSync();
+  return zip.toBufferSync();
 }
 
 // -----------------------------------------------------------------------------

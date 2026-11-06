@@ -4,9 +4,9 @@
  * Demonstrates the `Anchor` namespace, the plain-data drawing-anchor handle
  * (a cell coordinate plus an EMU offset) used to position images/drawings:
  * - Anchor.create(ws, "B2")     — build an anchor from a worksheet + address
- * - Anchor.col(a) / Anchor.row(a)        — read fractional col/row position
+ * - Anchor.getCol(a) / Anchor.getRow(a)        — read fractional col/row position
  * - Anchor.setCol(a, v) / Anchor.setRow(a, v) — set fractional col/row position
- * - Anchor.colWidth(a) / Anchor.rowHeight(a)  — resolved EMU width/height
+ * - Anchor.getColWidth(a) / Anchor.getRowHeight(a)  — resolved EMU width/height
  * - Anchor.clone(a)             — duplicate an anchor (optionally rebinding ws)
  *
  * The console section exercises the handle methods directly; the workbook
@@ -39,14 +39,14 @@ console.log("=== 1. Anchor.create / col / row ===");
 
 // From an A1-style address. Column B = index 1, row 2 = index 1 (0-based).
 const a1 = Anchor.create(ws, "B2");
-console.log('Anchor "B2": col =', Anchor.col(a1), "row =", Anchor.row(a1));
+console.log('Anchor "B2": col =', Anchor.getCol(a1), "row =", Anchor.getRow(a1));
 
 // From a { col, row } simple address (0-based).
 const a2 = Anchor.create(ws, { col: 4, row: 3 });
-console.log("Anchor {col:4,row:3}: col =", Anchor.col(a2), "row =", Anchor.row(a2));
+console.log("Anchor {col:4,row:3}: col =", Anchor.getCol(a2), "row =", Anchor.getRow(a2));
 
 // Resolved EMU width/height for the anchored cell (defaults when not custom).
-console.log("colWidth (EMU):", Anchor.colWidth(a1), "rowHeight (EMU):", Anchor.rowHeight(a1));
+console.log("colWidth (EMU):", Anchor.getColWidth(a1), "rowHeight (EMU):", Anchor.getRowHeight(a1));
 
 // =============================================================================
 // 2. Mutate position with setCol / setRow (supports fractional offsets)
@@ -59,9 +59,9 @@ Anchor.setCol(moving, 2.5); // half-way into column C (index 2)
 Anchor.setRow(moving, 1.25); // a quarter into row 2 (index 1)
 console.log(
   "After setCol(2.5)/setRow(1.25): col =",
-  Anchor.col(moving),
+  Anchor.getCol(moving),
   "row =",
-  Anchor.row(moving)
+  Anchor.getRow(moving)
 );
 
 // =============================================================================
@@ -73,8 +73,8 @@ console.log("\n=== 3. Anchor.clone ===");
 const original = Anchor.create(ws, "C3");
 const copy = Anchor.clone(original);
 Anchor.setCol(copy, 9); // mutate the clone only
-console.log("Original col:", Anchor.col(original), "(unchanged)");
-console.log("Clone col:", Anchor.col(copy));
+console.log("Original col:", Anchor.getCol(original), "(unchanged)");
+console.log("Clone col:", Anchor.getCol(copy));
 
 // =============================================================================
 // 4. Use anchors as a two-cell image anchor (tl + br)
@@ -95,13 +95,13 @@ const tl = Anchor.create(ws, "B2");
 const br = Anchor.create(ws, "E10");
 
 // Image.place's surface anchor type is the fractional { col, row } form, so
-// project each Anchor handle through Anchor.col / Anchor.row.
+// project each Anchor handle through Anchor.getCol / Anchor.getRow.
 Image.place(ws, imageId, {
-  tl: { col: Anchor.col(tl), row: Anchor.row(tl) },
-  br: { col: Anchor.col(br), row: Anchor.row(br) }
+  tl: { col: Anchor.getCol(tl), row: Anchor.getRow(tl) },
+  br: { col: Anchor.getCol(br), row: Anchor.getRow(br) }
 });
-console.log("Placed image with tl col/row:", Anchor.col(tl), Anchor.row(tl));
-console.log("                  br col/row:", Anchor.col(br), Anchor.row(br));
+console.log("Placed image with tl col/row:", Anchor.getCol(tl), Anchor.getRow(tl));
+console.log("                  br col/row:", Anchor.getCol(br), Anchor.getRow(br));
 
 try {
   await writeBothFormats(wb, filename);

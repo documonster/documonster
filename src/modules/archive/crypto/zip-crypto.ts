@@ -13,7 +13,12 @@
  */
 
 import { crc32UpdateByte } from "@archive/compression/crc32.base";
+import { checkArchiveArgument } from "@archive/core/arguments";
+import { checkBytes, checkUint } from "@archive/core/entry-checks";
+import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
+import { describeValue } from "@utils/describe-value";
+import { s } from "@utils/schema";
 
 /**
  * ZipCrypto encryption header size.
@@ -29,6 +34,27 @@ export interface ZipCryptoState {
   key0: number;
   key1: number;
   key2: number;
+}
+
+/** Refuse a password that is neither a string nor bytes. */
+export function checkZipPassword(where: string, password: unknown): void {
+  checkArchiveArgument(
+    s.custom(v => typeof v === "string" || v instanceof Uint8Array, "a string or a Uint8Array"),
+    password,
+    where,
+    "password"
+  );
+}
+
+/** Refuse a CRC-32 that is not an unsigned 32-bit integer; `undefined` is refused too. */
+function checkCrc32(where: string, crc32: unknown): void {
+  if (crc32 === undefined) {
+    throw new ArchiveArgumentError(
+      "crc32",
+      `${where}: crc32 must be an integer from 0 to 4294967295, got undefined`
+    );
+  }
+  checkUint(where, "crc32", crc32, 0xffffffff);
 }
 
 /**
@@ -48,6 +74,12 @@ export function zipCryptoInitKeys(password: string | Uint8Array): ZipCryptoState
   }
 
   return state;
+}
+
+/** {@link zipCryptoInitKeys} with its argument checked — the form `Archive.Crypto` publishes. */
+export function createZipCryptoKeys(password: string | Uint8Array): ZipCryptoState {
+  checkZipPassword("Archive.Crypto.createZipCryptoKeys", password);
+  return zipCryptoInitKeys(password);
 }
 
 /**
@@ -165,7 +197,7 @@ export function zipCryptoDecrypt(
   password: string | Uint8Array,
   crc32: number,
   lastModTime?: number
-): Uint8Array | null {
+): Uint8Array<ArrayBuffer> | null {
   if (encryptedData.length < ZIP_CRYPTO_HEADER_SIZE) {
     return null;
   }
@@ -188,6 +220,39 @@ export function zipCryptoDecrypt(
 }
 
 /**
+ * Decrypt ZipCrypto data, throwing when it cannot — the form `Archive.Crypto` publishes
+ * as `zipCryptoDecrypt`, matching `aesDecrypt`, which also throws.
+ *
+ * @param encryptedData - Full encrypted data including 12-byte header
+ * @param password - Password string or bytes
+ * @param crc32 - Expected CRC32 for header verification
+ * @param lastModTime - Optional last modified time for alternative verification
+ * @returns Decrypted data (excluding header)
+ * @throws {ArchiveError} When the data is shorter than the header or the password fails
+ * the header check
+ */
+export function zipCryptoDecryptOrThrow(
+  encryptedData: Uint8Array,
+  password: string | Uint8Array,
+  crc32: number,
+  lastModTime?: number
+): Uint8Array<ArrayBuffer> {
+  const where = "Archive.Crypto.decryptZipCrypto";
+  checkBytes(where, "encryptedData", encryptedData);
+  checkZipPassword(where, password);
+  checkCrc32(where, crc32);
+  checkUint(where, "lastModTime", lastModTime, 0xffff);
+  if (encryptedData.length < ZIP_CRYPTO_HEADER_SIZE) {
+    throw new ArchiveError("Encrypted data too short");
+  }
+  const decrypted = zipCryptoDecrypt(encryptedData, password, crc32, lastModTime);
+  if (!decrypted) {
+    throw new ArchiveError("Password verification failed");
+  }
+  return decrypted;
+}
+
+/**
  * High-level encryption interface for ZipCrypto.
  *
  * @param data - Plain data to encrypt
@@ -201,14 +266,26 @@ export function zipCryptoEncrypt(
   password: string | Uint8Array,
   crc32: number,
   getRandomBytes: (length: number) => Uint8Array
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
+  const where = "Archive.Crypto.encryptZipCrypto";
+  checkBytes(where, "data", data);
+  checkZipPassword(where, password);
+  checkCrc32(where, crc32);
+  checkArchiveArgument(s.function(), getRandomBytes, where, "getRandomBytes");
+  const random: unknown = getRandomBytes(11);
+  if (!(random instanceof Uint8Array) || random.length < 11) {
+    throw new ArchiveArgumentError(
+      "getRandomBytes",
+      `${where}: getRandomBytes(11) must return a Uint8Array of at least 11 bytes, got ${describeValue(random)}`
+    );
+  }
+
   const state = zipCryptoInitKeys(password);
 
   // Allocate output buffer once
   const output = new Uint8Array(ZIP_CRYPTO_HEADER_SIZE + data.length);
 
   // Create and encrypt header directly into output
-  const random = getRandomBytes(11);
   for (let i = 0; i < 11; i++) {
     output[i] = zipCryptoEncryptByte(state, random[i]!);
   }

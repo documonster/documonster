@@ -31,23 +31,23 @@
 import type { DataValidationOperator, DataValidationRule } from "@excel/types";
 import { encodeRange as encodeReference } from "@excel/utils/address";
 import {
+  boundingTopLeft,
   encodeNullableWideString,
   encodeRange,
   readNullableWideString,
-  readRange,
+  readSheetRange,
   tryDecodeRange,
-  type BiffRange
+  type BiffRange,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import {
-  decodePtg,
+  encodeFormula,
   encodeParsedFormula,
-  encodePtg,
+  formulaText,
   type PtgContext
 } from "@excel/xlsb/formula/ptg";
-import { parse } from "@formula/syntax/parser";
-import { printAst } from "@formula/syntax/print";
-import { tokenize } from "@formula/syntax/tokenizer";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import type { BinaryReader } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 import { dateToExcel, excelToDate } from "@utils/utils";
 
 /** `valType`, MS-XLSB 2.4.356. The model's names for the same eight kinds. */
@@ -111,7 +111,8 @@ export function encodeValidation(
   }
 
   const withFormulae = rule.type === "any" ? undefined : rule;
-  const formulae = withFormulae?.formulae ?? [];
+  // An `any` rule may carry formulas too — Excel writes them (see `readValidation`) — so they are kept.
+  const formulae = (rule as { formulae?: readonly (string | number | Date)[] }).formulae ?? [];
   // `typOperator` is undefined for `any`, `list` and `custom` — the specification says so and says it
   // MUST be ignored — so writing an operator there would be writing into a field nothing reads.
   const usesOperator = rule.type !== "any" && rule.type !== "list" && rule.type !== "custom";
@@ -141,12 +142,30 @@ export function encodeValidation(
     encodeNullableWideString(value === "" ? undefined : value)
   );
 
-  const first = encodeFormulaField(formulae[0], rule.type, context, `${where} formula1`, date1904);
+  // **Relative to the top-left of the whole sqref, as Excel writes and reads it.** A validation's formula is stated
+  // once for every cell it covers, so its relative references are offsets (`PtgRefN`, `PtgAreaN`) from an anchor —
+  // and Excel's anchor is the top-left of the *bounding box* of all the ranges, not the first range: its own
+  // `A:A` list on `D4 B12:B13` is `2d … ff 7f ff 7f`, a column offset of -1 from B. Writing positions instead made
+  // Excel shift them from its anchor, so a `D4` list of `A:A` read back as `D:D`.
+  const formulaContext: PtgContext = {
+    ...context,
+    origin: boundingTopLeft(ranges),
+    relativeToOrigin: true,
+    role: rule.type === "list" ? "list" : "validation"
+  };
+  const first = encodeFormulaField(
+    formulae[0],
+    rule.type,
+    formulaContext,
+    `${where} formula1`,
+    date1904
+  );
   // `formula2` is only read when the operator takes two bounds. The specification requires `cce` to be
   // 0 otherwise, so an unused second formula is an empty one rather than a copy of the first.
   const second =
-    usesOperator && (operator === 0 || operator === 1)
-      ? encodeFormulaField(formulae[1], rule.type, context, `${where} formula2`, date1904)
+    (usesOperator && (operator === 0 || operator === 1)) ||
+    (rule.type === "any" && formulae.length > 1)
+      ? encodeFormulaField(formulae[1], rule.type, formulaContext, `${where} formula2`, date1904)
       : encodeParsedFormula(new Uint8Array(0));
   if (first === undefined || second === undefined) {
     return undefined;
@@ -186,7 +205,7 @@ export function readValidation(
   date1904 = false
 ): SheetValidation | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const flags = reader.readUint32();
     const type = VALIDATION_TYPE[flags & 0x0f];
     if (type === undefined) {
@@ -199,7 +218,7 @@ export function readValidation(
     }
     const ranges: string[] = [];
     for (let index = 0; index < count; index++) {
-      ranges.push(rangeReference(readRange(reader)));
+      ranges.push(rangeReference(readSheetRange(reader, "BrtDVal")));
     }
     const operatorIndex = (flags >>> 20) & 0x0f;
     const errorTitle = readNullableWideString(reader, part);
@@ -215,17 +234,40 @@ export function readValidation(
       ...((flags >>> 8) & 1 ? { allowBlank: true } : {}),
       ...((flags >>> 18) & 1 ? { showInputMessage: true } : {}),
       ...((flags >>> 19) & 1 ? { showErrorMessage: true } : {}),
-      errorStyle: ERROR_STYLE[(flags >>> 4) & 0x07] ?? "stop"
+      // `stop` is what an absent `errorStyle` means, and Excel's XLSX leaves it out — so does this.
+      ...(((flags >>> 4) & 0x07) === 0
+        ? {}
+        : { errorStyle: ERROR_STYLE[(flags >>> 4) & 0x07] ?? "stop" })
     };
 
-    if (type === "any") {
-      // `formula1.cce` MUST be 0 for `any`, so there is nothing after the strings to read.
-      return { ranges, rule: { type: "any", ...base } };
-    }
-
-    const first = readFormulaField(reader, part, context);
-    const second = readFormulaField(reader, part, context);
+    // `DVParsedFormula` may carry the relative tokens — `PtgRefN`, `PtgAreaN` — whose offsets are from the rule's
+    // anchor: the top-left of the bounding box of *all* its ranges, which is where Excel measures them from (see
+    // `encodeValidation`). Reading them against the first range's corner shifted every relative reference of a
+    // rule whose first range is not its top-left one.
+    const parsed = ranges
+      .map(reference => tryDecodeRange(reference))
+      .filter((range): range is BiffRange => range !== undefined);
+    const formulaContext: PtgContext = {
+      ...context,
+      ...(parsed.length === 0 ? {} : { origin: boundingTopLeft(parsed) }),
+      role: type === "list" ? "list" : "validation"
+    };
+    const first = readFormulaField(reader, part, formulaContext);
+    const second = readFormulaField(reader, part, formulaContext);
     const texts = [first, second].filter((value): value is string => value !== undefined);
+    if (type === "any") {
+      // The specification says `formula1.cce` MUST be 0 for `any`, and Excel writes them anyway: its XLSB of a
+      // validation with no type and `<formula1>0</formula1><formula2>0</formula2>` carries both, as `1e 00 00`. The
+      // XLSX reader keeps them as text, so this does too.
+      return {
+        ranges,
+        rule: {
+          type: "any",
+          ...(texts.length === 0 ? {} : { formulae: texts }),
+          ...base
+        } as DataValidationRule
+      };
+    }
     // A date bound is stored as a serial literal, exactly as a date cell's value is, so it is read back the
     // same way. A bound that is an expression rather than a literal stays text — there is no date to recover.
     const formulae: (string | number | Date)[] =
@@ -236,7 +278,10 @@ export function readValidation(
               ? excelToDate(serial, date1904)
               : text;
           })
-        : texts;
+        : type === "whole" || type === "textLength" || type === "decimal"
+          ? // A numeric bound is a number in the model, as the XLSX reader makes it; an expression stays text.
+            texts.map(text => (NUMERIC_LITERAL.test(text) ? Number(text) : text))
+          : texts;
     // `typOperator` is undefined for a list and a custom rule — the specification says to ignore it —
     // so reading one there would invent a constraint the record does not express.
     const usesOperator = type !== "list" && type !== "custom";
@@ -270,20 +315,20 @@ function readFormulaField(
 ): string | undefined {
   const length = reader.readUint32();
   const tokens = reader.readBytes(length);
-  // `rgcb`, the ancillary block. Consumed so that the second formula starts at the right offset —
-  // skipping it made `formula2` read `formula1`'s trailer as its own token count.
-  reader.readBytes(reader.readUint32());
+  // `rgcb`, the ancillary block — an array constant's values. Read so that the second formula starts at the
+  // right offset, and passed to the decoder, which needs it for a `{…}` list.
+  const extra = reader.readBytes(reader.readUint32());
   if (length === 0) {
     return undefined;
   }
-  const decoded = decodePtg(tokens, context, `${part} data validation formula`);
-  if ("sharedRow" in decoded) {
-    // `DVParsedFormula` may not contain `PtgExp`, so this is a malformed record rather than a shared
-    // formula. Reported as an unreadable bound instead of being turned into a reference.
-    return undefined;
-  }
-  return printAst(decoded);
+  const decoded = formulaText(tokens, context, `${part} data validation formula`, extra);
+  // `DVParsedFormula` may not contain `PtgExp`, so a shared-formula reference is a malformed record. Reported as an
+  // unreadable bound instead of being turned into a reference.
+  return typeof decoded === "string" ? decoded : undefined;
 }
+
+/** A plain decimal number, the only bound text the model turns into a number. */
+const NUMERIC_LITERAL = /^-?(?:\d+\.?\d*|\.\d+)(?:E[+-]?\d+)?$/i;
 
 /**
  * One `DVParsedFormula`.
@@ -303,12 +348,13 @@ function encodeFormulaField(
   if (formula === undefined) {
     return encodeParsedFormula(new Uint8Array(0));
   }
-  const text = formulaText(formula, type, date1904);
+  const text = validationFormulaText(formula, type, date1904);
   if (text === undefined) {
     return undefined;
   }
   try {
-    return encodeParsedFormula(encodePtg(parse(tokenize(text)), context, where));
+    const encoded = encodeFormula(text, context, where);
+    return encodeParsedFormula(encoded.rgce, encoded.extra);
   } catch {
     // A formula this library cannot tokenise. Reported by the caller as a lost validation.
     return undefined;
@@ -316,7 +362,7 @@ function encodeFormulaField(
 }
 
 /** The expression text for a model formula value. */
-function formulaText(
+function validationFormulaText(
   formula: string | number | Date,
   type: DataValidationRule["type"],
   date1904: boolean

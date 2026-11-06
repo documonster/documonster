@@ -58,10 +58,6 @@ export function getUniqueTestFilePath(testFileUrlOrPath: string, extension = ".x
   return uniqueTestFilePathFromFilename(toPath(testFileUrlOrPath), extension);
 }
 
-export function getUniqueTestFilePathCJS(filename: string, extension = ".xlsx"): string {
-  return uniqueTestFilePathFromFilename(filename, extension);
-}
-
 export function testFilePath(name: string, extension = ".xlsx"): string {
   return path.join(testOutDir(), `${name}${extension}`);
 }

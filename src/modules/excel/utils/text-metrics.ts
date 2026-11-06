@@ -30,7 +30,7 @@ import type { FontMetrics } from "@utils/font-data";
 import { getFontMetrics } from "@utils/font-data";
 import { graphemeClusters } from "@utils/grapheme";
 import { createLineMeasurer, isAscii, measureTextWidthPx, resolveFont } from "@utils/text-measure";
-import { charWidthToPixel, getPixelPadding, pixelToCharWidth, pixelToPoints } from "@utils/units";
+import { pixelToCharWidth, pixelToPoints } from "@utils/units";
 
 // =============================================================================
 // Constants
@@ -153,6 +153,11 @@ export function calculateAutoFitWidth(
     return 0;
   }
 
+  // Targets Windows Excel: 96-dpi pixels and the default font's max digit width there (Calibri 11 → 7px). Mac
+  // Excel's AutoFit differs and is not what this models — it lays text out at 72 dpi with a 6px digit, so its widths
+  // are multiples of 1/6 character and come out narrower for the same text (measured against Excel 16 for Mac on 256
+  // font/size/text cases; notes in tmp/office-tests/fx24, `af-compare.tsv`).
+  //
   // Padding formula:
   // oneSidePadding = CEIL(textWidth * 0.03 + mdw / 4)
   // totalWidth = textWidth + 2 * oneSidePadding + 1 (gridline)
@@ -408,19 +413,6 @@ export function calculateRichTextAutoFitHeight(
   const fullText = richText.map(r => r.text).join("");
 
   return calculateAutoFitHeight(fullText, maxFontForHeight, alignment, columnWidthPx);
-}
-
-/**
- * Get the content area width of a column in pixels (excluding padding).
- *
- * @param charWidth - Column width in Excel character units
- * @param mdw - Max digit width
- * @returns Content width in pixels
- */
-export function getColumnContentWidthPx(charWidth: number, mdw: number): number {
-  const totalPx = charWidthToPixel(charWidth, mdw);
-  const pp = getPixelPadding(mdw);
-  return Math.max(0, totalPx - pp);
 }
 
 // =============================================================================

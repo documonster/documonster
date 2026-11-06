@@ -12,7 +12,7 @@
  */
 
 import { Address, Cell, Workbook } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -91,7 +91,7 @@ export const formulaEvaluateTool = defineTool({
     Cell.setValue(ws, probe, { formula: normalizeFormula(args.formula) });
 
     try {
-      calculateFormulas(wb);
+      ExcelFormula.calculate(wb);
     } catch (cause) {
       throw toolError.invalidInput(
         `the formula could not be evaluated: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -206,11 +206,11 @@ function collectSpill(
   anchorColumn: number
 ): { label: string; text: string }[] {
   const width = measureRun(
-    column => Cell.getValue(ws, anchorRow, anchorColumn + column),
+    column => Cell.getValue(ws, { row: anchorRow, col: anchorColumn + column }),
     Math.min(MAX_SPILL_SPAN, MAX_EXCEL_COLUMNS - anchorColumn + 1)
   );
   const height = measureRun(
-    row => Cell.getValue(ws, anchorRow + row, anchorColumn),
+    row => Cell.getValue(ws, { row: anchorRow + row, col: anchorColumn }),
     Math.min(MAX_SPILL_SPAN, MAX_EXCEL_ROWS - anchorRow + 1)
   );
 
@@ -220,7 +220,7 @@ function collectSpill(
       if (row === 0 && column === 0) {
         continue;
       }
-      const value = Cell.getValue(ws, anchorRow + row, anchorColumn + column);
+      const value = Cell.getValue(ws, { row: anchorRow + row, col: anchorColumn + column });
       if (value === null || value === undefined) {
         continue;
       }

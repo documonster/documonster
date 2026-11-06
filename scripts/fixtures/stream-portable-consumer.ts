@@ -7,7 +7,6 @@
  * this file is that promise, made checkable.
  */
 import {
-  Collector,
   Duplex,
   PassThrough,
   Readable,
@@ -18,21 +17,9 @@ import {
   type IPullStream,
   type IReadable,
   type PipelineStageLike,
-  createCollector,
-  createDuplex,
-  createPullStream,
-  createReadable,
-  createReadableFromArray,
-  createReadableFromPromise,
-  createTransform,
-  createWritable,
   finished,
   pipeline,
-  readableFromWeb,
-  readableStreamToAsyncIterable,
-  readableToWeb,
-  writableFromWeb,
-  writableToWeb
+  Streams
 } from "documonster/stream";
 
 type IsEqual<A, B> =
@@ -180,17 +167,17 @@ export async function portableUsage(): Promise<string[]> {
   }
 
   // The module's own conversions: same guarantees on both builds.
-  const safeWeb = readableToWeb(Readable.from(["y"]));
-  for await (const chunk of readableFromWeb(safeWeb, { objectMode: true })) {
+  const safeWeb = Streams.toWebReadable(Readable.from(["y"]));
+  for await (const chunk of Streams.fromWebReadable(safeWeb, { objectMode: true })) {
     out.push(String(chunk));
   }
-  const sink = writableFromWeb(new WritableStream<string>(), { objectMode: true });
+  const sink = Streams.fromWebWritable(new WritableStream<string>(), { objectMode: true });
   sink.end("z");
   await finished(sink);
-  writableToWeb(counter()).getWriter().releaseLock();
+  Streams.toWebWritable(counter()).getWriter().releaseLock();
 
   // compose, factories, PassThrough, Duplex.from, finished.
-  const upper = createTransform<string, string>(s => s.toUpperCase(), { objectMode: true });
+  const upper = Streams.createTransform<string, string>(s => s.toUpperCase(), { objectMode: true });
   const composed = compose(upper, new PassThrough({ objectMode: true }));
   composed.end("c");
   for await (const chunk of composed) {
@@ -318,24 +305,24 @@ export function declaredTypes(
   strings: ReadableStream<string>,
   thenable: PromiseLike<number>
 ): void {
-  const iterated = readableStreamToAsyncIterable(numbers);
+  const iterated = Streams.readableStreamToAsyncIterable(numbers);
   type _Iterated = Assert<IsEqual<typeof iterated, AsyncGenerator<number, void, unknown>>>;
 
-  const decoded = readableFromWeb(bytes, { encoding: "utf8" });
+  const decoded = Streams.fromWebReadable(bytes, { encoding: "utf8" });
   type _Decoded = Assert<IsEqual<typeof decoded, IReadable<string>>>;
-  const asBytes = readableFromWeb(strings);
+  const asBytes = Streams.fromWebReadable(strings);
   type _Bytes = Assert<IsEqual<typeof asBytes, IReadable<Uint8Array>>>;
-  const asObjects = readableFromWeb(numbers, { objectMode: true });
+  const asObjects = Streams.fromWebReadable(numbers, { objectMode: true });
   type _Objects = Assert<IsEqual<typeof asObjects, IReadable<number>>>;
   // @ts-expect-error byte mode cannot carry numbers
-  readableFromWeb(numbers);
+  Streams.fromWebReadable(numbers);
 
-  const byteArray = createReadableFromArray(["hi"], { objectMode: false });
+  const byteArray = Streams.createReadableFromArray(["hi"], { objectMode: false });
   type _ByteArray = Assert<IsEqual<typeof byteArray, IReadable<Uint8Array>>>;
-  const fromThenable = createReadableFromPromise(thenable);
+  const fromThenable = Streams.createReadableFromPromise(thenable);
   type _FromThenable = Assert<IsEqual<typeof fromThenable, IReadable<number>>>;
 
-  const produced = createReadable<number>({
+  const produced = Streams.createReadable<number>({
     read() {
       this.push(1);
       // @ts-expect-error a number stream's push takes numbers
@@ -343,28 +330,28 @@ export function declaredTypes(
     }
   });
   produced.push(null);
-  createWritable<number>({
+  Streams.createWritable<number>({
     write(chunk, _encoding, done) {
       this.emit("value", chunk + 1);
       done();
     }
   });
-  createDuplex<string, number>({
+  Streams.createDuplex<string, number>({
     write(chunk, _encoding, done) {
       this.push(String(chunk));
       done();
     }
   });
 
-  const collected: Uint8Array = createCollector<number>().toUint8Array();
-  const collector = new Collector<number>();
+  const collected: Uint8Array = new Streams.Collector<number>().toUint8Array();
+  const collector = new Streams.Collector<number>();
   // @ts-expect-error a number collector takes numbers
   collector.write("x");
-  const pull: IPullStream = createPullStream();
+  const pull: IPullStream = new Streams.PullStream();
 
   void pipeline(
     // @ts-expect-error a sync generator as a middle stage fails with ERR_INVALID_RETURN_VALUE
-    createReadableFromArray([1]),
+    Streams.createReadableFromArray([1]),
     function* () {
       yield 1;
     },

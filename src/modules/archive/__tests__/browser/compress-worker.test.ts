@@ -103,8 +103,10 @@ describe("compress.browser with worker support", () => {
       const original = new TextEncoder().encode("Hello, World!");
       const result = await compress(original, { useWorker: true, level: 0 });
 
-      // Level 0 should return data as-is without going to worker
-      expect(result).toEqual(original);
+      // Level 0 is stored DEFLATE blocks — still a DEFLATE stream (this test used to expect
+      // the input back unchanged, which no inflater can read).
+      expect(result.length).toBeGreaterThan(original.length);
+      expect(await decompress(result)).toEqual(original);
     });
 
     it("should support allowTransfer option for zero-copy", async () => {

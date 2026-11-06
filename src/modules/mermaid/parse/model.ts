@@ -7,7 +7,7 @@
  * block's column span.
  */
 
-import { decodeLabel, splitStatements, unquote } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, splitStatementsAt, unquote } from "@mermaid/parse/lex";
 import type {
   BlockCell,
   BlockDiagram,
@@ -81,7 +81,9 @@ export function parseRequirement(source: string): RequirementDiagram {
     open = undefined;
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^requirementDiagram\b/i.test(text)) {
       continue;
     }
@@ -94,6 +96,8 @@ export function parseRequirement(source: string): RequirementDiagram {
       const field = /^(\w+)\s*:\s*(.*)$/.exec(text);
       if (field) {
         open.fields.set(field[1].toLowerCase(), decodeLabel(field[2]));
+      } else {
+        skipped.add(statement);
       }
       continue;
     }
@@ -149,7 +153,12 @@ export function parseRequirement(source: string): RequirementDiagram {
     ).exec(text);
     if (backward) {
       links.push({ from: backward[3], to: backward[1], verb: backward[2].toLowerCase() });
+      continue;
     }
+    if (/^(direction|style|classDef|class|accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
   close();
 
@@ -158,7 +167,8 @@ export function parseRequirement(source: string): RequirementDiagram {
     ...(title === undefined ? {} : { title }),
     requirements,
     elements,
-    links
+    links,
+    ...skipped.report()
   };
 }
 
@@ -187,7 +197,9 @@ export function parseC4(source: string): C4Diagram {
   let title: string | undefined;
   const open: string[] = [];
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^C4(Context|Container|Component|Dynamic|Deployment)\b/i.test(text)) {
       continue;
     }
@@ -220,6 +232,7 @@ export function parseC4(source: string): C4Diagram {
       const args = splitArgs(element[2]);
       const id = args[0];
       if (id === undefined) {
+        skipped.add(statement);
         continue;
       }
       const container = /^Container|^Component|^Node/i.test(element[1]);
@@ -246,6 +259,7 @@ export function parseC4(source: string): C4Diagram {
     if (relation) {
       const args = splitArgs(relation[2]);
       if (args.length < 2) {
+        skipped.add(statement);
         continue;
       }
       relations.push({
@@ -255,7 +269,17 @@ export function parseC4(source: string): C4Diagram {
         ...(args[3] === undefined ? {} : { technology: args[3] }),
         reversed: /_back$/i.test(relation[1])
       });
+      continue;
     }
+    // Layout hints and styling carry no geometry this renderer uses.
+    if (
+      /^(UpdateLayoutConfig|UpdateElementStyle|UpdateRelStyle|UpdateBoundaryStyle|AddElementTag|AddRelTag|accTitle|accDescr)\b/i.test(
+        text
+      )
+    ) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
@@ -263,7 +287,8 @@ export function parseC4(source: string): C4Diagram {
     ...(title === undefined ? {} : { title }),
     elements,
     boundaries,
-    relations
+    relations,
+    ...skipped.report()
   };
 }
 
@@ -318,7 +343,9 @@ export function parseBlock(source: string): BlockDiagram {
   let title: string | undefined;
   let columns = 0;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^block(?:-beta)?\s*$/i.test(text)) {
       continue;
     }
@@ -350,11 +377,17 @@ export function parseBlock(source: string): BlockDiagram {
       continue;
     }
 
+    let complete = true;
     for (const token of splitCells(text)) {
       const cell = readCell(token, cells.length);
       if (cell) {
         cells.push(cell);
+      } else {
+        complete = false;
       }
+    }
+    if (!complete) {
+      skipped.add(statement);
     }
   }
 
@@ -364,7 +397,8 @@ export function parseBlock(source: string): BlockDiagram {
     // Without a declaration every cell gets its own column, which is Mermaid's default.
     columns: columns > 0 ? columns : Math.max(1, cells.length),
     cells,
-    edges
+    edges,
+    ...skipped.report()
   };
 }
 

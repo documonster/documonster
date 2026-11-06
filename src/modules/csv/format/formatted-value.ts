@@ -7,11 +7,23 @@
  * @module
  */
 
+import { CsvArgumentError } from "@csv/errors";
+import { describeValue } from "@csv/utils/check-options";
+
 /**
  * Symbol to identify FormattedValue instances.
  * Using Symbol.for ensures reliable detection across module boundaries.
  */
 const FORMATTED_VALUE_SYMBOL: unique symbol = Symbol.for("csv.FormattedValue");
+
+function checkFormattedText(where: string, value: unknown): void {
+  if (typeof value !== "string") {
+    throw new CsvArgumentError(
+      "value",
+      `${where}: value must be a string, got ${describeValue(value)}`
+    );
+  }
+}
 
 /**
  * Wrapper type for CSV field values with explicit quoting control.
@@ -39,8 +51,8 @@ export function isFormattedValue(value: unknown): value is FormattedValue {
 /**
  * Mark a value to be output with quotes.
  *
- * Use this in a transform function to force quoting for specific fields,
- * regardless of the global `quoteColumns` setting.
+ * Write it as a cell value, or return it from a `typeTransform` function, to force quoting
+ * for that field regardless of the global `quoteColumns` setting.
  *
  * @param value - The string value to output
  * @returns A FormattedValue that will be quoted in the CSV output
@@ -49,12 +61,12 @@ export function isFormattedValue(value: unknown): value is FormattedValue {
  * ```ts
  * import { Csv } from "documonster/csv";
  *
- * formatCsv(data, {
- *   transform: {
+ * Csv.format(data, {
+ *   typeTransform: {
  *     // Force quoting for code-like fields, and quote empty strings
  *     string: (v, ctx) => {
- *       if (ctx.column === "code") return Csv.quoted(v);
- *       if (v === "") return Csv.quoted(v);
+ *       if (ctx.column === "code") return Csv.forceQuote(v);
+ *       if (v === "") return Csv.forceQuote(v);
  *       return v;
  *     }
  *   }
@@ -62,14 +74,15 @@ export function isFormattedValue(value: unknown): value is FormattedValue {
  * ```
  */
 export function quoted(value: string): FormattedValue {
+  checkFormattedText("Csv.forceQuote", value);
   return { [FORMATTED_VALUE_SYMBOL]: true, value, quote: true };
 }
 
 /**
  * Mark a value to be output without quotes.
  *
- * Use this in a transform function to prevent quoting for specific fields,
- * even when the value would normally be quoted (e.g., contains delimiter).
+ * Write it as a cell value, or return it from a `typeTransform` function, to prevent quoting
+ * for that field even when the value would normally be quoted (e.g., contains delimiter).
  *
  * WARNING: Using unquoted() with values containing delimiters or newlines
  * will produce invalid CSV. Use only when you need raw output like Excel formulas.
@@ -81,16 +94,17 @@ export function quoted(value: string): FormattedValue {
  * ```ts
  * import { Csv } from "documonster/csv";
  *
- * formatCsv(data, {
- *   transform: {
+ * Csv.format(data, {
+ *   typeTransform: {
  *     // Output Excel formula without outer quotes
  *     number: (v, ctx) => ctx.column === "id"
- *       ? Csv.unquoted(`="${v}"`)  // Outputs: ="7"
+ *       ? Csv.preventQuote(`="${v}"`)  // Outputs: ="7"
  *       : String(v)
  *   }
  * });
  * ```
  */
 export function unquoted(value: string): FormattedValue {
+  checkFormattedText("Csv.preventQuote", value);
   return { [FORMATTED_VALUE_SYMBOL]: true, value, quote: false };
 }

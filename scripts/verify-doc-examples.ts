@@ -199,6 +199,9 @@ const EXOTIC_IMPORT = /import\s[^"'{}]*from\s+["']documonster(?:\/[A-Za-z0-9._/-
 /** A Markdown fence, capturing its run of backticks or tildes so the close can match it. */
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
+// `llms.txt` is Markdown by its own convention (llmstxt.org), and is the file an AI copies from first.
+const MARKDOWN_FILES = [".md", "llms.txt"] as const;
+
 /** Every file under `dir` whose name ends in one of `extensions`. */
 function filesUnder(dir: string, extensions: readonly string[]): string[] {
   const found: string[] = [];
@@ -412,7 +415,7 @@ export function collectDocImports(root: string): {
       scanRegion(relPosix(root, file), region, into);
     }
   }
-  for (const file of filesUnder(root, [".md"])) {
+  for (const file of filesUnder(root, MARKDOWN_FILES)) {
     const source = fs.readFileSync(file, "utf8");
     for (const region of fencedRegions(source)) {
       scanRegion(relPosix(root, file), region, into);
@@ -570,7 +573,7 @@ function main(): void {
   try {
     const files: string[] = [];
     const syntaxRegions: { file: string; startLine: number }[] = [];
-    for (const file of filesUnder(ROOT, [".md"])) {
+    for (const file of filesUnder(ROOT, MARKDOWN_FILES)) {
       for (const region of fencedRegions(fs.readFileSync(file, "utf8"))) {
         if (region.language !== "ts" && region.language !== "typescript") {
           continue;
@@ -706,7 +709,7 @@ function report(problems: string[]): never {
   }
   console.error(
     "\nAn example is the first thing a consumer copies. Name the public form — " +
-      "`Pdf.read`, `Io.toBuffer`, `Worksheet.Handle` — not the internal declaration " +
+      "`Pdf.extract`, `Document.toBuffer`, `Worksheet.Handle` — not the internal declaration " +
       "it forwards to.\n"
   );
   process.exit(1);

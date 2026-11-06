@@ -17,6 +17,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { ZipArchive } from "@archive/zip";
 import { Cell, Image, Workbook } from "@excel";
 import { expectValidXlsb } from "@excel/__tests__/helpers/expect-valid-xlsb";
+import { registerWorkbookImage } from "@excel/core/workbook-core";
 import { validateXlsbBuffer } from "@excel/utils/xlsb-validator";
 import { iterateBiffRecords } from "@excel/xlsb/binary";
 import { encodeDrawing, readDrawing } from "@excel/xlsb/drawing";
@@ -208,7 +209,8 @@ describe("image byte sources", () => {
   it("declares a content type for an image whose extension the model omits", async () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "NoExtension");
-    const id = Image.add(workbook, { buffer: PNG } as never);
+    // `Image.add` refuses an image without an extension, as its type does; a medium a reader registered can lack one.
+    const id = registerWorkbookImage(workbook, { buffer: PNG } as never);
     Image.place(sheet, id, { tl: { col: 1, row: 1 }, ext: { width: 60, height: 40 } } as never);
     const entries = await extractAll(await Workbook.toBuffer(workbook, { format: "xlsb" }));
     // The part path defaulted the extension to `png` while the content-type scan skipped the medium
@@ -225,8 +227,9 @@ describe("image byte sources", () => {
     Cell.setValue(sheet, "A1", 1);
     // `ImageData` makes all four sources optional, so this type-checks — and it used to write a drawing
     // relationship pointing at `../media/image1.png` with no such part in the package. A reference to
-    // something that is not there is one of the things Excel offers to repair.
-    const id = Image.add(workbook, { extension: "png" } as never);
+    // something that is not there is one of the things Excel offers to repair. `Image.add` refuses such an image
+    // now; a medium a reader registered can still be one, so the writer's refusal is tested through that path.
+    const id = registerWorkbookImage(workbook, { extension: "png" } as never);
     Image.place(sheet, id, { tl: { col: 1, row: 1 }, ext: { width: 40, height: 40 } } as never);
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(
       /image with no bytes and no link/
@@ -237,7 +240,7 @@ describe("image byte sources", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Empty");
     Cell.setValue(sheet, "A1", 1);
-    const id = Image.add(workbook, { extension: "png" } as never);
+    const id = registerWorkbookImage(workbook, { extension: "png" } as never);
     Image.place(sheet, id, { tl: { col: 1, row: 1 }, ext: { width: 40, height: 40 } } as never);
     const entries = await extractAll(
       await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" })
@@ -275,12 +278,19 @@ describe("image byte sources", () => {
  * The previous version of this block asserted the opposite — that two drawings coexist with two distinct
  * relationship ids — and passed. It was testing the shape of the package rather than whether the
  * pictures could still be reached from the sheet, so it confirmed a package in which the preserved
- * images had silently disappeared. Merging would need the preserved drawing's XML parsed, and this
- * reader deliberately does not model drawings, so the combination is refused and named instead.
+ * images had silently disappeared. A drawing of pictures alone is read into the model (see "pictures read
+ * from an XLSB" below) and so takes a new picture like any other sheet; one holding something the model
+ * cannot carry — a shape, here — is preserved verbatim, and for it the combination is refused and named.
  */
-describe("a new picture beside a preserved one", () => {
+describe("a new picture beside a preserved drawing", () => {
   async function reopened(): Promise<Workbook.Handle> {
-    const first = await Workbook.toBuffer(withImage(), { format: "xlsb" });
+    const source = withImage();
+    Image.addShape(Workbook.getWorksheet(source, "Pictures")!, {
+      range: "H2:I4",
+      shapeType: "rect",
+      name: "Box"
+    } as never);
+    const first = await Workbook.toBuffer(source, { format: "xlsb" });
     const workbook = Workbook.create();
     await Workbook.read(workbook, first);
     const sheet = Workbook.getWorksheet(workbook, "Pictures")!;
@@ -459,7 +469,7 @@ describe("package paths are unique", () => {
     archive.add("xl/drawings/drawing1.xml", new TextEncoder().encode("<wsDr/>"));
 
     const workbook = Workbook.create();
-    await Workbook.read(workbook, await archive.bytes());
+    await Workbook.read(workbook, await archive.toBuffer());
     for (const name of ["A", "B"]) {
       const id = Image.add(workbook, { buffer: PNG, extension: "png" });
       Image.place(Workbook.getWorksheet(workbook, name)!, id, {
@@ -473,5 +483,71 @@ describe("package paths are unique", () => {
     const drawings = names.filter(name => name.startsWith("xl/drawings/"));
     expect(drawings.length).toBeGreaterThan(2);
     expect(new Set(drawings).size).toBe(drawings.length);
+  });
+});
+
+/**
+ * Pictures read from an XLSB.
+ *
+ * A drawing is XML in both containers, and the XLSB reader used to keep it as an opaque part: the pictures
+ * survived a round trip, but `Image.list` on the reopened workbook was empty, so nothing could remove,
+ * move or inspect them. A drawing holding nothing but pictures (and controls' bridge anchors) is now read
+ * the way the XLSX reader reads one.
+ */
+describe("pictures read from an XLSB", () => {
+  async function reopened(source = withImage()): Promise<Workbook.Handle> {
+    const workbook = Workbook.create();
+    await Workbook.read(workbook, await Workbook.toBuffer(source, { format: "xlsb" }));
+    return workbook;
+  }
+
+  it("lists them, with the model a picture read from XLSX has", async () => {
+    const fromXlsb = Workbook.getWorksheet(await reopened(), "Pictures")!;
+    const viaXlsx = Workbook.create();
+    await Workbook.read(viaXlsx, await Workbook.toBuffer(withImage()));
+    const fromXlsx = Workbook.getWorksheet(viaXlsx, "Pictures")!;
+    expect(Image.list(fromXlsb)).toHaveLength(1);
+    expect(Image.getModel(Image.list(fromXlsb)[0])).toEqual(
+      Image.getModel(Image.list(fromXlsx)[0])
+    );
+  });
+
+  it("round-trips them losslessly: the same drawing, one medium, no preserved copy", async () => {
+    const first = await extractAll(await Workbook.toBuffer(withImage(), { format: "xlsb" }));
+    const workbook = await reopened();
+    Cell.setValue(Workbook.getWorksheet(workbook, "Pictures")!, "Z1", 1);
+    const bytes = await Workbook.toBuffer(workbook, { format: "xlsb" });
+    await expectValidXlsb(bytes);
+    const second = await extractAll(bytes);
+    const drawing = (entries: typeof first) =>
+      new TextDecoder().decode(entries.get("xl/drawings/drawing1.xml")!.data);
+    expect(drawing(second)).toBe(drawing(first));
+    const media = (entries: typeof first) =>
+      [...entries.keys()].filter(part => part.startsWith("xl/media/"));
+    expect(media(second)).toEqual(media(first));
+    expect(drawingReferenceOf(second)).toBeDefined();
+  });
+
+  it("removes one, and with the last one the drawing", async () => {
+    const workbook = await reopened();
+    const sheet = Workbook.getWorksheet(workbook, "Pictures")!;
+    expect(Image.remove(sheet, 0)).toBe(true);
+    const entries = await extractAll(await Workbook.toBuffer(workbook, { format: "xlsb" }));
+    expect([...entries.keys()].filter(part => /^xl\/(?:drawings|media)\//.test(part))).toEqual([]);
+    expect(drawingReferenceOf(entries)).toBeUndefined();
+  });
+
+  it("takes a new picture beside them", async () => {
+    const workbook = await reopened();
+    const sheet = Workbook.getWorksheet(workbook, "Pictures")!;
+    Image.place(sheet, Image.add(workbook, { buffer: PNG, extension: "png" }), {
+      tl: { col: 6, row: 1 },
+      ext: { width: 90, height: 60 }
+    } as never);
+    const bytes = await Workbook.toBuffer(workbook, { format: "xlsb" });
+    await expectValidXlsb(bytes);
+    const reread = Workbook.create();
+    await Workbook.read(reread, bytes);
+    expect(Image.list(Workbook.getWorksheet(reread, "Pictures")!)).toHaveLength(2);
   });
 });

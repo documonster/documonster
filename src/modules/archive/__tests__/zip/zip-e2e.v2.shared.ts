@@ -59,7 +59,7 @@ export function runZipE2ETests(imports: ZipE2EModuleImports): void {
       for (const e of entries) {
         z.add(e.name, e.data, { comment: "entry-comment" });
       }
-      const zipBytes = z.bytesSync();
+      const zipBytes = z.toBufferSync();
 
       expect(zipBytes).toBeInstanceOf(Uint8Array);
       expect(zipBytes.length).toBeGreaterThan(0);
@@ -82,7 +82,7 @@ export function runZipE2ETests(imports: ZipE2EModuleImports): void {
       for (const e of entries) {
         z.add(e.name, e.data);
       }
-      const zipBytes = await z.bytes();
+      const zipBytes = await z.toBuffer();
 
       const extracted = await unzipToMap(imports, zipBytes);
       expect(extracted.size).toBe(entries.length);
@@ -101,7 +101,7 @@ export function runZipE2ETests(imports: ZipE2EModuleImports): void {
       }
       // Use bytesSync here to validate the streaming unzip path. The async ZIP
       // writer uses data descriptors and is covered by the buffer-mode tests above.
-      const zipBytes = z.bytesSync();
+      const zipBytes = z.toBufferSync();
 
       const source: AsyncIterable<Uint8Array> = (async function* () {
         yield zipBytes;
@@ -121,13 +121,13 @@ export function runZipE2ETests(imports: ZipE2EModuleImports): void {
       for (const e of entries) {
         zSync.add(e.name, e.data);
       }
-      const bytesSync = zSync.bytesSync();
+      const bytesSync = zSync.toBufferSync();
 
       const zAsync = imports.zip({ level: 6 });
       for (const e of entries) {
         zAsync.add(e.name, e.data);
       }
-      const bytesAsync = await zAsync.bytes();
+      const bytesAsync = await zAsync.toBuffer();
 
       const a = await unzipToMap(imports, bytesSync);
       const b = await unzipToMap(imports, bytesAsync);

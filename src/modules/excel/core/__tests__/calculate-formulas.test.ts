@@ -8,7 +8,8 @@ import { calculateFormulas } from "@excel/core/formula-adapter";
 import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { addTable, findCell, setSheetName } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, ExcelArgumentError, Workbook, Worksheet } from "@excel/index";
+import { excelNameKey } from "@utils/name-key";
 import { describe, it, expect } from "vitest";
 
 /** Cell value, or null when the cell is absent — preserves the original `findCell(...)?.value ?? null` semantics. */
@@ -2843,7 +2844,7 @@ describe("calculateFormulas", () => {
       const snapshot = captureFormulaSnapshot(wb);
 
       // Verify distinct entries exist and don't cross-contaminate
-      const globalEntry = snapshot.definedNames.get("X");
+      const globalEntry = snapshot.definedNames.get(excelNameKey("X"));
       expect(globalEntry).toBeDefined();
       expect(globalEntry!.ranges[0]).toContain("Sheet1");
       expect(globalEntry!.scope).toBeUndefined();
@@ -2869,6 +2870,20 @@ describe("calculateFormulas", () => {
       calculateFormulas(wb);
 
       expect(Cell.getResult(ws1, "B1")).toBe(15);
+    });
+
+    it("finds a name typed with a decomposed accent", () => {
+      // `e` + U+0301 is canonically `é`, which the name keys equate — so the formula means the name defined as `éx`.
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "S");
+      definedNamesAddFormula(getDefinedNames(wb), "éx", "7");
+      Cell.setValue(ws, "A1", { formula: "e\u0301x+1", result: 0 });
+      Cell.setValue(ws, "A2", { formula: "LET(e\u0301x,2,éx*3)", result: 0 });
+
+      calculateFormulas(wb);
+
+      expect(Cell.getResult(ws, "A1")).toBe(8);
+      expect(Cell.getResult(ws, "A2")).toBe(6);
     });
   });
 
@@ -3812,5 +3827,19 @@ describe("calculateFormulas", () => {
       expect(Cell.getResult(ws, "B1")).toBe(-5); // IF true branch runs NEGATE
       expect(Cell.getResult(ws, "B2")).toBe(-2); // -5 + 3 = -2
     });
+  });
+});
+
+describe("ExcelFormula.calculate argument errors", () => {
+  it("names the public parameter, wb", () => {
+    let error: unknown;
+    try {
+      calculateFormulas(null as never);
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(ExcelArgumentError);
+    expect((error as ExcelArgumentError).field).toBe("wb");
+    expect((error as Error).message).toMatch(/^ExcelFormula\.calculate: wb must be a workbook/);
   });
 });

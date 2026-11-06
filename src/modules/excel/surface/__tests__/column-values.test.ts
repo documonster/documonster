@@ -1,8 +1,8 @@
-import { Cell, Column, ColumnOutOfBoundsError, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, ExcelColumnOutOfBoundsError, Row, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 /**
- * `Column.values` / `getValues` / `setValues` — reading and writing down a
+ * `Column.getValues` (both bases) / `setValues` — reading and writing down a
  * column by key, letter or number.
  *
  * Two things here are easy to get wrong and invisible once wrong. The arrays are
@@ -22,11 +22,11 @@ function sheet() {
   return { wb, ws };
 }
 
-describe("Column.values", () => {
+describe("Column.getValues with base 1", () => {
   it("is indexed by row number, with an empty leading slot", () => {
     const { ws } = sheet();
 
-    const v = Column.values(ws, "A");
+    const v = Column.getValues(ws, "A", { base: 1 });
     expect(v[1]).toBe("a");
     expect(v[2]).toBe("b");
     expect(v[4]).toBe("d");
@@ -35,10 +35,12 @@ describe("Column.values", () => {
 
   it("resolves a key, a letter and a number to the same column", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [{ key: "first", header: "First" }]);
+    Column.setDefinitions(ws, [{ key: "first", header: "First" }]);
 
-    expect(Column.values(ws, "first")).toEqual(Column.values(ws, "A"));
-    expect(Column.values(ws, 1)).toEqual(Column.values(ws, "A"));
+    expect(Column.getValues(ws, "first", { base: 1 })).toEqual(
+      Column.getValues(ws, "A", { base: 1 })
+    );
+    expect(Column.getValues(ws, 1, { base: 1 })).toEqual(Column.getValues(ws, "A", { base: 1 }));
   });
 
   it("composes with the Cell namespace, because the index is the row number", () => {
@@ -49,9 +51,9 @@ describe("Column.values", () => {
 
     const colNumber = Column.getNumber(ws, "C");
     const reddened: number[] = [];
-    Column.values(ws, "C").forEach((value, rowNumber) => {
+    Column.getValues(ws, "C", { base: 1 }).forEach((value, rowNumber) => {
       if (typeof value === "number" && value < 0) {
-        Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
+        Cell.setFont(ws, { row: rowNumber, col: colNumber }, { color: { argb: "FFC00000" } });
         reddened.push(rowNumber);
       }
     });
@@ -62,7 +64,7 @@ describe("Column.values", () => {
 
   it("is empty for a column that holds nothing", () => {
     const { ws } = sheet();
-    expect(Column.values(ws, "Z")).toEqual([]);
+    expect(Column.getValues(ws, "Z", { base: 1 })).toEqual([]);
   });
 });
 
@@ -79,7 +81,7 @@ describe("Column.getValues", () => {
 
   it("is the 1-based read shifted by one", () => {
     const { ws } = sheet();
-    expect(Column.getValues(ws, "A")).toEqual(Column.values(ws, "A").slice(1));
+    expect(Column.getValues(ws, "A")).toEqual(Column.getValues(ws, "A", { base: 1 }).slice(1));
   });
 });
 
@@ -97,10 +99,10 @@ describe("Column.setValues", () => {
   it("reads a leading hole as row-number indexing, so a read round-trips", () => {
     const { ws } = sheet();
 
-    Column.setValues(ws, "B", Column.values(ws, "A"));
+    Column.setValues(ws, "B", Column.getValues(ws, "A", { base: 1 }));
 
-    expect(Column.values(ws, "B")).toEqual(Column.values(ws, "A"));
-    expect(Object.keys(Column.values(ws, "B"))).toEqual(["1", "2", "4"]);
+    expect(Column.getValues(ws, "B", { base: 1 })).toEqual(Column.getValues(ws, "A", { base: 1 }));
+    expect(Object.keys(Column.getValues(ws, "B", { base: 1 }))).toEqual(["1", "2", "4"]);
   });
 
   it("treats a dense array and its row-number form as the same thing", () => {
@@ -118,7 +120,7 @@ describe("Column.setValues", () => {
     // Row 4 is outside the array, and `Row.setValues` would have dropped it.
     Column.setValues(ws, "A", [1, 2]);
 
-    expect(Column.values(ws, "A")[4]).toBe("d");
+    expect(Column.getValues(ws, "A", { base: 1 })[4]).toBe("d");
   });
 
   it("keeps a value the source column has no value for, so it is not a copy", () => {
@@ -126,9 +128,9 @@ describe("Column.setValues", () => {
     Cell.setValue(ws, "B3", "stale");
 
     // Column A holds rows 1, 2 and 4 — nothing at row 3, so nothing clears B3.
-    Column.setValues(ws, "B", Column.values(ws, "A"));
+    Column.setValues(ws, "B", Column.getValues(ws, "A", { base: 1 }));
 
-    expect(Column.values(ws, "B")).toEqual([, "a", "b", "stale", "d"]);
+    expect(Column.getValues(ws, "B", { base: 1 })).toEqual([, "a", "b", "stale", "d"]);
   });
 
   it("clears a cell when the array carries null at its index", () => {
@@ -137,7 +139,7 @@ describe("Column.setValues", () => {
     Column.setValues(ws, "A", [, null]);
 
     expect(Cell.getValue(ws, "A1")).toBeNull();
-    expect(Column.values(ws, "A")[2]).toBe("b");
+    expect(Column.getValues(ws, "A", { base: 1 })[2]).toBe("b");
   });
 
   it("takes the wider Cell.setValue input, not just what a read returns", () => {
@@ -158,7 +160,7 @@ describe("Column.setValues", () => {
 
   it("accepts a key as the reference", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [{ key: "first" }, { key: "second" }]);
+    Column.setDefinitions(ws, [{ key: "first" }, { key: "second" }]);
 
     Column.setValues(ws, "second", [7, 8]);
 
@@ -171,18 +173,18 @@ describe("Column.setValues", () => {
 
     Column.setValues(ws, "D", [1]);
 
-    expect(Worksheet.columns(ws).length).toBe(4);
+    expect(Column.getDefinitions(ws).length).toBe(4);
     expect(Cell.getValue(ws, "D1")).toBe(1);
   });
 });
 
 describe("row-number indexing is the round-trip form", () => {
-  it("writes Column.values back unchanged even when row 1 is empty", () => {
+  it("writes a base-1 read back unchanged even when row 1 is empty", () => {
     const { wb, ws } = sheet();
     const source = Workbook.addWorksheet(wb, "T");
     Cell.setValue(source, "A2", "x"); // nothing in row 1
 
-    Column.setValues(ws, "B", Column.values(source, "A"));
+    Column.setValues(ws, "B", Column.getValues(source, "A", { base: 1 }));
 
     expect(Cell.getValue(ws, "B1")).toBeNull();
     expect(Cell.getValue(ws, "B2")).toBe("x");
@@ -209,9 +211,9 @@ describe("column references are validated", () => {
     const { ws } = sheet();
 
     for (const ref of [0, -1, 16385]) {
-      expect(() => Column.values(ws, ref)).toThrow(ColumnOutOfBoundsError);
-      expect(() => Column.getValues(ws, ref)).toThrow(ColumnOutOfBoundsError);
-      expect(() => Column.setValues(ws, ref, [1])).toThrow(ColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref)).toThrow(ExcelColumnOutOfBoundsError);
+      expect(() => Column.setValues(ws, ref, [1])).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 
@@ -222,14 +224,14 @@ describe("column references are validated", () => {
     // so the read reported an empty column instead of a bad argument. `Infinity`
     // is the reason this matters: `getColumn` pads `_columns` in a `while` loop.
     for (const ref of [1.5, NaN, Infinity, -Infinity]) {
-      expect(() => Column.values(ws, ref)).toThrow(ColumnOutOfBoundsError);
-      expect(() => Column.setValues(ws, ref, [])).toThrow(ColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
+      expect(() => Column.setValues(ws, ref, [])).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 
   it("rejects a letter beyond XFD, the way it always did", () => {
     const { ws } = sheet();
-    expect(() => Column.values(ws, "XFE")).toThrow(ColumnOutOfBoundsError);
+    expect(() => Column.getValues(ws, "XFE", { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
   });
 
   it("does not mistake an Object.prototype member for a column key", () => {
@@ -238,15 +240,17 @@ describe("column references are validated", () => {
     // `ws._keys` is a plain object, so a bare lookup finds these on the
     // prototype and reports a column number of `undefined`.
     for (const ref of ["toString", "constructor", "hasOwnProperty"]) {
-      expect(() => Column.values(ws, ref)).toThrow(ColumnOutOfBoundsError);
+      expect(() => Column.getValues(ws, ref, { base: 1 })).toThrow(ExcelColumnOutOfBoundsError);
     }
   });
 
   it("still resolves a declared key that shadows an Object.prototype member", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [{ key: "toString" }]);
+    Column.setDefinitions(ws, [{ key: "toString" }]);
 
-    expect(Column.values(ws, "toString")).toEqual(Column.values(ws, "A"));
+    expect(Column.getValues(ws, "toString", { base: 1 })).toEqual(
+      Column.getValues(ws, "A", { base: 1 })
+    );
   });
 });
 
@@ -254,3 +258,56 @@ describe("column references are validated", () => {
 // `core/__tests__/read-side-effects.test.ts`, which fingerprints the saved bytes
 // as well as the counters — a strictly stronger check than anything expressible
 // here, and the file that owns that invariant for every reader in the library.
+
+describe("values with an explicit base are inverse pairs", () => {
+  it("Column: base 0 and base 1 read back what they wrote, even with row 1 empty", () => {
+    const ws = Workbook.addWorksheet(Workbook.create(), "E");
+    Column.setValues(ws, "A", [, "x", "y"], { base: 0 });
+    expect(Cell.getValue(ws, "A1")).toBeNull();
+    expect(Column.getValues(ws, "A")).toEqual([, "x", "y"]);
+    Column.setValues(ws, "B", Column.getValues(ws, "A"), { base: 0 });
+    expect(Column.getValues(ws, "B", { base: 1 })).toEqual(Column.getValues(ws, "A", { base: 1 }));
+    // base 1 ignores index 0 even when present
+    Column.setValues(ws, "C", ["ignored", "r1"], { base: 1 });
+    expect(Column.getValues(ws, "C")).toEqual(["r1"]);
+  });
+
+  it("Row: the same two pairs, by column", () => {
+    const ws = Workbook.addWorksheet(Workbook.create(), "E");
+    Row.setValues(ws, 1, [, "b", "c"], { base: 0 });
+    expect(Row.getValues(ws, 1)).toEqual([, "b", "c"]);
+    Row.setValues(ws, 2, Row.getValues(ws, 1), { base: 0 });
+    expect(Row.getValues(ws, 2, { base: 1 })).toEqual([, , "b", "c"]);
+    Row.setValues(ws, 3, ["ignored", "a"], { base: 1 });
+    expect(Row.getValues(ws, 3)).toEqual(["a"]);
+  });
+});
+
+describe("Row and Column iteration are mirrors", () => {
+  it("each visits the lines holding a value, or all up to the count", () => {
+    const ws = Workbook.addWorksheet(Workbook.create(), "E");
+    Cell.setValue(ws, "B2", 1);
+    Cell.setValue(ws, "D4", 2);
+    const cols: number[] = [];
+    Column.each(ws, c => cols.push(c));
+    expect(cols).toEqual([2, 4]);
+    const all: number[] = [];
+    Column.each(ws, c => all.push(c), { includeEmpty: true });
+    expect(all).toEqual([1, 2, 3, 4]);
+    const rows: number[] = [];
+    Row.each(ws, r => rows.push(r));
+    expect(rows).toEqual([2, 4]);
+  });
+
+  it("eachAddress with includeEmpty stops at the line's last cell in both directions", () => {
+    const ws = Workbook.addWorksheet(Workbook.create(), "E");
+    Cell.setValue(ws, "B2", 1);
+    Cell.setValue(ws, "A5", 2); // row 5 exists, but has no cell in column B
+    const down: string[] = [];
+    Column.eachAddress(ws, "B", a => down.push(a), { includeEmpty: true });
+    expect(down).toEqual(["B1", "B2"]);
+    const across: string[] = [];
+    Row.eachAddress(ws, 2, a => across.push(a), { includeEmpty: true });
+    expect(across).toEqual(["A2", "B2"]);
+  });
+});

@@ -5,9 +5,9 @@
  * fixed shape, row-major, non-destructive (no cell materialisation), and value
  * semantics identical to a single `Cell.getValue`.
  */
-import { getColumnCount, getRowCount } from "@excel/core/worksheet";
+import { getColumnCount, getRowCount, getSheetDimensions } from "@excel/core/worksheet";
 import { findCell, findRow, getRangeValues } from "@excel/core/worksheet-core";
-import { ExcelError, InvalidAddressError } from "@excel/errors";
+import { ExcelError, ExcelInvalidAddressError } from "@excel/errors";
 import { Cell, Range, Row, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
@@ -112,11 +112,11 @@ describe("getRangeValues", () => {
     it("leaves the sheet dimensions untouched", () => {
       const ws = sheet();
       Cell.setValue(ws, "B2", 1);
-      const before = { ...Worksheet.dimensions(ws) };
+      const before = { ...getSheetDimensions(ws) };
 
       getRangeValues(ws, "A1:J20");
 
-      expect(Worksheet.dimensions(ws)).toEqual(before);
+      expect(Worksheet.getDimensions(ws)).toEqual(before);
     });
   });
 
@@ -131,7 +131,7 @@ describe("getRangeValues", () => {
       Row.setValues(ws, 2, [null, new Date(Date.UTC(2020, 0, 2))]);
 
       const values = getRangeValues(ws, "A1:C2");
-      Range.forEachAddress(Range.create("A1:C2"), (address, row, col) => {
+      Range.eachAddress(Range.create("A1:C2"), (address, row, col) => {
         expect(values[row - 1][col - 1]).toEqual(Cell.getValue(ws, address));
       });
     });
@@ -227,7 +227,7 @@ describe("getRangeValues", () => {
       Cell.setValue(ws, "B2", 1);
       Cell.setValue(ws, "C3", 2);
 
-      expect(getRangeValues(ws, Worksheet.dimensions(ws))).toEqual([
+      expect(getRangeValues(ws, Worksheet.getDimensions(ws)!)).toEqual([
         [1, null],
         [null, 2]
       ]);
@@ -282,33 +282,34 @@ describe("getRangeValues", () => {
     it("rejects whole-column and whole-row references", () => {
       const ws = sheet();
 
-      expect(() => getRangeValues(ws, "A:A")).toThrow(InvalidAddressError);
-      expect(() => getRangeValues(ws, "A:C")).toThrow(InvalidAddressError);
-      expect(() => getRangeValues(ws, "1:5")).toThrow(InvalidAddressError);
+      expect(() => getRangeValues(ws, "A:A")).toThrow(ExcelInvalidAddressError);
+      expect(() => getRangeValues(ws, "A:C")).toThrow(ExcelInvalidAddressError);
+      expect(() => getRangeValues(ws, "1:5")).toThrow(ExcelInvalidAddressError);
     });
 
     it("rejects an undecodable range string", () => {
       const ws = sheet();
 
-      expect(() => getRangeValues(ws, "nope")).toThrow(InvalidAddressError);
-      expect(() => getRangeValues(ws, "")).toThrow(InvalidAddressError);
+      expect(() => getRangeValues(ws, "nope")).toThrow(ExcelInvalidAddressError);
+      expect(() => getRangeValues(ws, "")).toThrow(ExcelInvalidAddressError);
     });
 
     it("rejects an unset range handle", () => {
       const ws = sheet();
 
-      expect(() => getRangeValues(ws, Range.create())).toThrow(InvalidAddressError);
+      expect(() => getRangeValues(ws, Range.create())).toThrow(ExcelInvalidAddressError);
       expect(() => getRangeValues(ws, Range.create())).toThrow(/unset or empty/);
     });
 
-    it("rejects the dimensions of a sheet with no cells, and says why", () => {
+    it("rejects an unset range — what a sheet with no cells used to report as its dimensions — and says why", () => {
       const ws = sheet();
 
-      // `Worksheet.dimensions` returns rangeCreate's all-zero unset sentinel.
-      expect(Worksheet.dimensions(ws)).toEqual({ top: 0, left: 0, bottom: 0, right: 0 });
-      expect(() => getRangeValues(ws, Worksheet.dimensions(ws))).toThrow(/unset or empty/);
+      // `Worksheet.getDimensions` answers `undefined` for a sheet with no cells; it used to return rangeCreate's
+      // all-zero unset sentinel, which `Range.*` read as A1.
+      expect(Worksheet.getDimensions(ws)).toBeUndefined();
+      expect(() => getRangeValues(ws, Range.create())).toThrow(/unset or empty/);
       // …and not the unrelated whole-column diagnostic
-      expect(() => getRangeValues(ws, Worksheet.dimensions(ws))).not.toThrow(/whole-column/);
+      expect(() => getRangeValues(ws, Range.create())).not.toThrow(/whole-column/);
     });
 
     it("distinguishes an undecodable string from an unset handle", () => {
@@ -331,7 +332,7 @@ describe("getRangeValues", () => {
       const ws = sheet();
 
       expect(() => getRangeValues(ws, { top: 1.5, left: 1, bottom: 2, right: 2 })).toThrow(
-        InvalidAddressError
+        ExcelInvalidAddressError
       );
     });
   });

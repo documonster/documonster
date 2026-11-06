@@ -9,21 +9,26 @@
  *
  * @example
  * ```ts
- * import { htmlToDocxBody } from "documonster/word/html";
- * import { Document, Io } from "documonster/word";
+ * import { WordHtml } from "documonster/word/html";
+ * import { Document } from "documonster/word";
  *
- * const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
+ * const { body } = WordHtml.toDocxBody("<h1>Hello</h1><p>World</p>");
  * const h = Document.create();
+ * Document.useDefaultStyles(h);
  * for (const block of body) {
  *   Document.addContent(h, block);
  * }
- * const buffer = await Io.toBuffer(Document.build(h));
+ * const buffer = await Document.toBuffer(h);
  * ```
  */
 
 import { isEastAsianTypeface } from "@utils/cjk-typefaces";
+import type { SchemaMatches } from "@utils/schema";
+import { s } from "@utils/schema";
 import { base64ToUint8Array } from "@utils/utils";
+import { checkString } from "@word/core/argument-checks";
 import { sanitizeUrl } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import type {
   BodyContent,
   Hyperlink,
@@ -45,15 +50,40 @@ import type {
 } from "@word/types";
 import { EMU_PER_PX } from "@word/units";
 
+/**
+ * `numId` the importer writes on bullet (`<ul>`) list paragraphs. Content from
+ * `WordHtml.toDocxBody` refers to it — and returns the numbering instance
+ * defining it — so a document receiving that content must define a numbering
+ * instance with this id: merge the returned `numberingInstances`, or call
+ * `Document.addListDefinition(doc, "bullet", { numId: HTML_BULLET_LIST_NUM_ID })`.
+ */
+export const HTML_BULLET_LIST_NUM_ID = 1;
+
+/** `numId` the importer writes on numbered (`<ol>`) list paragraphs; see {@link HTML_BULLET_LIST_NUM_ID}. */
+export const HTML_NUMBERED_LIST_NUM_ID = 2;
+
 /** Options for HTML to DOCX conversion. */
 export interface HtmlImportOptions {
-  /** Default font size in half-points (default: 24 = 12pt). */
+  /**
+   * Default font size in **half-points**, as every Word run size is: 24 = 12pt
+   * (the default). Note the unit: `Pdf.fromDocx`'s `defaultFontSize` is in points.
+   */
   readonly defaultFontSize?: number;
   /** Default font family. */
   readonly defaultFont?: string;
   /** Map of CSS class names to inline style strings. Matched classes are merged with element styles. */
   readonly classStyles?: Record<string, string>;
 }
+
+const htmlImportOptionsSchema = w.record({
+  // A run size, half-points.
+  defaultFontSize: w.integer({ min: 0 }).optional(),
+  defaultFont: w.string().optional(),
+  classStyles: s.record(w.string(), { record: "argument" }).optional()
+});
+const _htmlImportOptionsMatch: SchemaMatches<typeof htmlImportOptionsSchema, HtmlImportOptions> =
+  true;
+void _htmlImportOptionsMatch;
 
 /**
  * Convert an HTML string into an array of DOCX body content blocks.
@@ -72,7 +102,14 @@ export interface HtmlImportOptions {
  * @param options - Optional conversion settings.
  * @returns Array of BodyContent blocks.
  */
+/** Check what an HTML import is given, in the name of `where`. */
+export function checkHtmlImport(html: unknown, options: unknown, where: string): void {
+  checkString(html, "html", where);
+  checkSchema(htmlImportOptionsSchema.optional(), options, where);
+}
+
 export function htmlToDocxBody(html: string, options?: HtmlImportOptions): BodyContent[] {
+  checkHtmlImport(html, options, "WordHtml.toDocxBody");
   const blocks: BodyContent[] = [];
   const tokens = tokenize(html);
   // Extract <style> rules and merge with user-provided classStyles
@@ -92,6 +129,11 @@ export function htmlToDocxBody(html: string, options?: HtmlImportOptions): BodyC
 
   parseBlocks(tokens, 0, blocks, initialCtx, classStyles);
   return blocks;
+}
+
+let _htmlImageSeq = 0;
+function nextHtmlImageSeq(): number {
+  return _htmlImageSeq++;
 }
 
 /** Result of {@link htmlToDocx}: body content plus the images it references. */
@@ -115,24 +157,31 @@ export interface HtmlToDocxResult {
  * runs reference. Merge the returned `images` into your document model so the
  * pictures are embedded rather than dropped as placeholders.
  *
- * @example
- * ```ts
- * const { body, images } = htmlToDocx(html);
- * const doc = Document.create();
- * for (const item of body) Document.addContent(doc, item);
- * const built = Document.build(doc);
- * const final = { ...built, images: [...(built.images ?? []), ...images] };
- * const bytes = await toBuffer(final);
- * ```
+ * Published as the deprecated `htmlToDocx`; `WordHtml.toDocxBody` returns
+ * this and the definitions the body refers to.
  */
 export function htmlToDocx(html: string, options?: HtmlImportOptions): HtmlToDocxResult {
+  return convertHtml(html, options, "WordHtml.toDocx", false);
+}
+
+/**
+ * {@link htmlToDocx} in the name of `where`; `placeholderText` writes a
+ * picture it cannot embed as `WordMarkdown`'s `[Image: alt]` text.
+ */
+export function convertHtml(
+  html: string,
+  options: HtmlImportOptions | undefined,
+  where: string,
+  placeholderText: boolean
+): HtmlToDocxResult {
+  checkHtmlImport(html, options, where);
   const blocks: BodyContent[] = [];
   const tokens = tokenize(html);
   const extractedStyles = extractStyleRules(tokens);
   const classStyles = mergeClassStyles(extractedStyles, options?.classStyles ?? {});
 
   const images: ImageDef[] = [];
-  const initialCtx: InlineContext = { imageSink: images };
+  const initialCtx: InlineContext = { imageSink: images, imagePlaceholderText: placeholderText };
   if (options?.defaultFont) {
     initialCtx.fontFamily = options.defaultFont;
   }
@@ -1306,6 +1355,14 @@ interface InlineContext {
    * accumulates every image in the document.
    */
   imageSink?: ImageDef[];
+  /**
+   * A picture that cannot be embedded — a remote or relative `src`, an
+   * undecodable `data:` URL — becomes the italic grey `[Image: alt]` text
+   * `WordMarkdown` writes, rather than an image node with an empty rId.
+   * Set by `WordHtml.toDocx` / `toDocxBody`; the deprecated flat names keep
+   * their placeholder image.
+   */
+  imagePlaceholderText?: boolean;
 }
 
 const _BLOCK_TAGS = new Set([
@@ -1741,6 +1798,10 @@ function parseInlineTag(
       const imgContent = buildImageContent(tok.attrs, ctx);
       if (imgContent) {
         runs.push({ content: [imgContent] } as Run);
+      } else if (ctx.imagePlaceholderText) {
+        // As `WordMarkdown` writes an image it cannot resolve.
+        const label = tok.attrs["alt"] || tok.attrs["src"] || "image";
+        runs.push(makeRun(`[Image: ${label}]`, { ...ctx, italic: true, color: "666666" }));
       } else {
         // Fallback placeholder text
         const alt = tok.attrs["alt"] || "image";
@@ -1918,7 +1979,7 @@ function parseListItem(
           type: "paragraph",
           properties: {
             numbering: {
-              numId: ordered ? 2 : 1,
+              numId: ordered ? HTML_NUMBERED_LIST_NUM_ID : HTML_BULLET_LIST_NUM_ID,
               level: level
             }
           },
@@ -1936,7 +1997,7 @@ function parseListItem(
           type: "paragraph",
           properties: {
             numbering: {
-              numId: ordered ? 2 : 1,
+              numId: ordered ? HTML_NUMBERED_LIST_NUM_ID : HTML_BULLET_LIST_NUM_ID,
               level: level
             }
           },
@@ -1988,7 +2049,7 @@ function parseListItem(
         type: "paragraph",
         properties: {
           numbering: {
-            numId: ordered ? 2 : 1,
+            numId: ordered ? HTML_NUMBERED_LIST_NUM_ID : HTML_BULLET_LIST_NUM_ID,
             level: level
           }
         },
@@ -2006,7 +2067,7 @@ function parseListItem(
       type: "paragraph",
       properties: {
         numbering: {
-          numId: ordered ? 2 : 1,
+          numId: ordered ? HTML_NUMBERED_LIST_NUM_ID : HTML_BULLET_LIST_NUM_ID,
           level: level
         }
       },
@@ -2467,7 +2528,10 @@ function buildImageContent(
     if (decoded) {
       const sink = ctx.imageSink;
       const index = sink.length;
-      const rId = `htmlImg${index}`;
+      // Unique across conversions, not only within this one: the result is
+      // meant to be spliced into a document, possibly beside another
+      // conversion's, and an image key names one picture document-wide.
+      const rId = `htmlImg${nextHtmlImageSeq()}`;
       const ext = decoded.mediaType === "jpeg" ? "jpg" : decoded.mediaType;
       sink.push({
         data: decoded.data,
@@ -2486,6 +2550,9 @@ function buildImageContent(
     }
   }
 
+  if (ctx?.imagePlaceholderText) {
+    return undefined;
+  }
   // No sink (htmlToDocxBody only returns BodyContent[] and cannot register
   // media) or an unsupported/remote source: emit a placeholder with an empty
   // rId. The renderer treats an empty rId as a placeholder; the original src

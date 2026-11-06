@@ -22,19 +22,34 @@
  * so that stays with the code that shades it.
  */
 
-import { parseCssColor } from "@utils/svg-lex";
+import { isNoPaintColor, parseCssColor } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
 
-const BLACK: Rgba01 = { r: 0, g: 0, b: 0, a: 1 };
+const BLACK: Rgba01 = Object.freeze({ r: 0, g: 0, b: 0, a: 1 });
+const TRANSPARENT: Rgba01 = Object.freeze({ r: 0, g: 0, b: 0, a: 0 });
 
-/** An authored colour token as an IR colour; black when it cannot be read. */
-export function cssColour(token: string | undefined): Rgba01 {
+/**
+ * An authored colour token as an IR colour.
+ *
+ * `none` and `transparent` are fully transparent — they are colours, not mistakes, and
+ * reading them as black painted a shape asked to be invisible. Anything else that cannot
+ * be read is black, per the policy above. `undefined` is black too: it is "no colour
+ * given", which a producer resolves to its default before calling.
+ */
+export function cssColor(token: string | undefined): Rgba01 {
+  if (isNoPaintColor(token)) {
+    return TRANSPARENT;
+  }
   return parseCssColor(token) ?? BLACK;
 }
 
-/** An authored colour token at the given alpha. */
+/**
+ * An authored colour token at the given alpha, which replaces the token's own. A no-paint
+ * token (`none`, `transparent`) stays fully transparent whatever `alpha` says.
+ */
 export function translucent(token: string | undefined, alpha: number): Rgba01 {
-  return { ...cssColour(token), a: alpha };
+  const color = cssColor(token);
+  return color === TRANSPARENT ? TRANSPARENT : { ...color, a: alpha };
 }
 
 /**
@@ -50,6 +65,6 @@ export function translucent(token: string | undefined, alpha: number): Rgba01 {
  * hand-tuned threshold, so consistency matters more than colorimetric exactness, and the
  * cheaper form is what the thresholds were chosen against.
  */
-export function relativeLuminance(colour: Rgba01): number {
-  return 0.2126 * colour.r + 0.7152 * colour.g + 0.0722 * colour.b;
+export function relativeLuminance(color: Rgba01): number {
+  return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
 }

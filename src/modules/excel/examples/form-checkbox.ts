@@ -99,6 +99,11 @@ async function main(): Promise<void> {
   });
   Row.setHeight(ws, 18, 25);
 
+  // A checkbox can be removed again. A checkbox added afterwards gets a fresh
+  // shape id, never one still in use.
+  const scratch = Form.addCheckbox(ws, "G2:H3", { text: "temporary" });
+  Form.remove(ws, scratch);
+
   // Note about linked cells
   Cell.setValue(ws, "A21", "Note: Click checkboxes in Excel to update linked cell values.");
   Cell.setStyle(ws, "A21", { font: { italic: true, color: { argb: "FF666666" } } });

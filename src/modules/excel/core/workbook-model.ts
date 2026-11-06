@@ -25,8 +25,9 @@ import { definedNamesModel } from "@excel/core/defined-names";
 import type { OpaqueDrop, OpaquePart } from "@excel/core/opaque-part";
 import type { PivotTable } from "@excel/core/pivot-table";
 import { sheetsInTabOrder } from "@excel/core/sheet-order";
+import { restateRenamedTableReferences } from "@excel/core/table-references";
 import type { NamedStyleEntry, WorkbookData } from "@excel/core/workbook-core";
-import { getWorksheets } from "@excel/core/workbook-core";
+import { checkWorkbook, getWorksheets } from "@excel/core/workbook-core";
 import type { WorksheetModel } from "@excel/core/worksheet";
 import { getSheetModel } from "@excel/core/worksheet";
 import type {
@@ -172,7 +173,7 @@ export interface WorkbookModel {
    */
   opaqueDrops?: OpaqueDrop[];
   /**
-   * What an XLSX write had to drop because it belongs to the other container's sheet family.
+   * What an XLSX write had to drop because it belongs to the other container's part family.
    *
    * Written by `resolveOpaqueReachability` and read back by `writeXlsxPackage` in the same call, which is what distinguishes
    * it from `opaqueDrops` — that one is a *read-time* report and a write never reaches its readers. This exists so
@@ -273,9 +274,45 @@ export interface ExternalLinkModel {
    * shows values, offers to update links".
    */
   cachedValues?: Record<string, ExternalLinkCachedSheet>;
+  /**
+   * What a read found in the part that this model does not describe — Excel 2021's alternate URLs, a cached
+   * `definedNames`, an `extLst` — kept so a write gives it back. Filled in on read; leave it alone.
+   */
+  preserved?: ExternalLinkPreserved;
+}
+
+/** The unmodelled content of an external link part, as read. See {@link ExternalLinkModel.preserved}. */
+export interface ExternalLinkPreserved {
+  /** The relationship id `<externalBook r:id>` used, so fragments that name the others keep meaning them. */
+  readonly bookRelationshipId: string;
+  /** Every relationship of the part, as read. */
+  readonly relationships: readonly {
+    readonly id: string;
+    readonly type: string;
+    readonly target: string;
+    readonly targetMode?: string;
+  }[];
+  /** `mc:Ignorable` and the `xmlns:*` declarations of `<externalLink>`. */
+  readonly rootAttributes: Readonly<Record<string, string>>;
+  /**
+   * Children of `<externalBook>` this model does not describe, as XML, with the modelled element each followed:
+   * `"start"` (before `sheetNames`), `"sheetNames"` or `"sheetDataSet"`.
+   */
+  readonly bookChildren: readonly { readonly xml: string; readonly after: string }[];
+  /** Children of `<externalLink>` after the book (`extLst`), as XML. */
+  readonly linkChildren: readonly string[];
 }
 
 export function getWorkbookModel(wb: WorkbookData): WorkbookModel {
+  checkWorkbook(wb);
+  const model = buildWorkbookModel(wb);
+  // A table a file named with something Excel cannot hold is stored corrected; a formula may still use the file's name
+  // for it, and the file written must say the stored one — see `restateRenamedTableReferences`.
+  restateRenamedTableReferences(model);
+  return model;
+}
+
+function buildWorkbookModel(wb: WorkbookData): WorkbookModel {
   // Built once and used for both `worksheets` and `sheets`, which used to call `getSheetModel` on every sheet twice.
   const worksheetModels = getWorksheets(wb).map(worksheet => getSheetModel(worksheet));
   return {

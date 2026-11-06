@@ -11,19 +11,35 @@
  * - Error classes and pure types stay flat at the top level.
  */
 
-// =============================================================================
-// `Archive` domain namespace — high-level ZIP/TAR API, readers, crypto/CRC
-// (tree-shaken via `export * as`)
-// =============================================================================
-
-export * as Archive from "@archive/surface/archive";
+import type {
+  ZipEntrySizeMismatchReason as ZipEntrySizeMismatchReasonImpl,
+  ArchiveFileTooLargeErrorOptions as ArchiveFileTooLargeErrorOptionsImpl
+} from "@archive/core/errors";
+import {
+  ZipEocdNotFoundError as ZipEocdNotFoundErrorImpl,
+  ZipCrc32MismatchError as ZipCrc32MismatchErrorImpl,
+  ZipDecryptionError as ZipDecryptionErrorImpl,
+  ZipPasswordRequiredError as ZipPasswordRequiredErrorImpl,
+  ZipEntrySizeMismatchError as ZipEntrySizeMismatchErrorImpl,
+  ZipUnsupportedCompressionError as ZipUnsupportedCompressionErrorImpl,
+  ArchiveRangeNotSupportedError as ArchiveRangeNotSupportedErrorImpl,
+  ArchiveHttpRangeError as ArchiveHttpRangeErrorImpl,
+  ArchiveFileTooLargeError as ArchiveFileTooLargeErrorImpl,
+  ArchiveLimitExceededError as ArchiveLimitExceededErrorImpl,
+  ArchiveWorkerStreamStartError as ArchiveWorkerStreamStartErrorImpl
+} from "@archive/core/errors";
+import { encodePng as encodePngImpl } from "@archive/png";
+import type {
+  EOCDInfo as EOCDInfoImpl,
+  ZIP64EOCDInfo as ZIP64EOCDInfoImpl
+} from "@archive/zip-spec/zip-parser-core";
 
 // =============================================================================
 // Core Types
 // =============================================================================
 
 // Unified archive I/O
-export type { ArchiveSource } from "@archive/io/archive-source";
+export type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
 export type { ArchiveSink } from "@archive/io/archive-sink";
 
 // Random Access / HTTP Range reading
@@ -37,8 +53,12 @@ export type {
   RemoteZipReaderOptions,
   RemoteZipOpenOptions,
   RemoteZipStats,
+  RemoteZipExtractOptions,
+  RawEntryReadOptions,
+  RawEntryStreamOptions,
   ExtractOptions
 } from "@archive/unzip/remote-zip-reader";
+export type { ArchiveOperationBase } from "@archive/core/progress";
 
 // High-level ZIP API types
 export type { ArchiveFormat } from "@archive/core/types";
@@ -48,7 +68,6 @@ export type { Zip64Mode } from "@archive/zip-spec/zip-records";
 export type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 export type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 export type { ZipStringEncoding } from "@archive/core/text";
-export type { EOCDInfo, ZIP64EOCDInfo } from "@archive/zip-spec/zip-parser-core";
 export type { SerializedZipEditOp, SerializedZipEditPlan } from "@archive/zip/zip-edit-plan";
 export type {
   ZipOptions,
@@ -67,8 +86,12 @@ export type {
   UnzipProgress,
   UnzipStreamOptions
 } from "@archive/unzip";
-export type { UnzipOptionsTar } from "@archive/unzip/zip-reader";
-export type { ZipOptionsTar } from "@archive/zip/zip-archive";
+export type {
+  UnzipOptionsTar,
+  UnzipOptionsZip,
+  ArchivePipeToOptions
+} from "@archive/unzip/zip-reader";
+export type { ZipOptionsTar, ZipOptionsZip } from "@archive/zip/zip-archive";
 
 // TAR archive types
 export type {
@@ -88,6 +111,8 @@ export type {
   TarReaderOperation
 } from "@archive/tar/index.browser";
 export type { TarEntryInput } from "@archive/tar/tar-archive";
+export type { UnpackedTarEntry } from "@archive/tar/tar-parser";
+export type { UnpackedZipEntry, UnpackZipOptions } from "@archive/zip-one-shot";
 
 // Encryption types
 export type {
@@ -99,46 +124,111 @@ export type {
   ZipEncryptionOptions
 } from "@archive/crypto";
 
-// =============================================================================
-// PNG encoding
-//
-// A PNG is a DEFLATE stream plus CRC-32-checked chunks — the two primitives this
-// module owns and already publishes as `zlibSync` and `crc32`. It is exported
-// here because the drawing engine deliberately stops at pixels:
-// `rasterizeToRgba` from `documonster/draw` hands back RGBA, and encoding needs
-// DEFLATE, which sits a layer above `draw`. Pairing the two is two lines, and
-// without this export a consumer of `documonster/draw` or `documonster/mermaid`
-// had to reimplement chunk framing this library already contains.
-//
-// Platform-identical source: the build rewrites its compression imports to the
-// `.browser` variants, so both entries get the same encoder.
-// =============================================================================
-
-export { encodePng } from "@archive/png";
 export type { EncodePngOptions } from "@archive/png";
+export type { TarGzOptions, ParseTarGzOptions } from "@archive/tar/tar-gzip";
+
+/** @deprecated Use {@link Archive.encodePng}. Removed in 1.0. */
+export const encodePng = encodePngImpl;
+/**
+ * @deprecated No public signature takes or returns it: the end-of-central-directory record is
+ * read inside `RemoteZipReader` and never handed out. Removed in 1.0, with no replacement.
+ */
+export type EOCDInfo = EOCDInfoImpl;
+/**
+ * @deprecated No public signature takes or returns it: the ZIP64 end-of-central-directory
+ * record is read inside `RemoteZipReader` and never handed out. Removed in 1.0, with no
+ * replacement.
+ */
+export type ZIP64EOCDInfo = ZIP64EOCDInfoImpl;
 
 // =============================================================================
 // Errors
 // =============================================================================
 
 export {
-  // Abort error class
+  // Abort error class and its guard (also true for a native `DOMException` named "AbortError")
   AbortError,
+  isAbortError,
   // Error classes
   ArchiveError,
+  ArchiveArgumentError,
+  isArchiveError,
   ZipParseError,
+  ZipInvalidSignatureError,
+  // Deprecated pre-prefix name; removed in 1.0.
   InvalidZipSignatureError,
-  EocdNotFoundError,
-  Crc32MismatchError,
-  DecryptionError,
-  PasswordRequiredError,
-  RangeNotSupportedError,
-  HttpRangeError,
-  FileTooLargeError,
-  UnsupportedCompressionError,
-  EntrySizeMismatchError,
-  ArchiveLimitError,
+  ZipEocdNotFoundError,
+  ZipCrc32MismatchError,
+  ZipDecryptionError,
+  ZipPasswordRequiredError,
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError,
+  ArchiveFileTooLargeError,
+  ArchiveFileError,
+  ZipUnsupportedCompressionError,
+  ZipEntrySizeMismatchError,
+  ArchiveLimitExceededError,
+  ArchiveWorkerStreamStartError,
+  ArchiveWorkerUnsupportedError,
   // Error types
-  type EntrySizeMismatchReason,
-  type ArchiveLimit
+  type ZipEntrySizeMismatchReason,
+  type ArchiveLimit,
+  type ArchiveFileTooLargeErrorOptions
 } from "@archive/core/errors";
+
+// The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
+export type { BaseErrorOptions } from "@utils/errors";
+
+// Deprecated error names — a ZIP-only error carries `Zip`, one any archive path raises `Archive`.
+
+/** @deprecated Use {@link ZipEocdNotFoundError}. Removed in 1.0. */
+export const EocdNotFoundError = ZipEocdNotFoundErrorImpl;
+/** @deprecated Use {@link ZipEocdNotFoundError}. Removed in 1.0. */
+export type EocdNotFoundError = ZipEocdNotFoundErrorImpl;
+/** @deprecated Use {@link ZipCrc32MismatchError}. Removed in 1.0. */
+export const Crc32MismatchError = ZipCrc32MismatchErrorImpl;
+/** @deprecated Use {@link ZipCrc32MismatchError}. Removed in 1.0. */
+export type Crc32MismatchError = ZipCrc32MismatchErrorImpl;
+/** @deprecated Use {@link ZipDecryptionError}. Removed in 1.0. */
+export const DecryptionError = ZipDecryptionErrorImpl;
+/** @deprecated Use {@link ZipDecryptionError}. Removed in 1.0. */
+export type DecryptionError = ZipDecryptionErrorImpl;
+/** @deprecated Use {@link ZipPasswordRequiredError}. Removed in 1.0. */
+export const PasswordRequiredError = ZipPasswordRequiredErrorImpl;
+/** @deprecated Use {@link ZipPasswordRequiredError}. Removed in 1.0. */
+export type PasswordRequiredError = ZipPasswordRequiredErrorImpl;
+/** @deprecated Use {@link ZipEntrySizeMismatchError}. Removed in 1.0. */
+export const EntrySizeMismatchError = ZipEntrySizeMismatchErrorImpl;
+/** @deprecated Use {@link ZipEntrySizeMismatchError}. Removed in 1.0. */
+export type EntrySizeMismatchError = ZipEntrySizeMismatchErrorImpl;
+/** @deprecated Use {@link ZipEntrySizeMismatchReason}. Removed in 1.0. */
+export type EntrySizeMismatchReason = ZipEntrySizeMismatchReasonImpl;
+/** @deprecated Use {@link ZipUnsupportedCompressionError}. Removed in 1.0. */
+export const UnsupportedCompressionError = ZipUnsupportedCompressionErrorImpl;
+/** @deprecated Use {@link ZipUnsupportedCompressionError}. Removed in 1.0. */
+export type UnsupportedCompressionError = ZipUnsupportedCompressionErrorImpl;
+/** @deprecated Use {@link ArchiveRangeNotSupportedError}. Removed in 1.0. */
+export const RangeNotSupportedError = ArchiveRangeNotSupportedErrorImpl;
+/** @deprecated Use {@link ArchiveRangeNotSupportedError}. Removed in 1.0. */
+export type RangeNotSupportedError = ArchiveRangeNotSupportedErrorImpl;
+/** @deprecated Use {@link ArchiveHttpRangeError}. Removed in 1.0. */
+export const HttpRangeError = ArchiveHttpRangeErrorImpl;
+/** @deprecated Use {@link ArchiveHttpRangeError}. Removed in 1.0. */
+export type HttpRangeError = ArchiveHttpRangeErrorImpl;
+/** @deprecated Use {@link ArchiveFileTooLargeError}. Removed in 1.0. */
+export const FileTooLargeError = ArchiveFileTooLargeErrorImpl;
+/** @deprecated Use {@link ArchiveFileTooLargeError}. Removed in 1.0. */
+export type FileTooLargeError = ArchiveFileTooLargeErrorImpl;
+/** @deprecated Use {@link ArchiveFileTooLargeErrorOptions}. Removed in 1.0. */
+export type FileTooLargeErrorOptions = ArchiveFileTooLargeErrorOptionsImpl;
+/**
+ * @deprecated Use {@link ArchiveLimitExceededError} — the same class, under the name every module's limit error has
+ * (`ExcelLimitExceededError`, `DocxLimitExceededError`, `PdfLimitExceededError`). Removed in 1.0.
+ */
+export const ArchiveLimitError = ArchiveLimitExceededErrorImpl;
+/** @deprecated Use {@link ArchiveLimitExceededError}. Removed in 1.0. */
+export type ArchiveLimitError = ArchiveLimitExceededErrorImpl;
+/** @deprecated Use {@link ArchiveWorkerStreamStartError}. Removed in 1.0. */
+export const WorkerStreamStartError = ArchiveWorkerStreamStartErrorImpl;
+/** @deprecated Use {@link ArchiveWorkerStreamStartError}. Removed in 1.0. */
+export type WorkerStreamStartError = ArchiveWorkerStreamStartErrorImpl;

@@ -39,7 +39,7 @@ const HEBREW_SHIN = 0x05e9; // ש — the only Hebrew letter the fixture below c
 function render(text: string, fonts: readonly RasterFontSource[]): BasicRasterCanvas {
   const canvas = new BasicRasterCanvas(400, 60);
   canvas.setFonts(fonts, { useSystemFonts: false });
-  canvas.drawText(10, 40, text, 24, "#000000", "start");
+  canvas.drawText(10, 40, text, { fontSize: 24, color: "#000000", anchor: "start" });
   return canvas;
 }
 
@@ -127,7 +127,7 @@ describe("raster shaping", () => {
 
     const canvas = render(ARABIC_HELLO, fonts);
     expect(glyphStarts(canvas)).toHaveLength(5);
-    expect([...canvas.uncoveredCodePoints]).toEqual([]);
+    expect(canvas.getUncoveredCodePoints()).toEqual([]);
   });
 
   it("puts a right-to-left run in visual order", () => {
@@ -144,7 +144,7 @@ describe("raster shaping", () => {
     // Four glyphs at 0.7em × 24pt from x=10: the run spans 10 → 77, midpoint ~43.
     expect(starts[0]).toBeGreaterThan(43);
     // The three it cannot draw are named, so the caller is told what to install.
-    expect([...canvas.uncoveredCodePoints].sort((a, b) => a - b)).toEqual([0x05d5, 0x05dc, 0x05dd]);
+    expect(canvas.getUncoveredCodePoints()).toEqual([0x05d5, 0x05dc, 0x05dd]);
   });
 
   it("falls back to base letters when nothing in the chain has the contextual form", () => {
@@ -164,7 +164,7 @@ describe("raster shaping", () => {
     // Every letter is drawn — unjoined, which is the point of the fallback.
     expect(glyphStarts(canvas)).toHaveLength(5);
     // And the caller is not sent after a font for a presentation form.
-    expect([...canvas.uncoveredCodePoints]).toEqual([]);
+    expect(canvas.getUncoveredCodePoints()).toEqual([]);
   });
 
   it("reports what shaping still cannot do, and does not send the caller elsewhere", () => {
@@ -174,7 +174,7 @@ describe("raster shaping", () => {
     const fonts = [faceFor(ARABIC_HELLO + TAMIL, "Fixture Complex")];
     const canvas = render(`${ARABIC_HELLO} ${TAMIL}`, fonts);
 
-    const warnings = canvas.textWarnings();
+    const warnings = canvas.getTextWarnings();
     expect(warnings.join(" ")).toContain("Arabic");
     expect(warnings.join(" ")).not.toContain("render incorrectly");
   });

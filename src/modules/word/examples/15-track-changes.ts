@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query } from "../index";
+import { Document, Build, Query } from "../index";
 import type { RevisionInfo } from "../index";
 
 const outDir = path.resolve(
@@ -41,7 +41,7 @@ Document.addHeading(doc, "Track Changes Demo", 1);
 // ---------------------------------------------------------------------------
 // 1. Plain insertion + deletion within a paragraph
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("The quick "),
@@ -54,7 +54,7 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 // 2. Insert a whole new sentence
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Original sentence kept. "),
@@ -66,7 +66,7 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 // 3. Move (paragraph relocation)
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.moveFromRangeStart(10, "Carol", { date: baseDate, name: "swap-paragraphs" }),
@@ -78,7 +78,7 @@ Document.addParagraphElement(
     Build.text("(remaining text stays put.)")
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.moveToRangeStart(10, "Carol", { date: baseDate, name: "swap-paragraphs" }),
@@ -94,7 +94,7 @@ Document.addParagraphElement(
 // approximate by using a deletedRun that wraps an inserted run sub-tree
 // in two separate paragraphs.
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Edge case: "),
@@ -104,41 +104,39 @@ Document.addParagraphElement(
   ])
 );
 
-const built = Document.build(doc);
-
 // Pending — write as-is
-const pending = await Io.toBuffer(built);
+const pending = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "15-revisions-pending.docx"), pending);
 console.log(`  → 15-revisions-pending.docx (${pending.length} bytes)`);
 
 // List the revisions (proves the API can introspect them)
-const revisions = Query.listRevisions(built);
+const revisions = Query.listRevisions(doc);
 console.log(`  detected ${revisions.length} revisions`);
 
 // Selectively accept & reject specific IDs
 {
-  const cloned = JSON.parse(JSON.stringify(built));
-  Query.acceptRevision(cloned, 2); // accept the "red" insertion
-  Query.rejectRevision(cloned, 1); // keep the original "brown"
-  const buf = await Io.toBuffer(cloned);
+  const cloned = Document.clone(doc);
+  Document.acceptRevision(cloned, 2); // accept the "red" insertion
+  Document.rejectRevision(cloned, 1); // keep the original "brown"
+  const buf = await Document.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-partial.docx"), buf);
   console.log(`  → 15-revisions-partial.docx (${buf.length} bytes)`);
 }
 
 // Accept all
 {
-  const cloned = JSON.parse(JSON.stringify(built));
-  Query.acceptAllRevisions(cloned);
-  const buf = await Io.toBuffer(cloned);
+  const cloned = Document.clone(doc);
+  Document.acceptAllRevisions(cloned);
+  const buf = await Document.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-accepted.docx"), buf);
   console.log(`  → 15-revisions-accepted.docx (${buf.length} bytes)`);
 }
 
 // Reject all
 {
-  const cloned = JSON.parse(JSON.stringify(built));
-  Query.rejectAllRevisions(cloned);
-  const buf = await Io.toBuffer(cloned);
+  const cloned = Document.clone(doc);
+  Document.rejectAllRevisions(cloned);
+  const buf = await Document.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-rejected.docx"), buf);
   console.log(`  → 15-revisions-rejected.docx (${buf.length} bytes)`);
 }

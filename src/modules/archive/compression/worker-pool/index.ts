@@ -10,39 +10,60 @@
 export type {
   WorkerPoolOptions,
   WorkerPoolStats,
+  WorkerPoolStream,
+  TaskOptions,
+  TaskResult,
+  WorkerTaskType
+} from "@archive/compression/worker-pool/types";
+import type {
+  WorkerPoolOptions,
+  WorkerPoolStats,
+  WorkerPoolStream,
   TaskOptions,
   TaskResult,
   WorkerTaskType
 } from "@archive/compression/worker-pool/types";
 
-export { hasWorkerSupport, createAbortError } from "@archive/compression/worker-pool/pool.base";
+// The Node answer (always `false`), not the pool's `typeof Worker` probe: Bun has a global
+// `Worker`, yet this entry's pool cannot use it.
+export { hasWorkerSupport } from "@archive/compression/compress";
+export { createAbortError } from "@archive/compression/worker-pool/pool.base";
 
-import { ArchiveError } from "@archive/core/errors";
+import { ArchiveWorkerUnsupportedError } from "@archive/core/errors";
 
-/** Shared error for Node.js stub methods */
-const NODEJS_STUB_ERROR = "WorkerPool is not available in Node.js";
+function throwStubError(operation: string): never {
+  throw new ArchiveWorkerUnsupportedError(operation);
+}
 
-function throwStubError(): never {
-  throw new ArchiveError(NODEJS_STUB_ERROR);
+function rejectStub(operation: string): Promise<never> {
+  return Promise.reject(new ArchiveWorkerUnsupportedError(operation));
 }
 
 /**
- * Node.js stub - throws if called
+ * Node.js stub with the browser class's signatures, so code that checks
+ * `Compression.hasWorkerSupport()` (always `false` here) first type-checks on both platforms;
+ * every call throws {@link ArchiveWorkerUnsupportedError} (the constructor included) except
+ * `terminate`, a no-op.
  */
 export class WorkerPool {
-  constructor() {
-    throw new ArchiveError(
-      "WorkerPool is only available in browser environments. " +
-        "Node.js uses the native zlib thread pool automatically."
-    );
+  constructor(options?: WorkerPoolOptions) {
+    void options;
+    throw new ArchiveWorkerUnsupportedError("Compression.Workers.Pool");
   }
 
-  execute(): never {
-    throwStubError();
+  execute(
+    taskType: WorkerTaskType,
+    data: Uint8Array,
+    options?: TaskOptions & { level?: number; maxOutputLength?: number }
+  ): Promise<TaskResult> {
+    void taskType;
+    void data;
+    void options;
+    return rejectStub("Compression.Workers.Pool#execute");
   }
 
-  getStats(): never {
-    throwStubError();
+  getStats(): WorkerPoolStats {
+    throwStubError("Compression.Workers.Pool#getStats");
   }
 
   terminate(): void {
@@ -52,28 +73,76 @@ export class WorkerPool {
   isTerminated(): boolean {
     return true;
   }
+
+  openStream(
+    taskType: WorkerTaskType,
+    options?: {
+      level?: number;
+      allowTransfer?: boolean;
+      onData: (chunk: Uint8Array) => void;
+      onEnd: () => void;
+      onError: (err: Error) => void;
+    }
+  ): WorkerPoolStream {
+    void taskType;
+    void options;
+    throwStubError("Compression.Workers.Pool#openStream");
+  }
+
+  executeBatch(
+    tasks: Array<{
+      taskType: WorkerTaskType;
+      data: Uint8Array;
+      options?: TaskOptions & { level?: number };
+    }>
+  ): Promise<TaskResult[]> {
+    void tasks;
+    return rejectStub("Compression.Workers.Pool#executeBatch");
+  }
 }
 
-export function getDefaultWorkerPool(): never {
-  throwStubError();
+export function getDefaultWorkerPool(options?: WorkerPoolOptions): WorkerPool {
+  void options;
+  throwStubError("Compression.Workers.getDefaultPool");
+}
+
+export function getDefaultPool(options?: WorkerPoolOptions): WorkerPool {
+  void options;
+  throwStubError("Compression.Workers.getDefaultPool");
 }
 
 export function terminateDefaultWorkerPool(): void {
   // No-op
 }
 
-export async function deflateWithPool(): Promise<never> {
-  throwStubError();
+export async function deflateWithPool(
+  data: Uint8Array,
+  options?: TaskOptions & { level?: number }
+): Promise<Uint8Array<ArrayBuffer>> {
+  void data;
+  void options;
+  return rejectStub("Compression.Workers.deflate");
 }
 
-export async function inflateWithPool(): Promise<never> {
-  throwStubError();
+export async function inflateWithPool(
+  data: Uint8Array,
+  options?: TaskOptions & { maxOutputLength?: number }
+): Promise<Uint8Array<ArrayBuffer>> {
+  void data;
+  void options;
+  return rejectStub("Compression.Workers.inflate");
 }
 
-export async function deflateBatchWithPool(): Promise<never> {
-  throwStubError();
+export async function deflateBatchWithPool(
+  items: Array<{ data: Uint8Array; options?: TaskOptions & { level?: number } }>
+): Promise<Uint8Array<ArrayBuffer>[]> {
+  void items;
+  return rejectStub("Compression.Workers.deflateBatch");
 }
 
-export async function inflateBatchWithPool(): Promise<never> {
-  throwStubError();
+export async function inflateBatchWithPool(
+  items: Array<{ data: Uint8Array; options?: TaskOptions }>
+): Promise<Uint8Array<ArrayBuffer>[]> {
+  void items;
+  return rejectStub("Compression.Workers.inflateBatch");
 }

@@ -8,6 +8,7 @@ import type {
   PivotTableSubtotal,
   ParsedCacheDefinition
 } from "@excel/core/pivot-table";
+import { restateRenamedTableReferences } from "@excel/core/table-references";
 import type { ExternalLinkModel } from "@excel/core/workbook.browser";
 import { pivotTablePathFromName, worksheetPath } from "@excel/utils/ooxml-paths";
 import { collectOpaqueParts, groupOpaqueRelationshipsBySource } from "@excel/xlsx/opaque-parts";
@@ -42,7 +43,35 @@ export type ExternalLinkRelsEntry = {
   TargetMode?: string;
 };
 
+/**
+ * Number the media by part name rather than by where they sat in the package.
+ *
+ * A medium's id is its index in `model.media`, and every image placement is resolved to one. The reader
+ * registers media as it meets them, which is the package's entry order — and that order is not part of
+ * what a package means: the same workbook zipped with its entries sorted by name gets `image10` before
+ * `image2`, and every id after it shifts. So the media are put in the natural order of their names
+ * (`image2` before `image10`) before anything resolves an id. This writer names a medium after its id
+ * (`image${id + 1}`), so a file it wrote reads back with the ids it was written with.
+ */
+function orderMedia(model: any): void {
+  const media = model.media as { name: string; extension: string }[] | undefined;
+  if (!media || media.length < 2) {
+    return;
+  }
+  const collator = new Intl.Collator("en", { numeric: true });
+  media.sort(
+    (a, b) => collator.compare(a.name, b.name) || collator.compare(a.extension, b.extension)
+  );
+  const index: Record<string, number> = {};
+  media.forEach((medium, i) => {
+    index[`${medium.name}.${medium.extension}`] = i;
+    index[medium.name] = i;
+  });
+  model.mediaIndex = index;
+}
+
 export async function reconcile(model: any, options?: XlsxOptions): Promise<void> {
+  orderMedia(model);
   // Join the opaque staging maps first: everything else in reconcile works on
   // modelled state, and the preserved parts must be settled before the model
   // is handed to the workbook.
@@ -162,8 +191,9 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
     comments: model.comments,
     tables: model.tables,
     vmlDrawings: model.vmlDrawings,
+    ctrlProps: model.ctrlProps,
     vmlDrawingHF: model.vmlDrawingHF,
-    vmlDrawingHFRels: model.vmlDrawingHFRels,
+    vmlDrawingRels: model.vmlDrawingRels,
     pivotTables: model.pivotTablesIndexed,
     hasDynamicArrayMetadata: !!model.metadata?.hasDynamicArrays,
     dynamicArrayCmIndices: model.metadata?.dynamicArrayCmIndices as Set<number> | undefined
@@ -225,10 +255,10 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
     }
     if (cs.legacyDrawingHF && csRels) {
       const vmlRel = csRels.find((r: any) => r.Id === cs.legacyDrawingHF.rId);
-      const match = vmlRel?.Target && /(vmlDrawingHF\d+)[.]vml$/.exec(vmlRel.Target);
+      const match = vmlRel?.Target && /(vmlDrawing(?:HF)?\d+)[.]vml$/.exec(vmlRel.Target);
       const name = match?.[1];
       const images = name && model.vmlDrawingHF?.[name];
-      const imageRels = name && model.vmlDrawingHFRels?.[name];
+      const imageRels = name && model.vmlDrawingRels?.[name];
       if (images && imageRels) {
         const relMap = Object.fromEntries(imageRels.map((rel: any) => [rel.Id, rel]));
         cs.headerImages = images.flatMap((image: any) => {
@@ -240,7 +270,8 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
                   imageId,
                   width: image.width,
                   height: image.height,
-                  position: image.position
+                  position: image.position,
+                  ...(image.shape === undefined ? {} : { shape: image.shape })
                 }
               ]
             : [];
@@ -279,6 +310,8 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
   // drawings are untouched — this reconcile only moves bytes for
   // chart-overlay parts.
   reconcileChartUserShapes(model);
+  reconcileMediaTargets(model, model.chartRels);
+  reconcileMediaTargets(model, model.drawingRels);
 
   // delete unnecessary parts
   delete model.worksheetHash;
@@ -308,6 +341,7 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
   delete model.drawingRels;
   delete model.drawingRaw;
   delete model.vmlDrawings;
+  delete model.ctrlProps;
   delete model.pivotTableRels;
   delete model.metadata;
   // Internal-only scratch fields consumed by reconcileExternalLinks.
@@ -316,6 +350,40 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
   delete model.externalLinkRelsByIndex;
   delete model.chartsheetRels;
   delete model.chartsheetsList;
+  // A table the file names `T2` is stored as `_T2`; its formulas are read as naming it that way too.
+  restateRenamedTableReferences(model);
+}
+
+/**
+ * Point the media relationships that are written back as read at the name the medium is written under.
+ *
+ * Every medium is written as `xl/media/image{id + 1}`, whatever the package it was read from called it,
+ * and every other reference — sheet pictures, backgrounds, chartsheets — is rebuilt from the media id.
+ * Chart relationships, and a drawing's relationships for the objects it keeps verbatim (a text box filled
+ * with a picture, a picture inside a group), are written back as they were read, so one naming
+ * `image5.png` was left pointing at a part that no longer existed — or at a different medium now written
+ * under that name — and anything that resolved it to a media id (releasing a chart's picture fill on
+ * removal) read the wrong one. Rewriting the target here makes it name the id.
+ *
+ * Runs after the drawings are reconciled, which resolve their pictures by the names the package used.
+ */
+function reconcileMediaTargets(model: any, relsMap: Record<string, any[]> | undefined): void {
+  const mediaIndex = model.mediaIndex as Record<string, number> | undefined;
+  if (!relsMap || !mediaIndex) {
+    return;
+  }
+  for (const rels of Object.values(relsMap)) {
+    for (const rel of Array.isArray(rels) ? rels : []) {
+      if (rel?.TargetMode === "External" || typeof rel?.Target !== "string") {
+        continue;
+      }
+      const file = /(?:^|\/)media\/([^/]+)$/.exec(rel.Target)?.[1];
+      const id = file === undefined ? undefined : mediaIndex[file];
+      if (id !== undefined) {
+        rel.Target = `../media/image${id + 1}.${model.media[id].extension}`;
+      }
+    }
+  }
 }
 
 /**
@@ -427,10 +495,18 @@ function reconcileExternalLinks(model: any): void {
     const parsed = model.externalLinksByIndex[partIndex] as ParsedExternalLink | undefined;
     const partRels = (model.externalLinkRelsByIndex[partIndex] ?? []) as ExternalLinkRelsEntry[];
 
-    // Locate the externalLinkPath rel (should be unique within a part).
+    // The relationship the book names. A part may carry several — Excel 2021 adds the SharePoint URL and a long
+    // path beside the file's own — and taking the first `externalLinkPath` picked the URL in place of the path.
     const pathRel =
+      partRels.find(r => r.Id === parsed?.externalBookRId) ??
       partRels.find(r => r.Type === RelType.ExternalLinkPath) ??
       partRels.find(r => r.TargetMode === "External");
+
+    // What the model does not describe is kept for the write: unmodelled XML and the relationships it names.
+    const keepsMore =
+      parsed !== undefined &&
+      pathRel !== undefined &&
+      (parsed.unmodelled !== undefined || partRels.length > 1);
 
     externalLinks.push({
       index: i + 1,
@@ -438,7 +514,23 @@ function reconcileExternalLinks(model: any): void {
       target: pathRel?.Target ?? "",
       targetMode: (pathRel?.TargetMode as "External" | "Internal" | undefined) ?? "External",
       sheetNames: parsed?.sheetNames ?? [],
-      cachedValues: parsed?.cachedValues ?? {}
+      cachedValues: parsed?.cachedValues ?? {},
+      ...(keepsMore
+        ? {
+            preserved: {
+              bookRelationshipId: pathRel.Id,
+              relationships: partRels.map(rel => ({
+                id: rel.Id,
+                type: rel.Type,
+                target: rel.Target,
+                ...(rel.TargetMode === undefined ? {} : { targetMode: rel.TargetMode })
+              })),
+              rootAttributes: parsed.unmodelled?.rootAttributes ?? {},
+              bookChildren: parsed.unmodelled?.bookChildren ?? [],
+              linkChildren: parsed.unmodelled?.linkChildren ?? []
+            }
+          }
+        : {})
     });
   }
 

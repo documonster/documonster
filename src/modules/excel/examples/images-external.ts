@@ -1,15 +1,15 @@
 /**
  * Example: External (linked) images
  *
- * By default `workbook.addImage({ buffer | base64 | filename })` EMBEDS the
+ * By default `Image.add(wb, { buffer | base64 | filename })` EMBEDS the
  * image bytes inside the .xlsx package (`xl/media/imageN.ext`). Passing a
  * `link` instead references the image EXTERNALLY — Excel stores only a
  * relationship (`TargetMode="External"`) and a `<a:blip r:link>`, so no bytes
  * are written into the file and its size stays small.
  *
  * Covers:
- * - Linked picture placed in a cell range (`ws.addImage`)
- * - Linked overlay watermark (`ws.addWatermark({ mode: "overlay" })`)
+ * - Linked picture placed in a cell range (`Image.place`)
+ * - Linked overlay watermark (`Watermark.set(ws, { mode: "overlay" })`)
  * - Embedded-vs-linked file-size comparison
  *
  * The `link` may be:
@@ -88,12 +88,12 @@ Image.place(ws, urlImageId, "G4:J11");
 const wmSheet = Workbook.addWorksheet(wb, "linked-watermark");
 Cell.setValue(wmSheet, "A1", "This sheet has a linked overlay watermark.");
 const wmImageId = Image.add(wb, { extension: "png", link: LOCAL_FILE_URL });
-Watermark.add(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
+Watermark.set(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
 
 // The following would THROW — background and header watermarks must be embedded:
-//   wmSheet.addWatermark({ imageId: wmImageId, mode: "header" });
-//   ws.addBackgroundImage(wmImageId);
-//   // ImageError: ...cannot be external (linked) images.
+//   Watermark.set(wmSheet, { imageId: wmImageId, mode: "header" });
+//   Image.setBackground(ws, wmImageId);
+//   // ExcelImageError: ...cannot be external (linked) images.
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();

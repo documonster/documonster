@@ -220,35 +220,35 @@ server root with an untrusted local account or process while the server runs.
 
 ## Tools
 
-| Tool                    | Purpose                                                                                                                                                          |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Orientation**         |                                                                                                                                                                  |
-| `documonster_help`      | Conventions, path rules, and formula/document/editing notes kept out of tool schemas to save context.                                                            |
-| `doc_inspect`           | Identify a file (type, size, sheet list, CSV dialect, extension mismatches) or list a directory. Always first.                                                   |
-| `text_write`            | Upload a long text file (Markdown, JSON, CSV) in numbered parts, for content too large for one tool call. See [Long content](#long-content).                     |
-| **Spreadsheets**        |                                                                                                                                                                  |
-| `sheet_read`            | Read a bounded window as a Markdown table with column letters and row numbers. Paginates; reports what it omitted.                                               |
-| `sheet_write`           | Create an `.xlsx` from a declarative spec. `fromCsv` pulls source data in server-side; `images` places pictures.                                                 |
-| `sheet_edit`            | Patch an existing `.xlsx` — cells, ranges, formulas, rows, styles, sheets, images. Atomic, backed up, `dryRun` available.                                        |
-| `formula_evaluate`      | Evaluate a formula against supplied values using the real engine (~450 functions). Touches no files.                                                             |
-| **Documents**           |                                                                                                                                                                  |
-| `doc_read`              | Read `.docx` / `.pdf` / `.md` / `.txt` / `.mmd`. Word returns Markdown; PDFs page by page; a Markdown file's mermaid fences are indexed.                         |
-| `doc_write`             | Create a `.docx` or `.pdf` from Markdown.                                                                                                                        |
-| `doc_edit`              | Find and replace text in a `.docx`, including matches Word split across runs. Formatting preserved.                                                              |
-| `doc_search`            | Find text, or find text **by its formatting** — "which text is red", "what is highlighted".                                                                      |
-| `doc_paginate`          | Real page count and per-heading page numbers without Word installed; optionally refresh fields and the TOC.                                                      |
-| `doc_convert`           | `docx`→`md`/`html`/`pdf`/`txt`, `md`→`docx`/`pdf`, `xlsx`→`csv`/`pdf`, `csv`→`xlsx`. Lossy conversions state their loss.                                         |
-| `pdf_edit`              | Watermark, page numbers, stamps, a Mermaid diagram drawn as vectors, rotate, delete/keep pages, append another PDF. Overlays never rewrite the original content. |
-| **Forms and templates** |                                                                                                                                                                  |
-| `template_inspect`      | List a template's placeholders and print the JSON shape needed to fill it.                                                                                       |
-| `template_fill`         | Fill a Word template from JSON, plus `{{%name}}` image placeholders. A missing field fails loudly rather than shipping a blank.                                  |
-| `form_fill`             | List or fill Word form fields and PDF AcroForms. PDF values are verified by re-reading the saved file.                                                           |
-| **Diagrams**            |                                                                                                                                                                  |
-| `diagram_inspect`       | Parse Mermaid text and report what it means — every node, edge, participant, task or slice recognised. Writes nothing.                                           |
-| `diagram_render`        | Draw it as `.svg` / `.png` / `.pdf`. Twenty-one diagram types, themed, from one display list.                                                                    |
-| **Archives**            |                                                                                                                                                                  |
-| `archive_read`          | List or extract a `.zip`/`.tar`. Guards traversal, decompression bombs and symlink entries.                                                                      |
-| `archive_write`         | Package files and directories into a `.zip`/`.tar`, verified by reading it back.                                                                                 |
+| Tool                    | Purpose                                                                                                                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Orientation**         |                                                                                                                                                                                                                          |
+| `documonster_help`      | Conventions, path rules, and formula/document/editing notes kept out of tool schemas to save context.                                                                                                                    |
+| `doc_inspect`           | Identify a file (type, size, sheet list, CSV dialect, extension mismatches) or list a directory. Always first.                                                                                                           |
+| `text_write`            | Upload a long text file (Markdown, JSON, CSV) in numbered parts, for content too large for one tool call. See [Long content](#long-content).                                                                             |
+| **Spreadsheets**        |                                                                                                                                                                                                                          |
+| `sheet_read`            | Read a bounded window as a Markdown table with column letters and row numbers. Paginates; reports what it omitted.                                                                                                       |
+| `sheet_write`           | Create an `.xlsx` from a declarative spec. `fromCsv` pulls source data in server-side; `images` places pictures.                                                                                                         |
+| `sheet_edit`            | Patch an existing `.xlsx` — cells, ranges, formulas, rows, styles, sheets, images. Atomic, backed up, `dryRun` available.                                                                                                |
+| `formula_evaluate`      | Evaluate a formula against supplied values using the real engine (~450 functions). Touches no files.                                                                                                                     |
+| **Documents**           |                                                                                                                                                                                                                          |
+| `doc_read`              | Read `.docx` / `.pdf` / `.md` / `.txt` / `.mmd`. Word returns Markdown; PDFs page by page; a Markdown file's mermaid fences are indexed.                                                                                 |
+| `doc_write`             | Create a `.docx` or `.pdf` from Markdown.                                                                                                                                                                                |
+| `doc_edit`              | Find and replace text in a `.docx`, including matches Word split across runs. Formatting preserved.                                                                                                                      |
+| `doc_search`            | Find text, or find text **by its formatting** — "which text is red", "what is highlighted".                                                                                                                              |
+| `doc_paginate`          | Real page count and per-heading page numbers without Word installed; optionally refresh fields and the TOC.                                                                                                              |
+| `doc_convert`           | `docx`→`md`/`html`/`pdf`/`txt`, `md`→`docx`/`pdf`, `xlsx`→`csv`/`pdf`, `csv`→`xlsx`. Lossy conversions state their loss.                                                                                                 |
+| `pdf_edit`              | Watermark, page numbers, stamps, a Mermaid diagram drawn as vectors, rotate, delete/keep pages, append another PDF (with its form fields, or `formFields: "drop"` without). Overlays never rewrite the original content. |
+| **Forms and templates** |                                                                                                                                                                                                                          |
+| `template_inspect`      | List a template's placeholders and print the JSON shape needed to fill it.                                                                                                                                               |
+| `template_fill`         | Fill a Word template from JSON, plus `{{%name}}` image placeholders. A missing field fails loudly rather than shipping a blank.                                                                                          |
+| `form_fill`             | List or fill Word form fields and PDF AcroForms. PDF values are verified by re-reading the saved file.                                                                                                                   |
+| **Diagrams**            |                                                                                                                                                                                                                          |
+| `diagram_inspect`       | Parse Mermaid text and report what it means — every node, edge, participant, task or slice recognised. Writes nothing.                                                                                                   |
+| `diagram_render`        | Draw it as `.svg` / `.png` / `.pdf`. Twenty-one diagram types, themed, from one display list.                                                                                                                            |
+| **Archives**            |                                                                                                                                                                                                                          |
+| `archive_read`          | List or extract a `.zip`/`.tar`. Guards traversal, decompression bombs and symlink entries.                                                                                                                              |
+| `archive_write`         | Package files and directories into a `.zip`/`.tar`, verified by reading it back.                                                                                                                                         |
 
 ### Long content
 

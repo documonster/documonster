@@ -17,9 +17,12 @@
  * `Override`). None of those questions can be answered by a part writer looking at one sheet.
  */
 
+import { ZipArchive } from "@archive/zip";
+import { fitZipModTime } from "@archive/zip-spec/timestamps";
+import type { LegacyControlModel } from "@excel/core/form-control";
 import {
   imageContentTypeFor,
-  isForeignSheetPart,
+  isForeignContainerPart,
   isRootOrWorkbookSourced
 } from "@excel/core/opaque-part";
 import type {
@@ -30,8 +33,11 @@ import type {
 import type { PivotTable } from "@excel/core/pivot-table";
 import { sheetsInTabOrder } from "@excel/core/sheet-order";
 import type { WorkbookModel } from "@excel/core/workbook.browser";
-import { STREAMED_LEGACY_VML_REL_ID } from "@excel/stream/xlsb-writer";
-import type { IgnoredError } from "@excel/types";
+import {
+  STREAMED_BACKGROUND_REL_ID,
+  STREAMED_DRAWING_REL_ID,
+  STREAMED_LEGACY_VML_REL_ID
+} from "@excel/stream/xlsb-writer";
 import { decodeCell } from "@excel/utils/address";
 import {
   buildDrawingAnchorsAndRels,
@@ -40,6 +46,8 @@ import {
   buildFormControlAnchors,
   buildShapeAnchors,
   isExternalImage,
+  preservedDrawingObjects,
+  resolveMediaTarget,
   type DrawingAnchor,
   type DrawingRel,
   type ImageMedium,
@@ -48,6 +56,8 @@ import {
   type MediaLike,
   type ShapeLike
 } from "@excel/utils/drawing-utils";
+import { isLambdaParameter } from "@excel/utils/future-functions";
+import { MediaReferenceTracker } from "@excel/utils/media-references";
 import {
   drawingPath,
   drawingRelTargetFromWorksheet,
@@ -57,17 +67,25 @@ import {
 } from "@excel/utils/ooxml-paths";
 import type { PackageSink } from "@excel/utils/package-sink";
 import { ArchiveSink } from "@excel/utils/package-sink-adapters";
+import { createFirstFreeRelIds } from "@excel/utils/rel-ids";
+import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
+import {
+  allocateVmlShapeIds,
+  createVmlShapeIdSpace,
+  reserveVmlShapeIds
+} from "@excel/utils/vml-shape-ids";
 import { encodeBiffRecords } from "@excel/xlsb/binary";
 import { encodeChartsheetPart } from "@excel/xlsb/chartsheet";
 import { encodeCommentsPart } from "@excel/xlsb/comments";
-import { collectDxfs, type SheetConditionalFormatting } from "@excel/xlsb/conditional-format";
-import type {
-  BookProtectionLike,
-  SheetProtectionLike,
-  WorkbookViewLike
-} from "@excel/xlsb/defaults";
-import { encodeDxf } from "@excel/xlsb/dxf";
-import { futureFunctionStubName, isFutureFunction } from "@excel/xlsb/formula/ptg";
+import {
+  createCfPriorities,
+  createWorkbookDxfTable,
+  type DxfTable,
+  type SheetConditionalFormatting
+} from "@excel/xlsb/conditional-format";
+import type { BookProtectionLike, WorkbookViewLike } from "@excel/xlsb/defaults";
+import { encodeFormula, encodeParsedFormula, type PtgContext } from "@excel/xlsb/formula/ptg";
+import { writeDynamicArrayMetadata } from "@excel/xlsb/metadata";
 import {
   pivotCacheDefinitionRecords,
   pivotCacheRecordsRecords,
@@ -76,10 +94,17 @@ import {
 import { pivotParts } from "@excel/xlsb/pivot-model";
 import { pivotViewRecords, type PivotViewModel } from "@excel/xlsb/pivot-view";
 import type { PivotCacheBinding } from "@excel/xlsb/read/parts";
-import type { SheetSparklineGroup } from "@excel/xlsb/sparkline";
 import { CellFormatTable, internStyle, writeStyles, type NamedStyleLike } from "@excel/xlsb/styles";
 import { encodeTablePart } from "@excel/xlsb/tables";
 import { record } from "@excel/xlsb/write/emit";
+import {
+  definedNamesSignature,
+  FormulaNameCollector,
+  rowFormulas,
+  sheetLevelFormulas,
+  type FormulaNameStub,
+  type StreamedFormulaNames
+} from "@excel/xlsb/write/future-names";
 import { workbookLosses, worksheetLosses } from "@excel/xlsb/write/losses";
 import {
   breaksFromModel,
@@ -91,14 +116,15 @@ import {
   pivotAnchorsFromModel,
   paneFromModel,
   printNamesFromModel,
+  sheetFeaturesFromModel,
   validationsFromModel,
   viewSettingsFromModel,
   mergesFromModel,
   sheetRowsFromModel
 } from "@excel/xlsb/write/model-adapter";
 import { SharedStringTable, writeSharedStrings } from "@excel/xlsb/write/shared-strings";
-import { writeWorkbookPart } from "@excel/xlsb/write/workbook";
-import { writeWorksheetPart } from "@excel/xlsb/write/worksheet";
+import { withSheetExternSheets, writeWorkbookPart } from "@excel/xlsb/write/workbook";
+import { writeWorksheetPart, type WorksheetFeatures } from "@excel/xlsb/write/worksheet";
 import {
   appendOpaqueSourceRelationships,
   opaqueContentTypeDeclarations,
@@ -107,6 +133,7 @@ import {
   resolveReachableOpaqueParts
 } from "@excel/xlsx/opaque-parts";
 import { RelType } from "@excel/xlsx/rel-type";
+import type { ZipWriterOptions } from "@excel/xlsx/types";
 import { collectChartExParts, renderChartWithLeadingComments } from "@excel/xlsx/write/charts";
 import {
   CHARTSHEET_DRAWING_EMU,
@@ -122,8 +149,10 @@ import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
+import type { RegisteredFunctions } from "@formula/syntax/array-result";
 import { stringToUint8Array } from "@utils/binary";
 import { readFileBytes } from "@utils/fs";
+import { excelNameKey } from "@utils/name-key";
 import { base64ToUint8Array } from "@utils/utils.base";
 import { XmlWriter } from "@xml/writer";
 
@@ -165,6 +194,8 @@ const PIVOT_CACHE_DEFINITION_CONTENT_TYPE = "application/vnd.ms-excel.pivotCache
 const PIVOT_CACHE_RECORDS_CONTENT_TYPE = "application/vnd.ms-excel.pivotCacheRecords";
 const SHARED_STRINGS_CONTENT_TYPE = "application/vnd.ms-excel.sharedStrings";
 const STYLES_CONTENT_TYPE = "application/vnd.ms-excel.styles";
+const METADATA_CONTENT_TYPE = "application/vnd.ms-excel.sheetMetadata";
+const METADATA_PART = "xl/metadata.bin";
 
 const OFFICE_DOCUMENT_REL =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
@@ -203,6 +234,28 @@ export interface XlsbWriteOptions {
    * asked for; supplying one is how a streaming destination gets the same parts without a second writer.
    */
   readonly sink?: PackageSink;
+  /**
+   * Media ids an API call stopped using in this session — the only ones the write may leave out, and only
+   * when nothing written references them. Carried beside the model rather than in it: it is a fact about
+   * the session's edits, not part of the document a model snapshot describes.
+   */
+  readonly releasedMedia?: ReadonlySet<number>;
+  /**
+   * The workbook's registered functions — `Workbook.registerFunction`'s registry. A formula calling one that declares
+   * `returnsArray` is written as a dynamic array, as the XLSX writer and the formula engine treat it.
+   */
+  readonly registeredFunctions?: RegisteredFunctions;
+  /**
+   * Modification time stamped on every ZIP entry of the default (buffered) sink. The XLSX writer stamps
+   * `workbook.modified ?? workbook.created`; passing the same here is what makes writing one workbook twice
+   * produce identical bytes in both containers. Omitted means the current time.
+   */
+  readonly modTime?: Date;
+  /**
+   * ZIP settings of the default (buffered) sink — `Workbook.toBuffer`'s `zip` option: compression `level` and the
+   * `timestamps` mode. `zip.modTime` wins over {@link modTime}, as it does for XLSX.
+   */
+  readonly zip?: ZipWriterOptions;
   /** Work a streaming caller has already done. Omitted means "none of it". */
   readonly streamed?: {
     /** Sheet part paths already in the sink. This writer will not produce them again. */
@@ -211,6 +264,19 @@ export interface XlsbWriteOptions {
     readonly strings: SharedStringTable;
     /** The table the already-written `ixfe` values point into. */
     readonly formats: CellFormatTable;
+    /** The future-function and `_xlpm.` names the streamed rows were encoded against. */
+    readonly names?: StreamedFormulaNames;
+    /** What the streamed rows recorded needing from the package — see `WorksheetFeatures`. */
+    readonly features?: WorksheetFeatures;
+    /**
+     * The `BrtExternSheet` table the streamed formulas resolved their `ixti` through. The workbook part carries this
+     * table — completed with a single-sheet entry for any sheet it lacks — so the indices in the sink stay valid.
+     */
+    readonly externSheets?: { first: number; last: number }[];
+    /** The differential formats the streamed conditional formats name by index — see `createDxfTable`. */
+    readonly dxfs?: DxfTable;
+    /** The rule priorities the streamed sheets have claimed. */
+    readonly cfPriorities?: (stated: number | undefined) => number;
   };
 }
 
@@ -225,6 +291,7 @@ export async function writeXlsbPackage(
   const strings = options?.streamed?.strings ?? new SharedStringTable();
   const formats = options?.streamed?.formats ?? new CellFormatTable();
   const alreadyWritten = options?.streamed?.sheetPaths ?? new Set<string>();
+  const features: WorksheetFeatures = options?.streamed?.features ?? { dynamicArrays: false };
   const unsupported: string[] = [];
 
   const worksheets = model.worksheets ?? [];
@@ -311,17 +378,49 @@ export async function writeXlsbPackage(
   // Print areas and print titles are `_xlnm.*` defined names, not records, so they join the list before
   // the formula context is built from it — `PtgName` is a one-based index into this order, and appending
   // them afterwards would shift every index a formula already resolved.
-  const definedNames = [
+  const leadingNames = [
     ...(model.definedNames ?? []),
-    ...printNamesFromModel(model.worksheets, tabPositionOf),
-    // Stubs for functions the `Ftab` has no id for. Appended *here*, before the formula context is built,
-    // because `PtgName` is a one-based index into this list and a name discovered while a formula was being
-    // encoded would arrive after the index had been taken. See `futureFunctionStubs`.
-    ...futureFunctionStubs(model.worksheets, [
-      ...(model.definedNames ?? []),
-      ...printNamesFromModel(model.worksheets, tabPositionOf)
-    ])
+    ...printNamesFromModel(model.worksheets, tabPositionOf)
   ];
+  // A streamed workbook's rows were encoded against the names its sheets allocated as they went, at indices counted
+  // from the names ahead of them. Those indices are already in the sink, so if the names ahead have changed since —
+  // a defined name or print area added after a formula needing a stub was committed — they point at the wrong names.
+  const streamedNames = options?.streamed?.names;
+  if (streamedNames !== undefined && streamedNames.stubs.length > 0) {
+    const finalPrefix = definedNamesSignature(leadingNames);
+    if ([...streamedNames.prefixes].some(prefix => prefix !== finalPrefix)) {
+      unsupported.push(
+        "defined names: a defined name or print area was added after a streamed formula calling a newer function was committed, so that formula's name references may point at the wrong names"
+      );
+    }
+  }
+  // Stubs for functions the `Ftab` has no id for, and `LET`/`LAMBDA` parameters. Appended *here*, before the formula
+  // context is built, because `PtgName` is a one-based index into this list and a name discovered while a formula was
+  // being encoded would arrive after the index had been taken. A streamed workbook's own come first, at the indices
+  // its rows already used; anything else (a defined name's own formula, say) follows. See `FormulaNameCollector`.
+  const collector = new FormulaNameCollector([...leadingNames, ...(streamedNames?.stubs ?? [])]);
+  collector.scan(
+    (function* (): Iterable<unknown> {
+      for (const worksheet of model.worksheets) {
+        yield* rowFormulas(worksheet.rows as never);
+        yield* sheetLevelFormulas(worksheet);
+      }
+      for (const name of model.definedNames ?? []) {
+        yield (
+          (name as { formulaExpression?: string }).formulaExpression ??
+            (name as { rawText?: string }).rawText
+        );
+      }
+    })()
+  );
+  // A `_xlpm.` name's `fCalcExp` depends on every formula declaring it; a streamed stub carries what its rows said, and
+  // a name the workbook already held is decided by the formulas scanned here.
+  const definedNames = [...leadingNames, ...(streamedNames?.stubs ?? []), ...collector.stubs].map(
+    name =>
+      isLambdaParameter(name.name) && (name as FormulaNameStub).calcExp === undefined
+        ? { ...name, calcExp: collector.isCalcExpParameter(name.name) }
+        : name
+  );
   // Tables, by name, so a structured reference can resolve to an `idList` and a column index. Built
   // *before* the formula context because `PtgList` needs it while a cell formula is being encoded — and
   // the ids are assigned here rather than in the sheet loop for the same reason, since a formula on
@@ -348,6 +447,10 @@ export async function writeXlsbPackage(
     // In tab order, not worksheet order — see `tabOrderNames`.
     sheetNames: tabOrderNames,
     definedNames: definedNames.map(defined => defined.name),
+    // Which sheet each name belongs to, so `Total` on a sheet with its own `Total` means that one.
+    definedNameScopes: definedNames.map(
+      defined => (defined as { localSheetId?: number }).localSheetId
+    ),
     // The identity table `writeWorkbookPart` emits. Stated here rather than left implicit so the
     // encoder resolves an `ixti` against the same table the file will carry — if the two ever
     // disagree, every 3D reference in the output points at the wrong sheet.
@@ -356,50 +459,26 @@ export async function writeXlsbPackage(
     // appends one; the worksheets are serialised before the workbook part, so an entry added while a
     // formula is being encoded still reaches the file. Freezing this would mean narrowing such a
     // reference to its first sheet, which is what it used to do.
-    externSheets: tabOrderNames.map((_name, index) => ({ first: index, last: index }))
-  };
+    externSheets: withSheetExternSheets(options?.streamed?.externSheets ?? [], tabOrderNames.length)
+  } satisfies PtgContext;
 
   // ctrlProp part numbers are workbook-wide for the same reason table ids are.
   let ctrlPropCount = 0;
   // The differential-format table a rule's `dxfId` indexes. Built across *every* sheet before any of them
   // is written, because the index is workbook-wide — a per-sheet table would give two sheets' rules the
   // same id for different formatting.
-  const dxfIndex = collectDxfs(
+  // A streamed workbook's sheets were written against a table that grew as each one ended; it is completed here, and
+  // a format already in it keeps its index. See `createDxfTable`.
+  const dxfIndex = options?.streamed?.dxfs ?? createWorkbookDxfTable(model.dxfs);
+  dxfIndex.add(
     worksheets.flatMap(
       worksheet =>
         (worksheet as unknown as { conditionalFormattings?: readonly SheetConditionalFormatting[] })
           .conditionalFormattings ?? []
-    ),
-    {
-      source: model.dxfs,
-      // The number-format id does not decide whether a format is writable, only which number it is written
-      // under — that is allocated with the styles part, so any id serves for the question asked here.
-      describe: style => {
-        const { payload, dropped } = encodeDxf(style, () => 0);
-        return { writable: payload !== undefined, dropped };
-      }
-    }
+    )
   );
-  // `iPri` "MUST NOT duplicate" another rule's anywhere in the sheet. The model's priorities are per block and
-  // routinely collide, so they cannot simply be copied — but they also cannot simply be replaced, which is what
-  // a running counter did: Excel keeps the numbers a file states, and comparing this library's output against
-  // an XLSB Excel wrote for the same workbook showed every rule renumbered.
-  //
-  // So a stated priority is honoured when it is a positive integer nobody has claimed, and the counter fills in
-  // for the rest. `claimed` is workbook-wide, which is stricter than the record requires and costs nothing.
-  const claimed = new Set<number>();
-  let cfPriority = 0;
-  const nextCfPriority = (stated: number | undefined): number => {
-    if (stated !== undefined && Number.isInteger(stated) && stated > 0 && !claimed.has(stated)) {
-      claimed.add(stated);
-      return stated;
-    }
-    do {
-      cfPriority += 1;
-    } while (claimed.has(cfPriority));
-    claimed.add(cfPriority);
-    return cfPriority;
-  };
+  // Rule priorities are workbook-unique, and a streamed workbook's sheets have claimed theirs already.
+  const nextCfPriority = options?.streamed?.cfPriorities ?? createCfPriorities();
   // `BrtBeginList.idList` must be unique across the whole workbook and at least 1, so it is counted here
   // rather than derived from a sheet's own column index — two sheets each with one table would otherwise
   // Which sheet Excel highlights on open. `BrtBookView.itabCur` says it for the workbook; the sheet's own
@@ -422,11 +501,34 @@ export async function writeXlsbPackage(
   const placeholderFor = (index: number): string | undefined =>
     (worksheets[index] as { chartsheetPlaceholder?: string } | undefined)?.chartsheetPlaceholder;
 
-  const sheetParts = worksheets.map((worksheet, index) => {
+  // VML shape ids are numbered across the workbook — see `@excel/utils/vml-shape-ids`. A control keeps
+  // the id it was read or created with unless an earlier sheet already holds its block.
+  const vmlShapeIds = createVmlShapeIdSpace();
+  // Plain assignable fields reach the writer unchecked; refuse a value outside the format before writing anything.
+  for (const worksheet of worksheets) {
+    checkSheetSettings(`Write XLSB (worksheet ${JSON.stringify(worksheet.name)})`, worksheet);
+  }
+  for (const worksheet of worksheets) {
+    reserveVmlShapeIds(vmlShapeIds, worksheet, vmlControlIds(worksheet));
+  }
+
+  const sheetParts = worksheets.map((sourceWorksheet, index) => {
+    // The notes and the controls share the sheet's VML part, so they share its blocks. The controls are
+    // renumbered on a copy: the drawing anchors below and the VML must name the same id, and the live
+    // checkbox keeps its own.
+    const noteShapes = allocateVmlShapeIds(vmlShapeIds, {
+      owner: sourceWorksheet,
+      fixed: vmlControlIds(sourceWorksheet),
+      count: commentsFromModel(sourceWorksheet).length
+    });
+    const worksheet = withVmlControlIds(sourceWorksheet, noteShapes.fixed);
     const sheetName = worksheet.name ?? `sheet${index + 1}`;
     // Images. The drawing part and the media are XML and bytes respectively, both shared with the
     // XLSX path; the only binary part is a `BrtDrawing` naming the relationship. Built before the
     // sheet is serialised because the record has to go inside it.
+    // Whether this sheet was streamed decides who owns the ids its records name — see `commentRels`.
+    const streamedPath = `xl/worksheets/sheet${index + 1}.bin`;
+    const wasStreamed = alreadyWritten.has(streamedPath);
     const drawing = drawingForWorksheet(
       worksheet,
       media.named,
@@ -434,7 +536,8 @@ export async function writeXlsbPackage(
       drawings,
       reservedPaths,
       media.usable,
-      drawingLosses
+      drawingLosses,
+      wasStreamed ? STREAMED_DRAWING_REL_ID : undefined
     );
     const merges = mergesFromModel(worksheet);
     const pane = paneFromModel(worksheet);
@@ -443,15 +546,6 @@ export async function writeXlsbPackage(
       worksheet,
       tabPositionOf(index) === activeSheetIndex
     );
-    // Both are read straight off the model: an auto filter is a range string and an ignored-error entry
-    // already carries its own range, so neither needs an adapter.
-    const sheet = worksheet as unknown as {
-      autoFilter?: string;
-      autoFilterCriteria?: { readonly xml?: string };
-      ignoredErrors?: readonly IgnoredError[];
-      sparklineGroups?: readonly SheetSparklineGroup[];
-      conditionalFormattings?: readonly SheetConditionalFormatting[];
-    };
     const validations = validationsFromModel(worksheet);
     const breaks = breaksFromModel(worksheet);
     // Hyperlinks. The destination is an OPC relationship rather than anything in the record stream, so
@@ -459,8 +553,25 @@ export async function writeXlsbPackage(
     // already occupies — and the `.rels` entries are written with the sheet below.
     const takenIds = new Set([
       ...(worksheet.opaqueRels ?? []).map(relationship => relationship.id),
-      ...(drawing === undefined ? [] : [drawing.rId])
+      ...(drawing === undefined ? [] : [drawing.rId]),
+      // Named inside a streamed sheet already, so nothing else may be given them.
+      ...(wasStreamed
+        ? [
+            STREAMED_LEGACY_VML_REL_ID,
+            STREAMED_DRAWING_REL_ID,
+            STREAMED_BACKGROUND_REL_ID,
+            // And each external link's, which its `BrtHLink` already names.
+            ...hyperlinksFromModel(worksheet).flatMap(link =>
+              link.relationshipId === undefined || link.relationshipId === ""
+                ? []
+                : [link.relationshipId]
+            )
+          ]
+        : [])
     ]);
+    // The lowest free id each time, resuming where the last search stopped — `takenIds` only grows. Probing from
+    // `rId1` per relationship made a sheet's n hyperlinks cost O(n²) to number.
+    const nextRelId = createFirstFreeRelIds(takenIds);
     // Comments need two relationships and one of them is named by a record, so both ids are allocated
     // here alongside the drawing's and the hyperlinks'. The VML is what `BrtLegacyDrawing` points at;
     // the comments part itself is reached implicitly and is *not* named by any record, which
@@ -468,12 +579,7 @@ export async function writeXlsbPackage(
     // Tables. `idList` must be unique across the *workbook*, so the id comes from a counter outside this
     // per-sheet mapping rather than from the sheet's own index.
     const tables = tablesFromModel(worksheet).map(table => {
-      const relationshipId = unusedName(
-        candidate => takenIds.has(candidate),
-        base => `rId${base}`,
-        1
-      );
-      takenIds.add(relationshipId);
+      const relationshipId = nextRelId();
       // The id from the pass above, so a `PtgList` and its `BrtBeginList` agree. Counting again here
       // produced the same numbers by luck and would have diverged the moment two sheets shared a table
       // name or a table failed to encode.
@@ -496,27 +602,12 @@ export async function writeXlsbPackage(
     const background = otherMedia.find(medium => medium.type === "background");
     const headerImages = otherMedia.filter(medium => medium.type !== "background");
     const backgroundRel =
-      background === undefined
-        ? undefined
-        : (() => {
-            const id = unusedName(
-              candidate => takenIds.has(candidate),
-              base => `rId${base}`,
-              1
-            );
-            takenIds.add(id);
-            return id;
-          })();
+      background === undefined ? undefined : wasStreamed ? STREAMED_BACKGROUND_REL_ID : nextRelId();
     const headerFooterRel =
       headerImages.length === 0
         ? undefined
         : (() => {
-            const id = unusedName(
-              candidate => takenIds.has(candidate),
-              base => `rId${base}`,
-              1
-            );
-            takenIds.add(id);
+            const id = nextRelId();
             return id;
           })();
     // Threaded comments: read straight off the model, because the part is XML and identical in both
@@ -527,12 +618,7 @@ export async function writeXlsbPackage(
       threadedComments === undefined || threadedComments.length === 0
         ? undefined
         : (() => {
-            const id = unusedName(
-              candidate => takenIds.has(candidate),
-              base => `rId${base}`,
-              1
-            );
-            takenIds.add(id);
+            const id = nextRelId();
             return id;
           })();
     // Form controls. Three parts each in effect: the hidden DrawingML anchor (added by
@@ -543,21 +629,27 @@ export async function writeXlsbPackage(
       (worksheet as unknown as { formControls?: readonly FormControlLike[] }).formControls ?? []
     ).filter(control => control.tl !== undefined && control.br !== undefined);
     const formControlRels = formControls.map(control => {
+      const id = nextRelId();
+      // The ctrlProp part number is workbook-wide, like a table's — two sheets each with one control
+      // would otherwise both write `ctrlProp1.xml`.
+      const ctrlPropId = ++ctrlPropCount;
+      return { control, relationshipId: id, ctrlPropId };
+    });
+    // The controls kept as read — buttons, list boxes, … — go into the same VML, and each one whose
+    // properties part was kept gets that part back, verbatim, under a workbook-wide number of its own.
+    const legacyControls = legacyControlsOf(worksheet);
+    const legacyControlRels = legacyControls.flatMap(control => {
+      if (control.ctrlPropXml === undefined) {
+        return [];
+      }
       const id = unusedName(
         candidate => takenIds.has(candidate),
         base => `rId${base}`,
         1
       );
       takenIds.add(id);
-      // The ctrlProp part number is workbook-wide, like a table's — two sheets each with one control
-      // would otherwise both write `ctrlProp1.xml`.
-      const ctrlPropId = ++ctrlPropCount;
-      return { control, relationshipId: id, ctrlPropId };
+      return [{ xml: control.ctrlPropXml, relationshipId: id, ctrlPropId: ++ctrlPropCount }];
     });
-    // Declared before the relationships below, because whether this sheet was streamed decides who owns its VML
-    // relationship id — see `commentRels`.
-    const streamedPath = `xl/worksheets/sheet${index + 1}.bin`;
-    const wasStreamed = alreadyWritten.has(streamedPath);
     const comments = commentsFromModel(worksheet);
     const commentRels =
       comments.length === 0
@@ -568,21 +660,9 @@ export async function writeXlsbPackage(
             // relationship reaching the VML that draws a note's marker. Allocating a fresh id here would leave that
             // record pointing at nothing — which is what happened while the streamed path emitted no record at all.
             //
-            // Seeded into `takenIds` as well, so nothing else on the sheet can be given the same id.
-            const vml =
-              (wasStreamed ? STREAMED_LEGACY_VML_REL_ID : undefined) ??
-              unusedName(
-                candidate => takenIds.has(candidate),
-                base => `rId${base}`,
-                1
-              );
-            takenIds.add(vml);
-            const part = unusedName(
-              candidate => takenIds.has(candidate),
-              base => `rId${base}`,
-              1
-            );
-            takenIds.add(part);
+            // Seeded into `takenIds` above, so nothing else on the sheet can be given the same id.
+            const vml = wasStreamed ? STREAMED_LEGACY_VML_REL_ID : nextRelId();
+            const part = nextRelId();
             return { vml, part };
           })();
     const links = hyperlinksFromModel(worksheet).map(link => {
@@ -592,12 +672,8 @@ export async function writeXlsbPackage(
       if (link.location !== undefined) {
         return { ...link, relationshipId: "" };
       }
-      const relationshipId = unusedName(
-        candidate => takenIds.has(candidate),
-        base => `rId${base}`,
-        1
-      );
-      takenIds.add(relationshipId);
+      // A streamed sheet's `BrtHLink` already names its id; it is kept rather than reallocated.
+      const relationshipId = link.relationshipId ?? nextRelId();
       return { ...link, relationshipId };
     });
     // One VML file per sheet holds both a note's box and a control's shape, so one relationship reaches it
@@ -606,15 +682,10 @@ export async function writeXlsbPackage(
     // present with nothing pointing at it, which Excel offers to repair.
     const legacyVmlRel =
       commentRels?.vml ??
-      (formControls.length === 0
+      (formControls.length === 0 && legacyControls.length === 0
         ? undefined
         : (() => {
-            const id = unusedName(
-              candidate => takenIds.has(candidate),
-              base => `rId${base}`,
-              1
-            );
-            takenIds.add(id);
+            const id = nextRelId();
             return id;
           })());
     // **A streamed sheet is not serialised again here.** Its bytes are in the sink and its strings and styles
@@ -624,12 +695,20 @@ export async function writeXlsbPackage(
     const written = alreadyWritten.has(streamedPath)
       ? { bytes: new Uint8Array(0), unsupported: [] as readonly string[] }
       : writeWorksheetPart({
-          rows: sheetRowsFromModel(worksheet, date1904),
+          rows: sheetRowsFromModel(
+            worksheet,
+            date1904,
+            undefined,
+            undefined,
+            options?.registeredFunctions
+          ),
+          features,
           // A pivot table occupies the grid without writing a cell there, so its anchor has to reach `BrtWsDim` or the
           // sheet is declared empty — which is what happened to all three pivot sheets in the oracle's `05-pivots`.
           occupiedRegions: pivotAnchorsFromModel(worksheet),
           strings,
-          formulaContext,
+          // The sheet's own position, which decides what an unqualified local name means on it.
+          formulaContext: { ...formulaContext, sheetIndex: tabPositionOf(index) },
           formats,
           merges: merges.ranges,
           columns: columnsFromModel(worksheet),
@@ -649,34 +728,16 @@ export async function writeXlsbPackage(
           hyperlinks: links,
           ...(pane === undefined ? {} : { pane }),
           ...(viewSettings === undefined ? {} : { viewSettings }),
-          ...(sheet.autoFilter === undefined ? {} : { autoFilter: sheet.autoFilter }),
-          ...(sheet.autoFilterCriteria?.xml === undefined
-            ? {}
-            : { autoFilterCriteriaXml: sheet.autoFilterCriteria.xml }),
+          ...sheetFeaturesFromModel(worksheet),
           // The sheet's own name, which a sparkline's data formula has to be qualified with: the record
           // requires a `PtgArea3d`, and an unqualified range parses to a plain `PtgArea`.
           sheetName,
-          ...(sheet.conditionalFormattings === undefined
-            ? {}
-            : { conditionalFormattings: sheet.conditionalFormattings }),
           dxfIndex,
           nextCfPriority,
-          ...(sheet.sparklineGroups === undefined
-            ? {}
-            : { sparklineGroups: sheet.sparklineGroups }),
           ...(backgroundRel === undefined ? {} : { backgroundRelationshipId: backgroundRel }),
           ...(headerFooterRel === undefined
             ? {}
             : { headerFooterDrawingRelationshipId: headerFooterRel }),
-          ...(sheet.ignoredErrors === undefined ? {} : { ignoredErrors: sheet.ignoredErrors }),
-          ...((worksheet as unknown as { sheetProtection?: SheetProtectionLike })
-            .sheetProtection === undefined
-            ? {}
-            : {
-                sheetProtectionSettings: (
-                  worksheet as unknown as { sheetProtection: SheetProtectionLike }
-                ).sheetProtection
-              }),
           ...(legacyVmlRel === undefined ? {} : { legacyDrawingRelationshipId: legacyVmlRel }),
           validations,
           // The part writer needs its own copy: cell values carry `date1904` individually through
@@ -712,11 +773,24 @@ export async function writeXlsbPackage(
         : { background: { medium: background, rId: backgroundRel } }),
       ...(headerImages.length === 0 || headerFooterRel === undefined
         ? {}
-        : { headerImages, headerFooterRel }),
+        : {
+            headerImages,
+            headerFooterRel,
+            // One shape per section — the VML writer keeps the last image declared for each.
+            headerImageShapeIds: allocateVmlShapeIds(vmlShapeIds, {
+              count: new Set(
+                headerImages.map(medium => (medium as { position?: string }).position ?? "CH")
+              ).size
+            }).free
+          }),
+      ...(commentRels === undefined && formControlRels.length === 0 && legacyControls.length === 0
+        ? {}
+        : { noteShapeIds: noteShapes.free }),
       ...(threadedComments === undefined || threadedCommentRel === undefined
         ? {}
         : { threadedComments, threadedCommentRel }),
       ...(formControlRels.length === 0 ? {} : { formControlRels }),
+      ...(legacyControls.length === 0 ? {} : { legacyControls, legacyControlRels }),
       ...(legacyVmlRel === undefined ? {} : { legacyDrawingRelationshipId: legacyVmlRel })
     };
   });
@@ -731,9 +805,21 @@ export async function writeXlsbPackage(
   // resolve it at all, which it cannot for a font it has never seen.
   // An *array*, each entry already carrying its own `name` — not a record keyed by name. Reading it as
   // a record produced styles called "0" and "1", and those names round-tripped.
+  // One per name as Excel compares them, without regard to case: the first is kept, as Excel keeps it.
+  const styleKeys = new Set<string>();
   const namedStyles = (
     (model as unknown as { cellStyles?: readonly NamedStyleLike[] }).cellStyles ?? []
-  ).filter(style => typeof style.name === "string" && style.name !== "");
+  ).filter(style => {
+    if (typeof style.name !== "string" || style.name === "") {
+      return false;
+    }
+    const key = excelNameKey(style.name);
+    if (styleKeys.has(key)) {
+      return false;
+    }
+    styleKeys.add(key);
+    return true;
+  });
   for (const named of namedStyles) {
     internStyle(formats, {
       ...(named.numFmt === undefined ? {} : { numberFormat: named.numFmt }),
@@ -860,6 +946,10 @@ export async function writeXlsbPackage(
   worksheets.forEach((worksheet, sheet) => {
     const source = worksheet as unknown as { pivotTables?: readonly PivotTable[] };
     for (const pivot of source.pivotTables ?? []) {
+      // Recomputed from the source as it is now — see the XLSX writer's `addPivotTables`.
+      if (!pivot.isLoaded) {
+        pivot.refreshCache?.();
+      }
       const built = pivotParts(pivot, "rId1");
       if (built === undefined) {
         // **Reported, not skipped in silence.** `pivotParts` needs the live source worksheet and the cache
@@ -902,7 +992,7 @@ export async function writeXlsbPackage(
     }
   });
 
-  // Charts, by part number. `chartEntries` is on the *workbook* — `Chart.add` registers there — so the
+  // Charts, by part number. `chartEntries` is on the *workbook* — `Chart.place` registers there — so the
   // list is the same for every sheet and is derived once. Every entry becomes a part, whether or not a
   // sheet still anchors it: a chart whose anchor was removed is a part with nothing pointing at it, which
   // is the same shape as a preserved-but-unreferenced drawing and equally something Excel tolerates.
@@ -953,7 +1043,15 @@ export async function writeXlsbPackage(
    * file. That freedom is what makes this writer usable from a streaming destination as well as a buffered one:
    * a `PackageSink` is either, and nothing below this line knows which.
    */
-  const sink: PackageSink = options?.sink ?? new ArchiveSink();
+  const sink: PackageSink =
+    options?.sink ??
+    new ArchiveSink(
+      new ZipArchive({
+        modTime: fitZipModTime(options?.zip?.modTime ?? options?.modTime),
+        ...(options?.zip?.level === undefined ? {} : { level: options.zip.level }),
+        ...(options?.zip?.timestamps === undefined ? {} : { timestamps: options.zip.timestamps })
+      })
+    );
   const partPaths = sink.paths;
   // **Every part goes through here, and a path may only be written once.**
   //
@@ -999,6 +1097,10 @@ export async function writeXlsbPackage(
    * offers and `writeSharedStrings` does not use. That is real work with a real payoff for exactly this shape of
    * workbook, and it is not what these three awaits are.
    */
+  // Media are written after every other part, and only those some written part references — see
+  // `media-references.ts`. A streamed sheet is already in the sink unseen, so with one every medium is kept.
+  const mediaReferences = new MediaReferenceTracker();
+  const keepAllMedia = options?.streamed !== undefined;
   const addPartAndDrain = async (path: string, data: Uint8Array | string): Promise<void> => {
     addPart(path, data);
     await sink.drain();
@@ -1015,6 +1117,7 @@ export async function writeXlsbPackage(
       return;
     }
     writtenPaths.add(key);
+    mediaReferences.observe(path, data);
     sink.part(path, data);
   };
   const rootRels = [
@@ -1113,6 +1216,14 @@ export async function writeXlsbPackage(
       Id: `rId${workbookRels.length + 1}`,
       Type: STYLES_REL,
       Target: "styles.bin"
+    });
+  }
+  // A dynamic array's `BrtCellMeta` indexes this part, so it is written whenever a sheet wrote one.
+  if (features.dynamicArrays) {
+    workbookRels.push({
+      Id: `rId${workbookRels.length + 1}`,
+      Type: RelType.SheetMetadata,
+      Target: "metadata.bin"
     });
   }
   // `workbook.bin.rels`, not `workbook.xml.rels`. OPC locates a part's relationships at
@@ -1257,13 +1368,9 @@ export async function writeXlsbPackage(
   }
   unsupported.push(...workbookPart.unsupported);
   unsupported.push(...workbookLosses(model));
-  // Images: the bytes, the drawing part that places them, and that part's own relationships. All
+  // Images: the drawing part that places them and that part's own relationships (the bytes are written last). All
   // three are shared with the XLSX path — the media are opaque bytes, the drawing is XML rendered by
   // `DrawingXform`, and only the reference from the sheet is binary.
-  for (const part of media.parts) {
-    // An image is the largest thing in most packages — see `addPartAndDrain`.
-    await addPartAndDrain(part.path, part.bytes);
-  }
   if (drawings.length > 0) {
     const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
     for (const drawing of drawings) {
@@ -1326,8 +1433,24 @@ export async function writeXlsbPackage(
     // every table went out invisible. The part is still written here because this is where the relationship
     // is recorded; the record naming it is emitted by the worksheet writer, from the same list.
     part.tables.forEach((table, position) => {
-      const bytes = encodeTablePart(table);
-      const path = tablePathBySheet[sheetParts.indexOf(part)][position];
+      const sheet = sheetParts.indexOf(part);
+      const bytes = encodeTablePart(table, (text, column) => {
+        const where = `${table.name}[${column}]`;
+        try {
+          const encoded = encodeFormula(
+            text,
+            { ...formulaContext, sheetIndex: tabPositionOf(sheet) },
+            where
+          );
+          return encodeParsedFormula(encoded.rgce, encoded.extra);
+        } catch (cause) {
+          unsupported.push(
+            `${where}: calculated column formula${cause instanceof Error ? ` (${cause.message})` : ""}`
+          );
+          return undefined;
+        }
+      });
+      const path = tablePathBySheet[sheet][position];
       if (bytes === undefined || path === undefined) {
         return;
       }
@@ -1356,7 +1479,7 @@ export async function writeXlsbPackage(
     }
 
     // A background image: one relationship, pointing straight at the medium. No new part — the image
-    // bytes are already in `xl/media/` because `planMedia` wrote every usable medium there.
+    // bytes go to `xl/media/` at the end, because `planMedia` planned every usable medium there.
     if (part.background !== undefined) {
       const target = mediaTarget(part.background.medium.imageId, media.named);
       if (target !== undefined) {
@@ -1387,9 +1510,11 @@ export async function writeXlsbPackage(
             imageRelId: relationshipId,
             width: (medium as { headerWidth?: number }).headerWidth,
             height: (medium as { headerHeight?: number }).headerHeight,
-            position: (medium as { position?: string }).position
+            position: (medium as { position?: string }).position,
+            shape: (medium as { vmlShape?: unknown }).vmlShape
           };
-        })
+        }),
+        shapeIds: part.headerImageShapeIds
       } as never);
       addPart(vmlPath, vmlWriter.xml);
       if (imageRels.length > 0) {
@@ -1411,9 +1536,12 @@ export async function writeXlsbPackage(
     // 1-based, because a part path is `sheet1.bin` for the first sheet.
     const sheetIndex = sheet + 1;
     const controls = part.formControlRels ?? [];
+    const legacyControls = part.legacyControls ?? [];
     if (
       part.legacyDrawingRelationshipId !== undefined &&
-      ((part.commentRels !== undefined && part.comments !== undefined) || controls.length > 0)
+      ((part.commentRels !== undefined && part.comments !== undefined) ||
+        controls.length > 0 ||
+        legacyControls.length > 0)
     ) {
       const vmlPath = `xl/drawings/vmlDrawing${sheetIndex}.vml`;
       const vmlWriter = new XmlWriter();
@@ -1437,7 +1565,10 @@ export async function writeXlsbPackage(
             note: comment.note ?? { texts: comment.texts }
           };
         }),
-        formControls: controls.map(entry => entry.control)
+        formControls: controls.map(entry => entry.control),
+        legacyControls,
+        // Allocated for every note on the sheet; a part rendering fewer uses the first of them.
+        shapeIds: (part.noteShapeIds ?? []).slice(0, part.comments?.length ?? 0)
       } as never);
       addPart(vmlPath, vmlWriter.xml);
 
@@ -1471,6 +1602,14 @@ export async function writeXlsbPackage(
       const writer = new XmlWriter();
       new CtrlPropXform().render(writer, entry.control as never);
       addPart(`xl/ctrlProps/ctrlProp${entry.ctrlPropId}.xml`, writer.xml);
+      sheetRels.push({
+        Id: entry.relationshipId,
+        Type: RelType.CtrlProp,
+        Target: `../ctrlProps/ctrlProp${entry.ctrlPropId}.xml`
+      });
+    }
+    for (const entry of part.legacyControlRels ?? []) {
+      addPart(`xl/ctrlProps/ctrlProp${entry.ctrlPropId}.xml`, entry.xml);
       sheetRels.push({
         Id: entry.relationshipId,
         Type: RelType.CtrlProp,
@@ -1645,6 +1784,9 @@ export async function writeXlsbPackage(
   if (styles) {
     addPart("xl/styles.bin", styles);
   }
+  if (features.dynamicArrays) {
+    addPart(METADATA_PART, writeDynamicArrayMetadata());
+  }
   for (const theme of themes) {
     addPart(theme.path, theme.xml);
   }
@@ -1668,6 +1810,17 @@ export async function writeXlsbPackage(
           }))
         )
       );
+    }
+  }
+
+  for (const part of media.parts) {
+    if (
+      keepAllMedia ||
+      !options?.releasedMedia?.has(part.index) ||
+      mediaReferences.isReferenced(part.path)
+    ) {
+      // An image is the largest thing in most packages — see `addPartAndDrain`.
+      await addPartAndDrain(part.path, part.bytes);
     }
   }
 
@@ -1931,6 +2084,12 @@ function contentTypes(
       ContentType: STYLES_CONTENT_TYPE
     });
   }
+  if (allPartPaths.includes(METADATA_PART)) {
+    writer.leafNode("Override", {
+      PartName: `/${METADATA_PART}`,
+      ContentType: METADATA_CONTENT_TYPE
+    });
+  }
   writer.leafNode("Override", {
     PartName: "/docProps/core.xml",
     ContentType: "application/vnd.openxmlformats-package.core-properties+xml"
@@ -1963,17 +2122,18 @@ function reachableOpaqueParts(
     readonly opaqueRels: readonly OpaqueRelationship[];
   }[]
 ): { readonly parts: readonly OpaquePart[]; readonly drops: readonly string[] } {
-  // **Sheet parts from the other container do not travel.** An XLSX read preserves `xl/worksheets/sheetN.xml` only
+  // **Parts of the other container's family do not travel.** An XLSX read preserves `xl/worksheets/sheetN.xml` only
   // when this library could not model it, and a SpreadsheetML sheet is not a BIFF12 record stream — see
-  // `isForeignSheetPart`. Filtered before reachability rather than after, so the chain hanging off such a part is
+  // `isForeignContainerPart`. Filtered before reachability rather than after, so the chain hanging off such a part is
   // resolved against a package that no longer contains it.
   const all = model.opaqueParts ?? [];
-  const foreign = all.filter(part => isForeignSheetPart(part, "xlsb"));
-  const parts = foreign.length === 0 ? all : all.filter(part => !isForeignSheetPart(part, "xlsb"));
+  const foreign = all.filter(part => isForeignContainerPart(part, "xlsb"));
+  const parts =
+    foreign.length === 0 ? all : all.filter(part => !isForeignContainerPart(part, "xlsb"));
   if (parts.length === 0) {
     return {
       parts: [],
-      drops: foreign.map(part => `${part.path}: preserved sheet part from the other container`)
+      drops: foreign.map(part => `${part.path}: preserved part from the other container`)
     };
   }
   // The relationships **this write will actually emit** — not every relationship the model remembers.
@@ -2004,7 +2164,7 @@ function reachableOpaqueParts(
     parts: resolved.parts,
     // **Only one of the two kinds of drop is a loss, and putting both here was a category error.**
     //
-    // A part from the *other container's* sheet family is content this writer cannot express: an XLSB chartsheet has no
+    // A part from the *other container's* part family is content this writer cannot express: an XLSB chartsheet has no
     // form in a SpreadsheetML package, so the tab is genuinely gone and the caller needs telling. That belongs in
     // `unsupported` beside everything else this writer cannot carry.
     //
@@ -2013,7 +2173,7 @@ function reachableOpaqueParts(
     // Reporting it as unsupported made the *default* policy refuse a perfectly good workbook: a preserved
     // `theme2.xml` that lost its referrer turned `Workbook.toBuffer` into a rejection. So it stays unreported here,
     // which is also why `OpaqueDropReason` is documented as a read-time vocabulary.
-    drops: foreign.map(part => `${part.path}: preserved sheet part from the other container`)
+    drops: foreign.map(part => `${part.path}: preserved part from the other container`)
   };
 }
 
@@ -2049,6 +2209,43 @@ function renderXform(
  * would Excel call this, and is that name already occupied?" — and both answers have to hold against
  * parts this writer did not create.
  */
+/** A sheet's controls kept as read (buttons, list boxes, …), as the model carries them. */
+function legacyControlsOf(worksheet: object): readonly LegacyControlModel[] {
+  return (worksheet as { legacyControls?: readonly LegacyControlModel[] }).legacyControls ?? [];
+}
+
+/** The shape ids of a sheet's form controls — the checkboxes, then the controls kept as read. */
+function vmlControlIds(worksheet: object): number[] {
+  return [
+    ...((worksheet as { formControls?: readonly FormControlLike[] }).formControls ?? []).map(
+      control => control.shapeId ?? 0
+    ),
+    ...legacyControlsOf(worksheet).map(control => control.shapeId)
+  ];
+}
+
+/** `worksheet` with its form controls carrying `shapeIds`, copied only where an id changed. */
+function withVmlControlIds<T extends object>(worksheet: T, shapeIds: readonly number[]): T {
+  const controls = (worksheet as { formControls?: readonly FormControlLike[] }).formControls ?? [];
+  const legacy = legacyControlsOf(worksheet);
+  const legacyIds = shapeIds.slice(controls.length);
+  if (
+    controls.every((control, i) => control.shapeId === shapeIds[i]) &&
+    legacy.every((control, i) => control.shapeId === legacyIds[i])
+  ) {
+    return worksheet;
+  }
+  return {
+    ...worksheet,
+    formControls: controls.map((control, i) =>
+      control.shapeId === shapeIds[i] ? control : { ...control, shapeId: shapeIds[i] }
+    ),
+    legacyControls: legacy.map((control, i) =>
+      control.shapeId === legacyIds[i] ? control : { ...control, shapeId: legacyIds[i] }
+    )
+  };
+}
+
 function unusedName(
   taken: (candidate: string) => boolean,
   format: (n: number) => string,
@@ -2059,55 +2256,6 @@ function unusedName(
     n++;
   }
   return format(n);
-}
-
-/**
- * The `_xlfn.*` defined names a workbook's formulas will need, in the shape `BrtName` writes.
- *
- * A function with no `Ftab` id — `XLOOKUP`, `TEXTJOIN`, `CONFIDENCE.T`, anything newer than the enumeration —
- * is called through a `PtgName` naming a hidden stub, which is Excel's own mechanism and the only way such a
- * call can be written at all. Those calls used to be refused by name.
- *
- * **Collected by scanning the formula text, not while encoding.** A `PtgName` is a one-based index into the
- * defined-name list, and the list is counted before any formula is encoded; a stub created mid-encoding would
- * be given an index the file does not have. The scan is a regular expression over the formula source rather
- * than a parse, deliberately: a name that turns out not to be needed costs one hidden defined name, while a
- * missed one costs the formula. Over-collecting is the safe direction.
- *
- * Existing names win. A workbook that already defines `_xlfn.XLOOKUP` — because it was read from a file Excel
- * had repaired — gets no second copy.
- */
-function futureFunctionStubs(
-  worksheets: WorkbookModel["worksheets"],
-  existing: readonly { readonly name: string }[]
-): { readonly name: string; readonly formula: string; readonly hidden: boolean }[] {
-  const already = new Set(existing.map(entry => entry.name));
-  const wanted = new Map<string, string>();
-  for (const worksheet of worksheets) {
-    for (const row of worksheet.rows ?? []) {
-      for (const cell of row.cells ?? []) {
-        const formula = (cell as { formula?: unknown }).formula;
-        if (typeof formula !== "string") {
-          continue;
-        }
-        // A function call in the source is a name followed by `(`. `_xlfn.`-prefixed names are skipped: they
-        // are already stubs, and prefixing one again would produce `_xlfn._xlfn.X`.
-        for (const match of formula.matchAll(/([A-Za-z_][A-Za-z0-9_.]*)\s*\(/g)) {
-          const name = match[1]!;
-          if (name.startsWith("_xlfn.") || !isFutureFunction(name)) {
-            continue;
-          }
-          const stub = futureFunctionStubName(name);
-          if (!already.has(stub)) {
-            wanted.set(stub, name);
-          }
-        }
-      }
-    }
-  }
-  // `formula` is the text form of `PtgErr(#NAME?)`, which is the body Excel gives every stub. The record
-  // writer re-encodes it, so the two agree by construction rather than by a second literal.
-  return [...wanted.keys()].map(name => ({ name, formula: "#NAME?", hidden: true }));
 }
 
 /**
@@ -2139,7 +2287,9 @@ function themeParts(
   reservedPaths: Set<string>,
   writtenOpaqueParts: readonly { readonly path: string }[]
 ): readonly { readonly path: string; readonly xml: string }[] {
-  const modelled = model.themes as Record<string, string> | undefined;
+  // An XLSX read of a file with no theme models `{}`, which is no theme at all — not a reason to skip the default.
+  const read = model.themes as Record<string, string> | undefined;
+  const modelled = read && Object.keys(read).length > 0 ? read : undefined;
   const preserved = writtenOpaqueParts.some(part =>
     part.path.toLowerCase().startsWith("xl/theme/")
   );
@@ -2207,7 +2357,9 @@ function drawingForWorksheet(
   accumulated: DrawingPart[],
   reservedPaths: Set<string>,
   usable: ReadonlySet<number>,
-  losses: string[]
+  losses: string[],
+  /** The id a streamed sheet's `BrtDrawing` already names; such a sheet carries no preserved relationships. */
+  streamedRelId?: string
 ): DrawingPart | undefined {
   const media = (worksheet.media ?? []).filter(
     medium => medium.type === "image" && usable.has(Number(medium.imageId))
@@ -2230,19 +2382,25 @@ function drawingForWorksheet(
   // Form controls need the drawing too, and for a reason worth stating: their DrawingML anchors are
   // *hidden bridges* to the VML shapes that draw them. Excel writes one when it repairs a sheet with
   // legacy controls and no `<drawing>` part, so a sheet with controls and nothing else still needs it.
-  const formControls = (
-    (worksheet as unknown as { formControls?: readonly FormControlLike[] }).formControls ?? []
-  ).filter(control => control.tl !== undefined && control.br !== undefined);
+  const formControls = [
+    ...((worksheet as unknown as { formControls?: readonly FormControlLike[] }).formControls ?? []),
+    // A kept control is bridged when its properties part is written beside it, as a checkbox always is.
+    ...legacyControlsOf(worksheet).filter(control => control.ctrlPropXml !== undefined)
+  ].filter(control => control.tl !== undefined && control.br !== undefined);
   // Charts are anchors in the same drawing, reached from it by a relationship the `graphicFrame` names.
   const charts = (
     (worksheet as unknown as { charts?: readonly ChartAnchorLike[] }).charts ?? []
   ).filter(chart => (chart.chartNumber ?? 0) > 0 || (chart.chartExNumber ?? 0) > 0);
+  // What a drawing read from an XLSX keeps verbatim — a text box, a group, a connector. Converting to XLSB used to
+  // drop them, since only the modelled objects above were written.
+  const preserved = preservedObjectsFor(worksheet, namedMedia, usable);
   if (
     media.length === 0 &&
     watermarks.length === 0 &&
     shapes.length === 0 &&
     formControls.length === 0 &&
-    charts.length === 0
+    charts.length === 0 &&
+    preserved.anchors.length === 0
   ) {
     return undefined;
   }
@@ -2257,6 +2415,11 @@ function drawingForWorksheet(
   // `"ignore"` the *preserved* drawing wins: the caller asked to add a picture, not to delete the ones
   // already there.
   if (worksheet.xlsbDrawingRelationshipId !== undefined) {
+    // Checkboxes alone are not a loss: they were read from this sheet, and their hidden bridge anchors
+    // are in the drawing being preserved (the reader regenerates a drawing only when it held nothing else).
+    if (media.length + watermarks.length + shapes.length + charts.length === 0) {
+      return undefined;
+    }
     losses.push(
       `${media.length + shapes.length} new image(s) or shape(s) on a sheet that already has a ` +
         `preserved drawing, which this writer cannot merge into`
@@ -2276,22 +2439,23 @@ function drawingForWorksheet(
   // An id nothing else in this sheet's `.rels` uses. `rId1` unconditionally was safe only while the
   // sheet had no other relationships; a preserved relationship carried through from a read is free
   // to be `rId1` itself, and two entries with one id is a malformed part.
-  const takenIds = new Set((worksheet.opaqueRels ?? []).map(relationship => relationship.id));
-  const rId = unusedName(
-    candidate => takenIds.has(candidate),
-    base => `rId${base}`,
-    1
-  );
+  const rId =
+    streamedRelId ??
+    createFirstFreeRelIds(
+      new Set((worksheet.opaqueRels ?? []).map(relationship => relationship.id))
+    )();
   // Claimed immediately. Only the *preserved* paths were consulted before, so two sheets adding an image
   // to a package that already had `drawing1` both looked past it, both landed on `drawing2`, and the
   // archive received one path twice.
   reservedPaths.add(drawingPath(name).toLowerCase());
   const drawing: DrawingPart = { name, rId, anchors: [], rels: [] };
-  const built = buildDrawingAnchorsAndRels(media as ImageMedium[], [], {
+  // A preserved object's XML names its relationship ids, so those are kept and every new one goes around them.
+  const nextDrawingRelId = createFirstFreeRelIds(new Set(preserved.rels.map(rel => rel.Id)));
+  const built = buildDrawingAnchorsAndRels(media as ImageMedium[], preserved.rels, {
     getBookImage: id => namedMedia[Number(id)],
-    nextRId: rels => `rId${rels.length + 1}`
+    nextRId: () => nextDrawingRelId()
   });
-  drawing.anchors = built.anchors;
+  drawing.anchors = [...preserved.anchors, ...built.anchors];
   drawing.rels = built.rels;
   // After the images, so a shape's `cNvPrId` cannot collide with a picture's — image and chart ids derive
   // from their anchor position, and a shape numbering itself from 1 would land on the first picture.
@@ -2302,7 +2466,7 @@ function drawingForWorksheet(
       watermarks as { imageId: string | number; opacity?: number }[],
       {
         getBookImage: id => namedMedia[Number(id)],
-        nextRId: rels => `rId${rels.length + 1}`,
+        nextRId: () => nextDrawingRelId(),
         extent: { right: worksheet.dimensions?.right, bottom: worksheet.dimensions?.bottom }
       },
       drawing.rels
@@ -2314,6 +2478,37 @@ function drawingForWorksheet(
   drawing.anchors.push(...buildChartAnchors(charts, drawing.rels));
   accumulated.push(drawing);
   return drawing;
+}
+
+/**
+ * The objects a sheet's drawing kept verbatim when it was read from an XLSX, with their relationships.
+ *
+ * A picture fill names its medium by the target the XLSX reader gave it, `../media/image{id + 1}.{ext}` — the name the
+ * XLSX writer uses. This writer names media its own way, so each such target is pointed at the name `planMedia`
+ * gave that medium. A medium that did not reach the package leaves its target as it was.
+ */
+function preservedObjectsFor(
+  worksheet: WorkbookModel["worksheets"][number],
+  namedMedia: readonly MediaLike[],
+  usable: ReadonlySet<number>
+): { anchors: DrawingAnchor[]; rels: DrawingRel[] } {
+  const drawing = (worksheet as { drawing?: { anchors?: unknown[]; rels?: DrawingRel[] } }).drawing;
+  if (drawing === undefined) {
+    return { anchors: [], rels: [] };
+  }
+  const preserved = preservedDrawingObjects(drawing);
+  const rels = preserved.rels.map(rel => {
+    const match =
+      rel.TargetMode === "External"
+        ? null
+        : /(?:^|\/)media\/image(\d+)\.([^./]+)$/.exec(rel.Target);
+    const id = match ? Number(match[1]) - 1 : -1;
+    const medium = namedMedia[id];
+    return medium !== undefined && usable.has(id) && medium.extension === match![2].toLowerCase()
+      ? { ...rel, Target: resolveMediaTarget(medium) }
+      : { ...rel };
+  });
+  return { anchors: preserved.anchors, rels };
 }
 
 /**
@@ -2336,7 +2531,11 @@ interface MediaPlan {
    */
   readonly named: readonly MediaLike[];
   /** The parts to write, already resolved to bytes. */
-  readonly parts: readonly { readonly path: string; readonly bytes: Uint8Array }[];
+  readonly parts: readonly {
+    readonly path: string;
+    readonly bytes: Uint8Array;
+    readonly index: number;
+  }[];
   /** Content type per extension, for the `Default` declarations. */
   readonly contentTypes: ReadonlyMap<string, string>;
   /**
@@ -2368,7 +2567,7 @@ async function planMedia(
   reservedPaths: ReadonlySet<string>
 ): Promise<MediaPlan> {
   const named: MediaLike[] = [];
-  const parts: { path: string; bytes: Uint8Array }[] = [];
+  const parts: { path: string; bytes: Uint8Array; index: number }[] = [];
   const contentTypes = new Map<string, string>();
   const usedPaths = new Set(reservedPaths);
   const usable = new Set<number>();
@@ -2402,7 +2601,9 @@ async function planMedia(
             requested === undefined ? index + 1 : 2
           );
     usedPaths.add(mediaPath(`${name}.${extension}`).toLowerCase());
-    const entry: MediaLike = { ...(medium as MediaLike), name };
+    // The defaulted extension travels with the name: every relationship target is built from this
+    // entry, and one built from the model's missing extension pointed at `image1.undefined`.
+    const entry: MediaLike = { ...(medium as MediaLike), name, extension };
     named.push(entry);
     // An external image is referenced in place through `TargetMode="External"` and stores no bytes,
     // so it needs neither a part nor a content type.
@@ -2416,7 +2617,7 @@ async function planMedia(
       continue;
     }
     usable.add(index);
-    parts.push({ path: mediaPath(`${entry.name}.${extension}`), bytes });
+    parts.push({ path: mediaPath(`${entry.name}.${extension}`), bytes, index });
     contentTypes.set(extension, imageContentTypeFor(extension));
   }
 

@@ -117,7 +117,7 @@ async function excelShapedPackage(
   for (const [path, part] of Object.entries(binaryParts)) {
     archive.add(path, part.data);
   }
-  return await archive.bytes();
+  return await archive.toBuffer();
 }
 
 describe("part classification comes from content types", () => {
@@ -136,7 +136,7 @@ describe("part classification comes from content types", () => {
     archive.add("xl/workbook.bin", WORKBOOK);
     archive.add("xl/worksheets/sheet1.bin", WORKSHEET);
 
-    const report = await validateXlsbBuffer(await archive.bytes(), { includeWarnings: true });
+    const report = await validateXlsbBuffer(await archive.toBuffer(), { includeWarnings: true });
     expect(report.problems).toEqual([]);
   });
 
@@ -203,7 +203,7 @@ describe("part classification comes from content types", () => {
     archive.add("xl/workbook.bin", WORKBOOK);
     archive.add("xl/worksheets/sheet1.bin", WORKSHEET);
 
-    const report = await validateXlsbBuffer(await archive.bytes(), { includeWarnings: true });
+    const report = await validateXlsbBuffer(await archive.toBuffer(), { includeWarnings: true });
     expect(report.problems.map(problem => problem.kind)).not.toContain("scope-missing-root");
   });
 
@@ -246,8 +246,8 @@ describe("part classification comes from content types", () => {
     );
 
     const workbook = Workbook.create();
-    await Workbook.read(workbook, await archive.bytes());
-    expect(Cell.getValue(Workbook.getWorksheets(workbook)[0]!, "A1")).toBe("found");
+    await Workbook.read(workbook, await archive.toBuffer());
+    expect(Cell.getValue(Workbook.listWorksheets(workbook)[0]!, "A1")).toBe("found");
   });
 
   it("classifies by content type, not by path", () => {

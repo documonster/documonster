@@ -7,6 +7,13 @@
  * them has to rediscover where a statement ends or what a comment looks like.
  */
 
+/** One statement, and where it starts in the source (1-based line and column). */
+export interface Statement {
+  readonly text: string;
+  readonly line: number;
+  readonly column: number;
+}
+
 /**
  * Split source into statements.
  *
@@ -16,20 +23,52 @@
  * reading its contents as statements would be worse than ignoring it.
  */
 export function splitStatements(source: string): string[] {
-  const out: string[] = [];
-  for (const line of stripFrontmatter(source.split(/\r\n|\r|\n/))) {
-    const raw = stripComment(line);
+  return splitStatementsAt(source).map(statement => statement.text);
+}
+
+/** {@link splitStatements}, with each statement's position — for reporting what was skipped. */
+export function splitStatementsAt(source: string): Statement[] {
+  const out: Statement[] = [];
+  const lines = stripFrontmatter(source.split(/\r\n|\r|\n/));
+  for (let index = 0; index < lines.length; index++) {
+    const raw = stripComment(lines[index]);
     if (raw.trim() === "") {
       continue;
     }
+    let offset = 0;
     for (const part of splitOnSemicolons(raw)) {
       const text = part.trim();
       if (text !== "") {
-        out.push(text);
+        out.push({ text, line: index + 1, column: offset + part.indexOf(text) + 1 });
       }
+      offset += part.length + 1;
     }
   }
   return out;
+}
+
+/**
+ * Collects the statements a lenient parser could not read, so the diagram can say what it
+ * left out instead of drawing a confident picture of part of the source.
+ */
+export class SkipLog {
+  private readonly entries: Array<{ text: string; line: number; column: number }> = [];
+
+  /** Record `statement` as not (fully) understood. */
+  add(statement: Statement): void {
+    this.entries.push({ text: statement.text, line: statement.line, column: statement.column });
+  }
+
+  /** Record a raw line (for the indentation-based grammars) as not understood. */
+  addLine(text: string, line: number): void {
+    const trimmed = text.trim();
+    this.entries.push({ text: trimmed, line, column: text.indexOf(trimmed) + 1 });
+  }
+
+  /** `{ skipped }` when anything was skipped, else nothing — spread into the diagram. */
+  report(): { skipped?: readonly { text: string; line: number; column: number }[] } {
+    return this.entries.length === 0 ? {} : { skipped: this.entries };
+  }
 }
 
 /**

@@ -17,7 +17,7 @@ function createTestZip(fileCount: number, bytesPerFile: number): Uint8Array {
   for (let i = 0; i < fileCount; i++) {
     z.add(`file_${i}.txt`, encoder.encode(content));
   }
-  return z.bytesSync();
+  return z.toBufferSync();
 }
 
 describe("browser unzip parsing", () => {

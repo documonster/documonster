@@ -28,7 +28,7 @@ describe("Documonster.Pdf IIFE bundle", () => {
     const page = doc.addPage();
     page.drawText?.("Hello from the PDF IIFE bundle", { x: 72, y: 700 });
 
-    const bytes: Uint8Array = await doc.build();
+    const bytes: Uint8Array = await doc.toBuffer();
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.byteLength).toBeGreaterThan(0);
     const header = new TextDecoder().decode(bytes.subarray(0, 5));
@@ -38,9 +38,9 @@ describe("Documonster.Pdf IIFE bundle", () => {
   it("reads back the PDF it just built", async () => {
     const doc = new Pdf.Builder();
     doc.addPage();
-    const bytes: Uint8Array = await doc.build();
+    const bytes: Uint8Array = await doc.toBuffer();
 
-    const result = await Pdf.read(bytes);
+    const result = await Pdf.extract(bytes);
     expect(result.pages.length).toBe(1);
   });
 });

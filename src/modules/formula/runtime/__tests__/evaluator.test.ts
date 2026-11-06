@@ -546,7 +546,7 @@ describe("evaluator: LET and LAMBDA", () => {
   it("LAMBDA can be invoked through a named binding in LET", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    // Parser doesn't accept LAMBDA(...)(args) inline; bind a name first.
+    // The named form; the inline `LAMBDA(...)(args)` is covered in `excel/xlsb/__tests__/lambda-invocation.test.ts`.
     Cell.setValue(ws, "A1", {
       formula: "LET(add,LAMBDA(x,y,x+y),add(3,4))",
       result: 0
@@ -1847,5 +1847,91 @@ describe("evaluator: multi-area reference unions", () => {
     Cell.setValue(ws, "B1", 100);
     calculateFormulas(wb);
     expect(Cell.getResult(ws, "D1")).toBe(101);
+  });
+});
+
+// ============================================================================
+// Element-wise application over arrays
+// ============================================================================
+
+describe("evaluator: a function of one value applied over an array", () => {
+  function sheet() {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    ["ab", "c", "def", "", "ghij"].forEach((text, i) => Cell.setValue(ws, `B${i + 1}`, text));
+    [-1.25, 2.5, -3.75].forEach((n, i) => Cell.setValue(ws, `A${i + 1}`, n));
+    [new Date(Date.UTC(2024, 0, 15)), new Date(Date.UTC(2025, 5, 30))].forEach((d, i) =>
+      Cell.setValue(ws, `C${i + 1}`, d)
+    );
+    return { wb, ws };
+  }
+
+  it.each([
+    ["SUM(LEN(B1:B5))", 10],
+    ["SUMPRODUCT(LEN(B1:B5))", 10],
+    ["SUM(ABS(A1:A3))", 7.5],
+    ["SUM(ROUND(A1:A3,0))", -2],
+    ["SUM(--ISNUMBER(B1:B5))", 0],
+    ["SUM(--ISNUMBER(A1:A3))", 3],
+    ['SUM(VALUE(TEXT(A1:A3,"0.0"))*10)', -26],
+    ["SUM(YEAR(C1:C2))", 4049],
+    ["SUM(MONTH(C1:C2))+SUM(DAY(C1:C2))", 52],
+    ["SUM(LEN(LEFT(B1:B5,2)))", 7],
+    ["SUM(LEN(UPPER(B1:B5)))", 10],
+    ["SUM(LEN(B1:B5)*{1;1;1;1;1})", 10]
+  ])("%s", (formula, expected) => {
+    const { wb, ws } = sheet();
+    Cell.setValue(ws, "E1", { formula });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "E1")).toBe(expected);
+  });
+
+  it("spills the per-element results of a dynamic array", () => {
+    const { wb, ws } = sheet();
+    Cell.setValue(ws, "E1", {
+      formula: "LEN(B1:B5)",
+      shareType: "array",
+      ref: "E1",
+      isDynamicArray: true
+    });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "E1")).toBe(2);
+    expect(["E2", "E3", "E4", "E5"].map(a => Cell.getValue(ws, a))).toEqual([1, 3, 0, 4]);
+  });
+
+  it("pairs arrays as Excel does: a single row repeats, past a shorter one is #N/A", () => {
+    const { wb, ws } = sheet();
+    Cell.setValue(ws, "E1", {
+      formula: "LEFT(B1:B3,{1,2})",
+      shareType: "array",
+      ref: "E1",
+      isDynamicArray: true
+    });
+    Cell.setValue(ws, "H1", {
+      formula: "LEFT(B1:B3,{1;2})",
+      shareType: "array",
+      ref: "H1",
+      isDynamicArray: true
+    });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "E1")).toBe("a");
+    expect(["F1", "E2", "F2", "E3", "F3"].map(a => Cell.getValue(ws, a))).toEqual([
+      "ab",
+      "c",
+      "c",
+      "d",
+      "de"
+    ]);
+    expect(Cell.getResult(ws, "H1")).toBe("a");
+    expect(["H2", "H3"].map(a => Cell.getValue(ws, a))).toEqual(["c", { error: "#N/A" }]);
+  });
+
+  it("leaves a function that takes an array whole", () => {
+    const { wb, ws } = sheet();
+    Cell.setValue(ws, "E1", { formula: 'ROWS(B1:B5&"")' });
+    Cell.setValue(ws, "E2", { formula: "INDEX(LEN(B1:B5),5)" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "E1")).toBe(5);
+    expect(Cell.getResult(ws, "E2")).toBe(4);
   });
 });

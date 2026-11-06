@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Image, Pivot, Watermark, Workbook, Worksheet } from "@excel/index";
+import { ConditionalFormatting, Image, Pivot, Watermark, Workbook, Worksheet } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -89,7 +89,7 @@ const probes: {
   {
     name: "03-conditional-format",
     build: ({ sheet }) => {
-      Worksheet.addConditionalFormatting(sheet, {
+      ConditionalFormatting.add(sheet, {
         ref: "B2:B3",
         rules: [
           {
@@ -132,21 +132,21 @@ const probes: {
   {
     name: "06-sheet-password",
     build: async ({ sheet }) => {
-      await Worksheet.protect(sheet, "s3cret", { formatCells: true });
+      await Worksheet.protect(sheet, { password: "s3cret", formatCells: true });
     }
   },
 
   {
     name: "07-workbook-password",
     build: async ({ workbook }) => {
-      await Workbook.protect(workbook, "b00kpass", { lockStructure: true });
+      await Workbook.protect(workbook, { password: "b00kpass", lockStructure: true });
     }
   },
 
   {
     name: "08-watermark-overlay",
     build: ({ workbook, sheet }) => {
-      Watermark.add(sheet, {
+      Watermark.set(sheet, {
         imageId: Image.add(workbook, { buffer: PNG, extension: "png" }),
         mode: "overlay",
         opacity: 0.25

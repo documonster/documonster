@@ -15,6 +15,7 @@ function baseFacts() {
     hasBlobSource: true,
     allSourcesInMemory: true,
     smartStore: false,
+    encrypted: false,
     zip64Requested: false,
     needsDeflate: true,
     hasDeflateRawCompressionStream: () => true
@@ -32,6 +33,7 @@ describe("canUseBrowserBlobFastPath", () => {
       ["no Blob source to stream", { hasBlobSource: false }],
       ["a source is not in memory", { allSourcesInMemory: false }],
       ["smartStore is on", { smartStore: true }],
+      ["the archive is encrypted", { encrypted: true }],
       ["ZIP64 was requested", { zip64Requested: true }]
     ])("refuses when %s", (_label, override) => {
       expect(canUseBrowserBlobFastPath({ ...baseFacts(), ...override })).toBe(false);

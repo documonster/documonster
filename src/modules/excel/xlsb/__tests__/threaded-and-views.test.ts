@@ -115,6 +115,26 @@ describe("multiple sheet views", () => {
     ]);
   });
 
+  it("round-trips two views that are both the default", async () => {
+    // No view departs from anything, so neither branch that sets the sheet's views ran, and the second view was
+    // appended after `views[0]` of the empty default — a hole the XLSX writer then threw a `TypeError` on.
+    // The second sheet, because the first is the selected tab and that alone is a departure from the default.
+    const workbook = Workbook.create();
+    Workbook.addWorksheet(workbook, "First");
+    const sheet = Workbook.addWorksheet(workbook, "S", {
+      views: [{ state: "normal" }, { state: "normal" }]
+    } as never);
+    Cell.setValue(sheet, "A1", 1);
+    const reopened = Workbook.create();
+    await Workbook.read(reopened, await Workbook.toBuffer(workbook, { format: "xlsb" }));
+    const views = (Workbook.getModel(reopened).worksheets[1] as unknown as { views?: unknown[] })
+      .views;
+    expect(views).toHaveLength(2);
+    expect(views![0]).toMatchObject({ state: "normal" });
+    expect(views![1]).toMatchObject({ state: "normal" });
+    await expect(Workbook.toBuffer(reopened)).resolves.toBeInstanceOf(Uint8Array);
+  });
+
   it("puts the pane on the first view only", async () => {
     // The model holds one pane per *sheet*, not one per view. Repeating it in every view would invent a
     // claim the model does not make.

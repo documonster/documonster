@@ -94,7 +94,7 @@ describe("WorksheetWriter", () => {
       expect(cellGetValue(ws.getCell("A1"))).toBe(7);
       expect(cellGetValue(ws.getCell("B1"))).toBe("Hello, World!");
       expect(cellGetValue(ws.getCell("C1"))).toBe(3.14);
-      expect(cellGetValue(ws.getCell("D1"))).toBe(now);
+      expect(cellGetValue(ws.getCell("D1"))).toEqual(now);
       expect(cellGetValue(ws.getCell("E1"))).toBe("Hello, World!");
       expect(cellGetValue(ws.getCell("F1"))).toEqual({
         text: "www.google.com",
@@ -296,11 +296,11 @@ describe("WorksheetWriter", () => {
 
       expect(cellGetValue(ws.getCell("A2"))).toBe(1);
       expect(cellGetValue(ws.getCell("B2"))).toBe("John Doe");
-      expect(cellGetValue(ws.getCell("C2"))).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("C2"))).toEqual(dateValue1);
 
       expect(cellGetValue(ws.getCell("A3"))).toBe(2);
       expect(cellGetValue(ws.getCell("B3"))).toBe("Jane Doe");
-      expect(cellGetValue(ws.getCell("C3"))).toBe(dateValue2);
+      expect(cellGetValue(ws.getCell("C3"))).toEqual(dateValue2);
 
       expect(rowValues(ws.getRow(2))).toEqual([, 1, "John Doe", dateValue1]);
       expect(rowValues(ws.getRow(3))).toEqual([, 2, "Jane Doe", dateValue2]);
@@ -318,11 +318,11 @@ describe("WorksheetWriter", () => {
 
       expect(cellGetValue(ws.getCell("A1"))).toBe(1);
       expect(cellGetValue(ws.getCell("B1"))).toBe("John Doe");
-      expect(cellGetValue(ws.getCell("C1"))).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("C1"))).toEqual(dateValue1);
 
       expect(cellGetValue(ws.getCell("A2"))).toBe(2);
       expect(cellGetValue(ws.getCell("B2"))).toBe("Jane Doe");
-      expect(cellGetValue(ws.getCell("C2"))).toBe(dateValue2);
+      expect(cellGetValue(ws.getCell("C2"))).toEqual(dateValue2);
 
       expect(rowValues(ws.getRow(1))).toEqual([, 1, "John Doe", dateValue1]);
       expect(rowValues(ws.getRow(2))).toEqual([, 2, "Jane Doe", dateValue2]);
@@ -348,15 +348,15 @@ describe("WorksheetWriter", () => {
 
       expect(cellGetValue(ws.getCell("A1"))).toBe(1);
       expect(cellGetValue(ws.getCell("B1"))).toBe("John Doe");
-      expect(cellGetValue(ws.getCell("D1"))).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("D1"))).toEqual(dateValue1);
 
       expect(cellGetValue(ws.getCell("A2"))).toBe(2);
       expect(cellGetValue(ws.getCell("B2"))).toBe("Jane Doe");
-      expect(cellGetValue(ws.getCell("D2"))).toBe(dateValue2);
+      expect(cellGetValue(ws.getCell("D2"))).toEqual(dateValue2);
 
       expect(cellGetValue(ws.getCell("A3"))).toBe(3);
       expect(cellGetValue(ws.getCell("C3"))).toBe("Sam");
-      expect(cellGetValue(ws.getCell("E3"))).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("E3"))).toEqual(dateValue1);
 
       expect(rowValues(ws.getRow(1))).toEqual(rows[1]);
       expect(rowValues(ws.getRow(2))).toEqual(rows[2]);
@@ -592,7 +592,12 @@ describe("WorksheetWriter", () => {
       ws.autoFilter = { from: "A1", to: "C1" };
 
       // Set sheet protection
-      await ws.protect("test", { formatColumns: true, formatRows: true, autoFilter: true });
+      await ws.protect({
+        password: "test",
+        formatColumns: true,
+        formatRows: true,
+        autoFilter: true
+      });
 
       ws.commit();
       await wb.commit();
@@ -635,11 +640,7 @@ describe("WorksheetWriter", () => {
       });
       rowCommit(row);
 
-      expect(sheet.protect).toBeDefined();
-
-      await sheet.protect("password", {
-        spinCount: 1
-      });
+      await sheet.protect({ password: "password", spinCount: 1 });
 
       sheet.commit();
       await workbook.commit();

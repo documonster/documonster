@@ -6,10 +6,12 @@
 
 import { Enums } from "@excel/core/enums";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
+import { createPartDecoder } from "@excel/utils/part-decoder";
 import { RelType } from "@excel/xlsx/rel-type";
+import { createPrefixNormalizer } from "@excel/xlsx/xform/namespace-prefixes";
 import { EventEmitter } from "@utils/event-emitter";
 import { SaxParser } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
+import type { XmlSaxTag } from "@xml/types";
 
 export interface HyperlinkReaderOptions<TWorkbook = unknown> {
   workbook: TWorkbook;
@@ -26,6 +28,10 @@ export interface Hyperlink {
   targetMode: string;
 }
 
+/**
+ * A sheet's hyperlink relationships, from a streaming workbook reader with `hyperlinks: "emit"`: `read()` reads them,
+ * raising a `hyperlink` event each, and `each` visits the ones read.
+ */
 class HyperlinkReader extends EventEmitter {
   workbook: unknown;
   id: number;
@@ -78,9 +84,15 @@ class HyperlinkReader extends EventEmitter {
 
     try {
       const parser = new SaxParser({ position: false, invalidCharHandling: "skip" });
-      const decoder = new TextDecoder("utf-8", { fatal: true });
+      // Prefixes normalised to the ones matched below — see `namespace-prefixes.ts`.
+      const parserPrefixes = createPrefixNormalizer({ lazy: true });
+      const decoder = createPartDecoder();
 
-      parser.on("opentag", (node: SaxTag) => {
+      parser.on("closetag", (rawTag: XmlSaxTag) => {
+        parserPrefixes.close(rawTag.name);
+      });
+      parser.on("opentag", (rawNode: XmlSaxTag) => {
+        const node = parserPrefixes.open(rawNode);
         if (node.name !== "Relationship") {
           return;
         }
@@ -113,12 +125,14 @@ class HyperlinkReader extends EventEmitter {
       for await (const chunk of iterator) {
         const chunkStr =
           typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
+        parserPrefixes.scan(chunkStr);
         parser.write(chunkStr);
       }
 
       // Flush trailing bytes (catches truncated UTF-8)
       const trailing = decoder.decode();
       if (trailing) {
+        parserPrefixes.scan(trailing);
         parser.write(trailing);
       }
 

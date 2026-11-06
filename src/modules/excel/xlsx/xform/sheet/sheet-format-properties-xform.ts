@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { parseXsdFloatOrText, parseXsdIntOrText } from "@excel/xlsx/xform/xsd-values";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface SheetFormatPropertiesModel {
@@ -44,17 +45,15 @@ class SheetFormatPropertiesXform extends BaseXform {
 
   parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "sheetFormatPr") {
+      // A value that is not a number keeps its text, for the reader to set aside (`sheet-settings-checks`).
       this.model = {
-        defaultRowHeight: parseFloat(node.attributes.defaultRowHeight ?? "0"),
-        dyDescent:
-          node.attributes["x14ac:dyDescent"] !== undefined
-            ? parseFloat(node.attributes["x14ac:dyDescent"])
-            : undefined,
-        outlineLevelRow: parseInt(node.attributes.outlineLevelRow ?? "0", 10),
-        outlineLevelCol: parseInt(node.attributes.outlineLevelCol ?? "0", 10)
-      };
+        defaultRowHeight: parseXsdFloatOrText(node.attributes.defaultRowHeight) ?? 0,
+        dyDescent: parseXsdFloatOrText(node.attributes["x14ac:dyDescent"]),
+        outlineLevelRow: parseXsdIntOrText(node.attributes.outlineLevelRow) ?? 0,
+        outlineLevelCol: parseXsdIntOrText(node.attributes.outlineLevelCol) ?? 0
+      } as SheetFormatPropertiesModel;
       if (node.attributes.defaultColWidth) {
-        this.model.defaultColWidth = parseFloat(node.attributes.defaultColWidth);
+        this.model.defaultColWidth = parseXsdFloatOrText(node.attributes.defaultColWidth);
       }
       if (node.attributes.customHeight === "1") {
         this.model.customHeight = true;

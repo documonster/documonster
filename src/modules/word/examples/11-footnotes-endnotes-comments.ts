@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Document, Build } from "../index";
 import type { Run } from "../index";
 
 const outDir = path.resolve(
@@ -62,7 +62,7 @@ function footnoteRef(id: number): Run {
   };
 }
 
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("This sentence has a footnote"),
@@ -93,7 +93,7 @@ function endnoteRef(id: number): Run {
   };
 }
 
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("This sentence references endnote one"),
@@ -124,7 +124,7 @@ const c3 = Document.addComment(doc, "Alice", "Done.", {
 });
 
 // Body content with overlapping comment ranges
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.commentRangeStart(c1),
@@ -149,7 +149,7 @@ const pointComment = Document.addComment(
   "Reviewer",
   "Inserted-at-point comment (no range — pinned to this caret position)."
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Point-style comment placed mid-sentence "),
@@ -160,7 +160,7 @@ Document.addParagraphElement(
 
 // Edge case: comment with empty body (Word still renders the marker)
 const emptyComment = Document.addComment(doc, "Carol", "");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.commentRangeStart(emptyComment),
@@ -178,7 +178,7 @@ Document.addHeading(doc, "4. Multiple footnotes inside one table cell", 2);
 const fnA = Document.addFootnote(doc, "Footnote A — first citation in the cell.");
 const fnB = Document.addFootnote(doc, "Footnote B — second citation in the cell.");
 const fnC = Document.addFootnote(doc, "Footnote C — third citation in the cell.");
-Document.addTableElement(doc, {
+Document.addTable(doc, {
   type: "table",
   properties: { width: { value: 5000, type: "pct" } },
   rows: [
@@ -210,7 +210,7 @@ const stressIds: number[] = [];
 for (let i = 1; i <= 100; i++) {
   stressIds.push(Document.addFootnote(doc, `Stress footnote #${i}`));
 }
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text(`There are ${stressIds.length} footnotes attached to this paragraph.`)
@@ -218,11 +218,11 @@ Document.addParagraphElement(
 );
 // Reference every 10th one inline so the file actually links them
 const sampledRefs = stressIds.filter((_, idx) => idx % 10 === 0).map(footnoteRef);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.text("Sampled refs:"), ...sampledRefs.flatMap(r => [Build.text(" "), r])])
 );
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "11-footnotes-endnotes-comments.docx"), buf);
 console.log(`  → 11-footnotes-endnotes-comments.docx (${buf.length} bytes)`);

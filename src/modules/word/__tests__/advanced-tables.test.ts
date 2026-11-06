@@ -75,10 +75,10 @@ describe("Advanced Tables - Nested Tables", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, outerTable);
-    const doc = Document.build(h);
+    Document.addTable(h, outerTable);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     // Verify outer table
@@ -113,10 +113,10 @@ describe("Advanced Tables - Nested Tables", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, outerTable);
-    const doc = Document.build(h);
+    Document.addTable(h, outerTable);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const outerTbl = parsed.body[0] as Table;
@@ -145,10 +145,10 @@ describe("Advanced Tables - Merged Cells", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -171,10 +171,10 @@ describe("Advanced Tables - Merged Cells", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -202,10 +202,10 @@ describe("Advanced Tables - Merged Cells", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -244,10 +244,10 @@ describe("Advanced Tables - Table Properties", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -278,10 +278,10 @@ describe("Advanced Tables - Table Properties", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -297,10 +297,10 @@ describe("Advanced Tables - Table Properties", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -316,10 +316,10 @@ describe("Advanced Tables - Table Properties", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -335,10 +335,10 @@ describe("Advanced Tables - Table Properties", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -354,10 +354,10 @@ describe("Advanced Tables - Table Properties", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -382,10 +382,10 @@ describe("Advanced Tables - Header Row", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -406,10 +406,10 @@ describe("Advanced Tables - Header Row", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -435,10 +435,10 @@ describe("Advanced Tables - XML Compliance", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const root = await getDocumentXml(bytes);
 
     // Navigate: w:document > w:body > w:tbl > w:tblGrid
@@ -464,10 +464,10 @@ describe("Advanced Tables - XML Compliance", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -494,10 +494,10 @@ describe("Advanced Tables - XML Compliance", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -539,10 +539,10 @@ describe("Track Changes - Table Row Revisions", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -568,10 +568,10 @@ describe("Track Changes - Table Row Revisions", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
@@ -597,10 +597,10 @@ describe("Track Changes - Table Row Revisions", () => {
     );
 
     const h = Document.create();
-    Document.addTableElement(h, tbl);
-    const doc = Document.build(h);
+    Document.addTable(h, tbl);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -642,13 +642,13 @@ describe("Track Changes - Section Property Change", () => {
 
     const h = Document.create();
     // Add a paragraph with section properties embedded
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([Build.text("Section change test")], { sectionProperties: sectProps })
     );
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     // The section properties can appear either as paragraph section properties or last sectPr
@@ -684,13 +684,13 @@ describe("Track Changes - Section Property Change", () => {
     };
 
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([Build.text("test")], { sectionProperties: sectProps })
     );
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -728,15 +728,15 @@ describe("Track Changes - Run Property Change", () => {
     };
 
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([
         { content: [{ type: "text", text: "Formatted text" }], properties: runProps }
       ])
     );
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const para = parsed.body[0] as Paragraph;
@@ -768,13 +768,13 @@ describe("Track Changes - Run Property Change", () => {
     };
 
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([{ content: [{ type: "text", text: "Styled" }], properties: runProps }])
     );
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -800,7 +800,7 @@ describe("Track Changes - Run Property Change", () => {
 
   it("should roundtrip insertedRun with track changes", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([
         Build.text("Original "),
@@ -810,9 +810,9 @@ describe("Track Changes - Run Property Change", () => {
         )
       ])
     );
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const para = parsed.body[0] as Paragraph;
@@ -822,7 +822,7 @@ describe("Track Changes - Run Property Change", () => {
 
   it("should roundtrip deletedRun with track changes", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([
         Build.text("Keep this "),
@@ -832,9 +832,9 @@ describe("Track Changes - Run Property Change", () => {
         )
       ])
     );
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes = await Io.package(doc);
+    const bytes = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes);
 
     const para = parsed.body[0] as Paragraph;

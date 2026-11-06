@@ -3,60 +3,105 @@
  *
  * ## What this file does and does not own
  *
- * BIFF12 stores a formula as a reverse-polish stream of `Ptg` tokens, not as text. Turning
- * that into something usable needs two things: a mapping between tokens and expression
- * structure, and a way to get from structure to text. Only the first is specific to XLSB,
- * and this file is only the first.
+ * BIFF12 stores a formula as a reverse-polish stream of `Ptg` tokens, not as text. Turning that into something
+ * usable needs two things: a mapping between tokens and expression structure, and a way to get from structure to
+ * text. Only the first is specific to XLSB, and this file is only the first.
  *
- * The second is `@formula`: `tokenize` + `parse` for text → AST, and `printAst` for AST →
- * text. Sharing that is not opportunistic reuse — the alternative is assembling text while
- * walking the token stack, which means reimplementing operator precedence and
- * parenthesisation. A mistake there does not produce a syntax error; it produces a
- * different formula that parses cleanly and computes something else. `=-2^2` is `4` in
- * Excel and `-4` almost everywhere else, and that is the kind of detail a second
- * implementation gets wrong.
- *
- * So the pipeline is:
+ * The second is `@formula`: `tokenizeWithGaps` + `parseWithLayout` for text → AST, and `printAstWithLayout` for
+ * AST → text. Sharing that is not opportunistic reuse — the alternative is assembling text while walking the token
+ * stack, which means reimplementing operator precedence and parenthesisation. A mistake there does not produce a
+ * syntax error; it produces a different formula that parses cleanly and computes something else.
  *
  * ```text
- * read:   Ptg bytes ──► AST ──► text        (this file, then Formula.print)
- * write:  text ──► AST ──► Ptg bytes        (Formula.tokenize/parse, then this file)
+ * read:   Ptg bytes ──► AST + layout ──► text      (decodeFormula, then formulaText)
+ * write:  text ──► AST + layout ──► Ptg bytes      (encodeFormula)
  * ```
  *
- * The AST turned out to fit the token set closely — `CellRefNode` already carries absolute
- * flags and a sheet pair for 3D references, `UnionRefNode` is `PtgMemFunc`, `MissingNode`
- * is `PtgMissArg`. Nothing had to be added to it.
+ * The *layout* is the part of a formula's text the AST does not hold — the author's spaces and line breaks and the
+ * parentheses precedence does not need — and Excel stores exactly that as tokens of its own (`PtgAttrSpace`,
+ * `PtgParen`). It travels beside the tree (`@formula/syntax/layout`), so `( A1 + B1 ) * 2` written by Excel reads
+ * back as Excel shows it and is written back the same way.
  *
- * `StructuredRefNode` *corresponds* to `PtgList`, but neither is implemented: a structured
- * reference is refused by name below. This comment used to list the pair alongside the ones that
- * work, and a `PtgContext.tables` field sat beside it that nothing ever filled in and nothing ever
- * read — scaffolding that read as a finished feature. Tables themselves are written (see
- * `xlsb/tables.ts`); resolving `Table1[Column]` to a token that indexes one is the remaining half.
+ * ## Three properties Excel checks and a round trip cannot
+ *
+ * Every defect this codec has had passed its own round trip, because the encoder and the decoder agreed with each
+ * other. The tests that matter compare against bytes Excel wrote (`__tests__/data/*-excel.*`). The three things
+ * most easily got wrong:
+ *
+ * - **Operand classes.** A reference token's class (`0x20` reference, `0x40` value, `0x60` array) states what its
+ *   consumer does with it. `=A1+B1` with reference-class operands is `#VALUE!` in Excel. The class of every token is
+ *   computed from the root down — see {@link assignClasses}.
+ * - **Control tokens.** Excel writes `IF` and `CHOOSE` with jump tables (`PtgAttrIf`, `PtgAttrChoose`,
+ *   `PtgAttrGoto`), a one-argument `SUM` as `PtgAttrSum`, and a volatile formula with a leading `PtgAttrSemi`. The
+ *   reader must skip or interpret each, and the writer emits them as Excel does.
+ * - **Display tokens.** Without `PtgParen` Excel *shows* `A1*(B1+C1)` as `A1*B1+C1` — it still computes the right
+ *   thing, from the token order, and displays something else.
  *
  * ## Unsupported tokens fail loudly
  *
- * A token this codec does not model throws `ExcelNotSupportedError` naming the token. It
- * never returns a partial expression: half a formula is worse than no formula, because it
- * looks like it worked.
+ * A token this codec does not model throws `ExcelUnsupportedFeatureError` naming the token. It never returns a partial
+ * expression: half a formula is worse than no formula, because it looks like it worked.
  */
 
-import { ExcelNotSupportedError, XlsbParseError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError, XlsbParseError } from "@excel/errors";
 import { decodeCol, encodeCol } from "@excel/utils/address";
-import { XLSB_MAX_COLUMNS, XLSB_MAX_ROWS } from "@excel/xlsb/binary";
+import { definedNameListKey } from "@excel/utils/function-names";
+import {
+  bareFunctionName,
+  isLambdaParameter,
+  isWorksheetFunctionName,
+  storedFunctionName,
+  fromFileFormula,
+  toFileFormula
+} from "@excel/utils/future-functions";
+import { checkSheetIndex, XLSB_MAX_COLUMNS, XLSB_MAX_ROWS, XlsbReader } from "@excel/xlsb/binary";
 import { errorCodeOf, errorTextOf } from "@excel/xlsb/error-values";
+import {
+  ARRAY_CLASS,
+  assignClasses,
+  bareIntersections,
+  nonReferenceArgument,
+  builtInId,
+  INVOKE,
+  invocationOperands,
+  isAttrSum,
+  isInvocation,
+  needsMemToken,
+  REFERENCE_CLASS,
+  VALUE_CLASS,
+  type FormulaRole,
+  type TokenClasses
+} from "@excel/xlsb/formula/operand-classes";
 import {
   NodeType,
   type AstNode,
   type CellRefNode,
   type ColRangeRefNode,
+  type FunctionCallNode,
   type RowRangeRefNode,
   type StructuredRefNode
 } from "@formula/syntax/ast";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import {
+  ARITY_BY_ID,
+  FUNCTION_NAME_BY_ID,
+  FUNCTION_TABLES,
+  functionClasses,
+  futureFunctionClasses
+} from "@formula/syntax/function-table";
+import { layoutOf, type FormulaLayout, type NodeLayout } from "@formula/syntax/layout";
+import { parseWithLayout } from "@formula/syntax/parser";
+import { printAstWithLayout } from "@formula/syntax/print";
+import { tokenizeWithGaps } from "@formula/syntax/tokenizer";
+import type { BinaryReader } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
+
+export { FUNCTION_TABLES };
 
 /** Ptg identifiers this codec understands. Base values, before the class bits. */
 const Ptg = {
   Exp: 0x01,
+  Tbl: 0x02,
   Add: 0x03,
   Sub: 0x04,
   Mul: 0x05,
@@ -92,6 +137,8 @@ const Ptg = {
   Ref: 0x04,
   Area: 0x05,
   MemArea: 0x06,
+  MemErr: 0x07,
+  MemNoMem: 0x08,
   MemFunc: 0x09,
   RefErr: 0x0a,
   AreaErr: 0x0b,
@@ -100,6 +147,9 @@ const Ptg = {
   NameX: 0x19,
   Ref3d: 0x1a,
   Area3d: 0x1b,
+  // Tagged only: untagged, these two bytes are `PtgErr` and `PtgBool`, matched first by `decodePtg`.
+  RefErr3d: 0x1c,
+  AreaErr3d: 0x1d,
   /**
    * `PtgList`. Reserved as 0x18 by MS-XLSB 2.5.98.52 and always followed by an `eptg` of 0x19 — it is
    * one of the "extended" tokens, whose real identity is the second byte.
@@ -107,20 +157,29 @@ const Ptg = {
   List: 0x18
 } as const;
 
+/** `PtgAttr` flag bits — MS-XLSB 2.5.98.24 to 2.5.98.33. Exactly one is set, except `Space | Semi`. */
+const Attr = {
+  Semi: 0x01,
+  If: 0x02,
+  Choose: 0x04,
+  Goto: 0x08,
+  Sum: 0x10,
+  Baxcel: 0x20,
+  Space: 0x40,
+  IfError: 0x80
+} as const;
+
 /**
- * The operand class of a class-tagged token, added to the classless base values in `Ptg` above.
- *
- * **These two were swapped**, and every use of them was therefore inverted: references came out value-class and
- * function calls reference-class. The classic table settles it in three independent places — `PtgRef` is `0x24`
- * in the reference class (`0x04 | 0x20`), `PtgRef3d` is `0x3A` (`0x1A | 0x20`), and `PtgFuncVar` is `0x42` in
- * the value class (`0x02 | 0x40`) — and so does Excel, which writes `0x3A` for the reference a defined name
- * resolves to where this wrote `0x5A`.
- *
- * The class is not decoration. A reference in the value class is dereferenced to a single value before the
- * surrounding function sees it, so `SUM` over a value-class area gets one number rather than a range.
+ * `PtgAttrSpaceType.type` — MS-XLSB 2.5.98.32. Even values are spaces, odd ones carriage returns, and the pair
+ * says where: before an operand or operator, before an opening display parenthesis, before a closing one, or before
+ * the whole formula.
  */
-const REFERENCE_CLASS = 0x20;
-const VALUE_CLASS = 0x40;
+const SpaceAt = {
+  Expression: 0x00,
+  OpenParen: 0x02,
+  CloseParen: 0x04,
+  Formula: 0x06
+} as const;
 
 const BINARY_OP_BY_PTG: ReadonlyMap<number, string> = new Map([
   [Ptg.Add, "+"],
@@ -143,6 +202,11 @@ const PTG_BY_BINARY_OP: ReadonlyMap<string, number> = new Map(
   [...BINARY_OP_BY_PTG].map(([ptg, op]) => [op, ptg])
 );
 
+/** The `iftab`s with control-token encodings of their own. */
+const IF_ID = 1;
+const CHOOSE_ID = 100;
+const IFERROR_ID = 480;
+
 /** Context a token stream needs to be interpretable. */
 export interface PtgContext {
   /** Sheet names in workbook declaration order — the order `BrtBundleSh` emits them. */
@@ -156,30 +220,53 @@ export interface PtgContext {
    * `issues.xlsb` the table is `[{first:0,last:0}, {first:2,last:2}]`, so `ixti = 1` means the
    * *third* sheet, and reading it as the second silently retargets the reference.
    *
+   * `first` is signed: `-2` is a workbook-level entry (what a `PtgNameX` to another sheet's local name points
+   * through) and `-1` a sheet that no longer exists. `supportingLink` indexes {@link supportingLinks}; absent means
+   * 0, this workbook.
+   *
    * Absent means the identity mapping, which is what a file with no `BrtExternSheet` implies and
    * what this library's own writer emits a real table for.
    */
-  readonly externSheets?: readonly { readonly first: number; readonly last: number }[];
+  readonly externSheets?: readonly {
+    readonly first: number;
+    readonly last: number;
+    readonly supportingLink?: number;
+  }[];
+  /**
+   * The supporting links `BrtExternSheet` entries point into, in file order. Absent means a single `BrtSupSelf`.
+   *
+   * Only this workbook (`self`) and add-ins (`addin`, whose function names a `PtgNameX` indexes) are resolvable; an
+   * external workbook is recognised so a reference to one fails by name rather than resolving into this one.
+   */
+  readonly supportingLinks?: readonly SupportingLink[];
   /** Defined names in declaration order; `PtgName` is a one-based index into this. */
   readonly definedNames?: readonly string[];
+  /**
+   * Each defined name's scope, parallel to {@link definedNames}: the sheet position of a sheet-local name, or
+   * `undefined` for a workbook-wide one. A formula naming `Total` on a sheet with its own `Total` means that one,
+   * and `Sheet2!Total` means Sheet2's.
+   */
+  readonly definedNameScopes?: readonly (number | undefined)[];
+  /**
+   * Whether each defined name's definition is empty, parallel to {@link definedNames}. A call through such a name is a
+   * user-defined function, which XLSX spells `_xludf.NAME(…)` — Excel writes a plain, empty `BrtName` for each.
+   */
+  readonly definedNameEmpty?: readonly boolean[];
+  /** Position of the sheet the formula sits on, which decides which of two same-named names it means. */
+  readonly sheetIndex?: number;
+  /** What the formula is for. Defaults to `cell`. See {@link FormulaRole}. */
+  readonly role?: FormulaRole;
   /**
    * Tables by name, for `PtgList`.
    *
    * A structured reference names a table and a column *by name*, and the token carries an `idList` and a
    * column *index* — so resolving one needs the table's id and its column order, which only the package
-   * writer knows. There was a field like this here once that nothing filled in and nothing read; it was
-   * removed for that reason. This one is populated by `write/package.ts` and read by `emitStructuredRef`.
+   * writer knows.
    *
    * `sheet` is here because `PtgList` carries an `ixti` — it is a *3D* reference, like `PtgRef3d`, and
-   * naming the table is not enough to locate it. That field was written as a hard-coded 0, which is only
-   * right when the table happens to sit on whichever sheet `BrtExternSheet` entry 0 names. It usually
-   * does not: entry 0 of this writer's identity table is the *first* sheet, so every structured reference
-   * in a workbook whose table lives anywhere else pointed at the wrong sheet.
+   * naming the table is not enough to locate it.
    */
-  readonly tables?: ReadonlyMap<
-    string,
-    { readonly id: number; readonly columns: readonly string[]; readonly sheet: string }
-  >;
+  readonly tables?: ReadonlyMap<string, TableEntry>;
   /** Cell the formula sits in, for the relative forms `PtgRefN` / `PtgAreaN`. */
   readonly origin?: { readonly row: number; readonly column: number };
   /**
@@ -193,10 +280,30 @@ export interface PtgContext {
   readonly relativeToOrigin?: boolean;
 }
 
+/** One supporting link — `BrtSupSelf`, `BrtSupSame`, `BrtSupAddin` or `BrtSupBookSrc`. */
+export type SupportingLink =
+  | { readonly kind: "self" }
+  | { readonly kind: "same" }
+  | { readonly kind: "addin"; readonly names: readonly string[] }
+  | { readonly kind: "external" };
+
 /** A shared-formula reference: this cell defers to the formula at `row`/`column`. */
 export interface SharedFormulaReference {
   readonly sharedRow: number;
   readonly sharedColumn: number;
+}
+
+/** A decoded formula: the tree, its layout, and whitespace written before the whole formula. */
+export interface DecodedFormula {
+  readonly ast: AstNode;
+  readonly layout: FormulaLayout;
+  readonly prefix: string;
+}
+
+/** An encoded formula: the `Rgce` and the `RgbExtra` its array constants need. */
+export interface EncodedFormula {
+  readonly rgce: Uint8Array;
+  readonly extra: Uint8Array;
 }
 
 /** Bytes a `PtgExtraCol` occupies — a single `Col`, MS-XLSB 2.5.98.42. */
@@ -230,18 +337,8 @@ export function encodeSharedFormulaReference(
 /**
  * Decode a token stream into an AST, or report that it defers to a shared formula.
  *
- * `PtgExp` alone means the cell's formula lives elsewhere — Excel's way of storing one
- * expression for a filled range — so that is returned rather than treated as an expression.
- *
- * `extra` is the `RgbExtra` that follows the `Rgce` in a `CellParsedFormula`, and it is not optional in
- * practice for a `PtgExp`: **the token carries only the row.** The column lives in a `PtgExtraCol` over in
- * `RgbExtra` (MS-XLSB 2.5.98.40 and 2.5.98.42), so a five-byte `Rgce` is the whole token and the four bytes
- * that complete it are elsewhere in the record.
- *
- * This used to read the column as a `u16` from the `Rgce` itself, which made the token seven bytes. Excel's
- * are five — `01 08 00 00 00`, verified in `poi-62815.xlsb` and `poi-bug66682.xlsb` — so the decode
- * overran and threw, and the sheet reader's `catch` turned every shared and array formula in those files
- * into "could not be decoded". Nothing failed loudly; the formulas simply were not there.
+ * Kept for callers that want the tree alone; {@link decodeFormula} also returns the layout, and
+ * {@link formulaText} the text Excel would show.
  */
 export function decodePtg(
   tokens: Uint8Array,
@@ -249,126 +346,421 @@ export function decodePtg(
   where: string,
   extra?: Uint8Array
 ): AstNode | SharedFormulaReference {
-  const reader = new BinaryReader(tokens, 0, where);
-  const stack: AstNode[] = [];
-
-  while (reader.remaining > 0) {
-    const raw = reader.readUint8();
-    const base = raw & 0x1f;
-
-    // Untagged tokens first: their identifier is the whole byte, so they must be matched
-    // before the low-five-bit form or `PtgStr` (0x17) collides with a tagged token.
-    if (raw === Ptg.Exp) {
-      const row = reader.readUint32();
-      if (reader.remaining !== 0) {
-        throw new XlsbParseError(where, "PtgExp must be the only token in the stream");
-      }
-      if (extra === undefined || extra.length < PTG_EXTRA_COL_SIZE) {
-        throw new XlsbParseError(
-          where,
-          "PtgExp needs a PtgExtraCol in RgbExtra to supply its column"
-        );
-      }
-      return {
-        sharedRow: row,
-        sharedColumn: new DataView(extra.buffer, extra.byteOffset, extra.byteLength).getUint32(
-          0,
-          true
-        )
-      };
-    }
-    const binaryOp = BINARY_OP_BY_PTG.get(raw);
-    if (binaryOp !== undefined) {
-      const right = pop(stack, where);
-      const left = pop(stack, where);
-      stack.push({ type: NodeType.BinaryOp, op: binaryOp, left, right });
-      continue;
-    }
-    if (raw === Ptg.Union) {
-      // The comma operator produces a union. Flattened so `(a,b,c)` is one node rather
-      // than a nest, matching what the parser builds from the same text.
-      const right = pop(stack, where);
-      const left = pop(stack, where);
-      const areas = left.type === NodeType.UnionRef ? [...left.areas, right] : [left, right];
-      stack.push({ type: NodeType.UnionRef, areas });
-      continue;
-    }
-
-    switch (raw) {
-      case Ptg.Uplus:
-        stack.push({ type: NodeType.UnaryOp, op: "+", operand: pop(stack, where) });
-        continue;
-      case Ptg.Uminus:
-        stack.push({ type: NodeType.UnaryOp, op: "-", operand: pop(stack, where) });
-        continue;
-      case Ptg.Percent:
-        stack.push({ type: NodeType.Percent, operand: pop(stack, where) });
-        continue;
-      case Ptg.Paren:
-        // Nothing to do: the AST does not record redundant parentheses, and the printer
-        // re-inserts the ones precedence requires.
-        continue;
-      case Ptg.MissArg:
-        stack.push({ type: NodeType.Missing });
-        continue;
-      case Ptg.Str:
-        stack.push({ type: NodeType.String, value: readPtgString(reader, where) });
-        continue;
-      case Ptg.Err: {
-        const code = reader.readUint8();
-        const error = errorTextOf(code);
-        if (error === undefined) {
-          throw new XlsbParseError(where, `unknown error code 0x${code.toString(16)} in PtgErr`);
-        }
-        stack.push({ type: NodeType.Error, value: error });
-        continue;
-      }
-      case Ptg.Bool:
-        stack.push({ type: NodeType.Boolean, value: reader.readUint8() !== 0 });
-        continue;
-      case Ptg.Int:
-        stack.push({ type: NodeType.Number, value: reader.readUint16() });
-        continue;
-      case Ptg.Num:
-        stack.push({ type: NodeType.Number, value: reader.readFloat64() });
-        continue;
-      case Ptg.Attr:
-        skipAttribute(reader, where);
-        continue;
-      default:
-        break;
-    }
-
-    decodeClassTagged(raw, base, reader, stack, context, where);
-  }
-
-  if (stack.length !== 1) {
-    throw new XlsbParseError(
-      where,
-      `token stream left ${stack.length} expressions on the stack instead of one`
-    );
-  }
-  return stack[0]!;
+  const decoded = decodeFormula(tokens, context, where, extra);
+  return "sharedRow" in decoded ? decoded : decoded.ast;
 }
 
-function decodeClassTagged(
-  raw: number,
-  base: number,
-  reader: BinaryReader,
-  stack: AstNode[],
+/**
+ * The text of a token stream — what Excel shows for it — or the shared formula it defers to.
+ */
+export function formulaText(
+  tokens: Uint8Array,
   context: PtgContext,
-  where: string
+  where: string,
+  extra?: Uint8Array
+): string | SharedFormulaReference {
+  const decoded = decodeFormula(tokens, context, where, extra);
+  return "sharedRow" in decoded ? decoded : printDecoded(decoded);
+}
+
+/** Print a decoded formula with its layout. */
+export function printDecoded(decoded: DecodedFormula): string {
+  // `_xlfn.ANCHORARRAY(A1)` is how the package stores the spill-range operator; it reads back as `A1#`, as XLSX does.
+  return fromFileFormula(decoded.prefix + printAstWithLayout(decoded.ast, decoded.layout));
+}
+
+/**
+ * Decode a token stream and its `RgbExtra`.
+ *
+ * `PtgExp` alone means the cell's formula lives elsewhere — Excel's way of storing one expression for a filled
+ * range — so that is returned rather than treated as an expression. The token carries only the row; the column
+ * lives in a `PtgExtraCol` in `extra` (MS-XLSB 2.5.98.40 and 2.5.98.42).
+ *
+ * `extra` is also where a `PtgArray`'s values and a `PtgMemArea`'s cached areas live, one structure per such token
+ * in token order (MS-XLSB 2.5.98.87), so a caller that has a `RgbExtra` must pass it.
+ */
+export function decodeFormula(
+  tokens: Uint8Array,
+  context: PtgContext,
+  where: string,
+  extra?: Uint8Array
+): DecodedFormula | SharedFormulaReference {
+  if (tokens.length > 0 && tokens[0] === Ptg.Exp) {
+    if (tokens.length !== PTG_EXP_SIZE) {
+      throw new XlsbParseError(where, "PtgExp must be the only token in the stream");
+    }
+    if (extra === undefined || extra.length < PTG_EXTRA_COL_SIZE) {
+      throw new XlsbParseError(
+        where,
+        "PtgExp needs a PtgExtraCol in RgbExtra to supply its column"
+      );
+    }
+    return {
+      sharedRow: new DataView(tokens.buffer, tokens.byteOffset, tokens.byteLength).getUint32(
+        1,
+        true
+      ),
+      sharedColumn: new DataView(extra.buffer, extra.byteOffset, extra.byteLength).getUint32(
+        0,
+        true
+      )
+    };
+  }
+  const state: DecodeState = {
+    reader: new XlsbReader(tokens, 0, where),
+    extra: new XlsbReader(extra ?? new Uint8Array(0), 0, `${where} RgbExtra`),
+    stack: [],
+    layout: new Map(),
+    pending: [],
+    closedUnions: new Set(),
+    emptyNames: new Set(),
+    tokenClasses: new Map(),
+    prefix: "",
+    context,
+    where
+  };
+  while (state.reader.remaining > 0) {
+    decodeToken(state);
+  }
+  if (state.stack.length !== 1) {
+    throw new XlsbParseError(
+      where,
+      `token stream left ${state.stack.length} expressions on the stack instead of one`
+    );
+  }
+  const ast =
+    (context.role ?? "cell") === "cell"
+      ? withIntersections(state.stack[0]!, state.tokenClasses)
+      : state.stack[0]!;
+  // A union with no parenthesis of its own is a defined name's list of areas, `S!$A$1,S!$B$2`. Anywhere else the
+  // printer supplies the parentheses, because without them the commas would separate arguments.
+  if (ast.type === NodeType.UnionRef && !state.closedUnions.has(ast)) {
+    layoutOf(state.layout, ast).bare = true;
+  }
+  return { ast, layout: state.layout, prefix: state.prefix };
+}
+
+interface DecodeState {
+  readonly reader: BinaryReader;
+  readonly extra: BinaryReader;
+  readonly stack: AstNode[];
+  readonly layout: FormulaLayout;
+  /** `PtgAttrSpace` tokens seen since the last token they could belong to. */
+  pending: { readonly type: number; readonly count: number }[];
+  /** Unions whose own parenthesis has been read — a further one is a display parenthesis. */
+  readonly closedUnions: Set<AstNode>;
+  /** Name operands naming an empty defined name — a user-defined function when called. */
+  readonly emptyNames: Set<AstNode>;
+  /** The class each class-tagged token was written in, by the node it decoded to — see {@link withIntersections}. */
+  readonly tokenClasses: Map<AstNode, number>;
+  prefix: string;
+  readonly context: PtgContext;
+  readonly where: string;
+}
+
+/**
+ * The whitespace pending spaces of the given positions describe, removing them.
+ *
+ * `0x00`/`0x02`/`0x04`/`0x06` are spaces and the odd values carriage returns. A carriage return is a line break,
+ * and the XLSX text of the same formula carries it as one — `\r\n` in Excel's XML, which XML parsing reads as `\n`.
+ */
+function takeSpaces(state: DecodeState, at: number): string {
+  let text = "";
+  const rest: { type: number; count: number }[] = [];
+  for (const entry of state.pending) {
+    if ((entry.type & ~1) === at) {
+      text += (entry.type & 1 ? "\n" : " ").repeat(entry.count);
+    } else {
+      rest.push(entry);
+    }
+  }
+  state.pending = rest;
+  return text;
+}
+
+/**
+ * Attach the pending whitespace an operand-like token owns, and push it.
+ *
+ * Only the kind it owns is taken. The rest stays pending for a later token: Excel writes the space before a
+ * function's `)` in front of whatever token ends the last argument — `AND( A1>0, B1>0 )` has it before the `>` —
+ * so an operator that cleared everything pending lost it.
+ */
+function pushOperand(state: DecodeState, node: AstNode): void {
+  setLayout(state, node, "lead", takeSpaces(state, SpaceAt.Expression));
+  state.stack.push(node);
+}
+
+function setLayout(
+  state: DecodeState,
+  node: AstNode,
+  field: "lead" | "op" | "close",
+  text: string
 ): void {
+  if (text !== "") {
+    const entry = layoutOf(state.layout, node);
+    entry[field] = (entry[field] ?? "") + text;
+  }
+}
+
+function decodeToken(state: DecodeState): void {
+  const { reader, stack, where } = state;
+  const raw = reader.readUint8();
+
+  // Untagged tokens first: their identifier is the whole byte, so they must be matched
+  // before the low-five-bit form or `PtgStr` (0x17) collides with a tagged token.
+  if (raw === Ptg.Exp || raw === Ptg.Tbl) {
+    throw new ExcelUnsupportedFeatureError(
+      `Read XLSB formula at ${where}`,
+      raw === Ptg.Exp
+        ? "a PtgExp that is not the whole formula"
+        : "a data table (PtgTbl) is not supported yet"
+    );
+  }
+  const binaryOp = BINARY_OP_BY_PTG.get(raw);
+  if (binaryOp !== undefined) {
+    const right = pop(stack, where);
+    const left = pop(stack, where);
+    const node: AstNode = { type: NodeType.BinaryOp, op: binaryOp, left, right };
+    const spaces = takeSpaces(state, SpaceAt.Expression);
+    // The intersection operator *is* a space, so what Excel records is the run beyond the first.
+    setLayout(state, node, "op", binaryOp === " " && spaces !== "" ? ` ${spaces}` : spaces);
+    stack.push(node);
+    return;
+  }
+  if (raw === Ptg.Union) {
+    // The comma operator produces a union. Flattened so `(a,b,c)` is one node rather
+    // than a nest, matching what the parser builds from the same text.
+    const right = pop(stack, where);
+    const left = pop(stack, where);
+    const areas =
+      left.type === NodeType.UnionRef && !state.closedUnions.has(left)
+        ? [...left.areas, right]
+        : [left, right];
+    // Whitespace before a comma has no place in the text Excel would show; it is dropped, as Excel drops it.
+    takeSpaces(state, SpaceAt.Expression);
+    stack.push({ type: NodeType.UnionRef, areas });
+    return;
+  }
+
+  switch (raw) {
+    case Ptg.Uplus:
+    case Ptg.Uminus: {
+      const node: AstNode = {
+        type: NodeType.UnaryOp,
+        op: raw === Ptg.Uminus ? "-" : "+",
+        operand: pop(stack, where)
+      };
+      setLayout(state, node, "lead", takeSpaces(state, SpaceAt.Expression));
+      stack.push(node);
+      return;
+    }
+    case Ptg.Percent: {
+      const node: AstNode = { type: NodeType.Percent, operand: pop(stack, where) };
+      setLayout(state, node, "op", takeSpaces(state, SpaceAt.Expression));
+      stack.push(node);
+      return;
+    }
+    case Ptg.Paren: {
+      const inner = pop(stack, where);
+      const open = takeSpaces(state, SpaceAt.OpenParen);
+      const close = takeSpaces(state, SpaceAt.CloseParen);
+      if (inner.type === NodeType.UnionRef && !state.closedUnions.has(inner)) {
+        // A union's own parentheses — the ones that make its commas a union.
+        state.closedUnions.add(inner);
+        setLayout(state, inner, "lead", open);
+        setLayout(state, inner, "close", close);
+      } else {
+        (layoutOf(state.layout, inner).parens ??= []).push({
+          ...(open === "" ? {} : { open }),
+          ...(close === "" ? {} : { close })
+        });
+      }
+      stack.push(inner);
+      return;
+    }
+    case Ptg.MissArg:
+      pushOperand(state, { type: NodeType.Missing });
+      return;
+    case Ptg.Str:
+      pushOperand(state, { type: NodeType.String, value: readPtgString(reader, where) });
+      return;
+    case Ptg.Err: {
+      const code = reader.readUint8();
+      const error = errorTextOf(code);
+      if (error === undefined) {
+        throw new XlsbParseError(where, `unknown error code 0x${code.toString(16)} in PtgErr`);
+      }
+      pushOperand(state, { type: NodeType.Error, value: error });
+      return;
+    }
+    case Ptg.Bool:
+      pushOperand(state, { type: NodeType.Boolean, value: reader.readUint8() !== 0 });
+      return;
+    case Ptg.Int:
+      pushOperand(state, { type: NodeType.Number, value: reader.readUint16() });
+      return;
+    case Ptg.Num:
+      pushOperand(state, { type: NodeType.Number, value: reader.readFloat64() });
+      return;
+    case Ptg.Attr:
+      decodeAttribute(state);
+      return;
+    default:
+      break;
+  }
+
+  const depth = stack.length;
+  const before = stack[depth - 1];
+  decodeClassTagged(state, raw, raw & 0x1f);
+  const after = stack[stack.length - 1];
+  if (after !== undefined && (stack.length !== depth || after !== before)) {
+    state.tokenClasses.set(after, raw & 0x60);
+  }
+}
+
+/** A reference, or a call that returns one — what `@` intersects; not a function passed by name. */
+function isIntersectable(node: AstNode): boolean {
+  switch (node.type) {
+    case NodeType.CellRef:
+    case NodeType.RangeRef:
+    case NodeType.ColRangeRef:
+    case NodeType.RowRangeRef:
+    case NodeType.StructuredRef:
+      return true;
+    case NodeType.Name:
+      return !node.name.toLowerCase().startsWith("_xleta.");
+    case NodeType.FunctionCall:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * A cell formula's `tree` with an `@` around each reference the file wrote in the value class where its text alone is
+ * written in another. Excel writes `@x` (XLSX `_xlfn.SINGLE(x)`) as a call to the `_xlfn.SINGLE` stub, which reads
+ * back as `@x`, except where `x` alone is intersected in its place anyway (`bareIntersections`) — and those bytes read
+ * back bare, as the XLSX reader of `<f>A1:A3</f>` leaves it. A value-class reference where the text alone would be in
+ * another class is an intersection written without the call, and reading it bare would sum a whole range where the
+ * file sums one cell (`SUM` of a `45` area). A cell formula only: the encoder's classes are Excel's there
+ * (`operand-classes.node.test.ts`), and not checked against Excel's in conditional formats, validations or names,
+ * where Excel writes the call. Only references — an `@` changes nothing else — and not a function passed by name
+ * (`_xleta.SUM`), which is always in the value class. Unchanged parts keep their identity, so their layout still
+ * applies.
+ */
+function withIntersections(tree: AstNode, written: ReadonlyMap<AstNode, number>): AstNode {
+  let assigned: ReadonlyMap<AstNode, number> | undefined;
+  for (const tokenClass of written.values()) {
+    if (tokenClass === VALUE_CLASS) {
+      assigned = assignClasses(tree, "cell").own;
+      break;
+    }
+  }
+  if (assigned === undefined) {
+    return tree;
+  }
+  const expected = assigned;
+  const rewrite = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      let changed = false;
+      const mapped = value.map(item => {
+        const next = rewrite(item);
+        changed ||= next !== item;
+        return next;
+      });
+      return changed ? mapped : value;
+    }
+    if (typeof value !== "object" || value === null || !("type" in value)) {
+      return value;
+    }
+    const node = value as AstNode;
+    let copy: Record<string, unknown> | undefined;
+    for (const [key, item] of Object.entries(node)) {
+      const next = rewrite(item);
+      if (next !== item) {
+        copy ??= { ...node };
+        copy[key] = next;
+      }
+    }
+    const inner = (copy ?? node) as AstNode;
+    const wanted = expected.get(node);
+    return written.get(node) === VALUE_CLASS &&
+      wanted !== undefined &&
+      wanted !== VALUE_CLASS &&
+      isIntersectable(node)
+      ? { type: NodeType.UnaryOp, op: "@", operand: inner }
+      : inner;
+  };
+  return rewrite(tree) as AstNode;
+}
+
+/**
+ * `PtgAttr` — MS-XLSB 2.5.98.24 to 2.5.98.33.
+ *
+ * Most are control tokens the reader steps over: `PtgAttrIf`, `PtgAttrIfError`, `PtgAttrChoose` and `PtgAttrGoto`
+ * are jumps that let an evaluator skip a branch, and the function token after them already says what was called;
+ * `PtgAttrSemi` marks a volatile formula. Two carry meaning. `PtgAttrSum` *is* a call — Excel writes `SUM` with one
+ * argument as this four-byte token, and leaving the operand on the stack read `=SUM(F5-I5)` as `=F5-I5`, 93 times
+ * across the Excel-converted corpus. `PtgAttrSpace` is the author's whitespace, kept until the token it precedes.
+ */
+function decodeAttribute(state: DecodeState): void {
+  const { reader, where } = state;
+  const flags = reader.readUint8();
+  if ((flags & Attr.Space) !== 0) {
+    // `PtgAttrSpace`, or `PtgAttrSpaceSemi` (0x41), which is the same plus "volatile".
+    const type = reader.readUint8();
+    const count = reader.readUint8();
+    if (type === SpaceAt.Formula || type === SpaceAt.Formula + 1) {
+      state.prefix += (type & 1 ? "\n" : " ").repeat(count);
+    } else if (type <= 0x05) {
+      state.pending.push({ type, count });
+    }
+    return;
+  }
+  if ((flags & Attr.Choose) !== 0) {
+    // A jump table whose length is one more than `cOffset`.
+    const count = reader.readUint16();
+    reader.skip((count + 1) * 2);
+    return;
+  }
+  if ((flags & Attr.Sum) !== 0) {
+    reader.skip(2);
+    const call: FunctionCallNode = {
+      type: NodeType.FunctionCall,
+      name: "SUM",
+      args: [pop(state.stack, where)]
+    };
+    finishCall(state, call);
+    return;
+  }
+  // `PtgAttrSemi`, `PtgAttrIf`, `PtgAttrIfError`, `PtgAttrGoto`, `PtgAttrBaxcel`: two bytes, nothing to build. Any
+  // whitespace pending stays pending — Excel writes the space before a function's `)` *before* the jump that
+  // precedes the function token.
+  if ((flags & (Attr.Semi | Attr.If | Attr.IfError | Attr.Goto | Attr.Baxcel)) === 0) {
+    throw new XlsbParseError(where, `PtgAttr with unknown flags 0x${flags.toString(16)}`);
+  }
+  reader.skip(2);
+}
+
+/** Give a decoded call the whitespace its function token owns, and push it. */
+function finishCall(state: DecodeState, call: FunctionCallNode): void {
+  setLayout(state, call, "lead", takeSpaces(state, SpaceAt.Expression));
+  setLayout(state, call, "close", takeSpaces(state, SpaceAt.CloseParen));
+  state.stack.push(call);
+}
+
+function decodeClassTagged(state: DecodeState, raw: number, base: number): void {
+  const { reader, stack, context, where } = state;
   switch (base) {
+    case Ptg.Array:
+      pushOperand(state, readArrayConstant(state));
+      return;
     case Ptg.Func: {
-      // **A fixed-arity call, and this used to throw.** The token carries no argument count — the count is
-      // implied by the function — so decoding one needs an arity table, and the comment here said this codec
-      // "does not carry" it. The consequence was that *no* formula Excel wrote for any of the 256 fixed-arity
-      // functions could be read: `ROUND`, `MOD`, `MID`, `DATE`, `TEXT` and every other fixed signature.
+      // A fixed-arity call. The token carries no argument count — the count is implied by the function.
       const functionId = reader.readUint16() & 0x7fff;
       const name = FUNCTION_NAME_BY_ID.get(functionId);
       if (name === undefined) {
-        throw new ExcelNotSupportedError(
+        throw new ExcelUnsupportedFeatureError(
           `Read XLSB formula at ${where}`,
           `built-in function id ${functionId} is not in this codec's table`
         );
@@ -376,8 +768,7 @@ function decodeClassTagged(
       const arity = ARITY_BY_ID.get(functionId);
       if (arity === undefined) {
         // A `PtgFunc` naming a function this codec knows to be variadic is a contradiction: the token says the
-        // count is implied and the table says there is none to imply. Reported rather than guessed, because
-        // guessing means silently taking the wrong number of operands off the stack.
+        // count is implied and the table says there is none to imply. Reported rather than guessed.
         throw new XlsbParseError(
           where,
           `${name} was called through PtgFunc, which implies a fixed argument count, but it is variadic`
@@ -389,57 +780,79 @@ function decodeClassTagged(
           `${name} wants ${arity} argument(s) but the stack holds ${stack.length}`
         );
       }
-      const args = stack.splice(stack.length - arity, arity);
-      stack.push({ type: NodeType.FunctionCall, name, args });
+      finishCall(state, {
+        type: NodeType.FunctionCall,
+        name,
+        args: stack.splice(stack.length - arity, arity)
+      });
       return;
     }
     case Ptg.FuncVar: {
       const argumentCount = reader.readUint8() & 0x7f;
       const functionId = reader.readUint16() & 0x7fff;
+      if (stack.length < argumentCount) {
+        throw new XlsbParseError(
+          where,
+          `a call wants ${argumentCount} operand(s) but the stack holds ${stack.length}`
+        );
+      }
       // `0x00FF` is not a function: it means "the callee is the first operand", which is how Excel calls
-      // anything the `Ftab` has no id for. The first of the `cparams` is therefore the `PtgName` naming the
-      // function, and the rest are its arguments.
+      // anything the `Ftab` has no id for. The first of the `cparams` is therefore the name of the function.
       if (functionId === IFTAB_CALL_BY_NAME) {
-        if (stack.length < argumentCount || argumentCount < 1) {
+        if (argumentCount < 1) {
           throw new XlsbParseError(
             where,
-            `a call through a name wants ${argumentCount} operand(s) but the stack holds ${stack.length}`
+            "a call through a name has no operand naming the function"
           );
         }
         const operands = stack.splice(stack.length - argumentCount, argumentCount);
         const callee = operands[0]!;
+        // An argument list applied to the result of a call — `LAMBDA(x,x*2)(5)`; see `INVOCATION_CLASSES`.
+        if (callee.type === NodeType.FunctionCall) {
+          (callee.invocations ??= []).push(operands.slice(1));
+          stack.push(callee);
+          return;
+        }
         if (callee.type !== NodeType.Name) {
           throw new XlsbParseError(
             where,
             `a call through iftab 0x00FF must name its function, and the first operand is not a name`
           );
         }
-        stack.push({
+        // **The `_xlfn.` prefix stays.** It is how the XLSX container spells the same call — Excel's own XLSX of
+        // this cell reads `_xlfn.CONCAT(…)` — and a reader that dropped it produced `CONCAT(…)`, which the XLSX
+        // writer then wrote verbatim and Excel opened as `#NAME?`.
+        //
+        // A call through a plain *empty* name is a user-defined function, which XLSX spells `_xludf.NAME(…)`: Excel's
+        // own XLSX of an unknown `CONCAT(A1,B1)` holds `_xludf.CONCAT(A1,B1)` where its XLSB has `PtgName` to an empty
+        // `CONCAT`.
+        const call: FunctionCallNode = {
           type: NodeType.FunctionCall,
-          // The `_xlfn.` prefix is the file format's, not the formula's: a reader must give back
-          // `XLOOKUP(…)`, which is what the author wrote and what the XLSX container stores.
-          name: callee.name.startsWith(FUTURE_FUNCTION_PREFIX)
-            ? callee.name.slice(FUTURE_FUNCTION_PREFIX.length)
+          name: state.emptyNames.has(callee)
+            ? `${USER_FUNCTION_PREFIX}${callee.name}`
             : callee.name,
           args: operands.slice(1)
-        });
+        };
+        // The whitespace before the name was written before the name's token.
+        const calleeLead = state.layout.get(callee)?.lead;
+        if (calleeLead !== undefined) {
+          setLayout(state, call, "lead", calleeLead);
+        }
+        finishCall(state, call);
         return;
       }
       const name = FUNCTION_NAME_BY_ID.get(functionId);
       if (name === undefined) {
-        throw new ExcelNotSupportedError(
+        throw new ExcelUnsupportedFeatureError(
           `Read XLSB formula at ${where}`,
           `built-in function id ${functionId} is not in this codec's table`
         );
       }
-      if (stack.length < argumentCount) {
-        throw new XlsbParseError(
-          where,
-          `${name} wants ${argumentCount} argument(s) but the stack holds ${stack.length}`
-        );
-      }
-      const args = stack.splice(stack.length - argumentCount, argumentCount);
-      stack.push({ type: NodeType.FunctionCall, name, args });
+      finishCall(state, {
+        type: NodeType.FunctionCall,
+        name,
+        args: stack.splice(stack.length - argumentCount, argumentCount)
+      });
       return;
     }
     case Ptg.Name: {
@@ -451,87 +864,100 @@ function decodeClassTagged(
           `PtgName references defined name ${index}, which is absent`
         );
       }
-      stack.push({ type: NodeType.Name, name });
+      const node: AstNode = { type: NodeType.Name, name };
+      if (context.definedNameEmpty?.[index - 1] === true && !name.toLowerCase().startsWith("_xl")) {
+        state.emptyNames.add(node);
+      }
+      pushOperand(state, node);
       return;
     }
+    case Ptg.NameX: {
+      pushOperand(state, readNameX(state));
+      return;
+    }
+    // In a defined name every reference to a sheet is 3D, so a plain one is Excel's `!$A$1` — "the sheet the name is
+    // used on". The empty sheet prints as that bare `!`; read without it, the definition became a different one.
     case Ptg.Ref:
-      stack.push(readRef(reader, undefined, undefined));
+      pushOperand(state, readRef(reader, currentSheetOf(context), undefined, where));
       return;
     case Ptg.Area:
-      stack.push(readArea(reader, undefined, undefined));
+      pushOperand(state, readArea(reader, currentSheetOf(context), undefined, where));
       return;
-    case Ptg.RefN: {
-      const origin = requireOrigin(context, where, "PtgRefN");
-      stack.push(readRelativeRef(reader, origin));
+    case Ptg.RefN:
+      pushOperand(state, readRelativeRef(reader, requireOrigin(context, where, "PtgRefN"), where));
       return;
-    }
-    case Ptg.AreaN: {
-      const origin = requireOrigin(context, where, "PtgAreaN");
-      stack.push(readRelativeArea(reader, origin));
+    case Ptg.AreaN:
+      pushOperand(
+        state,
+        readRelativeArea(reader, requireOrigin(context, where, "PtgAreaN"), where)
+      );
       return;
-    }
     case Ptg.Ref3d: {
       const { sheet, endSheet } = readSheetPair(reader, context, where);
-      stack.push(readRef(reader, sheet, endSheet));
-      return;
-    }
-    case Ptg.List: {
-      // The `eptg` that follows, which the specification fixes at 0x19. Consumed even though its value is
-      // known, because skipping it shifts every field after it.
-      reader.readUint8();
-      reader.readUint16(); // ixti
-      const flags = reader.readUint16();
-      const listIndex = reader.readUint32();
-      const first = reader.readUint16();
-      const last = reader.readUint16();
-      const table = [...(context.tables ?? [])].find(([, entry]) => entry.id === listIndex);
-      if (table === undefined) {
-        throw new XlsbParseError(
-          where,
-          `PtgList names table ${listIndex}, which this file does not declare`
-        );
-      }
-      const [tableName, entry] = table;
-      const columnCount = flags & 0x03;
-      const columns =
-        columnCount === 0
-          ? []
-          : columnCount === 1
-            ? [entry.columns[first] ?? ""]
-            : [entry.columns[first] ?? "", entry.columns[last] ?? ""];
-      stack.push({
-        type: NodeType.StructuredRef,
-        tableName,
-        columns: columns.filter(name => name !== ""),
-        specials: specialsOf((flags >>> 2) & 0x1f)
-      });
+      pushOperand(state, readRef(reader, sheet, endSheet, where));
       return;
     }
     case Ptg.Area3d: {
       const { sheet, endSheet } = readSheetPair(reader, context, where);
-      stack.push(readArea(reader, sheet, endSheet));
+      pushOperand(state, readArea(reader, sheet, endSheet, where));
       return;
     }
+    case Ptg.List:
+      pushOperand(state, readList(reader, context, where));
+      return;
     case Ptg.RefErr:
       reader.skip(6);
-      stack.push({ type: NodeType.Error, value: "#REF!" });
+      pushOperand(state, { type: NodeType.Error, value: "#REF!" });
       return;
     case Ptg.AreaErr:
       reader.skip(12);
-      stack.push({ type: NodeType.Error, value: "#REF!" });
+      pushOperand(state, { type: NodeType.Error, value: "#REF!" });
+      return;
+    // The 3D forms of the two above: an `ixti`, then the same unused bytes (MS-XLSB 2.5.98.71 and 2.5.98.21). What
+    // Excel writes once the cells a cross-sheet reference named have been deleted — and it shows them qualified,
+    // `Other!#REF!`, so the sheet is kept.
+    case Ptg.RefErr3d:
+    case Ptg.AreaErr3d: {
+      const ixti = reader.readUint16();
+      reader.skip(base === Ptg.RefErr3d ? 6 : 12);
+      // In a conditional format or a validation the formula's own sheet is not named: Excel writes the rule
+      // `#REF!>1` as `5c 00 00 …`, through the entry for the sheet it sits on, and shows it unqualified. A defined
+      // name keeps it — a local name's `Feststellanlagen!#REF!` reads back qualified in Excel's XLSX.
+      const resolved = resolveSheet(context, ixti);
+      const template =
+        context.role === "conditional" || context.role === "validation" || context.role === "list";
+      const sheet =
+        template &&
+        resolved !== undefined &&
+        resolved === context.sheetNames?.[context.sheetIndex ?? -1]
+          ? undefined
+          : resolved;
+      pushOperand(state, {
+        type: NodeType.Error,
+        value: "#REF!",
+        ...(sheet === undefined ? {} : { sheet })
+      });
+      return;
+    }
+    // Mem tokens precede a reference subexpression and say whether its result was cached. The subexpression's
+    // own tokens follow and are decoded like any others; the cache is not needed to say what the formula is.
+    case Ptg.MemArea: {
+      reader.skip(4 + 2);
+      // Its cached areas are a `PtgExtraMem` in `RgbExtra`, which has to be stepped over to keep any later
+      // `PtgArray` aligned with its own values.
+      const count = state.extra.readUint32();
+      state.extra.skip(count * 16);
+      return;
+    }
+    case Ptg.MemErr:
+    case Ptg.MemNoMem:
+      reader.skip(4 + 2);
       return;
     case Ptg.MemFunc:
-      // A cached reference subexpression. The length prefix is followed by the tokens
-      // themselves, which the loop decodes; nothing needs to be pushed here.
       reader.skip(2);
       return;
-    case Ptg.MemArea:
-      // As `PtgMemFunc`, but the cached area list lives in the record's extra data, which
-      // the caller rejects — so reaching this means the stream is inconsistent.
-      reader.skip(6);
-      return;
     default:
-      throw new ExcelNotSupportedError(
+      throw new ExcelUnsupportedFeatureError(
         `Read XLSB formula at ${where}`,
         `Ptg token 0x${raw.toString(16).padStart(2, "0")} is not supported yet`
       );
@@ -539,40 +965,151 @@ function decodeClassTagged(
 }
 
 /**
- * `PtgAttr` carries hints, not expression structure.
+ * `PtgArray` and its `PtgExtraArray` — MS-XLSB 2.5.98.23 and 2.5.98.41.
  *
- * The one that matters is `bitSum` — `SUM` with a single argument is encoded as an
- * attribute rather than a function call — and it is handled by leaving the operand on the
- * stack, which is what the following tokens expect.
+ * The token's fourteen bytes are unused; the values are in `RgbExtra`: a row count, a column count, then one
+ * `SerAr` per element in row-major order, each led by a byte naming its kind (2.5.98.93). Excel's own
+ * `{1,"a";TRUE,#N/A}` is `02 00 00 00 02 00 00 00 | 00 <f64 1> | 01 01 00 61 00 | 02 01 | 04 2a 00 00 00`.
  */
-function skipAttribute(reader: BinaryReader, where: string): void {
-  const flags = reader.readUint8();
-  if ((flags & 0x04) !== 0) {
-    // bitChoose: a jump table whose length is the number of entries.
-    const count = reader.readUint16();
-    reader.skip((count + 1) * 2);
-    return;
+function readArrayConstant(state: DecodeState): AstNode {
+  const { reader, extra, where } = state;
+  reader.skip(14);
+  const rowCount = extra.readUint32();
+  const columnCount = extra.readUint32();
+  if (rowCount === 0 || columnCount === 0 || rowCount * columnCount > extra.remaining) {
+    throw new XlsbParseError(
+      where,
+      `PtgExtraArray of ${rowCount}×${columnCount} does not fit its data`
+    );
   }
-  if ((flags & 0x40) !== 0) {
-    // bitSpace: two bytes describing whitespace the author wrote. Dropped, because the
-    // printer decides spacing.
-    reader.skip(2);
-    return;
+  const rows: AstNode[][] = [];
+  for (let row = 0; row < rowCount; row++) {
+    const values: AstNode[] = [];
+    for (let column = 0; column < columnCount; column++) {
+      const kind = extra.readUint8();
+      switch (kind) {
+        case 0x00:
+          values.push({ type: NodeType.Number, value: extra.readFloat64() });
+          break;
+        case 0x01:
+          values.push({ type: NodeType.String, value: readPtgString(extra, where) });
+          break;
+        case 0x02:
+          values.push({ type: NodeType.Boolean, value: extra.readUint8() !== 0 });
+          break;
+        case 0x04: {
+          const code = extra.readUint8();
+          extra.skip(3);
+          const error = errorTextOf(code);
+          if (error === undefined) {
+            throw new XlsbParseError(where, `unknown error code 0x${code.toString(16)} in SerErr`);
+          }
+          values.push({ type: NodeType.Error, value: error });
+          break;
+        }
+        default:
+          throw new XlsbParseError(where, `SerAr of unknown kind 0x${kind.toString(16)}`);
+      }
+    }
+    rows.push(values);
   }
-  void where;
-  reader.skip(2);
+  return { type: NodeType.Array, rows };
+}
+
+/**
+ * `PtgNameX` — MS-XLSB 2.5.98.61: an `ixti` and a one-based name index.
+ *
+ * The specification describes it as a name in another workbook, and Excel also uses it for a name *scoped to
+ * another sheet of this one*: `Other!LocalO` on sheet `S` is `59 02 00 0b 00 00 00`, where `ixti` 2 is a
+ * workbook-level entry (`BrtSupSelf`, -2, -2) and 11 indexes this workbook's own `BrtName` list. The sheet in the
+ * text is the name's own scope.
+ */
+function readNameX(state: DecodeState): AstNode {
+  const { reader, context, where } = state;
+  const ixti = reader.readUint16();
+  const index = reader.readUint32();
+  const entry = context.externSheets?.[ixti];
+  const link = context.supportingLinks?.[entry?.supportingLink ?? 0] ?? { kind: "self" };
+  if (link.kind === "addin") {
+    const name = link.names[index - 1];
+    if (name === undefined) {
+      throw new XlsbParseError(where, `PtgNameX names add-in function ${index}, which is absent`);
+    }
+    return { type: NodeType.Name, name };
+  }
+  if (link.kind !== "self") {
+    throw new ExcelUnsupportedFeatureError(
+      `Read XLSB formula at ${where}`,
+      "a defined name in another workbook is not supported yet"
+    );
+  }
+  const name = context.definedNames?.[index - 1];
+  if (name === undefined) {
+    throw new XlsbParseError(where, `PtgNameX references defined name ${index}, which is absent`);
+  }
+  const scope = context.definedNameScopes?.[index - 1];
+  const sheet = scope === undefined ? undefined : context.sheetNames?.[scope];
+  return { type: NodeType.Name, name, ...(sheet === undefined ? {} : { sheet }) };
+}
+
+/**
+ * `PtgList` — a structured reference; see {@link emitStructuredRef} for the layout.
+ */
+function readList(reader: BinaryReader, context: PtgContext, where: string): AstNode {
+  // The `eptg` that follows, which the specification fixes at 0x19. Consumed even though its value is
+  // known, because skipping it shifts every field after it.
+  const eptg = reader.readUint8();
+  if (eptg !== 0x19) {
+    throw new ExcelUnsupportedFeatureError(
+      `Read XLSB formula at ${where}`,
+      `extended Ptg 0x18 0x${eptg.toString(16)} is not supported yet`
+    );
+  }
+  reader.readUint16(); // ixti
+  const flags = reader.readUint16();
+  const listIndex = reader.readUint32();
+  const first = reader.readUint16();
+  const last = reader.readUint16();
+  // `invalid` (bit 12): the reference no longer names a table, and every other field is unused. Excel writes it for
+  // `Tb[@x]` in a cell outside the table — `18 19 ff ff 00 30 ff ff ff ff …` — and shows `#REF!`.
+  if ((flags & 0x1000) !== 0) {
+    return { type: NodeType.Error, value: "#REF!" };
+  }
+  // `nonresident` (bit 13): a table in another workbook, with its name in a `PtgExtraList` this codec does not read.
+  if ((flags & 0x2000) !== 0) {
+    throw new ExcelUnsupportedFeatureError(
+      `Read XLSB formula at ${where}`,
+      "a structured reference to a table in another workbook is not supported yet"
+    );
+  }
+  const table = [...(context.tables ?? [])].find(([, entry]) => entry.id === listIndex);
+  if (table === undefined) {
+    throw new XlsbParseError(
+      where,
+      `PtgList names table ${listIndex}, which this file does not declare`
+    );
+  }
+  const [tableName, entry] = table;
+  const columnCount = flags & 0x03;
+  const columns =
+    columnCount === 0
+      ? []
+      : columnCount === 1
+        ? [entry.columns[first] ?? ""]
+        : [entry.columns[first] ?? "", entry.columns[last] ?? ""];
+  return {
+    type: NodeType.StructuredRef,
+    tableName,
+    columns: columns.filter(name => name !== ""),
+    specials: specialsOf((flags >>> 2) & 0x1f)
+  };
 }
 
 /**
  * `PtgStr`: a two-byte character count, then UTF-16LE. No flag byte.
  *
- * Established from Excel's own output. The obvious guess is that this is BIFF8's
- * `XLUnicodeString`, which carries a flag byte selecting between Latin-1 and UTF-16 — and
- * an earlier version of this decoder assumed exactly that. On a real `=("a"&"b")` the
- * tokens are `17 01 00 61 00`, five bytes: the ptg, a count of one, and one UTF-16 code
- * unit. A flag byte would have consumed the `61` and then read `00 17` as a character,
- * producing a plausible string from the wrong bytes and desynchronising the rest of the
- * stream.
+ * Established from Excel's own output. On a real `=("a"&"b")` the tokens are `17 01 00 61 00`, five bytes: the
+ * ptg, a count of one, and one UTF-16 code unit. A BIFF8-style flag byte would have consumed the `61`.
  */
 function readPtgString(reader: BinaryReader, where: string): string {
   const length = reader.readUint16();
@@ -586,6 +1123,15 @@ function readPtgString(reader: BinaryReader, where: string): string {
   return text;
 }
 
+/** The sheet a single-sheet `ixti` resolves to, or `undefined` when it names none. */
+function resolveSheet(context: PtgContext, ixti: number): string | undefined {
+  const entry = context.externSheets?.[ixti] ?? { first: ixti, last: ixti };
+  if ((entry.supportingLink ?? 0) !== 0 || entry.first < 0) {
+    return undefined;
+  }
+  return context.sheetNames?.[entry.first];
+}
+
 function readSheetPair(
   reader: BinaryReader,
   context: PtgContext,
@@ -594,7 +1140,14 @@ function readSheetPair(
   const ixti = reader.readUint16();
   // Resolved through `BrtExternSheet`, not used as a sheet index. See `PtgContext.externSheets`.
   const entry = context.externSheets?.[ixti] ?? { first: ixti, last: ixti };
-  const sheet = context.sheetNames?.[entry.first];
+  const link = context.supportingLinks?.[entry.supportingLink ?? 0] ?? { kind: "self" };
+  if (link.kind !== "self") {
+    throw new ExcelUnsupportedFeatureError(
+      `Read XLSB formula at ${where}`,
+      "a reference to another workbook is not supported yet"
+    );
+  }
+  const sheet = entry.first < 0 ? undefined : context.sheetNames?.[entry.first];
   if (sheet === undefined) {
     throw new XlsbParseError(
       where,
@@ -618,40 +1171,75 @@ function requireOrigin(
 }
 
 /** `RgceLoc`: row as `u32`, then column with its two absolute-reference flags. */
+/** The sheet a plain `PtgRef` / `PtgArea` names: none in a formula, and the using sheet (`""`) in a defined name. */
+function currentSheetOf(context: PtgContext): string | undefined {
+  return context.role === "name" ? "" : undefined;
+}
+
 function readRef(
   reader: BinaryReader,
   sheet: string | undefined,
-  endSheet: string | undefined
+  endSheet: string | undefined,
+  where: string
 ): CellRefNode {
-  const row = reader.readUint32();
+  const row = checkSheetIndex(reader.readUint32(), "row", where, "PtgRef");
   const columnAndFlags = reader.readUint16();
   return cellRef(row, columnAndFlags, sheet, endSheet);
 }
 
+/**
+ * `RgceArea` — MS-XLSB 2.5.98.89: `rowFirst`, `rowLast`, `columnFirst`, `columnLast`, all positions.
+ *
+ * The two rows come before the two columns. A cell pair (`row, col, row, col`) is the obvious misreading.
+ */
 function readArea(
   reader: BinaryReader,
   sheet: string | undefined,
-  endSheet: string | undefined
+  endSheet: string | undefined,
+  where: string
 ): AstNode {
-  const firstRow = reader.readUint32();
-  const lastRow = reader.readUint32();
+  // An `RwLongU` is at most 0xFFFFF. A larger one is a malformed token, not a reference to be modelled: a defined
+  // name holding one reached a consumer that walks its area cell by cell.
+  const firstRow = checkSheetIndex(reader.readUint32(), "row", where, "PtgArea");
+  const lastRow = checkSheetIndex(reader.readUint32(), "row", where, "PtgArea");
   const firstColumn = reader.readUint16();
   const lastColumn = reader.readUint16();
+  return areaNode(firstRow, lastRow, firstColumn, lastColumn, sheet, endSheet);
+}
 
-  // An axis pinned to the sheet's full extent is a *whole-row* or *whole-column* reference, and reading
-  // it back as an ordinary range loses the shape: `$1:$1` becomes `$A$1:$XFD$1`, which computes the same
-  // thing but is not what the author wrote — and for `_xlnm.Print_Titles` it is not even valid, because
-  // Excel only accepts a whole-axis reference there.
+/**
+ * An area from resolved positions, each column still carrying its two `ColRelShort` flags.
+ *
+ * An axis pinned to the sheet's full extent is a *whole-row* or *whole-column* reference, and reading it back as
+ * an ordinary range loses the shape: `$1:$1` becomes `$A$1:$XFD$1`, which computes the same thing but is not what
+ * the author wrote — and for `_xlnm.Print_Titles` it is not even valid. The axis that *is* named keeps its `$`
+ * markers: `C:C` in a template moves with the cell and `$C:$C` does not.
+ */
+function areaNode(
+  firstRow: number,
+  lastRow: number,
+  firstColumn: number,
+  lastColumn: number,
+  sheet: string | undefined,
+  endSheet: string | undefined
+): AstNode {
+  const scope = {
+    ...(sheet === undefined ? {} : { sheet }),
+    ...(endSheet === undefined ? {} : { endSheet })
+  };
   const spansAllColumns =
     (firstColumn & 0x3fff) === 0 && (lastColumn & 0x3fff) === XLSB_MAX_COLUMNS - 1;
   const spansAllRows = firstRow === 0 && lastRow === XLSB_MAX_ROWS - 1;
-  if (spansAllColumns && !spansAllRows) {
+  // The whole sheet is shown as every *row* — Excel's `SUM(1:1048576)` is the same token as `A1:XFD1048576` and
+  // reads back as rows.
+  if (spansAllColumns) {
     return {
       type: NodeType.RowRangeRef,
       startRow: firstRow + 1,
       endRow: lastRow + 1,
-      ...(sheet === undefined ? {} : { sheet }),
-      ...(endSheet === undefined ? {} : { endSheet })
+      ...((firstColumn & 0x8000) === 0 ? { startAbsolute: true } : {}),
+      ...((lastColumn & 0x8000) === 0 ? { endAbsolute: true } : {}),
+      ...scope
     };
   }
   if (spansAllRows && !spansAllColumns) {
@@ -659,8 +1247,9 @@ function readArea(
       type: NodeType.ColRangeRef,
       startCol: encodeCol(firstColumn & 0x3fff),
       endCol: encodeCol(lastColumn & 0x3fff),
-      ...(sheet === undefined ? {} : { sheet }),
-      ...(endSheet === undefined ? {} : { endSheet })
+      ...((firstColumn & 0x4000) === 0 ? { startAbsolute: true } : {}),
+      ...((lastColumn & 0x4000) === 0 ? { endAbsolute: true } : {}),
+      ...scope
     };
   }
 
@@ -668,52 +1257,72 @@ function readArea(
     type: NodeType.RangeRef,
     start: cellRef(firstRow, firstColumn, undefined, undefined),
     end: cellRef(lastRow, lastColumn, undefined, undefined),
-    ...(sheet === undefined ? {} : { sheet }),
-    ...(endSheet === undefined ? {} : { endSheet })
+    ...scope
   };
 }
 
+/** `RgceLocRel` — MS-XLSB 2.5.98.92: a row, then a `ColRelShort`. */
 function readRelativeRef(
   reader: BinaryReader,
-  origin: { row: number; column: number }
+  origin: { row: number; column: number },
+  where: string
 ): CellRefNode {
-  // In the relative form the stored values are offsets from the cell holding the formula.
-  //
-  // **The row offset wraps through the row field's width, not the integer's.** Excel stores -1 as `0xFFFFF` —
-  // the widest row an XLSB addresses — so reading the four bytes as a signed 32-bit integer yields +1048575 and
-  // a reference a million rows below the formula. Masking to 20 bits first and sign-extending from there is
-  // also robust to the 32-bit form: `0xFFFFFFFF & 0xFFFFF` is `0xFFFFF`, which sign-extends to -1.
-  //
-  // This is worth naming as the pattern rather than the incident. The writer used to emit `0xFFFFFFFF` and this
-  // read it back as -1, so the two agreed perfectly and only Excel disagreed — the eighth time in this module
-  // that a reader and a writer have shared one wrong belief. The test that pinned it compared a value written
-  // here against a value read here, which is exactly the test that cannot catch it.
-  const rowOffset = signExtend20(reader.readUint32() & ROW_MASK);
+  const row = reader.readUint32();
   const columnAndFlags = reader.readUint16();
-  const columnOffset = signExtend14(columnAndFlags & 0x3fff);
-  return cellRef(
-    ((columnAndFlags & 0x8000) !== 0 ? origin.row + rowOffset : rowOffset) >>> 0,
-    (columnAndFlags & 0xc000) |
-      (((columnAndFlags & 0x4000) !== 0 ? origin.column + columnOffset : columnOffset) & 0x3fff),
+  const resolved = resolveRelative(row, columnAndFlags, origin, where);
+  return cellRef(resolved.row, resolved.columnAndFlags, undefined, undefined);
+}
+
+/**
+ * `RgceAreaRel` — MS-XLSB 2.5.98.90: `rowFirst`, `rowLast`, `columnFirst`, `columnLast`.
+ *
+ * **Rows first, then columns — the same order as `RgceArea`, and not two `RgceLocRel`s back to back.**
+ */
+function readRelativeArea(
+  reader: BinaryReader,
+  origin: { row: number; column: number },
+  where: string
+): AstNode {
+  const firstRow = reader.readUint32();
+  const lastRow = reader.readUint32();
+  const firstColumn = reader.readUint16();
+  const lastColumn = reader.readUint16();
+  const first = resolveRelative(firstRow, firstColumn, origin, where);
+  const last = resolveRelative(lastRow, lastColumn, origin, where);
+  return areaNode(
+    first.row,
+    last.row,
+    first.columnAndFlags,
+    last.columnAndFlags,
     undefined,
     undefined
   );
 }
 
-function readRelativeArea(reader: BinaryReader, origin: { row: number; column: number }): AstNode {
-  const start = readRelativeRef(reader, origin);
-  const end = readRelativeRef(reader, origin);
-  return { type: NodeType.RangeRef, start, end };
-}
-
-/** 14-bit two's-complement column offset. */
-function signExtend14(value: number): number {
-  return value >= 0x2000 ? value - 0x4000 : value;
-}
-
-/** A 20-bit row offset read as a signed value — `0xFFFFF` is -1, not 1048575. */
-function signExtend20(value: number): number {
-  return value >= 0x80000 ? value - 0x100000 : value;
+/**
+ * One row/column pair of a relative structure, resolved against the cell the formula is evaluated in.
+ *
+ * Each axis is an offset only when its own flag says so (`fRwRel`, `fColRel`); otherwise it is an ordinary
+ * position. **Offsets wrap through the sheet, as MS-XLSB 2.5.98.92 specifies** — a modulus, which is also what makes
+ * both spellings of a negative row offset read the same: Excel writes -1 as `0xFFFFF`.
+ */
+function resolveRelative(
+  row: number,
+  columnAndFlags: number,
+  origin: { row: number; column: number },
+  where: string
+): { row: number; columnAndFlags: number } {
+  const flags = columnAndFlags & 0xc000;
+  const column = columnAndFlags & 0x3fff;
+  return {
+    // An offset wraps; an absolute row is a position and must be on the sheet.
+    row:
+      (columnAndFlags & 0x8000) !== 0
+        ? (origin.row + row) & ROW_MASK
+        : checkSheetIndex(row, "row", where, "PtgRefN"),
+    columnAndFlags:
+      flags | ((columnAndFlags & 0x4000) !== 0 ? (origin.column + column) & 0x3fff : column)
+  };
 }
 
 function cellRef(
@@ -749,244 +1358,973 @@ function pop(stack: AstNode[], where: string): AstNode {
 // Encode: AST → Ptg
 // =============================================================================
 
-/** Encode an AST as a `Rgce` token stream. */
-export function encodePtg(node: AstNode, context: PtgContext, where: string): Uint8Array {
-  const writer = new BinaryWriter();
-  // **A formula that is nothing but a reference wants that reference as a value.**
-  //
-  // An operand's class states what its consumer does with it, and the consumer of the outermost operand is the
-  // cell: it displays a value. Excel writes `44` — `PtgRef | value` — for `=A1`, and for the body of an array
-  // formula that is a bare reference; this writer wrote `24`, the reference class, everywhere.
-  //
-  // Deliberately narrow. `SUM(A1:A2)` really does hand `SUM` a *reference*, and Excel writes the reference class
-  // there — which this writer already does. Getting the general rule right means propagating each function's
-  // expectation down to its arguments, and that is a larger change with no observed defect driving it; the case
-  // measured against Excel's own bytes is the bare one, so that is the case handled. The gap is recorded here
-  // rather than guessed at.
-  emit(node, writer, context, where, node.type === NodeType.CellRef);
-  return writer.toUint8Array();
+/**
+ * Whether a formula names a cell on a sheet, explicitly — `Other!A1`, `SUM(S1:S3!B2)`.
+ *
+ * Such a formula cannot be a *template*: `SharedParsedFormula` and `CFParsedFormula` both forbid `PtgRef3d` and
+ * `PtgArea3d` (MS-XLSB 2.5.98.98 and 2.5.98.6), and there is no relative 3D form for them to use instead.
+ */
+export function referencesAnotherSheet(node: AstNode): boolean {
+  switch (node.type) {
+    case NodeType.CellRef:
+    case NodeType.RangeRef:
+    case NodeType.ColRangeRef:
+    case NodeType.RowRangeRef:
+    case NodeType.Error:
+    case NodeType.Name:
+      return node.sheet !== undefined;
+    case NodeType.BinaryOp:
+      return referencesAnotherSheet(node.left) || referencesAnotherSheet(node.right);
+    case NodeType.UnaryOp:
+    case NodeType.Percent:
+      return referencesAnotherSheet(node.operand);
+    case NodeType.FunctionCall:
+      return (
+        node.args.some(referencesAnotherSheet) ||
+        (node.invocations ?? []).some(args => args.some(referencesAnotherSheet))
+      );
+    case NodeType.UnionRef:
+      return node.areas.some(referencesAnotherSheet);
+    default:
+      return false;
+  }
 }
 
-function emit(
+/**
+ * Encode formula text — the whole pipeline, keeping the author's whitespace and parentheses.
+ *
+ * Whitespace before the first token and after the last is not kept, which is what Excel does with the same text:
+ * its XLSX reading of `" A1+B1"` shows `A1+B1`.
+ */
+export function encodeFormula(text: string, context: PtgContext, where: string): EncodedFormula {
+  // The stored spelling: `FILTER` → `_xlfn._xlws.FILTER`, `LET(x,…)` → `_xlfn.LET(_xlpm.x,…)`. The stubs and the
+  // `_xlpm.` names a formula calls are created from the same spelling (`write/package.ts`).
+  const { tokens, gaps } = tokenizeWithGaps(toFileFormula(text));
+  gaps[0] = "";
+  const { ast, layout } = parseWithLayout(tokens, gaps);
+  return encodeFormulaAst(ast, context, where, layout);
+}
+
+/**
+ * Encode an AST as a `Rgce` token stream.
+ *
+ * Kept for callers holding a tree with no array constant in it; {@link encodeFormulaAst} also returns the
+ * `RgbExtra` an array constant needs, and refusing one here is better than writing a `PtgArray` with no values.
+ */
+export function encodePtg(node: AstNode, context: PtgContext, where: string): Uint8Array {
+  const encoded = encodeFormulaAst(node, context, where, undefined);
+  if (encoded.extra.length > 0) {
+    unsupported(where, "an array constant without its RgbExtra");
+  }
+  return encoded.rgce;
+}
+
+/** The call a file stores each operator as, by operator — see {@link operatorsAsCalls}. */
+const OPERATOR_CALLS: ReadonlyMap<string, string> = new Map([
+  ["#", "_xlfn.ANCHORARRAY"],
+  ["@", "_xlfn.SINGLE"]
+]);
+
+/**
+ * `value` with every spill-range operator `A1#` made the `_xlfn.ANCHORARRAY(A1)` call it is stored as, and every
+ * implicit-intersection operator `@x` the `_xlfn.SINGLE(x)` call — the operand, then `PtgName` of the stub and
+ * `PtgFuncVar(255)`, as Excel's own XLSB saves of `future-functions.xlsx` and `single.xlsx` show
+ * (`future-function-tokens.node.test.ts`, `single-tokens.node.test.ts`); `bareIntersections` decides where `@` is
+ * written as its operand alone. Text reaches the encoder with both already calls (`toFileFormula`); a tree may not.
+ * Unchanged parts keep their identity, and a rebuilt node takes over its original's layout.
+ */
+function operatorsAsCalls(value: unknown, layout: FormulaLayout): unknown {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map(item => {
+      const next = operatorsAsCalls(item, layout);
+      changed ||= next !== item;
+      return next;
+    });
+    return changed ? mapped : value;
+  }
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    return value;
+  }
+  const node = value as AstNode;
+  const call = node.type === NodeType.UnaryOp ? OPERATOR_CALLS.get(node.op) : undefined;
+  let rebuilt: AstNode | undefined;
+  if (call !== undefined && node.type === NodeType.UnaryOp) {
+    rebuilt = {
+      type: NodeType.FunctionCall,
+      name: call,
+      args: [operatorsAsCalls(node.operand, layout) as AstNode]
+    };
+  } else {
+    let copy: Record<string, unknown> | undefined;
+    for (const [key, item] of Object.entries(node)) {
+      const next = operatorsAsCalls(item, layout);
+      if (next !== item) {
+        copy ??= { ...node };
+        copy[key] = next;
+      }
+    }
+    rebuilt = copy as AstNode | undefined;
+  }
+  if (rebuilt === undefined) {
+    return node;
+  }
+  const entry = layout.get(node);
+  if (entry !== undefined) {
+    layout.set(rebuilt, entry);
+  }
+  return rebuilt;
+}
+
+/** Encode an AST, with its layout when there is one. */
+export function encodeFormulaAst(
   node: AstNode,
-  writer: BinaryWriter,
   context: PtgContext,
   where: string,
-  /** The cell consumes this operand directly, so it wants a value rather than a reference. */
-  asValue = false
+  layout: FormulaLayout | undefined
+): EncodedFormula {
+  // A file Excel will not open, however faithfully it is encoded — see `nonReferenceArgument`.
+  const refused = nonReferenceArgument(node);
+  if (refused !== undefined) {
+    throw new ExcelUnsupportedFeatureError(`Write XLSB formula at ${where}`, refused);
+  }
+  // A copy: an invoked call hands its whitespace to the call it applies to, which is a node of the encoder's own.
+  const ownLayout: FormulaLayout = new Map(layout);
+  const tree = operatorsAsCalls(node, ownLayout) as AstNode;
+  const role = context.role ?? "cell";
+  const bare = bareIntersections(tree, role);
+  const encoder: Encoder = {
+    out: new TokenBuffer(),
+    extra: new TokenBuffer(),
+    classes: assignClasses(tree, role, bare),
+    bare,
+    layout: ownLayout,
+    context,
+    where,
+    volatile: false
+  };
+  emit(encoder, tree, undefined);
+  const body = encoder.out.toUint8Array();
+  // **A volatile formula starts with `PtgAttrSemi`.** Excel writes `19 01 00 00` in front of every formula that
+  // calls `NOW`, `RAND`, `OFFSET`, `INDIRECT`, `CELL` or another volatile function; it is the token that tells a
+  // recalculation engine the cell must be recomputed even when nothing it reads has changed.
+  const rgce = encoder.volatile
+    ? concatUint8Arrays([Uint8Array.of(Ptg.Attr, Attr.Semi, 0, 0), body])
+    : body;
+  return { rgce, extra: encoder.extra.toUint8Array() };
+}
+
+/** A growable little-endian byte buffer whose earlier bytes can be patched — a jump offset is known only later. */
+class TokenBuffer {
+  private bytes = new Uint8Array(64);
+  private size = 0;
+
+  get length(): number {
+    return this.size;
+  }
+
+  private reserve(count: number): void {
+    if (this.size + count > this.bytes.length) {
+      const grown = new Uint8Array(Math.max(this.bytes.length * 2, this.size + count));
+      grown.set(this.bytes.subarray(0, this.size));
+      this.bytes = grown;
+    }
+  }
+
+  u8(value: number): this {
+    this.reserve(1);
+    this.bytes[this.size++] = value & 0xff;
+    return this;
+  }
+
+  u16(value: number): this {
+    return this.u8(value).u8(value >>> 8);
+  }
+
+  u32(value: number): this {
+    return this.u16(value & 0xffff).u16(value >>> 16);
+  }
+
+  f64(value: number): this {
+    const chunk = new Uint8Array(8);
+    new DataView(chunk.buffer).setFloat64(0, value, true);
+    return this.write(chunk);
+  }
+
+  write(chunk: Uint8Array): this {
+    this.reserve(chunk.length);
+    this.bytes.set(chunk, this.size);
+    this.size += chunk.length;
+    return this;
+  }
+
+  patchU16(at: number, value: number): void {
+    this.bytes[at] = value & 0xff;
+    this.bytes[at + 1] = (value >>> 8) & 0xff;
+  }
+
+  /** Remove and return everything from `at` on. */
+  cut(at: number): Uint8Array {
+    const tail = this.bytes.slice(at, this.size);
+    this.size = at;
+    return tail;
+  }
+
+  toUint8Array(): Uint8Array {
+    return this.bytes.slice(0, this.size);
+  }
+}
+
+interface Encoder {
+  readonly out: TokenBuffer;
+  readonly extra: TokenBuffer;
+  readonly classes: TokenClasses;
+  /** The `_xlfn.SINGLE` calls written as their operand alone — see `bareIntersections`. */
+  readonly bare: ReadonlySet<AstNode>;
+  readonly layout: FormulaLayout;
+  readonly context: PtgContext;
+  readonly where: string;
+  volatile: boolean;
+  /** Where the operand that ends a call's last argument finished — see {@link emitClosingArgument}. */
+  mark?: { readonly node: AstNode; at: number };
+}
+
+/** Emit an invoked call — see {@link INVOCATION_CLASSES} for the shape. */
+function emitInvocation(
+  encoder: Encoder,
+  node: FunctionCallNode,
+  entry: NodeLayout | undefined
 ): void {
+  const operands = invocationOperands(node);
+  if (node.name !== INVOKE && entry !== undefined && !encoder.layout.has(operands[0]!)) {
+    // The whitespace written around the call belongs to the call the lists are applied to.
+    encoder.layout.set(operands[0]!, entry);
+  }
+  for (const operand of operands) {
+    emit(encoder, operand, node);
+  }
+  encoder.out
+    .u8(Ptg.FuncVar | classOf(encoder, node))
+    .u8(operands.length)
+    .u16(IFTAB_CALL_BY_NAME);
+}
+
+// -----------------------------------------------------------------------------
+// Emission
+// -----------------------------------------------------------------------------
+
+/** Emit `node`, then its mem token's length, its own parenthesis if it is a union, then its display parentheses. */
+function emit(encoder: Encoder, node: AstNode, parent: AstNode | undefined): void {
+  const { out } = encoder;
+  const entry = encoder.layout.get(node);
+  const memClass = encoder.classes.mem.get(node);
+  if (encoder.bare.has(node) && node.type === NodeType.FunctionCall) {
+    // `@x` written as `x` in its place, which intersects it there.
+    emitSpaces(out, SpaceAt.Expression, entry?.lead);
+    emit(encoder, node.args[0]!, parent);
+  } else if (memClass !== undefined && needsMemToken(node, parent)) {
+    out.u8(Ptg.MemFunc | memClass);
+    const at = out.length;
+    out.u16(0);
+    emitCore(encoder, node, entry);
+    out.patchU16(at, out.length - at - 2);
+  } else {
+    emitCore(encoder, node, entry);
+  }
+  const bareRoot =
+    parent === undefined &&
+    (entry?.bare === true || encoder.context.role === "name" || encoder.context.role === "list");
+  if (node.type === NodeType.UnionRef && !bareRoot) {
+    // A union's own parentheses are a `PtgParen` after the mem expression, as Excel writes them — except as a
+    // whole defined name, which Excel stores without them: `S!$A$1,S!$B$2` is `29 13 00 3a … 3a … 10`.
+    emitSpaces(out, SpaceAt.OpenParen, entry?.lead);
+    emitSpaces(out, SpaceAt.CloseParen, entry?.close);
+    out.u8(Ptg.Paren);
+  }
+  for (const paren of entry?.parens ?? []) {
+    emitSpaces(out, SpaceAt.OpenParen, paren.open);
+    emitSpaces(out, SpaceAt.CloseParen, paren.close);
+    out.u8(Ptg.Paren);
+  }
+  // A child that precedence needs parenthesised but whose layout has none — a tree built rather than parsed —
+  // still gets its parenthesis, so Excel displays what it computes.
+  if (
+    parent !== undefined &&
+    (entry?.parens?.length ?? 0) === 0 &&
+    needsParentheses(node, parent)
+  ) {
+    out.u8(Ptg.Paren);
+  }
+  if (encoder.mark?.node === node) {
+    encoder.mark.at = out.length;
+  }
+}
+
+/**
+ * `PtgAttrSpace` tokens for a run of whitespace at `at`: one per run of spaces or of line breaks, each at most 255.
+ * A `\r\n` pair is one line break, and a tab is treated as a space.
+ */
+function emitSpaces(out: TokenBuffer, at: number, text: string | undefined): void {
+  if (text === undefined || text === "") {
+    return;
+  }
+  const normalised = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").replaceAll("\t", " ");
+  for (const run of normalised.match(/ +|\n+/g) ?? []) {
+    const type = at + (run[0] === "\n" ? 1 : 0);
+    for (let left = run.length; left > 0; left -= 255) {
+      out.u8(Ptg.Attr).u8(Attr.Space).u8(type).u8(Math.min(left, 255));
+    }
+  }
+}
+
+function emitCore(encoder: Encoder, node: AstNode, entry: NodeLayout | undefined): void {
+  const { out, where } = encoder;
+  const lead = entry?.lead;
   switch (node.type) {
     case NodeType.Number:
-      // The compact integer form where it fits, exactly as Excel does.
-      if (Number.isInteger(node.value) && node.value >= 0 && node.value <= 0xffff) {
-        writer.writeUint8(Ptg.Int).writeUint16(node.value);
-      } else {
-        writer.writeUint8(Ptg.Num).writeFloat64(node.value);
-      }
+      emitSpaces(out, SpaceAt.Expression, lead);
+      emitNumber(out, node.value);
       return;
     case NodeType.String: {
       if (node.value.length > 0xffff) {
         unsupported(where, "a string literal longer than 65535 characters");
       }
-      writer.writeUint8(Ptg.Str).writeUint16(node.value.length);
+      emitSpaces(out, SpaceAt.Expression, lead);
+      out.u8(Ptg.Str).u16(node.value.length);
       for (let index = 0; index < node.value.length; index++) {
-        writer.writeUint16(node.value.charCodeAt(index));
+        out.u16(node.value.charCodeAt(index));
       }
       return;
     }
     case NodeType.Boolean:
-      writer.writeUint8(Ptg.Bool).writeUint8(node.value ? 1 : 0);
+      emitSpaces(out, SpaceAt.Expression, lead);
+      out.u8(Ptg.Bool).u8(node.value ? 1 : 0);
       return;
     case NodeType.Error: {
+      emitSpaces(out, SpaceAt.Expression, lead);
+      if (node.value === "#REF!") {
+        // Excel parses a typed `#REF!` as a reference error rather than as an error constant: `=#REF!` is
+        // `4a 00 00 00 00 00 00` and `=Other!#REF!` is `5c 03 00 …`, the 3D form naming the sheet.
+        const tokenClass = classOf(encoder, node);
+        if (node.sheet !== undefined) {
+          out.u8(Ptg.RefErr3d | tokenClass).u16(sheetIndex(node.sheet, encoder.context, where));
+        } else {
+          out.u8(Ptg.RefErr | tokenClass);
+        }
+        out.u32(0).u16(0);
+        return;
+      }
       const code = errorCodeOf(node.value);
       if (code === undefined) {
         unsupported(where, `the error value ${node.value}`);
       }
-      writer.writeUint8(Ptg.Err).writeUint8(code!);
+      out.u8(Ptg.Err).u8(code!);
       return;
     }
     case NodeType.Missing:
-      writer.writeUint8(Ptg.MissArg);
+      emitSpaces(out, SpaceAt.Expression, lead);
+      out.u8(Ptg.MissArg);
       return;
     case NodeType.BinaryOp: {
-      emit(node.left, writer, context, where);
-      emit(node.right, writer, context, where);
       const ptg = PTG_BY_BINARY_OP.get(node.op);
       if (ptg === undefined) {
         unsupported(where, `the operator "${node.op}"`);
       }
-      writer.writeUint8(ptg!);
+      emit(encoder, node.left, node);
+      emit(encoder, node.right, node);
+      // The intersection operator is its first space; anything after it is recorded whitespace.
+      emitSpaces(out, SpaceAt.Expression, node.op === " " ? entry?.op?.slice(1) : entry?.op);
+      out.u8(ptg!);
       return;
     }
     case NodeType.UnaryOp:
-      emit(node.operand, writer, context, where);
-      writer.writeUint8(node.op === "-" ? Ptg.Uminus : Ptg.Uplus);
+      // `A1#` is not among them: it is stored as the `_xlfn.ANCHORARRAY` call, which `encodeFormula` and `encodePtg`
+      // write it as (`operatorsAsCalls`).
+      // Nor is `@`: it is the `_xlfn.SINGLE` call, which `encodeFormulaAst` makes it (`operatorsAsCalls`).
+      if (node.op !== "-" && node.op !== "+") {
+        unsupported(where, `the operator "${node.op}"`);
+      }
+      if (
+        node.op === "-" &&
+        node.operand.type === NodeType.Number &&
+        encoder.layout.get(node.operand) === undefined
+      ) {
+        // **A negated literal is one constant**, as Excel stores it: `=-5` is `1f 00 00 00 00 00 00 14 c0`, not
+        // `5` and `PtgUminus`. Both compute the same; this is the one Excel writes and reads back as `-5`.
+        emitSpaces(out, SpaceAt.Expression, lead);
+        out.u8(Ptg.Num).f64(-node.operand.value);
+        return;
+      }
+      emit(encoder, node.operand, node);
+      emitSpaces(out, SpaceAt.Expression, lead);
+      out.u8(node.op === "-" ? Ptg.Uminus : Ptg.Uplus);
       return;
     case NodeType.Percent:
-      emit(node.operand, writer, context, where);
-      writer.writeUint8(Ptg.Percent);
+      emit(encoder, node.operand, node);
+      emitSpaces(out, SpaceAt.Expression, entry?.op);
+      out.u8(Ptg.Percent);
       return;
     case NodeType.CellRef:
-      emitCellRef(node, writer, context, where, asValue);
+      emitSpaces(out, SpaceAt.Expression, lead);
+      emitCellRef(encoder, node);
       return;
     case NodeType.RangeRef: {
+      emitSpaces(out, SpaceAt.Expression, lead);
       const start = decodeCellRef(node.start, where);
       const end = decodeCellRef(node.end, where);
-      // **A range in a template is `PtgAreaN`, for the same reason a cell in one is `PtgRefN`.** The decoder
-      // has always read this token; nothing ever wrote it, so a shared `=SUM(B2:D2)` filled downwards named
-      // row 2 from every row — the identical defect the single-cell form had, one token along. `=SUM(A1:A10)`
-      // filled across is the commonest formula in a spreadsheet, so this is not a corner.
-      if (
-        node.sheet === undefined &&
-        context.relativeToOrigin === true &&
-        context.origin !== undefined
-      ) {
-        writer.writeUint8(Ptg.AreaN | VALUE_CLASS);
-        writer
-          .writeUint32(relativeRowOffset(start.row, node.start, context))
-          .writeUint32(relativeRowOffset(end.row, node.end, context));
-        writer
-          .writeUint16(relativeColumnOffset(start.columnAndFlags, node.start, context))
-          .writeUint16(relativeColumnOffset(end.columnAndFlags, node.end, context));
-        return;
-      }
-      if (node.sheet !== undefined) {
-        writer.writeUint8(Ptg.Area3d | REFERENCE_CLASS);
-        writer.writeUint16(sheetIndex(node.sheet, context, where, node.endSheet));
-      } else {
-        writer.writeUint8(Ptg.Area | REFERENCE_CLASS);
-      }
-      writer.writeUint32(start.row).writeUint32(end.row);
-      writer.writeUint16(start.columnAndFlags).writeUint16(end.columnAndFlags);
-      return;
-    }
-    case NodeType.FunctionCall: {
-      const id = FUNCTION_ID_BY_NAME.get(node.name.toUpperCase());
-      // **A function the `Ftab` has no id for is called through a name, not through an id.** That is Excel's
-      // own mechanism for anything newer than the enumeration — `XLOOKUP`, `TEXTJOIN`, `CONFIDENCE.T`, the
-      // whole `_xlfn.` family — and it is the only way such a call can be written at all. See
-      // {@link emitFutureFunctionCall}.
-      if (id === undefined) {
-        emitFutureFunctionCall(node, writer, context, where);
-        return;
-      }
-      for (const argument of node.args) {
-        emit(argument, writer, context, where);
-      }
-      // **A fixed-arity function is called through `PtgFunc`, which carries no argument count.** Using
-      // `PtgFuncVar` for one is a formula Excel repairs — see `FIXED_ARITY`. The two tokens differ by a single
-      // byte, so nothing short of Excel or a byte comparison against it could have caught this.
-      const arity = ARITY_BY_ID.get(id);
-      if (arity === undefined) {
-        writer
-          .writeUint8(Ptg.FuncVar | VALUE_CLASS)
-          .writeUint8(node.args.length)
-          .writeUint16(id);
-        return;
-      }
-      if (node.args.length !== arity) {
-        // The count is implied by the token, so a call with the wrong number of arguments cannot be *expressed*
-        // — there is nowhere to put the real count. Refused by name rather than written with the implied arity,
-        // which would silently change what the formula computes.
-        unsupported(
-          where,
-          `a call to ${node.name} with ${node.args.length} argument(s), which takes exactly ${arity}`
-        );
-      }
-      writer.writeUint8(Ptg.Func | VALUE_CLASS).writeUint16(id);
-      return;
-    }
-    case NodeType.Name: {
-      const index = indexOf(context).names.get(node.name.toUpperCase()) ?? -1;
-      if (index === -1) {
-        unsupported(where, `the name ${node.name}, which the workbook does not define`);
-      }
-      writer.writeUint8(Ptg.Name | REFERENCE_CLASS).writeUint32(index + 1);
-      return;
-    }
-    case NodeType.UnionRef: {
-      // The members, then one union operator per join — the shape the decoder flattens.
-      node.areas.forEach((area, index) => {
-        emit(area, writer, context, where);
-        if (index > 0) {
-          writer.writeUint8(Ptg.Union);
-        }
-      });
+      emitArea(encoder, node, start, end, node.sheet, node.endSheet);
       return;
     }
     // A whole-row or whole-column reference is an ordinary `PtgArea` with the *other* axis pinned to the
-    // sheet's limit — that is what `A:A` and `$1:$1` are in a token stream, and Excel writes them that
-    // way. There is no `PtgAreaWholeRow`; the pair was refused here because the codec had no lowering
-    // step, not because the format lacks a form for it.
-    //
-    // The absolute flags matter and are not cosmetic. `A:A` means *every* row, so the row bounds are
-    // absolute; leaving them relative would make the reference shift when the formula is copied, which
-    // for a print title is the difference between "repeat row 1" and "repeat the row above me".
+    // sheet's limit — that is what `A:A` and `$1:$1` are in a token stream, and Excel writes them that way.
     case NodeType.ColRangeRef:
     case NodeType.RowRangeRef: {
+      emitSpaces(out, SpaceAt.Expression, lead);
       const whole = wholeAxisArea(node);
-      if (node.sheet !== undefined) {
-        writer.writeUint8(Ptg.Area3d | REFERENCE_CLASS);
-        writer.writeUint16(sheetIndex(node.sheet, context, where, node.endSheet));
-      } else {
-        writer.writeUint8(Ptg.Area | REFERENCE_CLASS);
-      }
-      writer.writeUint32(whole.firstRow).writeUint32(whole.lastRow);
-      writer.writeUint16(whole.firstColumn).writeUint16(whole.lastColumn);
+      emitArea(encoder, node, whole.start, whole.end, node.sheet, node.endSheet);
       return;
     }
+    case NodeType.FunctionCall:
+      if (isInvocation(node)) {
+        emitInvocation(encoder, node, entry);
+        return;
+      }
+      emitCall(encoder, node, entry);
+      return;
+    case NodeType.Name:
+      emitSpaces(out, SpaceAt.Expression, lead);
+      emitName(encoder, node);
+      return;
+    case NodeType.UnionRef:
+      // The members, then one union operator per join — the shape the decoder flattens. The union's own
+      // parenthesis is emitted by `emit`, outside the mem token's expression.
+      node.areas.forEach((area, index) => {
+        emit(encoder, area, node);
+        if (index > 0) {
+          out.u8(Ptg.Union);
+        }
+      });
+      return;
     case NodeType.StructuredRef:
-      emitStructuredRef(node, writer, context, where);
+      emitSpaces(out, SpaceAt.Expression, lead);
+      emitStructuredRef(node, out, encoder.context, where, classOf(encoder, node));
       return;
     case NodeType.Array:
-      // Each needs a token whose payload lives in the record's extra data or in the table
-      // definitions, neither of which this codec carries yet. Named individually rather
-      // than lumped together, because a caller deciding whether XLSB is usable for their
-      // workbook needs to know which one stopped them.
-      unsupported(where, "an array constant");
+      emitSpaces(out, SpaceAt.Expression, lead);
+      emitArray(encoder, node);
       return;
   }
 }
 
+/** The compact integer form where it fits, exactly as Excel does. */
+function emitNumber(out: TokenBuffer, value: number): void {
+  if (Number.isInteger(value) && value >= 0 && value <= 0xffff && !Object.is(value, -0)) {
+    out.u8(Ptg.Int).u16(value);
+  } else {
+    out.u8(Ptg.Num).f64(value);
+  }
+}
+
 /**
- * A whole-row or whole-column reference as `PtgArea` bounds.
+ * Whether `child` needs parentheses to keep its meaning as an operand of `parent` — the same rule the printer
+ * applies, so a tree built rather than parsed is displayed by Excel as it computes.
+ */
+function needsParentheses(child: AstNode, parent: AstNode): boolean {
+  const power = bindingPower(child);
+  if (power === undefined) {
+    return false;
+  }
+  switch (parent.type) {
+    case NodeType.BinaryOp: {
+      const [left, right] = infixPower(parent.op);
+      return parent.left === child ? power < left : power < right;
+    }
+    case NodeType.UnaryOp:
+      return parent.op !== "@" && power < PREFIX_POWER;
+    case NodeType.Percent:
+      return power < PERCENT_POWER;
+    default:
+      return false;
+  }
+}
+
+const PREFIX_POWER = 77;
+const PERCENT_POWER = 75;
+
+/** Mirrors `@formula/syntax/print`. */
+function infixPower(op: string): readonly [number, number] {
+  switch (op) {
+    case "=":
+    case "<>":
+    case "<":
+    case ">":
+    case "<=":
+    case ">=":
+      return [10, 11];
+    case "&":
+      return [20, 21];
+    case "+":
+    case "-":
+      return [30, 31];
+    case "*":
+    case "/":
+      return [40, 41];
+    case "^":
+      return [60, 61];
+    case " ":
+      return [80, 81];
+    case ":":
+      return [90, 91];
+    default:
+      return [0, 0];
+  }
+}
+
+function bindingPower(node: AstNode): number | undefined {
+  switch (node.type) {
+    case NodeType.BinaryOp:
+      return infixPower(node.op)[0];
+    case NodeType.UnaryOp:
+      return node.op === "@" ? undefined : PREFIX_POWER;
+    case NodeType.Percent:
+      return PERCENT_POWER;
+    default:
+      return undefined;
+  }
+}
+
+function classOf(encoder: Encoder, node: AstNode): number {
+  return encoder.classes.own.get(node) ?? REFERENCE_CLASS;
+}
+
+/**
+ * A function call, in the form Excel writes it.
  *
- * The pinned axis runs the sheet's full extent and is marked absolute; the named axis carries the
- * reference's own columns or rows, also absolute, because `A:A` does not move.
+ * `IF` and `CHOOSE` carry jump tables, `IFERROR` a jump, and a one-argument `SUM` is `PtgAttrSum`. The jumps are
+ * byte offsets, measured on Excel's own output: `PtgAttrIf` points past the first `PtgAttrGoto` (the start of the
+ * false branch), `PtgAttrIfError` at its `PtgAttrGoto`, a `PtgAttrChoose` entry at its branch counted from the start
+ * of the offset table, and every `PtgAttrGoto` at one byte short of the end of the function token. The whitespace
+ * before the function's `)` goes where Excel puts it — see {@link emitClosingArgument}.
+ */
+function emitCall(encoder: Encoder, node: FunctionCallNode, entry: NodeLayout | undefined): void {
+  const { out, where } = encoder;
+  const id = builtInId(node.name);
+  const closing = (): void => {
+    emitSpaces(out, SpaceAt.Expression, entry?.lead);
+    emitSpaces(out, SpaceAt.CloseParen, entry?.close);
+  };
+  /** Emit argument `index`; the last one carries the whitespace before `)` — see {@link emitClosingArgument}. */
+  const argument = (index: number): void => {
+    if (index === node.args.length - 1) {
+      emitClosingArgument(encoder, node.args[index]!, node, closing);
+    } else {
+      emit(encoder, node.args[index]!, node);
+    }
+  };
+  // With no argument, the whitespace can only go in front of the function token.
+  const bare = node.args.length === 0 ? closing : (): void => {};
+  if (id === undefined) {
+    emitFutureFunctionCall(encoder, node, argument, bare);
+    return;
+  }
+  bare();
+  if (functionClasses(id).volatile) {
+    encoder.volatile = true;
+  }
+  const functionToken = (): void => {
+    const arity = ARITY_BY_ID.get(id);
+    const tokenClass = classOf(encoder, node);
+    if (arity === undefined) {
+      out
+        .u8(Ptg.FuncVar | tokenClass)
+        .u8(node.args.length)
+        .u16(id);
+      return;
+    }
+    if (node.args.length !== arity) {
+      // The count is implied by the token, so a call with the wrong number of arguments cannot be *expressed*.
+      unsupported(
+        where,
+        `a call to ${node.name} with ${node.args.length} argument(s), which takes exactly ${arity}`
+      );
+    }
+    out.u8(Ptg.Func | tokenClass).u16(id);
+  };
+  const gotos: number[] = [];
+  const jump = (): void => {
+    out.u8(Ptg.Attr).u8(Attr.Goto);
+    gotos.push(out.length);
+    out.u16(0);
+  };
+  const finish = (): void => {
+    functionToken();
+    for (const at of gotos) {
+      out.patchU16(at, out.length - (at + 2) - 1);
+    }
+  };
+
+  if (id === IF_ID && (node.args.length === 2 || node.args.length === 3)) {
+    argument(0);
+    out.u8(Ptg.Attr).u8(Attr.If);
+    const ifAt = out.length;
+    out.u16(0);
+    argument(1);
+    jump();
+    out.patchU16(ifAt, out.length - (ifAt + 2));
+    if (node.args.length === 3) {
+      argument(2);
+      jump();
+    }
+    finish();
+    return;
+  }
+  if (id === CHOOSE_ID && node.args.length >= 2) {
+    argument(0);
+    const choices = node.args.length - 1;
+    out.u8(Ptg.Attr).u8(Attr.Choose).u16(choices);
+    const table = out.length;
+    for (let index = 0; index <= choices; index++) {
+      out.u16(0);
+    }
+    for (let index = 1; index <= choices; index++) {
+      out.patchU16(table + (index - 1) * 2, out.length - table);
+      argument(index);
+      jump();
+    }
+    out.patchU16(table + choices * 2, out.length - table);
+    finish();
+    return;
+  }
+  if (id === IFERROR_ID && node.args.length === 2) {
+    argument(0);
+    out.u8(Ptg.Attr).u8(Attr.IfError);
+    const at = out.length;
+    out.u16(0);
+    argument(1);
+    out.patchU16(at, out.length - (at + 2));
+    jump();
+    finish();
+    return;
+  }
+  node.args.forEach((_argument, index) => argument(index));
+  if (isAttrSum(node)) {
+    out.u8(Ptg.Attr).u8(Attr.Sum).u16(0);
+    return;
+  }
+  finish();
+}
+
+/**
+ * Emit a call's last argument with the whitespace before the call's `)` where Excel puts it: **after the last
+ * operand, before the operators that complete the argument.**
  *
- * The column field is a `u16` holding the column in its low 14 bits with two flag bits above it, which is
- * why the absolute markers are folded in here rather than written separately.
+ * Excel records that whitespace when it reaches the `)`, which is before it has emitted the operators still pending
+ * on the right of the argument — so `AND( A1>0, B1>0 )` is `… 44 B1 1e 00 00 19 40 04 01 0d 42 02 24 00`, the
+ * space ahead of the `>`, while `SUM( A1 )` has it after `A1` and `IF( A1>0,1,2 )` ahead of the final jump. Reading
+ * either placement gives the same text; this one makes the bytes Excel's.
+ */
+function emitClosingArgument(
+  encoder: Encoder,
+  argument: AstNode,
+  parent: AstNode,
+  closing: () => void
+): void {
+  const previous = encoder.mark;
+  const mark = { node: rightmostOperand(encoder, argument), at: -1 };
+  encoder.mark = mark;
+  emit(encoder, argument, parent);
+  encoder.mark = previous;
+  const tail = encoder.out.cut(mark.at < 0 ? encoder.out.length : mark.at);
+  closing();
+  encoder.out.write(tail);
+}
+
+/**
+ * The node whose tokens end an expression before its trailing operators: down the right-hand side through every
+ * operator that is emitted after its operands, stopping at a leaf, a call, a parenthesised group or a mem-wrapped
+ * reference expression.
+ */
+function rightmostOperand(encoder: Encoder, node: AstNode): AstNode {
+  let current = node;
+  for (;;) {
+    if (
+      (encoder.layout.get(current)?.parens?.length ?? 0) > 0 ||
+      encoder.classes.mem.has(current)
+    ) {
+      return current;
+    }
+    if (current.type === NodeType.BinaryOp) {
+      current = current.right;
+    } else if (current.type === NodeType.Percent) {
+      current = current.operand;
+    } else if (
+      current.type === NodeType.UnaryOp &&
+      !(
+        current.op === "-" &&
+        current.operand.type === NodeType.Number &&
+        !encoder.layout.has(current.operand)
+      )
+    ) {
+      current = current.operand;
+    } else {
+      return current;
+    }
+  }
+}
+
+/** `PtgArray` and its `PtgExtraArray` — the inverse of `readArrayConstant`. */
+function emitArray(encoder: Encoder, node: Extract<AstNode, { type: NodeType.Array }>): void {
+  const { out, extra, where } = encoder;
+  const rows = node.rows;
+  const columns = rows[0]?.length ?? 0;
+  if (rows.length === 0 || columns === 0 || rows.some(row => row.length !== columns)) {
+    unsupported(where, "an array constant whose rows differ in length");
+  }
+  // The fourteen bytes are unused. Excel's own carry the column and row counts less one in the first four, which
+  // is written the same way so the token matches Excel's byte for byte where it matters to nobody but a diff.
+  out
+    .u8(Ptg.Array | classOf(encoder, node))
+    .u16(columns - 1)
+    .u16(rows.length - 1);
+  for (let index = 0; index < 10; index++) {
+    out.u8(0);
+  }
+  extra.u32(rows.length).u32(columns);
+  for (const row of rows) {
+    for (const value of row) {
+      const literal =
+        value.type === NodeType.UnaryOp &&
+        (value.op === "-" || value.op === "+") &&
+        value.operand.type === NodeType.Number
+          ? {
+              type: NodeType.Number as const,
+              value: value.op === "-" ? -value.operand.value : value.operand.value
+            }
+          : value;
+      switch (literal.type) {
+        case NodeType.Number:
+          extra.u8(0x00).f64(literal.value);
+          break;
+        case NodeType.String:
+          if (literal.value.length > 255) {
+            unsupported(where, "an array constant string longer than 255 characters");
+          }
+          extra.u8(0x01).u16(literal.value.length);
+          for (let index = 0; index < literal.value.length; index++) {
+            extra.u16(literal.value.charCodeAt(index));
+          }
+          break;
+        case NodeType.Boolean:
+          extra.u8(0x02).u8(literal.value ? 1 : 0);
+          break;
+        case NodeType.Error: {
+          const code = errorCodeOf(literal.value);
+          if (code === undefined) {
+            unsupported(where, `the error value ${literal.value} in an array constant`);
+          }
+          extra.u8(0x04).u8(code!).u8(0).u16(0);
+          break;
+        }
+        default:
+          unsupported(where, "an array constant element that is not a literal");
+      }
+    }
+  }
+}
+
+/**
+ * A defined name: `PtgName` with its one-based index, or `PtgNameX` for a name scoped to another sheet.
+ *
+ * **Scope decides which name.** A sheet may define its own `Total` beside the workbook's, and an unqualified
+ * `Total` on that sheet means the sheet's; elsewhere it means the workbook's. `Other!Total` means Other's, and
+ * Excel writes it as `PtgNameX` through a workbook-level `BrtExternSheet` entry (`BrtSupSelf`, -2, -2) — the same
+ * token a formula reaching another workbook's name uses.
+ */
+function emitName(encoder: Encoder, node: Extract<AstNode, { type: NodeType.Name }>): void {
+  const { out, context, where } = encoder;
+  const index = indexOf(context);
+  const candidates = index.names.get(definedNameListKey(node.name)) ?? [];
+  if (node.sheet !== undefined) {
+    const sheet = index.sheets.get(sheetNameKey(node.sheet));
+    if (sheet === undefined) {
+      throw new XlsbParseError(where, `sheet ${node.sheet} is not in the workbook`);
+    }
+    const local =
+      candidates.find(candidate => candidate.scope === sheet) ??
+      candidates.find(candidate => candidate.scope === undefined);
+    if (local === undefined) {
+      unsupported(where, `the name ${node.sheet}!${node.name}, which the workbook does not define`);
+    }
+    out
+      .u8(Ptg.NameX | classOf(encoder, node))
+      .u16(internExternSheet(context, -2, -2, where))
+      .u32(local!.index + 1);
+    return;
+  }
+  const eta = etaStubName(node.name, candidates.length > 0);
+  if (eta !== undefined) {
+    // Always the value class, whatever the argument it fills: Excel's `GROUPBY(…,_xleta.SUM)`, `BYROW(…,_xleta.SUM)`
+    // and `MAP(…,_xleta.ABS)` all carry `43`, where a reference argument of the same function is `25`.
+    const stub = index.names.get(definedNameListKey(eta))?.[0];
+    if (stub === undefined) {
+      unsupported(
+        where,
+        `the function ${node.name} as an argument, which needs a ${eta} defined name`
+      );
+    }
+    out.u8(Ptg.Name | VALUE_CLASS).u32(stub!.index + 1);
+    return;
+  }
+  const chosen =
+    candidates.find(
+      candidate => candidate.scope !== undefined && candidate.scope === context.sheetIndex
+    ) ??
+    candidates.find(candidate => candidate.scope === undefined) ??
+    candidates[0];
+  if (chosen === undefined) {
+    unsupported(where, `the name ${node.name}, which the workbook does not define`);
+  }
+  out.u8(Ptg.Name | classOf(encoder, node)).u32(chosen!.index + 1);
+}
+
+/** A row and a `ColRelShort` — one corner of an area, as the token stores it. */
+interface AreaCorner {
+  readonly row: number;
+  readonly columnAndFlags: number;
+}
+
+/**
+ * A whole-row or whole-column reference as `PtgArea` corners.
+ *
+ * **The pinned axis runs the sheet's full extent and is absolute**: `A:A` means *every* row, so its row bounds
+ * must not shift when the formula is copied. **The named axis keeps the reference's own `$` markers.** Bits set
+ * mean *relative*, the opposite of how `$` reads.
  */
 function wholeAxisArea(node: ColRangeRefNode | RowRangeRefNode): {
-  readonly firstRow: number;
-  readonly lastRow: number;
-  readonly firstColumn: number;
-  readonly lastColumn: number;
+  readonly start: AreaCorner;
+  readonly end: AreaCorner;
 } {
-  // Both flags clear means absolute — the bits mark *relative*, which is the opposite of how the `$`
-  // markers read, and getting it backwards produces a reference that drifts when copied.
-  const absolute = (column: number): number => column & 0x3fff;
   if (node.type === NodeType.RowRangeRef) {
+    const relativeRow = (absolute: boolean | undefined): number => (absolute ? 0 : 0x8000);
     return {
-      firstRow: node.startRow - 1,
-      lastRow: node.endRow - 1,
-      firstColumn: absolute(0),
-      lastColumn: absolute(XLSB_MAX_COLUMNS - 1)
+      start: { row: node.startRow - 1, columnAndFlags: relativeRow(node.startAbsolute) },
+      end: {
+        row: node.endRow - 1,
+        columnAndFlags: relativeRow(node.endAbsolute) | (XLSB_MAX_COLUMNS - 1)
+      }
     };
   }
+  const relativeColumn = (absolute: boolean | undefined): number => (absolute ? 0 : 0x4000);
   return {
-    firstRow: 0,
-    lastRow: XLSB_MAX_ROWS - 1,
-    firstColumn: absolute(decodeCol(node.startCol)),
-    lastColumn: absolute(decodeCol(node.endCol))
+    start: {
+      row: 0,
+      columnAndFlags: relativeColumn(node.startAbsolute) | (decodeCol(node.startCol) & 0x3fff)
+    },
+    end: {
+      row: XLSB_MAX_ROWS - 1,
+      columnAndFlags: relativeColumn(node.endAbsolute) | (decodeCol(node.endCol) & 0x3fff)
+    }
   };
+}
+
+/**
+ * `PtgArea`, `PtgArea3d` or `PtgAreaN` for two corners whose flags say which axes are relative.
+ *
+ * **A range in a template is `PtgAreaN` only when something in it is relative.** A shared `=SUM(B2:D2)` filled
+ * downwards has to name its own row from every row, so its relative axes are offsets from the origin. A fully
+ * absolute one is an ordinary `PtgArea`, as Excel writes it: a conditional format's `MAX($A$1:$A$10)` is `25 …`
+ * and a validation list `A:A` — relative columns — is `2d …`.
+ */
+function emitArea(
+  encoder: Encoder,
+  node: AstNode,
+  start: AreaCorner,
+  end: AreaCorner,
+  sheet: string | undefined,
+  endSheet: string | undefined
+): void {
+  const { out, context, where } = encoder;
+  const tokenClass = classOf(encoder, node);
+  if (sheet !== undefined) {
+    // **No `PtgArea3d` in a template.** `SharedParsedFormula` and `CFParsedFormula` both forbid it (MS-XLSB
+    // 2.5.98.98 and 2.5.98.6), and its `RgceArea` holds positions, so a relative corner could not shift anyway.
+    if (context.relativeToOrigin === true) {
+      unsupported(where, `the reference to another sheet ${sheet}!…, which a template cannot hold`);
+    }
+    out.u8(Ptg.Area3d | tokenClass).u16(sheetIndex(sheet, context, where, endSheet));
+    out.u32(start.row).u32(end.row).u16(start.columnAndFlags).u16(end.columnAndFlags);
+    return;
+  }
+  const relative = ((start.columnAndFlags | end.columnAndFlags) & 0xc000) !== 0;
+  if (context.relativeToOrigin === true && context.origin !== undefined && relative) {
+    out.u8(Ptg.AreaN | tokenClass);
+    out
+      .u32(relativeRowOffset(start, context.origin))
+      .u32(relativeRowOffset(end, context.origin))
+      .u16(relativeColumnOffset(start.columnAndFlags, context.origin))
+      .u16(relativeColumnOffset(end.columnAndFlags, context.origin));
+    return;
+  }
+  out.u8(Ptg.Area | tokenClass);
+  out.u32(start.row).u32(end.row).u16(start.columnAndFlags).u16(end.columnAndFlags);
+}
+
+function emitCellRef(encoder: Encoder, node: CellRefNode): void {
+  const { out, context, where } = encoder;
+  const corner = decodeCellRef(node, where);
+  const { row, columnAndFlags } = corner;
+  const tokenClass = classOf(encoder, node);
+  if (node.sheet !== undefined) {
+    // Forbidden in a template for the same reason as `PtgArea3d` — see `emitArea`.
+    if (context.relativeToOrigin === true) {
+      unsupported(
+        where,
+        `the reference to another sheet ${node.sheet}!…, which a template cannot hold`
+      );
+    }
+    out.u8(Ptg.Ref3d | tokenClass).u16(sheetIndex(node.sheet, context, where, node.endSheet));
+    out.u32(row).u16(columnAndFlags);
+    return;
+  }
+  // **`PtgRefN` for a relative reference in a template.** A conditional-formatting rule's formula is written once
+  // and applied to every cell in its range, so its relative references are *offsets from the range's anchor*.
+  // A fully absolute one stays `PtgRef`, as Excel writes it — a validation bound `$B$1+1` is `44 00 00 00 00 01 00`.
+  if (
+    context.relativeToOrigin === true &&
+    context.origin !== undefined &&
+    (columnAndFlags & 0xc000) !== 0
+  ) {
+    // **Offsets wrap at the width of the field they name.** A row offset of -1 is `0xFFFFF` and a column offset of
+    // -1 is `0x3FFF`, because that is what Excel writes: `poi-62815.xlsb` stores `=<the cell above> + 1` as
+    // `4c ff ff 0f 00 00 c0 …`.
+    out
+      .u8(Ptg.RefN | tokenClass)
+      .u32(relativeRowOffset(corner, context.origin))
+      .u16(relativeColumnOffset(columnAndFlags, context.origin));
+    return;
+  }
+  out
+    .u8(Ptg.Ref | tokenClass)
+    .u32(row)
+    .u16(columnAndFlags);
+}
+
+function decodeCellRef(node: CellRefNode, where: string): { row: number; columnAndFlags: number } {
+  const row = Number(node.row) - 1;
+  const column = decodeCol(node.col);
+  if (!Number.isInteger(row) || row < 0 || column < 0) {
+    throw new XlsbParseError(where, `cannot encode the reference ${node.col}${node.row}`);
+  }
+  // Set means relative, so an absolute reference clears the bit.
+  const flags = (node.rowAbsolute ? 0 : 0x8000) | (node.colAbsolute ? 0 : 0x4000);
+  return { row, columnAndFlags: flags | (column & 0x3fff) };
 }
 
 /**
  * `PtgList` — MS-XLSB 2.5.98.52. Twelve bytes.
  *
  * ```text
- * ptg          u8    0x18 with the class bits, then a mandatory 0x19 `eptg`
+ * ptg          u8    0x18, then a mandatory 0x19 `eptg`
  * eptg         u8
  * ixti         u16
  * flags        u16   columns (2 bits), rowType (5), then seven more
@@ -995,43 +2333,40 @@ function wholeAxisArea(node: ColRangeRefNode | RowRangeRefNode): {
  * colLast      u16
  * ```
  *
- * **The column indices are relative to the table, not to the sheet.** `Table1[Amount]` where the table
- * starts at column C and `Amount` is its third column is `colFirst = 2`, not 4. Resolving that needs the
- * table's column order, which is why `PtgContext.tables` exists.
+ * **The column indices are relative to the table, not to the sheet.** `rowType` is what `[#Data]`, `[#Headers]`,
+ * `[#Totals]` and `[#All]` become; a bare `Table1[Amount]` means the data region, which is `DATA` — 0.
  *
- * `rowType` is what `[#Data]`, `[#Headers]`, `[#Totals]` and `[#All]` become. A bare `Table1[Amount]`
- * means the data region, which is `DATA` — and `DATA` is 0, so a writer that forgot the field would
- * produce the right answer for the common case and the wrong one for every qualified reference.
- *
- * **A column *span* comes back as a column *list*.** `Table1[[Qty]:[Note]]` and `Table1[[Qty],[Note]]`
- * parse to the same `StructuredRefNode` — both give `columns: ["Qty", "Note"]` — and `printAst` prints
- * the comma form. The token distinguishes them (`columns = 2` versus a list), but the AST between them
- * does not, so the round trip normalises one spelling into the other.
- *
- * This is a real difference from XLSX and worth naming: XLSX stores the formula as *text* and returns it
- * verbatim, while XLSB stores tokens and therefore goes through the AST. The two references select the
- * same cells and compute the same result, so nothing is lost but the spelling — and closing the gap
- * means teaching the AST to distinguish a span from a list, which is a formula-module change rather than
- * a codec one.
+ * Two columns in a `StructuredRefNode` are a span, `Table1[[Qty]:[Note]]`: `columns` 2, from `colFirst` to `colLast`.
  */
 function emitStructuredRef(
   node: StructuredRefNode,
-  writer: BinaryWriter,
+  out: TokenBuffer,
   context: PtgContext,
-  where: string
+  where: string,
+  tokenClass: number
 ): void {
-  const table = context.tables?.get(node.tableName);
+  const table = indexOf(context).tables.get(excelNameKey(node.tableName));
   if (table === undefined) {
     // A reference to a table this workbook does not define. Refused by name rather than written with a
-    // guessed id: an `idList` matching no `BrtBeginList` is a reference Excel reports as broken.
-    unsupported(where, `a structured reference to the unknown table ${node.tableName}`);
+    // guessed id: an `idList` matching no `BrtBeginList` is a reference Excel reports as broken. One with no name at
+    // all is an unnamed `[@x]` that reached here without the enclosing table being supplied.
+    unsupported(
+      where,
+      node.tableName === ""
+        ? "a structured reference with no table name"
+        : `a structured reference to the unknown table ${node.tableName}`
+    );
     return;
   }
   const rowType = rowTypeOf(node.specials);
   // `columns`: 0 for the whole table, 1 for one column, 2 for a span.
-  const first = node.columns.length === 0 ? -1 : table.columns.indexOf(node.columns[0]);
+  // Columns, like tables, are compared by `excelNameKey`.
+  const columnKeys = table.columns.map(excelNameKey);
+  const first = node.columns.length === 0 ? -1 : columnKeys.indexOf(excelNameKey(node.columns[0]));
   const last =
-    node.columns.length < 2 ? first : table.columns.indexOf(node.columns[node.columns.length - 1]);
+    node.columns.length < 2
+      ? first
+      : columnKeys.indexOf(excelNameKey(node.columns[node.columns.length - 1]));
   if (node.columns.length > 0 && (first < 0 || last < 0)) {
     unsupported(where, `a structured reference to a column ${node.tableName} does not have`);
     return;
@@ -1039,38 +2374,29 @@ function emitStructuredRef(
   const columns = node.columns.length === 0 ? 0 : node.columns.length === 1 ? 1 : 2;
   let flags = columns & 0x03;
   flags |= (rowType & 0x1f) << 2;
-  // **The byte is exactly 0x18 — `PtgList` carries no operand class.** Its `ptg` field is *seven* bits wide
-  // (MS-XLSB 2.5.98.52: "ptg (7 bits): Reserved. This value MUST be 0x18"), with the eighth bit a reserved
-  // flag that MUST be 0. There is no room for a class tag, so OR-ing `REFERENCE_CLASS` in did not label the
-  // token — it overwrote bit 5 *of the ptg field itself* and produced 0x38, an identifier the specification
-  // does not define. Excel writes 0x18.
-  //
-  // This survived because the decoder recovers the base with `raw & 0x1f`, which maps 0x38 back to 0x18: the
-  // token round-tripped through this codec perfectly and went out malformed. Same trap as the function table
-  // and the operand classes — a shared table or a shared mask cannot check itself.
-  writer.writeUint8(Ptg.List);
+  // `type` (bits 10–11) is the token's operand class — 0 reference, 1 value, 2 array — carried here because the
+  // `ptg` byte has no room for it. Excel's `=Tbl[[#Totals],[Qty]]` is `21 04`: one column, `TOTALS`, value; the
+  // reference type there made Excel answer `#VALUE!` for the same text.
+  flags |= (tokenClass === VALUE_CLASS ? 1 : tokenClass === ARRAY_CLASS ? 2 : 0) << 10;
+  // Bit 9 — `unused` in MS-XLSB 2.5.98.52 ("undefined, MUST be ignored") — is set by Excel on every this-row
+  // reference it writes, named or typed as `[@x]`: `Tb[[#This Row],[x]]` is `41 06`, where the same reference with
+  // the bit clear would be `41 04` (`data/table-this-row.excel.xlsb`, in the cells and in `BrtListCCFmla`). It sits
+  // beside `rowType`'s `#This Row`, and the reader ignores it as the specification says.
+  if (rowType === 0x10) {
+    flags |= 0x0200;
+  }
+  // **The byte is exactly 0x18 — `PtgList` carries no operand class.** Its `ptg` field is *seven* bits wide, with
+  // the eighth a reserved flag that MUST be 0. Its class is the `type` field inside `flags`, set above.
+  out.u8(Ptg.List);
   // `eptg`, which the specification fixes at 0x19. It is not a length or a variant — omitting it shifts
   // every field after it.
-  writer.writeUint8(0x19);
+  out.u8(0x19);
   // `ixti` — the sheet the *table* is on, resolved through `BrtExternSheet` exactly as `PtgRef3d` does.
-  //
-  // This was a literal `0`, and 0 is not a neutral value: it is the first entry of the extern-sheet table,
-  // which for this writer's identity table is the first *sheet*. So a structured reference resolved to
-  // whatever happened to be sheet 1 rather than to the table's own sheet, and every formula in a workbook
-  // whose table sits elsewhere was retargeted. Excel repairs such a file, and reports it twice over — once
-  // against the table part the reference misses, and once against `workbook.bin`, which is where the
-  // extern-sheet table it failed to resolve through actually lives.
-  //
-  // Nothing here could have caught it: the decoder reads `listIndex` to find the table and *discards*
-  // `ixti`, because a table name locates a table on its own. Reader and writer therefore agreed on a
-  // round trip while the file was wrong — the same shape as the operand classes, the function table and
-  // the `0x38` above. The gate has to compare against Excel's bytes or against the resolved sheet, never
-  // against this codec's own output.
-  writer.writeUint16(sheetIndex(table.sheet, context, where));
-  writer.writeUint16(flags);
-  writer.writeUint32(table.id);
-  writer.writeUint16(Math.max(0, first));
-  writer.writeUint16(Math.max(0, last));
+  out.u16(sheetIndex(table.sheet, context, where));
+  out.u16(flags);
+  out.u32(table.id);
+  out.u16(Math.max(0, first));
+  out.u16(Math.max(0, last));
 }
 
 /** The inverse of {@link rowTypeOf}: the `[#…]` specifiers a `rowType` stands for. */
@@ -1080,6 +2406,8 @@ function specialsOf(rowType: number): string[] {
       return ["#All"];
     case 0x02:
       return ["#Headers"];
+    case 0x04:
+      return ["#Data"];
     case 0x06:
       return ["#Headers", "#Data"];
     case 0x08:
@@ -1089,8 +2417,7 @@ function specialsOf(rowType: number): string[] {
     case 0x10:
       return ["#This Row"];
     default:
-      // `DATA` and `DATA2` both mean the data region, which is what a bare reference means — so neither
-      // needs a specifier on the way back out.
+      // `DATA`: the data region, which is what a bare reference means.
       return [];
   }
 }
@@ -1120,96 +2447,39 @@ function rowTypeOf(specials: readonly string[]): number {
   if (totals) {
     return 0x08;
   }
+  // An explicit `[#Data]` is `DATA2`: Excel writes `Tb[[#Data],[x]]` as `11 00` — one column, rowType 4 — and a bare
+  // `Tb[x]` as `01 00`. Both mean the data region; the specifier is what Excel shows.
+  if (data) {
+    return 0x04;
+  }
   // No specifier means the data region, which is `DATA` — and `DATA` is 0.
   return 0x00;
 }
 
-function emitCellRef(
-  node: CellRefNode,
-  writer: BinaryWriter,
-  context: PtgContext,
-  where: string,
-  /** The cell consumes this reference directly — see `encodePtg`. */
-  asValue = false
-): void {
-  const { row, columnAndFlags } = decodeCellRef(node, where);
-  if (node.sheet !== undefined) {
-    writer.writeUint8(Ptg.Ref3d | REFERENCE_CLASS);
-    writer.writeUint16(sheetIndex(node.sheet, context, where, node.endSheet));
-    writer.writeUint32(row).writeUint16(columnAndFlags);
-    return;
-  }
-  // **`PtgRefN` when the caller asked for offsets.** A conditional-formatting rule's formula is written once
-  // and applied to every cell in its range, so its references have to be *offsets from the range's top-left*
-  // rather than positions. Excel writes `PtgRefN` there; this wrote `PtgRef` with the relative flags set, which
-  // states an absolute cell and leaves how it shifts up to the reader. For the first cell of the range the two
-  // agree, which is why the difference is easy to miss and wrong for every cell after it.
-  //
-  // `origin` doubles as the switch: the decoder already requires it to *read* a `PtgRefN`, and a caller that
-  // supplies one is a caller working in offsets.
-  if (context.relativeToOrigin === true && context.origin !== undefined) {
-    const relativeRow = node.rowAbsolute ? row : row - context.origin.row;
-    const relativeColumn = node.colAbsolute
-      ? columnAndFlags & 0x3fff
-      : (columnAndFlags & 0x3fff) - context.origin.column;
-    // **Value class, not reference.** Excel writes `4c` here and this wrote `2c`; the difference is the one
-    // that has cost this codec the most — an operand's class says what the *consumer* wants of it, and a
-    // reference handed to `SEARCH` is wanted as a value. The reference class is for an operand a function
-    // dereferences itself, which is not what a conditional-formatting predicate does with a cell.
-    writer.writeUint8(Ptg.RefN | VALUE_CLASS);
-    // **Offsets wrap at the width of the field they name, not at the width of the integer holding it.** A row
-    // offset of -1 is `0xFFFFF` and a column offset of -1 is `0x3FFF` — the largest row and column an XLSB
-    // addresses — because that is what Excel writes: `poi-62815.xlsb` stores `=<the cell above> + 1` as
-    // `4c ff ff 0f 00 00 c0 …`, and `poi-bug66682.xlsb` stores a column offset of -1 as `… 00 ff ff`.
-    //
-    // Writing `relativeRow >>> 0` gave `0xFFFFFFFF` instead, which is not a row this format can express. The
-    // conditional-formatting caller never revealed it because its offsets are measured from the top-left of
-    // its own range and are therefore never negative; a shared formula filled downwards is negative in every
-    // cell but the first.
-    writer
-      .writeUint32(relativeRow & ROW_MASK)
-      .writeUint16(((columnAndFlags & 0xc000) | (relativeColumn & 0x3fff)) & 0xffff);
-    return;
-  }
-  writer.writeUint8(Ptg.Ref | (asValue ? VALUE_CLASS : REFERENCE_CLASS));
-  writer.writeUint32(row).writeUint16(columnAndFlags);
-}
-
-function decodeCellRef(node: CellRefNode, where: string): { row: number; columnAndFlags: number } {
-  const row = Number(node.row) - 1;
-  const column = decodeCol(node.col);
-  if (!Number.isInteger(row) || row < 0 || column < 0) {
-    throw new XlsbParseError(where, `cannot encode the reference ${node.col}${node.row}`);
-  }
-  // Set means relative, so an absolute reference clears the bit.
-  const flags = (node.rowAbsolute ? 0 : 0x8000) | (node.colAbsolute ? 0 : 0x4000);
-  return { row, columnAndFlags: flags | (column & 0x3fff) };
+/** A table as a formula context knows it. */
+interface TableEntry {
+  readonly id: number;
+  readonly columns: readonly string[];
+  readonly sheet: string;
 }
 
 /**
  * Lookup tables for a context, built once and cached on it.
  *
- * `indexOf` per reference is O(names) and O(sheets), which a workbook with a few hundred names and a
- * few thousand formulas pays on every single one of them. The cache hangs off the context rather than
- * a module-level map so it cannot outlive the write it belongs to, and it is keyed by identity, so a
- * caller that mutates a context between calls gets a fresh one by handing over a fresh object — which
- * is what `writeXlsbPackage` does.
- *
- * Semantics are unchanged on purpose: `indexOf` is exact and case-sensitive, and so is this. Making
- * name lookup case-insensitive here would be a different behaviour wearing an optimisation's clothes.
+ * Keyed by identity, so a caller that mutates a context between calls gets a fresh one by handing over a fresh
+ * object — which is what `writeXlsbPackage` does.
  */
 interface ContextIndex {
-  readonly names: Map<string, number>;
+  /** `definedNameListKey` → every defined name of that key, with its position and scope. */
+  readonly names: Map<string, { readonly index: number; readonly scope: number | undefined }[]>;
+  /** `sheetNameKey` → position. */
   readonly sheets: Map<string, number>;
+  /** `excelNameKey` → table. */
+  readonly tables: Map<string, TableEntry>;
   readonly externBySheet: Map<number, number>;
-  /** `first:last` → `ixti`, including spans appended while encoding. */
-  readonly spans: Map<string, number>;
   /**
-   * Whether anything encoded through this context resolved an `ixti`.
-   *
-   * The workbook writer needs this to decide whether to emit the extern-sheet block at all — see
-   * {@link externSheetWasUsed}. Recorded here rather than inferred from the finished bytes because the
-   * question is "did a token need one", and only the encoder knows.
+   * Whether anything encoded through this context resolved an `ixti` against the identity mapping a context with
+   * no table implies. With a table, the table itself is marked — see {@link markUsed}.
    */
   usedExternSheet: boolean;
 }
@@ -1217,60 +2487,113 @@ interface ContextIndex {
 /** The `Ftab` id reserved for a function called through a `PtgName` — see {@link emitFutureFunctionCall}. */
 const IFTAB_CALL_BY_NAME = 0x00ff;
 
-/** The prefix Excel gives a future function's stub name. */
-const FUTURE_FUNCTION_PREFIX = "_xlfn.";
-
 /**
  * `#NAME?` as an `Rgce` — the body Excel gives a future function's stub.
  *
- * `PtgErr` (`0x1c`) then the `BErr` byte `0x1D`. Verified against Excel's own repair output, whose
- * `_xlfn.AVERAGEIF` and `_xlfn.SINGLE` both carry exactly `1c 1d` with a `cce` of 2.
+ * `PtgErr` (`0x1c`) then the `BErr` byte `0x1D`. Verified against Excel's own output, whose `_xlfn.CONCAT` and
+ * `_xlfn.SINGLE` both carry exactly `1c 1d` with a `cce` of 2.
  */
 export const FUTURE_FUNCTION_STUB_RGCE = Uint8Array.of(0x1c, 0x1d);
+
+/** The widest row an XLSB addresses, and therefore the modulus a negative row offset wraps through. */
+const ROW_MASK = 0xfffff;
+
+/**
+ * A corner's row as an offset from the template's origin, unless the reference pinned it with `$`.
+ */
+function relativeRowOffset(
+  corner: AreaCorner,
+  origin: { readonly row: number; readonly column: number }
+): number {
+  return (corner.columnAndFlags & 0x8000) === 0 ? corner.row : (corner.row - origin.row) & ROW_MASK;
+}
+
+/** A column as an offset from the template's origin, preserving the two flags in the high bits. */
+function relativeColumnOffset(
+  columnAndFlags: number,
+  origin: { readonly row: number; readonly column: number }
+): number {
+  const flags = columnAndFlags & 0xc000;
+  const column = columnAndFlags & 0x3fff;
+  const offset = (columnAndFlags & 0x4000) === 0 ? column : column - origin.column;
+  return (flags | (offset & 0x3fff)) & 0xffff;
+}
 
 /**
  * `BrtName.flags` for a future function's stub.
  *
  * `fHidden | fFunc | fProc | fFutureFunction`, and MS-XLSB 2.4.674 makes that combination mandatory rather
- * than stylistic: `fFutureFunction` MUST be 0 unless `fHidden` is 1, `fFunc` is 1, `fProc` is 1, `fOB` is 0,
- * `fCalcExp` is 0, `fgrp` is 0, `fPublished` is 0, `fBuiltin` is 0, `fWorkbookParam` is 0, the comment is NULL
- * and `itab` is `0xFFFFFFFF`. Excel's own stubs are `0x0002000b`, which is this value.
- *
- * (Excel's `_xlfn.SINGLE` is `0x0002001b` — the same plus `fCalcExp`, which its own constraint forbids
- * alongside `fFutureFunction`. The constraint-satisfying form is written here rather than the observed
- * inconsistency; `SINGLE` returning an array is presumably why Excel sets the extra bit.)
+ * than stylistic. Excel's own stubs are `0x0002000b`, which is this value.
  */
-/** The widest row an XLSB addresses, and therefore the modulus a negative row offset wraps through. */
-const ROW_MASK = 0xfffff;
+export const FUTURE_FUNCTION_FLAGS = 0x0002000b;
 
 /**
- * A row as an offset from the template's origin, unless the reference pinned it with `$`.
+ * `BrtName.flags` for a `LET`/`LAMBDA` parameter, `_xlpm.x`, without `fCalcExp`: `fHidden` (bit 0), `fProc` (bit 3) and
+ * `fFutureFunction` (bit 17), with the same `#NAME?` body and trailing strings as a future function's stub.
  *
- * An absolute row stays absolute inside a template — `B$1` filled downwards must keep naming row 1 — so the
- * `$` decides per axis whether this is an offset at all. That is why the two axes are separate helpers rather
- * than one that takes a pair.
+ * **Copied from Excel, not derived from the specification** — which this combination contradicts: MS-XLSB 2.4.718
+ * says `fFutureFunction` MUST be 0 when `fFunc` is 0 (it is here) or `fCalcExp` is 1 (it often is, see
+ * {@link NAME_FLAG_CALC_EXP}). Excel writes it anyway, and a parameter written with flags 0 and no body was dropped
+ * when Excel re-saved the file, every `PtgName` to it becoming index 0.
  */
-function relativeRowOffset(
-  row: number,
-  node: { readonly rowAbsolute?: boolean },
-  context: PtgContext
-): number {
-  return node.rowAbsolute === true ? row : (row - context.origin!.row) & ROW_MASK;
+export const LAMBDA_PARAMETER_FLAGS = 0x00020009;
+
+/**
+ * `fCalcExp`, bit 4 — per MS-XLSB "whether formula.rgce contains a call to a function that can return an array".
+ *
+ * That meaning does not fit where Excel sets it: on stubs whose body is only `#NAME?`. Excel sets it on the stubs of
+ * `ISOMITTED`, `LAMBDA`, `MODE.MULT`, `SINGLE` and `SORTBY` and no other future function in its files — not on
+ * `SEQUENCE` or `FILTER`, which return arrays — and on a `_xlpm.` parameter by the rule in `parameterDeclarations`.
+ * Both are reproduced as observed.
+ */
+export const NAME_FLAG_CALC_EXP = 0x10;
+
+/** The future functions whose stub Excel writes with {@link NAME_FLAG_CALC_EXP} — see there. */
+export const CALC_EXP_FUTURE_FUNCTIONS: ReadonlySet<string> = new Set([
+  "_XLFN.ISOMITTED",
+  "_XLFN.LAMBDA",
+  "_XLFN.MODE.MULT",
+  "_XLFN.SINGLE",
+  "_XLFN.SORTBY"
+]);
+
+/** The prefix Excel gives a future function's stub name, and the second one a worksheet function carries. */
+const FUTURE_FUNCTION_PREFIX = "_xlfn.";
+const WORKSHEET_FUNCTION_PREFIX = "_xlws.";
+/** How XLSX spells a call to a user-defined function — one the workbook names with an empty defined name. */
+const USER_FUNCTION_PREFIX = "_xludf.";
+/** How XLSX spells a function passed by name, an eta-reduced lambda: `GROUPBY(A2:A9,B2:B9,_xleta.SUM)`. */
+const ETA_PREFIX = "_xleta.";
+
+/**
+ * The `_xleta.` name a function named as a value stands for — `SUM` in `GROUPBY(A2:A9,B2:B9,SUM)` — or `undefined`
+ * when `name` is not one.
+ *
+ * A name spelled `_xleta.X` is one, as a file stores it. A bare name is one when it is a worksheet function's and the
+ * workbook defines no name of that spelling (`defined`): such a formula used to be refused for naming an undefined
+ * name, so reading it as the function changes nothing a workbook could already write. Excel's own XLSB calls it
+ * through a hidden `_xleta.SUM` name with the bare function name — no `_xlfn.` even for `PERCENTOF` or `ARRAYTOTEXT`.
+ */
+export function etaStubName(name: string, defined: boolean): string | undefined {
+  if (name.toLowerCase().startsWith(ETA_PREFIX)) {
+    return ETA_PREFIX + name.slice(ETA_PREFIX.length).toUpperCase();
+  }
+  if (defined) {
+    return undefined;
+  }
+  return isWorksheetFunctionName(name) ? ETA_PREFIX + bareFunctionName(name) : undefined;
 }
 
-/** A column as an offset from the template's origin, preserving the two `$` flags in the high bits. */
-function relativeColumnOffset(
-  columnAndFlags: number,
-  node: { readonly colAbsolute?: boolean },
-  context: PtgContext
-): number {
-  const flags = columnAndFlags & 0xc000;
-  const column = columnAndFlags & 0x3fff;
-  const offset = node.colAbsolute === true ? column : column - context.origin!.column;
-  return (flags | (offset & 0x3fff)) & 0xffff;
-}
+/** `BrtName.flags` of an `_xleta.` name — Excel's, `fHidden | fProc | fCalcExp | fFutureFunction`. */
+export const ETA_NAME_FLAGS = 0x00020019;
 
-export const FUTURE_FUNCTION_FLAGS = 0x0002000b;
+/**
+ * Whether `name` is XLSX's spelling of a user-defined function call, `_xludf.NAME`. Such a call goes through a
+ * plain defined name `NAME` with an empty definition, which is what Excel writes in XLSB.
+ */
+export function isUserFunction(name: string): boolean {
+  return name.toLowerCase().startsWith(USER_FUNCTION_PREFIX);
+}
 
 /**
  * Whether `name` is a function this codec must call through a stub rather than by id.
@@ -1280,57 +2603,85 @@ export const FUTURE_FUNCTION_FLAGS = 0x0002000b;
  * appended, and the list has already been counted by then.
  */
 export function isFutureFunction(name: string): boolean {
-  return !FUNCTION_ID_BY_NAME.has(name.toUpperCase());
+  return builtInId(name) === undefined;
 }
 
 /**
- * The stub name for a future function: `_xlfn.` and the name upper-cased, which is how Excel spells one.
+ * The stub name for a future function, spelled as Excel spells it: `_xlfn.` — and `_xlws.` for a worksheet
+ * function — in lower case, then the name in upper case.
  *
- * **The case is normalised deliberately, and it does cost something.** A round trip turns `unknownFunction()` into
- * `UNKNOWNFUNCTION()` — `verify:xlsb-corpus` reports it on `poi-bug66682`, where the difference is recorded as
- * expected. Preserving the author's spelling instead was tried and reverted, for a reason worth keeping:
+ * The prefix comes from the one list of future functions (`@excel/utils/future-functions`) that the XLSX writer
+ * uses too, so `FILTER(…)` gets `_xlfn._xlws.FILTER` whether the formula was written bare, half-prefixed
+ * (`_xlfn.FILTER`) or as XLSX stores it. A name that list does not know — a function newer than it, or a
+ * user-defined one — keeps whatever prefix it was written with and gets `_xlfn.` if it had none, which is the
+ * common case.
  *
- * A mixed-case name that no function table knows is, in practice, a user-defined function — and a UDF is *not* a
- * future function. `_xlfn.` asserts "Excel has this function and the file's schema version predates it", so Excel
- * resolves `_xlfn.FOO` against its own function list rather than against a macro. `poi-bug66682` shows Excel's own
- * distinction: it carries `_xlfn.XLOOKUP` **and** a bare, unprefixed `unknownFunction`.
- *
- * So a UDF is already mis-encoded by the prefix, whatever case it keeps — preserving the spelling fixes nothing
- * functional. Meanwhile the reverse risk is real: a caller may type `=xlookup(…)` in lower case, and writing
- * `_xlfn.xlookup` is a spelling Excel has never been observed to produce. Telling a UDF from a future function needs
- * a list of Excel's post-2007 functions, and the nearest thing here — the formula engine's 448-function registry —
- * is not one: it holds `XLOOKUP`, `CONCAT` and `TEXTJOIN` but lacks `IFS`, `LET`, `LAMBDA` and `SWITCH`. Using it as
- * the discriminator would write four common functions in whatever case they were typed.
- *
- * Between a cosmetic loss on an already-broken encoding and an unverified spelling on working functions, this takes
- * the first. The information that would settle it — the file's own name table, which says `unknownFunction` is a
- * plain visible name — is read and reported (`undefinedNames`) but not modelled: see `read/parts.ts`.
+ * **The case is normalised deliberately.** A caller may type `=xlookup(…)` in lower case, and `_xlfn.xlookup` is a
+ * spelling Excel has never been observed to produce.
  */
 export function futureFunctionStubName(name: string): string {
-  return `${FUTURE_FUNCTION_PREFIX}${name.toUpperCase()}`;
+  const known = storedFunctionName(name);
+  if (known !== undefined) {
+    return known;
+  }
+  let rest = name;
+  let worksheet = false;
+  if (rest.toLowerCase().startsWith(FUTURE_FUNCTION_PREFIX)) {
+    rest = rest.slice(FUTURE_FUNCTION_PREFIX.length);
+  }
+  if (rest.toLowerCase().startsWith(WORKSHEET_FUNCTION_PREFIX)) {
+    rest = rest.slice(WORKSHEET_FUNCTION_PREFIX.length);
+    worksheet = true;
+  }
+  return `${FUTURE_FUNCTION_PREFIX}${worksheet ? WORKSHEET_FUNCTION_PREFIX : ""}${rest.toUpperCase()}`;
+}
+
+/**
+ * Functions this writer cannot call in XLSB: `PY` (Python in Excel) and `PQSOURCE` (Power Query).
+ *
+ * A future function is called through a stub `BrtName`, and Excel refuses the whole package when that stub is
+ * `_xlfn.PY` or `_xlfn.PQSOURCE` (`lib-py.xlsb` in the fx21 Excel checks) — the XLSX spelling with the prefix is
+ * refused the same way, which is why `@excel/utils/future-functions` leaves both bare. No file Excel itself wrote shows
+ * what a working Python or Power Query cell needs in either container, so a call to one is reported rather than
+ * written into a file Excel will not open.
+ */
+const NO_XLSB_FORM: ReadonlySet<string> = new Set(["PY", "PQSOURCE"]);
+
+/** Whether a call to `name` has no XLSB form this writer can produce — see {@link NO_XLSB_FORM}. */
+export function hasNoXlsbForm(name: string): boolean {
+  return NO_XLSB_FORM.has(bareFunctionName(name));
 }
 
 /**
  * Emit a call to a function the `Ftab` cannot name.
  *
- * The shape is Excel's, read off `poi-bug66682.xlsb`: `23 02 00 00 00 42 01 ff 00` — a `PtgName` for the stub,
- * then `PtgFuncVar` whose `tab` is `0x00FF` and whose `cparams` **counts the name as one of them**. So a call
- * with two arguments is `PtgName`, the two arguments, then `cparams = 3`.
- *
- * `0x00FF` is deliberately absent from `FUNCTION_TABLE`: it is not a function, it is "the callee is the first
- * operand". Adding it to the table would let a formula name it directly, which is not a thing a formula can do.
+ * The shape is Excel's: `23 02 00 00 00 … 42 03 ff 00` for `_xlfn.CONCAT(A1,B1)` — a `PtgName` for the stub, the
+ * arguments, then `PtgFuncVar` whose `tab` is `0x00FF` and whose `cparams` **counts the name as one of them**.
  *
  * The stub must already exist. It is refused rather than invented here because the name index has to be stable
  * across the whole workbook, and {@link isFutureFunction} exists so the writer can collect them up front.
  */
 function emitFutureFunctionCall(
-  node: Extract<AstNode, { type: NodeType.FunctionCall }>,
-  writer: BinaryWriter,
-  context: PtgContext,
-  where: string
+  encoder: Encoder,
+  node: FunctionCallNode,
+  argument: (index: number) => void,
+  closing: () => void
 ): void {
-  const stub = futureFunctionStubName(node.name);
-  const index = indexOf(context).names.get(stub.toUpperCase()) ?? -1;
+  const { out, context, where } = encoder;
+  if (!isUserFunction(node.name) && !isLambdaParameter(node.name) && hasNoXlsbForm(node.name)) {
+    unsupported(where, `a call to ${bareFunctionName(node.name)}`);
+    return;
+  }
+  if (futureFunctionClasses(node.name).volatile) {
+    encoder.volatile = true;
+  }
+  // A `LET`/`LAMBDA` parameter holding a function — `_xlpm.f(1,2)` — is called through its own name.
+  const stub = isUserFunction(node.name)
+    ? node.name.slice(USER_FUNCTION_PREFIX.length)
+    : isLambdaParameter(node.name)
+      ? node.name
+      : futureFunctionStubName(node.name);
+  const index = indexOf(context).names.get(definedNameListKey(stub))?.[0]?.index ?? -1;
   if (index === -1) {
     unsupported(
       where,
@@ -1338,14 +2689,13 @@ function emitFutureFunctionCall(
     );
     return;
   }
-  writer.writeUint8(Ptg.Name | REFERENCE_CLASS).writeUint32(index + 1);
-  for (const argument of node.args) {
-    emit(argument, writer, context, where);
-  }
-  writer
-    .writeUint8(Ptg.FuncVar | VALUE_CLASS)
-    .writeUint8(node.args.length + 1)
-    .writeUint16(IFTAB_CALL_BY_NAME);
+  out.u8(Ptg.Name | REFERENCE_CLASS).u32(index + 1);
+  node.args.forEach((_argument, position) => argument(position));
+  closing();
+  out
+    .u8(Ptg.FuncVar | classOf(encoder, node))
+    .u8(node.args.length + 1)
+    .u16(IFTAB_CALL_BY_NAME);
 }
 
 const CONTEXT_INDEX = new WeakMap<object, ContextIndex>();
@@ -1355,39 +2705,41 @@ function indexOf(context: PtgContext): ContextIndex {
   if (cached !== undefined) {
     return cached;
   }
-  // **Keyed upper-case, because a defined name in Excel is case-insensitive.** `MyRange` and `myrange` are one name,
-  // and a formula may spell it either way — so a case-sensitive index resolves one of them and refuses the other.
-  //
-  // It is also what lets a future-function stub keep the case it was written with. The tokenizer upper-cases every
-  // function name (`syntax/tokenizer.ts`, correct for a case-insensitive language), so `emitFutureFunctionCall` asks
-  // for `_xlfn.UNKNOWNFUNCTION` while the stub the writer registered from the formula *source* is
-  // `_xlfn.unknownFunction`. Under a case-sensitive lookup those miss each other, which is why the stub name used to
-  // be upper-cased too — agreeing with the parser at the cost of the author's spelling.
-  const names = new Map<string, number>();
+  // **Keyed by the rules Excel compares by** (`@utils/name-key`): `MyRange` and `myrange` are one defined name, and
+  // `Straße` and `STRASSE` one, while `ı` and `I` are two — which `toUpperCase` made one, writing every `I` as `ı`.
+  // A sheet, and a `LET` / `LAMBDA` parameter, is compared by its own, narrower rule.
+  const names = new Map<string, { index: number; scope: number | undefined }[]>();
   (context.definedNames ?? []).forEach((name, index) => {
-    // First wins, which is what `indexOf` returned for a duplicated name.
-    const key = name.toUpperCase();
-    if (!names.has(key)) {
-      names.set(key, index);
-    }
+    const key = definedNameListKey(name);
+    const entries = names.get(key) ?? [];
+    entries.push({ index, scope: context.definedNameScopes?.[index] });
+    names.set(key, entries);
   });
   const sheets = new Map<string, number>();
   (context.sheetNames ?? []).forEach((sheet, index) => {
-    if (!sheets.has(sheet)) {
-      sheets.set(sheet, index);
+    const key = sheetNameKey(sheet);
+    if (!sheets.has(key)) {
+      sheets.set(key, index);
     }
   });
+  const tables = new Map<string, TableEntry>();
+  for (const [name, table] of context.tables ?? []) {
+    const key = excelNameKey(name);
+    if (!tables.has(key)) {
+      tables.set(key, table);
+    }
+  }
   const externBySheet = new Map<number, number>();
   (context.externSheets ?? []).forEach((entry, index) => {
-    if (entry.first === entry.last && !externBySheet.has(entry.first)) {
+    if (
+      (entry.supportingLink ?? 0) === 0 &&
+      entry.first === entry.last &&
+      !externBySheet.has(entry.first)
+    ) {
       externBySheet.set(entry.first, index);
     }
   });
-  const spans = new Map<string, number>();
-  (context.externSheets ?? []).forEach((entry, index) => {
-    spans.set(`${entry.first}:${entry.last}`, index);
-  });
-  const built: ContextIndex = { names, sheets, externBySheet, spans, usedExternSheet: false };
+  const built: ContextIndex = { names, sheets, tables, externBySheet, usedExternSheet: false };
   CONTEXT_INDEX.set(context, built);
   return built;
 }
@@ -1397,31 +2749,27 @@ function indexOf(context: PtgContext): ContextIndex {
  *
  * With an explicit table, the entry naming exactly that one sheet is the answer. Without one the
  * identity mapping is assumed, which is only sound because this library's writer emits an identity
- * table alongside; a writer that omitted the table would leave every 3D reference pointing into
- * nothing, which is the bug this function's previous form produced.
+ * table alongside.
  */
 function sheetIndex(sheet: string, context: PtgContext, where: string, endSheet?: string): number {
   const index = indexOf(context);
-  const sheetPosition = index.sheets.get(sheet) ?? -1;
+  const sheetPosition = index.sheets.get(sheetNameKey(sheet)) ?? -1;
   if (sheetPosition === -1) {
     throw new XlsbParseError(where, `sheet ${sheet} is not in the workbook`);
   }
   if (context.externSheets === undefined) {
-    // No table supplied means the identity mapping is assumed, which is only sound because this library's
-    // writer emits one alongside — so the block is still needed.
-    indexOf(context).usedExternSheet = true;
+    index.usedExternSheet = true;
     return sheetPosition;
   }
-  // A reference across a *span* of sheets — `Sheet1:Sheet3!A1`. `itabFirst` and `itabLast` are the two
-  // fields an entry already has, and the decoder has always read a difference between them as a span;
-  // the writer ignored `endSheet` entirely and emitted the entry for the *first* sheet, so
-  // `SUM(Sheet1:Sheet3!A1)` was written as `SUM(Sheet1!A1)` — a different answer, silently.
+  markUsed(context);
+  // A reference across a *span* of sheets — `Sheet1:Sheet3!A1` — is an entry whose `itabFirst` and `itabLast`
+  // differ.
   if (endSheet !== undefined) {
-    const endPosition = index.sheets.get(endSheet) ?? -1;
+    const endPosition = index.sheets.get(sheetNameKey(endSheet)) ?? -1;
     if (endPosition === -1) {
       throw new XlsbParseError(where, `sheet ${endSheet} is not in the workbook`);
     }
-    return internExternSheet(context, index, sheetPosition, endPosition, where);
+    return internExternSheet(context, sheetPosition, endPosition, where);
   }
   const ixti = index.externBySheet.get(sheetPosition) ?? -1;
   if (ixti === -1) {
@@ -1430,915 +2778,92 @@ function sheetIndex(sheet: string, context: PtgContext, where: string, endSheet?
       `sheet ${sheet} has no single-sheet BrtExternSheet entry to reference it by`
     );
   }
-  index.usedExternSheet = true;
   return ixti;
+}
+
+/**
+ * `BrtExternSheet` tables some token resolved an `ixti` through.
+ *
+ * Marked on the *table*, not on the context: a writer derives one context per sheet and per template from the
+ * workbook's (`{ ...context, sheetIndex }`), and every copy shares the one table the workbook part will carry. A
+ * flag on the context object was invisible from the original as soon as a copy did the resolving.
+ */
+const USED_TABLES = new WeakSet<object>();
+
+function markUsed(context: PtgContext): void {
+  if (context.externSheets !== undefined) {
+    USED_TABLES.add(context.externSheets);
+  }
 }
 
 /**
  * Whether anything encoded through `context` resolved an `ixti`.
  *
- * The extern-sheet block — `BrtBeginExternals`, `BrtSupSelf`, `BrtExternSheet`, `BrtEndExternals` — was written
- * unconditionally, on the reasoning that omitting it wrongly would leave every 3D reference pointing at nothing
- * while writing it needlessly cost four records. That was the right trade **while the condition was unknown**,
- * and the note left behind said what would settle it: "a flag the Ptg encoder sets when it emits an `ixti`".
- * This is that flag, and this function is the only thing in the codec that resolves one.
- *
- * The rule it yields matches Excel across all fifteen oracle references: the block appears for conditional
- * formats, pivots, tables, defined names, charts and sparklines, and not for the nine cases whose formulas are
- * plain cell references. Note that those six are *not* the ones with a 3D reference in a worksheet cell — a
- * conditional-formatting rule, a pivot source, a chart series and a sparkline range each carry references of
- * their own, which is why counting cell formulas produced the wrong answer.
+ * The extern-sheet block — `BrtBeginExternals`, `BrtSupSelf`, `BrtExternSheet`, `BrtEndExternals` — is written only
+ * when a token needs it, and only the encoder knows whether one did.
  */
 export function externSheetWasUsed(context: PtgContext): boolean {
-  return CONTEXT_INDEX.get(context)?.usedExternSheet ?? false;
+  return context.externSheets !== undefined
+    ? USED_TABLES.has(context.externSheets)
+    : (CONTEXT_INDEX.get(context)?.usedExternSheet ?? false);
 }
 
 /**
- * The `ixti` for a sheet span, appending an entry when the table has none.
+ * The `ixti` for an entry of this workbook's `BrtExternSheet`, appending one when the table has none.
  *
- * The table is built by the writer as an identity mapping — one single-sheet entry per sheet — because
- * that is what makes `ixti = sheet position` true by construction. A span has no such entry, so one is
- * added; the worksheets are serialised before the workbook part, so an entry appended while a formula is
- * being encoded still reaches the file.
- *
- * The entry *layout* is established from Excel's output (`issues.xlsb` carries `{0,0}` and `{2,2}`).
- * What is inferred is the value: no corpus workbook contains an entry whose `itabFirst` and `itabLast`
- * differ, so `INFERRED_VALUES.externSheetSpan` records that this reading of the two fields comes from
- * their names and from the decoder's long-standing interpretation rather than from observed bytes.
+ * The table is built by the writer as an identity mapping — one single-sheet entry per sheet. A span
+ * (`Sheet1:Sheet3`) and the workbook-level entry a `PtgNameX` goes through (-2, -2) have no such entry, so one is
+ * added; the worksheets are serialised before the workbook part, so an entry appended while a formula is being
+ * encoded still reaches the file. Excel's own table for a workbook with both carries `{0,1,1}`, `{0,-2,-2}` and
+ * `{0,1,2}`.
  */
 function internExternSheet(
   context: PtgContext,
-  index: ContextIndex,
   first: number,
   last: number,
   where: string
 ): number {
-  const key = `${first}:${last}`;
-  const existing = index.spans.get(key);
-  if (existing !== undefined) {
-    index.usedExternSheet = true;
-    return existing;
-  }
   const table = context.externSheets;
   if (!Array.isArray(table)) {
-    // A caller that handed a frozen table cannot be given a span, and quietly narrowing the reference
-    // is the outcome this whole function exists to remove.
+    // No table means the identity mapping, which has no room for anything but single sheets; and a caller that
+    // handed a frozen table cannot be given an entry. Quietly narrowing the reference is the outcome this function
+    // exists to remove.
     throw new XlsbParseError(
       where,
-      `a reference across sheets ${first}..${last} needs a BrtExternSheet entry, and the table ` +
-        `supplied cannot take one`
+      `a reference through BrtExternSheet entry ${first}..${last} needs a table that can take one`
     );
   }
-  const ixti = table.length;
-  index.usedExternSheet = true;
-  (table as { first: number; last: number }[]).push({ first, last });
-  index.spans.set(key, ixti);
+  // Searched in the live table rather than in a cached map: every context derived from the workbook's shares it.
+  const entries = table as { first: number; last: number; supportingLink?: number }[];
+  let ixti = entries.findIndex(
+    entry => (entry.supportingLink ?? 0) === 0 && entry.first === first && entry.last === last
+  );
+  if (ixti === -1) {
+    ixti = entries.length;
+    entries.push({ first, last });
+  }
+  markUsed(context);
   return ixti;
 }
 
 function unsupported(where: string, what: string): never {
-  throw new ExcelNotSupportedError(
+  throw new ExcelUnsupportedFeatureError(
     `Write XLSB formula at ${where}`,
     `${what} is not supported yet`
   );
 }
 
-// =============================================================================
-// Function identifiers
-// =============================================================================
-
 /**
- * Built-in function ids — the complete `Ftab` from MS-XLSB 2.5.98.10, transcribed.
+ * Wrap a token stream as a parsed formula: `cce`, the tokens, `cb`, then the `RgbExtra`.
  *
- * **This was a hand-maintained subset of 104 entries, and twelve of them named the wrong function.** Not
- * missing — *wrong*, which is worse, because a wrong pair is silent in both directions. `FIND` was written as
- * 82, and 82 is `SEARCH`; a workbook containing `=FIND("a",A1)` was saved as `=SEARCH("a",A1)`, which is
- * case-insensitive and accepts wildcards, so Excel opened the file without complaint and computed a different
- * answer. The full list of what the twelve actually encoded: `FIND`→SEARCH, `ISNUMBER`→CHAR, `FINDB`→FIND,
- * `TEXT`→INDIRECT, `ODD`→FISHER, `STDEVP`→DEVSQ, `GETPIVOTDATA`→STDEVA, `IFERROR`→ISEVEN, `COUNTIFS`→BESSELY,
- * `SUMIFS`→BESSELI, `AVERAGEIF`→XNPV, `AVERAGEIFS`→PRICEMAT.
- *
- * **Nothing here could have caught that**, and the reason is worth keeping: the encoder and the decoder read
- * the same table, so `FIND` went out as 82 and came back as `FIND`. Every round-trip test passed. Only Excel
- * disagreed, and only about the answer — never about whether the file was valid. This is the same shape as
- * the reference/value operand classes having been swapped: a table shared by both directions cannot be
- * validated by using it in both directions.
- *
- * So the subset is gone. All 475 numeric ids are here, generated from the specification's table rather than
- * curated, because a curated subset is a list that drifts from the thing it describes — and the drift is
- * invisible. `__tests__/function-table.test.ts` pins the count and the twelve corrected pairs.
- *
- * **Sixty-one of these are macro-sheet commands** (`SET.NAME`, `GET.CELL`, `ADD.BAR`) rather than worksheet
- * functions. They are real `iftab` values and belong in the table: the decoder needs them to read a macro
- * sheet, and the encoder reaches one only if a formula names it.
- *
- * **What is still missing is a different mechanism, not a missing row.** A *future function* — `XLOOKUP`,
- * `TEXTJOIN`, `IFS`, `CONCAT`, every `*.DIST` — has no `iftab` at all. It is encoded as `PtgName` pointing at
- * a defined name whose `fFutureFunction` bit is set, with an `_xlfn.` prefix on the stored name. That needs
- * name-table machinery this codec does not have yet, so those functions are still refused by name, which is
- * the correct behaviour until it exists.
- */
-const FUNCTION_TABLE: readonly (readonly [number, string])[] = [
-  [0, "COUNT"],
-  [1, "IF"],
-  [2, "ISNA"],
-  [3, "ISERROR"],
-  [4, "SUM"],
-  [5, "AVERAGE"],
-  [6, "MIN"],
-  [7, "MAX"],
-  [8, "ROW"],
-  [9, "COLUMN"],
-  [10, "NA"],
-  [11, "NPV"],
-  [12, "STDEV"],
-  [13, "DOLLAR"],
-  [14, "FIXED"],
-  [15, "SIN"],
-  [16, "COS"],
-  [17, "TAN"],
-  [18, "ATAN"],
-  [19, "PI"],
-  [20, "SQRT"],
-  [21, "EXP"],
-  [22, "LN"],
-  [23, "LOG10"],
-  [24, "ABS"],
-  [25, "INT"],
-  [26, "SIGN"],
-  [27, "ROUND"],
-  [28, "LOOKUP"],
-  [29, "INDEX"],
-  [30, "REPT"],
-  [31, "MID"],
-  [32, "LEN"],
-  [33, "VALUE"],
-  [34, "TRUE"],
-  [35, "FALSE"],
-  [36, "AND"],
-  [37, "OR"],
-  [38, "NOT"],
-  [39, "MOD"],
-  [40, "DCOUNT"],
-  [41, "DSUM"],
-  [42, "DAVERAGE"],
-  [43, "DMIN"],
-  [44, "DMAX"],
-  [45, "DSTDEV"],
-  [46, "VAR"],
-  [47, "DVAR"],
-  [48, "TEXT"],
-  [49, "LINEST"],
-  [50, "TREND"],
-  [51, "LOGEST"],
-  [52, "GROWTH"],
-  [53, "GOTO"],
-  [54, "HALT"],
-  [55, "RETURN"],
-  [56, "PV"],
-  [57, "FV"],
-  [58, "NPER"],
-  [59, "PMT"],
-  [60, "RATE"],
-  [61, "MIRR"],
-  [62, "IRR"],
-  [63, "RAND"],
-  [64, "MATCH"],
-  [65, "DATE"],
-  [66, "TIME"],
-  [67, "DAY"],
-  [68, "MONTH"],
-  [69, "YEAR"],
-  [70, "WEEKDAY"],
-  [71, "HOUR"],
-  [72, "MINUTE"],
-  [73, "SECOND"],
-  [74, "NOW"],
-  [75, "AREAS"],
-  [76, "ROWS"],
-  [77, "COLUMNS"],
-  [78, "OFFSET"],
-  [79, "ABSREF"],
-  [80, "RELREF"],
-  [81, "ARGUMENT"],
-  [82, "SEARCH"],
-  [83, "TRANSPOSE"],
-  [84, "ERROR"],
-  [85, "STEP"],
-  [86, "TYPE"],
-  [87, "ECHO"],
-  [88, "SET.NAME"],
-  [89, "CALLER"],
-  [90, "DEREF"],
-  [91, "WINDOWS"],
-  [93, "DOCUMENTS"],
-  [94, "ACTIVE.CELL"],
-  [95, "SELECTION"],
-  [96, "RESULT"],
-  [97, "ATAN2"],
-  [98, "ASIN"],
-  [99, "ACOS"],
-  [100, "CHOOSE"],
-  [101, "HLOOKUP"],
-  [102, "VLOOKUP"],
-  [103, "LINKS"],
-  [104, "INPUT"],
-  [105, "ISREF"],
-  [106, "GET.FORMULA"],
-  [107, "GET.NAME"],
-  [108, "SET.VALUE"],
-  [109, "LOG"],
-  [110, "EXEC"],
-  [111, "CHAR"],
-  [112, "LOWER"],
-  [113, "UPPER"],
-  [114, "PROPER"],
-  [115, "LEFT"],
-  [116, "RIGHT"],
-  [117, "EXACT"],
-  [118, "TRIM"],
-  [119, "REPLACE"],
-  [120, "SUBSTITUTE"],
-  [121, "CODE"],
-  [122, "NAMES"],
-  [123, "DIRECTORY"],
-  [124, "FIND"],
-  [125, "CELL"],
-  [126, "ISERR"],
-  [127, "ISTEXT"],
-  [128, "ISNUMBER"],
-  [129, "ISBLANK"],
-  [130, "T"],
-  [131, "N"],
-  [132, "FOPEN"],
-  [133, "FCLOSE"],
-  [134, "FSIZE"],
-  [135, "FREADLN"],
-  [136, "FREAD"],
-  [137, "FWRITELN"],
-  [138, "FWRITE"],
-  [139, "FPOS"],
-  [140, "DATEVALUE"],
-  [141, "TIMEVALUE"],
-  [142, "SLN"],
-  [143, "SYD"],
-  [144, "DDB"],
-  [145, "GET.DEF"],
-  [146, "REFTEXT"],
-  [147, "TEXTREF"],
-  [148, "INDIRECT"],
-  [149, "REGISTER"],
-  [150, "CALL"],
-  [151, "ADD.BAR"],
-  [152, "ADD.MENU"],
-  [153, "ADD.COMMAND"],
-  [154, "ENABLE.COMMAND"],
-  [155, "CHECK.COMMAND"],
-  [156, "RENAME.COMMAND"],
-  [157, "SHOW.BAR"],
-  [158, "DELETE.MENU"],
-  [159, "DELETE.COMMAND"],
-  [160, "GET.CHART.ITEM"],
-  [161, "DIALOG.BOX"],
-  [162, "CLEAN"],
-  [163, "MDETERM"],
-  [164, "MINVERSE"],
-  [165, "MMULT"],
-  [166, "FILES"],
-  [167, "IPMT"],
-  [168, "PPMT"],
-  [169, "COUNTA"],
-  [170, "CANCEL.KEY"],
-  [171, "FOR"],
-  [172, "WHILE"],
-  [173, "BREAK"],
-  [174, "NEXT"],
-  [175, "INITIATE"],
-  [176, "REQUEST"],
-  [177, "POKE"],
-  [178, "EXECUTE"],
-  [179, "TERMINATE"],
-  [180, "RESTART"],
-  [181, "HELP"],
-  [182, "GET.BAR"],
-  [183, "PRODUCT"],
-  [184, "FACT"],
-  [185, "GET.CELL"],
-  [186, "GET.WORKSPACE"],
-  [187, "GET.WINDOW"],
-  [188, "GET.DOCUMENT"],
-  [189, "DPRODUCT"],
-  [190, "ISNONTEXT"],
-  [191, "GET.NOTE"],
-  [192, "NOTE"],
-  [193, "STDEVP"],
-  [194, "VARP"],
-  [195, "DSTDEVP"],
-  [196, "DVARP"],
-  [197, "TRUNC"],
-  [198, "ISLOGICAL"],
-  [199, "DCOUNTA"],
-  [200, "DELETE.BAR"],
-  [201, "UNREGISTER"],
-  [204, "USDOLLAR"],
-  [205, "FINDB"],
-  [206, "SEARCHB"],
-  [207, "REPLACEB"],
-  [208, "LEFTB"],
-  [209, "RIGHTB"],
-  [210, "MIDB"],
-  [211, "LENB"],
-  [212, "ROUNDUP"],
-  [213, "ROUNDDOWN"],
-  [214, "ASC"],
-  [215, "DBCS"],
-  [216, "RANK"],
-  [219, "ADDRESS"],
-  [220, "DAYS360"],
-  [221, "TODAY"],
-  [222, "VDB"],
-  [223, "ELSE"],
-  [224, "ELSE.IF"],
-  [225, "END.IF"],
-  [226, "FOR.CELL"],
-  [227, "MEDIAN"],
-  [228, "SUMPRODUCT"],
-  [229, "SINH"],
-  [230, "COSH"],
-  [231, "TANH"],
-  [232, "ASINH"],
-  [233, "ACOSH"],
-  [234, "ATANH"],
-  [235, "DGET"],
-  [236, "CREATE.OBJECT"],
-  [237, "VOLATILE"],
-  [238, "LAST.ERROR"],
-  [239, "CUSTOM.UNDO"],
-  [240, "CUSTOM.REPEAT"],
-  [241, "FORMULA.CONVERT"],
-  [242, "GET.LINK.INFO"],
-  [243, "TEXT.BOX"],
-  [244, "INFO"],
-  [245, "GROUP"],
-  [246, "GET.OBJECT"],
-  [247, "DB"],
-  [248, "PAUSE"],
-  [251, "RESUME"],
-  [252, "FREQUENCY"],
-  [253, "ADD.TOOLBAR"],
-  [254, "DELETE.TOOLBAR"],
-  [256, "RESET.TOOLBAR"],
-  [257, "EVALUATE"],
-  [258, "GET.TOOLBAR"],
-  [259, "GET.TOOL"],
-  [260, "SPELLING.CHECK"],
-  [261, "ERROR.TYPE"],
-  [262, "APP.TITLE"],
-  [263, "WINDOW.TITLE"],
-  [264, "SAVE.TOOLBAR"],
-  [265, "ENABLE.TOOL"],
-  [266, "PRESS.TOOL"],
-  [267, "REGISTER.ID"],
-  [268, "GET.WORKBOOK"],
-  [269, "AVEDEV"],
-  [270, "BETADIST"],
-  [271, "GAMMALN"],
-  [272, "BETAINV"],
-  [273, "BINOMDIST"],
-  [274, "CHIDIST"],
-  [275, "CHIINV"],
-  [276, "COMBIN"],
-  [277, "CONFIDENCE"],
-  [278, "CRITBINOM"],
-  [279, "EVEN"],
-  [280, "EXPONDIST"],
-  [281, "FDIST"],
-  [282, "FINV"],
-  [283, "FISHER"],
-  [284, "FISHERINV"],
-  [285, "FLOOR"],
-  [286, "GAMMADIST"],
-  [287, "GAMMAINV"],
-  [288, "CEILING"],
-  [289, "HYPGEOMDIST"],
-  [290, "LOGNORMDIST"],
-  [291, "LOGINV"],
-  [292, "NEGBINOMDIST"],
-  [293, "NORMDIST"],
-  [294, "NORMSDIST"],
-  [295, "NORMINV"],
-  [296, "NORMSINV"],
-  [297, "STANDARDIZE"],
-  [298, "ODD"],
-  [299, "PERMUT"],
-  [300, "POISSON"],
-  [301, "TDIST"],
-  [302, "WEIBULL"],
-  [303, "SUMXMY2"],
-  [304, "SUMX2MY2"],
-  [305, "SUMX2PY2"],
-  [306, "CHITEST"],
-  [307, "CORREL"],
-  [308, "COVAR"],
-  [309, "FORECAST"],
-  [310, "FTEST"],
-  [311, "INTERCEPT"],
-  [312, "PEARSON"],
-  [313, "RSQ"],
-  [314, "STEYX"],
-  [315, "SLOPE"],
-  [316, "TTEST"],
-  [317, "PROB"],
-  [318, "DEVSQ"],
-  [319, "GEOMEAN"],
-  [320, "HARMEAN"],
-  [321, "SUMSQ"],
-  [322, "KURT"],
-  [323, "SKEW"],
-  [324, "ZTEST"],
-  [325, "LARGE"],
-  [326, "SMALL"],
-  [327, "QUARTILE"],
-  [328, "PERCENTILE"],
-  [329, "PERCENTRANK"],
-  [330, "MODE"],
-  [331, "TRIMMEAN"],
-  [332, "TINV"],
-  [334, "MOVIE.COMMAND"],
-  [335, "GET.MOVIE"],
-  [336, "CONCATENATE"],
-  [337, "POWER"],
-  [338, "PIVOT.ADD.DATA"],
-  [339, "GET.PIVOT.TABLE"],
-  [340, "GET.PIVOT.FIELD"],
-  [341, "GET.PIVOT.ITEM"],
-  [342, "RADIANS"],
-  [343, "DEGREES"],
-  [344, "SUBTOTAL"],
-  [345, "SUMIF"],
-  [346, "COUNTIF"],
-  [347, "COUNTBLANK"],
-  [348, "SCENARIO.GET"],
-  [349, "OPTIONS.LISTS.GET"],
-  [350, "ISPMT"],
-  [351, "DATEDIF"],
-  [352, "DATESTRING"],
-  [353, "NUMBERSTRING"],
-  [354, "ROMAN"],
-  [355, "OPEN.DIALOG"],
-  [356, "SAVE.DIALOG"],
-  [357, "VIEW.GET"],
-  [358, "GETPIVOTDATA"],
-  [359, "HYPERLINK"],
-  [360, "PHONETIC"],
-  [361, "AVERAGEA"],
-  [362, "MAXA"],
-  [363, "MINA"],
-  [364, "STDEVPA"],
-  [365, "VARPA"],
-  [366, "STDEVA"],
-  [367, "VARA"],
-  [368, "BAHTTEXT"],
-  [369, "THAIDAYOFWEEK"],
-  [370, "THAIDIGIT"],
-  [371, "THAIMONTHOFYEAR"],
-  [372, "THAINUMSOUND"],
-  [373, "THAINUMSTRING"],
-  [374, "THAISTRINGLENGTH"],
-  [375, "ISTHAIDIGIT"],
-  [376, "ROUNDBAHTDOWN"],
-  [377, "ROUNDBAHTUP"],
-  [378, "THAIYEAR"],
-  [379, "RTD"],
-  [380, "CUBEVALUE"],
-  [381, "CUBEMEMBER"],
-  [382, "CUBEMEMBERPROPERTY"],
-  [383, "CUBERANKEDMEMBER"],
-  [384, "HEX2BIN"],
-  [385, "HEX2DEC"],
-  [386, "HEX2OCT"],
-  [387, "DEC2BIN"],
-  [388, "DEC2HEX"],
-  [389, "DEC2OCT"],
-  [390, "OCT2BIN"],
-  [391, "OCT2HEX"],
-  [392, "OCT2DEC"],
-  [393, "BIN2DEC"],
-  [394, "BIN2OCT"],
-  [395, "BIN2HEX"],
-  [396, "IMSUB"],
-  [397, "IMDIV"],
-  [398, "IMPOWER"],
-  [399, "IMABS"],
-  [400, "IMSQRT"],
-  [401, "IMLN"],
-  [402, "IMLOG2"],
-  [403, "IMLOG10"],
-  [404, "IMSIN"],
-  [405, "IMCOS"],
-  [406, "IMEXP"],
-  [407, "IMARGUMENT"],
-  [408, "IMCONJUGATE"],
-  [409, "IMAGINARY"],
-  [410, "IMREAL"],
-  [411, "COMPLEX"],
-  [412, "IMSUM"],
-  [413, "IMPRODUCT"],
-  [414, "SERIESSUM"],
-  [415, "FACTDOUBLE"],
-  [416, "SQRTPI"],
-  [417, "QUOTIENT"],
-  [418, "DELTA"],
-  [419, "GESTEP"],
-  [420, "ISEVEN"],
-  [421, "ISODD"],
-  [422, "MROUND"],
-  [423, "ERF"],
-  [424, "ERFC"],
-  [425, "BESSELJ"],
-  [426, "BESSELK"],
-  [427, "BESSELY"],
-  [428, "BESSELI"],
-  [429, "XIRR"],
-  [430, "XNPV"],
-  [431, "PRICEMAT"],
-  [432, "YIELDMAT"],
-  [433, "INTRATE"],
-  [434, "RECEIVED"],
-  [435, "DISC"],
-  [436, "PRICEDISC"],
-  [437, "YIELDDISC"],
-  [438, "TBILLEQ"],
-  [439, "TBILLPRICE"],
-  [440, "TBILLYIELD"],
-  [441, "PRICE"],
-  [442, "YIELD"],
-  [443, "DOLLARDE"],
-  [444, "DOLLARFR"],
-  [445, "NOMINAL"],
-  [446, "EFFECT"],
-  [447, "CUMPRINC"],
-  [448, "CUMIPMT"],
-  [449, "EDATE"],
-  [450, "EOMONTH"],
-  [451, "YEARFRAC"],
-  [452, "COUPDAYBS"],
-  [453, "COUPDAYS"],
-  [454, "COUPDAYSNC"],
-  [455, "COUPNCD"],
-  [456, "COUPNUM"],
-  [457, "COUPPCD"],
-  [458, "DURATION"],
-  [459, "MDURATION"],
-  [460, "ODDLPRICE"],
-  [461, "ODDLYIELD"],
-  [462, "ODDFPRICE"],
-  [463, "ODDFYIELD"],
-  [464, "RANDBETWEEN"],
-  [465, "WEEKNUM"],
-  [466, "AMORDEGRC"],
-  [467, "AMORLINC"],
-  [469, "ACCRINT"],
-  [470, "ACCRINTM"],
-  [471, "WORKDAY"],
-  [472, "NETWORKDAYS"],
-  [473, "GCD"],
-  [474, "MULTINOMIAL"],
-  [475, "LCM"],
-  [476, "FVSCHEDULE"],
-  [477, "CUBEKPIMEMBER"],
-  [478, "CUBESET"],
-  [479, "CUBESETCOUNT"],
-  [480, "IFERROR"],
-  [481, "COUNTIFS"],
-  [482, "SUMIFS"],
-  [483, "AVERAGEIF"],
-  [484, "AVERAGEIFS"]
-];
-
-/**
- * The arity of every fixed-arity function, by `iftab`.
- *
- * **`PtgFunc` and `PtgFuncVar` are not interchangeable, and this codec used only the second one.** A function
- * with a fixed signature is called through `PtgFunc`, which carries no argument count because the count is
- * implied; a variadic one is called through `PtgFuncVar`, which carries it. Emitting `PtgFuncVar` for `MOD` —
- * exactly two arguments — produced a formula Excel repaired: `Repaired Records: Conditional formatting from
- * /xl/worksheets/sheet1.bin`, in six sheets of one workbook. Excel's own bytes for the same rule are
- * `41 27 00` where this wrote `42 02 27 00`.
- *
- * The reader had the mirror of the same gap and was louder about it: `PtgFunc` threw
- * `not supported yet`, so **no formula Excel wrote for any fixed-arity function could be read at all**.
- *
- * Derived from the `Parameters` column of MS-XLSB 2.5.98.10 rather than curated: a signature is fixed when its
- * grammar has no repetition (`*`), no optional group (`[`) and no alternation, and the arity is then the number
- * of terms. 256 of the 475 functions are fixed. Hand-listing that many would drift, and the drift would be
- * invisible — the two tokens differ by one byte and both decode through this same codec.
- */
-const FIXED_ARITY: readonly (readonly [number, number])[] = [
-  [2, 1],
-  [3, 1],
-  [10, 0],
-  [15, 1],
-  [16, 1],
-  [17, 1],
-  [18, 1],
-  [19, 0],
-  [20, 1],
-  [21, 1],
-  [22, 1],
-  [23, 1],
-  [24, 1],
-  [25, 1],
-  [26, 1],
-  [27, 2],
-  [30, 2],
-  [31, 3],
-  [32, 1],
-  [33, 1],
-  [34, 0],
-  [35, 0],
-  [38, 1],
-  [39, 2],
-  [40, 3],
-  [41, 3],
-  [42, 3],
-  [43, 3],
-  [44, 3],
-  [45, 3],
-  [47, 3],
-  [48, 2],
-  [53, 1],
-  [61, 3],
-  [63, 0],
-  [65, 3],
-  [66, 3],
-  [67, 1],
-  [68, 1],
-  [69, 1],
-  [71, 1],
-  [72, 1],
-  [73, 1],
-  [74, 0],
-  [75, 1],
-  [76, 1],
-  [77, 1],
-  [79, 2],
-  [80, 2],
-  [83, 1],
-  [85, 0],
-  [86, 1],
-  [89, 0],
-  [90, 1],
-  [94, 0],
-  [95, 0],
-  [97, 2],
-  [98, 1],
-  [99, 1],
-  [105, 1],
-  [106, 1],
-  [108, 2],
-  [111, 1],
-  [112, 1],
-  [113, 1],
-  [114, 1],
-  [118, 1],
-  [119, 4],
-  [121, 1],
-  [126, 1],
-  [127, 1],
-  [128, 1],
-  [129, 1],
-  [130, 1],
-  [131, 1],
-  [133, 1],
-  [134, 1],
-  [135, 1],
-  [136, 2],
-  [137, 2],
-  [138, 2],
-  [140, 1],
-  [141, 1],
-  [142, 3],
-  [143, 4],
-  [161, 1],
-  [162, 1],
-  [163, 1],
-  [164, 1],
-  [165, 2],
-  [172, 1],
-  [173, 0],
-  [174, 0],
-  [175, 2],
-  [176, 2],
-  [177, 3],
-  [178, 2],
-  [179, 1],
-  [184, 1],
-  [186, 1],
-  [189, 3],
-  [190, 1],
-  [195, 3],
-  [196, 3],
-  [198, 1],
-  [199, 3],
-  [200, 1],
-  [201, 1],
-  [207, 4],
-  [210, 3],
-  [211, 3],
-  [212, 2],
-  [213, 2],
-  [214, 1],
-  [215, 1],
-  [221, 0],
-  [223, 0],
-  [224, 1],
-  [225, 0],
-  [229, 1],
-  [230, 1],
-  [231, 1],
-  [232, 1],
-  [233, 1],
-  [234, 1],
-  [235, 3],
-  [238, 0],
-  [244, 1],
-  [245, 0],
-  [252, 2],
-  [254, 1],
-  [256, 1],
-  [257, 1],
-  [261, 1],
-  [265, 3],
-  [266, 3],
-  [271, 1],
-  [273, 4],
-  [274, 2],
-  [275, 2],
-  [276, 2],
-  [277, 3],
-  [278, 3],
-  [279, 1],
-  [280, 3],
-  [281, 3],
-  [282, 3],
-  [283, 1],
-  [284, 1],
-  [285, 2],
-  [286, 4],
-  [287, 3],
-  [288, 2],
-  [289, 4],
-  [290, 3],
-  [291, 3],
-  [292, 3],
-  [293, 4],
-  [294, 1],
-  [295, 3],
-  [296, 1],
-  [297, 3],
-  [298, 1],
-  [299, 2],
-  [300, 3],
-  [301, 3],
-  [302, 4],
-  [303, 2],
-  [304, 2],
-  [305, 2],
-  [306, 2],
-  [307, 2],
-  [308, 2],
-  [309, 3],
-  [310, 2],
-  [311, 2],
-  [312, 2],
-  [313, 2],
-  [314, 2],
-  [315, 2],
-  [316, 4],
-  [325, 2],
-  [326, 2],
-  [327, 2],
-  [328, 2],
-  [331, 2],
-  [332, 2],
-  [337, 2],
-  [342, 1],
-  [343, 1],
-  [346, 2],
-  [347, 1],
-  [349, 1],
-  [350, 4],
-  [351, 3],
-  [352, 1],
-  [353, 2],
-  [360, 1],
-  [368, 1],
-  [369, 1],
-  [370, 1],
-  [371, 1],
-  [372, 1],
-  [373, 1],
-  [374, 1],
-  [375, 1],
-  [376, 1],
-  [377, 1],
-  [378, 1],
-  [382, 3],
-  [385, 1],
-  [392, 1],
-  [393, 1],
-  [396, 2],
-  [397, 2],
-  [398, 2],
-  [399, 1],
-  [400, 1],
-  [401, 1],
-  [402, 1],
-  [403, 1],
-  [404, 1],
-  [405, 1],
-  [406, 1],
-  [407, 1],
-  [408, 1],
-  [409, 1],
-  [410, 1],
-  [414, 4],
-  [415, 1],
-  [416, 1],
-  [417, 2],
-  [420, 1],
-  [421, 1],
-  [422, 2],
-  [424, 1],
-  [425, 2],
-  [426, 2],
-  [427, 2],
-  [428, 2],
-  [430, 3],
-  [438, 3],
-  [439, 3],
-  [440, 3],
-  [443, 2],
-  [444, 2],
-  [445, 2],
-  [446, 2],
-  [447, 6],
-  [448, 6],
-  [449, 2],
-  [450, 2],
-  [464, 2],
-  [476, 2],
-  [479, 1],
-  [480, 2]
-];
-
-/** `iftab` → argument count, for the fixed-arity functions. Absent means variadic. */
-const ARITY_BY_ID: ReadonlyMap<number, number> = new Map(FIXED_ARITY);
-
-/**
- * The two function tables, for the cross-checks that keep them from drifting apart.
- *
- * **They are two transcriptions of one specification table, related only by a bare number.** `FUNCTION_TABLE` maps an
- * `iftab` to a name and `FIXED_ARITY` maps the same `iftab` to a parameter count; the first came from the specification's
- * name column and the second from a syntax judgement on its `Parameters` column. Nothing connected them, and both the
- * decoder and the encoder look each up separately, so an id present in one and absent from the other is a silent
- * degradation rather than an error.
- *
- * That matters more here than duplication usually does, because of how an arity mistake fails: `PtgFunc` has nowhere to
- * record the real argument count, so a wrong arity produces a file Excel opens without complaint and evaluates
- * differently — and a round trip cannot see it, since the encoder and decoder share the same wrong entry. It is the exact
- * shape of the twelve `iftab` defects this table's own history records.
- *
- * Exported so `__tests__/function-table.test.ts` can assert what no type can: that every id in one appears in the other,
- * that neither has a duplicate, and that the counts are what they are.
- */
-export const FUNCTION_TABLES = { names: FUNCTION_TABLE, arities: FIXED_ARITY } as const;
-
-const FUNCTION_NAME_BY_ID: ReadonlyMap<number, string> = new Map(FUNCTION_TABLE);
-const FUNCTION_ID_BY_NAME: ReadonlyMap<string, number> = new Map(
-  FUNCTION_TABLE.map(([id, name]) => [name, id])
-);
-
-/**
- * Wrap a token stream as a parsed formula: `cce`, the tokens, then an empty `rgcb`.
- *
- * `CellParsedFormula` (MS-XLSB 2.5.98.3) and `DVParsedFormula` (2.5.98.8) have the same four-part
- * layout, so one function serves both. They differ in what the token stream is *allowed* to contain —
- * a data validation formula may not carry `PtgExp`, `PtgList`, `PtgUnion` and a dozen others — but that
- * is a constraint on the caller's tokens, not on this framing, and enforcing it here would put a rule
- * about data validation inside a function cells also use.
- *
- * The `rgcb` trailer is always empty. It carries ancillary data for the token forms this library does
- * not emit — array constants and their like — and those are refused at the point of encoding, so there
- * is never anything to put in it.
+ * `CellParsedFormula` (MS-XLSB 2.5.98.3), `DVParsedFormula` (2.5.98.8), `NameParsedFormula` and their kind have
+ * the same four-part layout, so one function serves them all. The `RgbExtra` carries a `PtgExp`'s column and an
+ * array constant's values.
  */
 export function encodeParsedFormula(tokens: Uint8Array, extra?: Uint8Array): Uint8Array {
   return concatUint8Arrays([
     new BinaryWriter().writeUint32(tokens.length).toUint8Array(),
     tokens,
-    // `cb`, the length of the `RgbExtra` that follows. Zero for every formula whose tokens are
-    // self-contained; four for a `PtgExp`, whose column lives out here in a `PtgExtraCol`.
     new BinaryWriter().writeUint32(extra?.length ?? 0).toUint8Array(),
     ...(extra === undefined ? [] : [extra])
   ]);

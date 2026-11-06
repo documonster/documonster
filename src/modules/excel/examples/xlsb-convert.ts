@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
@@ -28,9 +28,9 @@ const prefix = process.argv[2] ?? path.join(outDir, "xlsb-convert");
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Report");
-Worksheet.addRow(ws, ["Region", "Units", "Revenue", "Booked"]);
-Worksheet.addRow(ws, ["North", 120, 2398.8, new Date(Date.UTC(2024, 0, 15))]);
-Worksheet.addRow(ws, ["South", 84, 2058.0, new Date(Date.UTC(2024, 1, 3))]);
+Row.add(ws, ["Region", "Units", "Revenue", "Booked"]);
+Row.add(ws, ["North", 120, 2398.8, new Date(Date.UTC(2024, 0, 15))]);
+Row.add(ws, ["South", 84, 2058.0, new Date(Date.UTC(2024, 1, 3))]);
 Cell.setValue(ws, "C4", { formula: "SUM(C2:C3)", result: 4456.8 });
 for (const row of [2, 3, 4]) {
   Cell.setStyle(ws, `C${row}`, { numFmt: '"$"#,##0.00' });
@@ -56,19 +56,17 @@ console.log(`wrote ${xlsbPath} (${xlsbBytes.byteLength} bytes)`);
 // xlsx → xlsb, and back again.
 // ---------------------------------------------------------------------------
 
-const fromXlsx = Workbook.create();
-await Workbook.readFile(fromXlsx, xlsxPath);
+const fromXlsx = await Workbook.readFile(xlsxPath);
 const asXlsb = `${prefix}-from-xlsx.xlsb`;
 await Workbook.writeFile(fromXlsx, asXlsb);
 
-const fromXlsb = Workbook.create();
-await Workbook.readFile(fromXlsb, asXlsb);
+const fromXlsb = await Workbook.readFile(asXlsb);
 const backToXlsx = `${prefix}-round-tripped.xlsx`;
 await Workbook.writeFile(fromXlsb, backToXlsx);
 console.log(`wrote ${asXlsb}`);
 console.log(`wrote ${backToXlsx}`);
 
-const read = Workbook.getWorksheets(fromXlsb)[0]!;
+const read = Workbook.listWorksheets(fromXlsb)[0]!;
 console.log(`  C4 after xlsx → xlsb: ${JSON.stringify(Cell.getValue(read, "C4"))}`);
 console.log(`  D2 is a Date: ${Cell.getValue(read, "D2") instanceof Date}`);
 console.log(`  C2 number format: ${JSON.stringify(Cell.getStyle(read, "C2")?.numFmt)}`);
@@ -82,9 +80,8 @@ for (const [label, bytes] of [
   ["xlsx bytes", xlsxBytes],
   ["xlsb bytes", xlsbBytes]
 ] as const) {
-  const detected = Workbook.create();
-  await Workbook.read(detected, bytes);
-  const sheet = Workbook.getWorksheets(detected)[0]!;
+  const detected = await Workbook.read(bytes);
+  const sheet = Workbook.listWorksheets(detected)[0]!;
   console.log(
     `read ${label} with no filename: ${Worksheet.getName(sheet)}, C4 = ${JSON.stringify(Cell.getValue(sheet, "C4"))}`
   );
@@ -93,8 +90,7 @@ for (const [label, bytes] of [
 // Asking for the wrong format is refused rather than silently producing an empty workbook, which is
 // what a reader that trusted the caller over the bytes would do.
 try {
-  const wrong = Workbook.create();
-  await Workbook.read(wrong, xlsbBytes, { format: "xlsx" });
+  await Workbook.read(xlsbBytes, { format: "xlsx" });
   console.log("unexpected: xlsb read as xlsx without complaint");
 } catch (error) {
   console.log(`refused to read xlsb as xlsx: ${(error as Error).message.slice(0, 90)}`);

@@ -5,12 +5,23 @@
  * `@utils/fs`.
  */
 
-import { readMarkdown, readMarkdownAll, writeMarkdown } from "@excel/bridge/markdown-bridge";
+import type {
+  ExcelMarkdownReadOptions,
+  ExcelMarkdownWriteOptions
+} from "@excel/bridge/markdown-bridge";
+import {
+  formatWorksheet,
+  readMarkdown,
+  readMarkdownAll,
+  readMarkdownInto,
+  readNewWorkbook
+} from "@excel/bridge/markdown-bridge";
+import { isReadTarget } from "@excel/core/workbook-io-types";
 import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ExcelFileError } from "@excel/errors";
+import { checkFilePath, fileSystemError } from "@excel/utils/file-path";
 import type { MarkdownOptions } from "@markdown/types";
-import { fileExists, readFileText, writeFileText } from "@utils/fs";
+import { readFileText, writeFileText } from "@utils/fs";
 
 /** Read a Markdown table from a file path into a new worksheet (Node.js only). */
 export async function readMarkdownFile(
@@ -18,12 +29,7 @@ export async function readMarkdownFile(
   filename: string,
   options?: MarkdownOptions
 ): Promise<Worksheet> {
-  if (!(await fileExists(filename))) {
-    throw new ExcelFileError(filename, "read", "file not found");
-  }
-
-  const content = await readFileText(filename);
-  return readMarkdown(workbook, content, options);
+  return readMarkdown(workbook, await markdownText("readMarkdownFile", filename), options);
 }
 
 /** Read all Markdown tables from a file path, each as a worksheet (Node.js only). */
@@ -32,20 +38,71 @@ export async function readMarkdownAllFile(
   filename: string,
   options?: MarkdownOptions
 ): Promise<Worksheet[]> {
-  if (!(await fileExists(filename))) {
-    throw new ExcelFileError(filename, "read", "file not found");
-  }
+  return readMarkdownAll(workbook, await markdownText("readMarkdownAllFile", filename), options);
+}
 
-  const content = await readFileText(filename);
-  return readMarkdownAll(workbook, content, options);
+/**
+ * The text of a Markdown file. A path that is not one is refused with `ExcelArgumentError`; a file the system will not
+ * read is an `ExcelFileError` naming a Markdown file, with the system's error — `ENOENT`, `EACCES` — as its cause.
+ */
+async function markdownText(where: string, filename: string): Promise<string> {
+  checkFilePath(where, filename);
+  try {
+    return await readFileText(filename);
+  } catch (error) {
+    throw fileSystemError(filename, "read", error, "Markdown");
+  }
+}
+
+/**
+ * Read the first Markdown table in a file into a new workbook, returned (Node.js only) — with `{ tables: "all" }`
+ * every table, one worksheet each. Values are read as `ExcelMarkdown.addWorksheet` reads them.
+ */
+export async function readMarkdownFileWorkbook(
+  filename: string,
+  options?: ExcelMarkdownReadOptions
+): Promise<Workbook>;
+/**
+ * @deprecated Use `ExcelMarkdown.addWorksheet(workbook, await readFile(filename, "utf8"), options)`, which this
+ * form does. `ExcelMarkdown.readFile(filename)` returns a new workbook. Removed in 1.0.
+ */
+export async function readMarkdownFileWorkbook(
+  workbook: Workbook,
+  filename: string,
+  options?: MarkdownOptions
+): Promise<Worksheet>;
+export async function readMarkdownFileWorkbook(
+  first: Workbook | string,
+  second?: string | MarkdownOptions,
+  third?: MarkdownOptions
+): Promise<Workbook | Worksheet> {
+  if (isReadTarget(first)) {
+    return readMarkdownInto(
+      first,
+      await markdownText("ExcelMarkdown.readFile", second as string),
+      third,
+      false,
+      "ExcelMarkdown.readFile"
+    );
+  }
+  return readNewWorkbook(
+    "ExcelMarkdown.readFile",
+    await markdownText("ExcelMarkdown.readFile", first),
+    second as ExcelMarkdownReadOptions | undefined
+  );
 }
 
 /** Write a worksheet to a Markdown file path (Node.js only). */
 export async function writeMarkdownFile(
   workbook: Workbook,
   filename: string,
-  options?: MarkdownOptions
+  options?: ExcelMarkdownWriteOptions
 ): Promise<void> {
-  const markdownString = writeMarkdown(workbook, options);
-  await writeFileText(filename, markdownString);
+  checkFilePath("ExcelMarkdown.writeFile", filename);
+  const markdownString = formatWorksheet("ExcelMarkdown.writeFile", workbook, options);
+  try {
+    await writeFileText(filename, markdownString);
+  } catch (error) {
+    throw fileSystemError(filename, "write", error, "Markdown");
+  }
 }

@@ -25,8 +25,10 @@
  * notice because it would read them back the same way.
  */
 import type { Border, BorderStyle, Borders, Color } from "@excel/types";
+import { XlsbReader } from "@excel/xlsb/binary";
 import { COLOR_SIZE, VALID_RGB, encodeColor, readColor } from "@excel/xlsb/color";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import type { BinaryReader } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** `dg`, in the record's own order. The index is the value written. */
 const BORDER_STYLE: readonly (BorderStyle | undefined)[] = [
@@ -90,7 +92,7 @@ export function readBorder(payload: Uint8Array, part: string): Partial<Borders> 
   if (payload.length < BORDER_SIZE) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const flags = reader.readUint8();
   const top = readBlxf(reader);
   const bottom = readBlxf(reader);

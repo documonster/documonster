@@ -21,14 +21,14 @@ async function save() {
   const stopwatch = new HrStopwatch();
 
   stopwatch.start();
-  await Worksheet.protect(ws, password); // default 100000
+  await Worksheet.protect(ws, { password }); // default 100000
   console.log("Protection Time [spinCount default]:", stopwatch.microseconds);
 
   await writeBothFormats(wb, path.join(outDir, `protection-spin-count-${0}.xlsx`));
 
   // options defined but spinCount not
   stopwatch.start();
-  await Worksheet.protect(ws, password, { insertRows: true }); // default 100000
+  await Worksheet.protect(ws, { password, insertRows: true }); // default 100000
   console.log("Protection Time [spinCount default]:", stopwatch.microseconds);
 
   await writeBothFormats(wb, path.join(outDir, `protection-spin-count-${1}.xlsx`));
@@ -39,7 +39,7 @@ async function save() {
     const value = values[index];
 
     stopwatch.start();
-    await Worksheet.protect(ws, password, { spinCount: value ?? undefined });
+    await Worksheet.protect(ws, { password, spinCount: value ?? undefined });
     console.log(`Protection Time [spinCount ${value}]:`, stopwatch.microseconds);
 
     await writeBothFormats(wb, path.join(outDir, `protection-spin-count-${index + 2}.xlsx`));

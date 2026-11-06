@@ -15,7 +15,7 @@ import type {
 import { buildChartModel, buildComboChartModel } from "@excel/chart/build/chart-builder";
 import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
 import { registerChart, registerChartEx } from "@excel/chart/chart-handle";
-import type { AddChartExOptions } from "@excel/chart/model/chart-ex-types";
+import type { AddChartExOptions, ChartExType } from "@excel/chart/model/chart-ex-types";
 import { applyChartExPreset, applyChartPreset } from "@excel/chart/model/chart-presets";
 import type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/model/chart-presets";
 import type {
@@ -33,7 +33,7 @@ import {
   cellAlignment,
   cellCol,
   cellComment,
-  cellGetValue,
+  cellReadValue,
   cellIsMerged,
   cellMaster,
   cellMerge,
@@ -41,25 +41,32 @@ import {
   cellSetValue,
   cellType,
   cellUnmerge,
-  cellView
+  cellView,
+  checkCellValue
 } from "@excel/core/cell";
 import type { ColumnData, ColumnModel, ColumnDefn, ColumnView } from "@excel/core/column";
 import { columnDefn, columnToModel } from "@excel/core/column";
 import type { DataValidationModel } from "@excel/core/data-validations";
 import { createDataValidations } from "@excel/core/data-validations";
-import { definedNamesSpliceColumns, definedNamesSpliceRows } from "@excel/core/defined-names";
+import { definedNamesHasName } from "@excel/core/defined-names";
 import { Enums } from "@excel/core/enums";
 import type {
   FormCheckboxData,
   FormCheckboxModel,
   FormCheckboxOptions,
-  FormControlRange
+  FormControlRange,
+  LegacyControlModel
 } from "@excel/core/form-control";
-import { formCheckboxCreate } from "@excel/core/form-control";
-import type { WorksheetImage, ImageModel } from "@excel/core/image";
-import { imageClone, imageCreate, imageModel } from "@excel/core/image";
+import { formCheckboxCreate, markCheckboxRemoved } from "@excel/core/form-control";
+import type { WorksheetImage, ImageModel, ImageModelInput } from "@excel/core/image";
+import { applyImageModel, imageClone, imageCreate, imageModel } from "@excel/core/image";
 import type { OpaqueRelationship } from "@excel/core/opaque-part";
-import { withPivotChartSource } from "@excel/core/pivot-chart";
+import {
+  isPivotChartSource,
+  isPivotFilterTarget,
+  withPivotChartSource
+} from "@excel/core/pivot-chart";
+import { checkNotPivotSource, checkPivotPlacement } from "@excel/core/pivot-source";
 import type { PivotTable, PivotTableModel } from "@excel/core/pivot-table";
 import { makePivotTable } from "@excel/core/pivot-table";
 import type { RangeData, RangeInput } from "@excel/core/range";
@@ -80,15 +87,25 @@ import { buildSparklineGroup } from "@excel/core/sparkline";
 // dependency graph stays acyclic: `worksheet → chart → *-core`. A consumer
 // that never references a chart API gets the entire chart implementation
 // tree-shaken out by the bundler — no host registry / install step required.
+import { sheetNamesInTabOrder, withReferenceEdit } from "@excel/core/structural-edit";
 import type { StyledBlankRangeModel } from "@excel/core/styled-blanks";
 import type { TableData, TableModel } from "@excel/core/table";
-import { createTable, tableModel, tableName } from "@excel/core/table";
+import {
+  checkTableNameFree,
+  markTableRemoved,
+  tableGetModel,
+  tableName,
+  tablePrepare,
+  tableStore
+} from "@excel/core/table";
 import type { Workbook } from "@excel/core/workbook";
 import {
-  getDefinedNames,
   getImage,
+  releaseChartMedia,
+  releaseMedia,
   removeChartEntry,
   removeChartExStructuredEntry,
+  refuseLongSheetName,
   removeWorksheetEx,
   validateSheetName
 } from "@excel/core/workbook-core";
@@ -101,6 +118,9 @@ import type {
 import {
   _copyStyle,
   _setStyleOption,
+  checkRowNumber,
+  checkWorksheet,
+  checkWorksheetAttached,
   columnCreate,
   columnSetDefn,
   eachRow,
@@ -113,12 +133,20 @@ import {
   getRows,
   getSheetName,
   getSheetWorkbook,
+  getTable,
   rowEachCell,
   rowGetCell,
   rowSetValues,
   rowSplice
 } from "@excel/core/worksheet-core";
-import { ImageError, MergeConflictError, TableError } from "@excel/errors";
+import {
+  ExcelColumnOutOfBoundsError,
+  ExcelArgumentError,
+  ExcelImageError,
+  ExcelMergeConflictError,
+  ExcelPivotTableError,
+  ExcelTableError
+} from "@excel/errors";
 import type {
   AddImageRange,
   AddShapeOptions,
@@ -143,13 +171,19 @@ import type {
 } from "@excel/types";
 import type { Origin } from "@excel/utils/address";
 import { decodeCell, decodeRange, encodeCol } from "@excel/utils/address";
+import { argumentChecks, checkNumber } from "@excel/utils/arguments";
 import { getCellDisplayText } from "@excel/utils/cell-format";
 import type { DecodedRange } from "@excel/utils/col-cache";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
 import { isExternalImage } from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
-import { buildSheetProtection, verifySheetPassword } from "@excel/utils/sheet-protection";
+import type { LineEdit } from "@excel/utils/reference-rewrite";
+import {
+  buildSheetProtection,
+  splitPasswordOptions,
+  verifySheetPassword
+} from "@excel/utils/sheet-protection";
 import {
   calculateAutoFitWidth,
   getMaxDigitWidth,
@@ -158,6 +192,8 @@ import {
   getCellTextWidthPx,
   getCellHeightPt
 } from "@excel/utils/text-metrics";
+import { excelNameKey } from "@utils/name-key";
+import { isRecordArgument } from "@utils/object";
 
 // Type for data validation model - maps address to validation
 
@@ -200,6 +236,8 @@ export interface WorksheetModel {
    * writer's `SheetComment`, and naming it here would make this model depend on that writer. See `getSheetModel`.
    */
   retainedComments?: readonly unknown[];
+  /** Hyperlinks a *streamed* sheet kept, with the relationship ids its part already names — see `retainedComments`. */
+  retainedHyperlinks?: readonly unknown[];
   id: number;
   name: string;
   dataValidations: DataValidationModel;
@@ -218,6 +256,8 @@ export interface WorksheetModel {
    * model. See `WorksheetData._opaqueRels`.
    */
   opaqueRels?: OpaqueRelationship[];
+  /** See `WorksheetData._legacyControls`. */
+  legacyControls?: LegacyControlModel[];
   /** See `WorksheetData._chartsheetPlaceholder`. */
   chartsheetPlaceholder?: string;
   /** See `WorksheetData._xlsbDrawingRelationshipId`. */
@@ -269,7 +309,7 @@ export function createWorksheet(options: WorksheetOptions): WorksheetData {
   ws.orderNo = options.orderNo ?? 0;
 
   // and a name - use the setter to ensure validation and truncation
-  setSheetName(ws, options.name || `sheet${ws.id}`);
+  assignSheetName(ws, options.name || `sheet${ws.id}`);
 
   // add a state
   ws.state = options.state ?? "visible";
@@ -282,7 +322,8 @@ export function createWorksheet(options: WorksheetOptions): WorksheetData {
   ws._columns = [];
 
   // column keys (addRow convenience): key ==> this._collumns index
-  ws._keys = {};
+  // No prototype, so a key such as `"__proto__"` or `"toString"` is an ordinary entry.
+  ws._keys = Object.create(null) as Record<string, ColumnData>;
 
   // keep record of all merges
   ws._merges = {};
@@ -346,7 +387,7 @@ export function createWorksheet(options: WorksheetOptions): WorksheetData {
     ...options.headerFooter
   };
 
-  ws.dataValidations = createDataValidations();
+  ws.dataValidations = createDataValidations(undefined, ws);
 
   // for freezepanes, split, zoom, gridlines, etc
   ws.views = options.views ?? [];
@@ -389,8 +430,20 @@ export function createWorksheet(options: WorksheetOptions): WorksheetData {
   return ws;
 }
 
+/**
+ * Remove the sheet from its workbook. References to it from what remains become `#REF!`, and a 3-D span that ends on
+ * it shrinks to the next sheet inward, as Excel does.
+ */
 export function destroy(ws: WorksheetData): void {
-  removeWorksheetEx(ws._workbook, ws);
+  checkWorksheet(ws);
+  const wb = ws._workbook;
+  if (!wb || wb._worksheets[ws.id] !== ws) {
+    removeWorksheetEx(wb, ws);
+    return;
+  }
+  checkNotPivotSource(wb, { sheet: ws }, "Workbook.removeWorksheet");
+  const edit = { kind: "removeSheet", sheet: ws._name, sheets: sheetNamesInTabOrder(wb) } as const;
+  withReferenceEdit(wb, edit, () => removeWorksheetEx(wb, ws));
 }
 
 export function spliceColumns(
@@ -398,6 +451,87 @@ export function spliceColumns(
   start: number,
   count: number,
   ...inserts: CellValue[][]
+): void {
+  checkLineSplice(ws, "Column.splice", "columns", start, count);
+  inserts.forEach((column, i) => {
+    if (!Array.isArray(column)) {
+      throw new ExcelArgumentError(
+        `inserts[${i}]`,
+        `Column.splice: inserts[${i}] must be an array of the column's values, got ${typeof column}.`
+      );
+    }
+    // Every value before any cell moves: a refusal found while the rows were being spliced left the rows above it
+    // shifted, the rows below it not, and every reference already rewritten.
+    column.forEach((value, r) =>
+      checkCellValue(value, { where: "Column.splice", field: `inserts[${i}][${r}]` })
+    );
+  });
+  withLineEdit(ws, "columns", start, count, inserts.length, () =>
+    _spliceColumnCells(ws, start, count, inserts)
+  );
+}
+
+/**
+ * The checks a row or column splice makes before anything moves. A negative count used to run the insertion branch
+ * with a deletion's arithmetic — duplicating a line and shifting every reference by one — and `NaN` or a fraction
+ * reached the cell arrays as an index nothing can hold. A removed sheet is refused like every other edit: the
+ * reference rewrite is keyed by sheet name, so a splice through a stale handle rewrote the references of whichever
+ * sheet had taken the name since.
+ */
+function checkLineSplice(
+  ws: WorksheetData,
+  where: string,
+  kind: "rows" | "columns",
+  start: number,
+  count: number
+): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
+  // A start outside the grid is a position error, as for every other row or column reference.
+  if (kind === "rows") {
+    checkRowNumber(start);
+  } else if (!Number.isInteger(start) || start < 1 || start > 16384) {
+    throw new ExcelColumnOutOfBoundsError(start);
+  }
+  checkNumber(where, "count", count, { min: 0, integer: true });
+}
+
+/**
+ * Run a row or column splice as a structural edit, so every reference to the sheet's cells follows them.
+ *
+ * A splice overwrites the lines it both deletes and inserts — they stay where they are, with new values — and only
+ * the difference is an insertion or a deletion: `splice(3, 2, a)` writes `a` over line 3 and deletes line 4. That is
+ * the edit references see, so a formula naming line 3 keeps naming it, as it would after `Cell.setValue`.
+ */
+function withLineEdit(
+  ws: WorksheetData,
+  kind: "rows" | "columns",
+  start: number,
+  count: number,
+  inserted: number,
+  apply: () => void
+): void {
+  const overwritten = Math.min(count, inserted);
+  const wb = getSheetWorkbook(ws);
+  if (count === inserted || !wb) {
+    apply();
+    return;
+  }
+  const edit: LineEdit = {
+    kind,
+    sheet: getSheetName(ws),
+    at: start + overwritten,
+    deleted: count - overwritten,
+    inserted: inserted - overwritten
+  };
+  withReferenceEdit(wb, edit, apply, { overwritten });
+}
+
+function _spliceColumnCells(
+  ws: WorksheetData,
+  start: number,
+  count: number,
+  inserts: CellValue[][]
 ): void {
   // Before splicing cells, release all cell-level merge references so that
   // row.splice copies plain values instead of merge proxies.
@@ -413,10 +547,10 @@ export function spliceColumns(
     }
   }
 
-  const rows = ws._rows;
-  const nRows = rows.length;
   if (inserts.length > 0) {
-    // must iterate over all rows whether they exist yet or not
+    // Every row the sheet has or an inserted column reaches, whether it exists yet or not: stopping at the sheet's last
+    // row dropped the values below it — all of them on an empty sheet.
+    const nRows = Math.max(ws._rows.length, ...inserts.map(insert => insert.length));
     for (let i = 0; i < nRows; i++) {
       const insertValues = inserts.map(insert => insert[i] ?? null);
       const row = getRow(ws, i + 1);
@@ -448,33 +582,6 @@ export function spliceColumns(
     columnSetDefn(getColumn(ws, i), undefined);
   }
 
-  // account for defined names
-  definedNamesSpliceColumns(
-    getDefinedNames(getSheetWorkbook(ws)),
-    getSheetName(ws),
-    start,
-    count,
-    inserts.length
-  );
-
-  // account for images
-  if (nExpand !== 0) {
-    for (const image of ws._media) {
-      if (image.type === "image" && image.range) {
-        const { tl, br } = image.range;
-        if (tl && tl.nativeCol >= start - 1) {
-          tl.nativeCol = Math.max(0, tl.nativeCol + nExpand);
-        }
-        if (br && br.nativeCol >= start - 1) {
-          br.nativeCol = Math.max(0, br.nativeCol + nExpand);
-        }
-      }
-    }
-
-    // account for chart anchors in drawing and programmatic chart objects
-    _shiftChartAnchors(ws, "col", start - 1, nExpand);
-  }
-
   // account for merges
   _spliceMerges(ws, "col", start, count, inserts.length);
 }
@@ -485,6 +592,7 @@ export function insertRow(
   value: RowValues,
   style: string = "n"
 ): RowData {
+  checkWorksheet(ws);
   spliceRows(ws, pos, 0, value);
   _setStyleOption(ws, pos, style);
   return getRow(ws, pos);
@@ -496,6 +604,7 @@ export function insertRows(
   values: RowValues[],
   style: string = "n"
 ): RowData[] | undefined {
+  checkWorksheet(ws);
   spliceRows(ws, pos, 0, ...values);
   if (style !== "n") {
     // copy over the styles
@@ -518,6 +627,7 @@ export function duplicateRow(
 ): void {
   // create count duplicates of rowNum
   // either inserting new or overwriting existing rows
+  checkNumber("Row.duplicate", "count", count, { min: 0, integer: true });
 
   const rSrc = getRow(ws, rowNum);
   const inserts = Array.from<RowValues>({ length: count }).fill(rowValuesForStructuralCopy(rSrc));
@@ -588,7 +698,10 @@ export function duplicateRow(
     ws._media = ws._media.filter(image => {
       if (image.type === "image" && image.range) {
         const row0 = image.range.tl.nativeRow;
-        return row0 < dstStart0 || row0 > dstEnd0;
+        if (row0 >= dstStart0 && row0 <= dstEnd0) {
+          releaseMedia(ws._workbook, image.imageId);
+          return false;
+        }
       }
       return true;
     });
@@ -614,6 +727,18 @@ export function spliceRows(
   count: number,
   ...inserts: RowValues[]
 ): void {
+  checkLineSplice(ws, "Row.splice", "rows", start, count);
+  withLineEdit(ws, "rows", start, count, inserts.length, () =>
+    _spliceRowCells(ws, start, count, inserts)
+  );
+}
+
+function _spliceRowCells(
+  ws: WorksheetData,
+  start: number,
+  count: number,
+  inserts: RowValues[]
+): void {
   // same problem as row.splice, except worse.
 
   // Before splicing rows, release all cell-level merge references so that
@@ -638,8 +763,12 @@ export function spliceRows(
   let rSrc: RowData | undefined;
   if (nExpand < 0) {
     // remove rows
-    if (start === nEnd) {
-      ws._rows[nEnd - 1] = undefined!;
+    // A block that reaches past the last row has nothing below it to move up, so the loop below never runs:
+    // clear what it deletes here. The rows it overwrites with `inserts` are written further down.
+    if (nKeep > nEnd) {
+      for (i = start + nInserts; i <= nEnd; i++) {
+        ws._rows[i - 1] = undefined!;
+      }
     }
     for (i = nKeep; i <= nEnd; i++) {
       rSrc = ws._rows[i - 1];
@@ -685,33 +814,6 @@ export function spliceRows(
     rowSetValues(rDst, inserts[i]);
   }
 
-  // account for defined names
-  definedNamesSpliceRows(
-    getDefinedNames(getSheetWorkbook(ws)),
-    getSheetName(ws),
-    start,
-    count,
-    nInserts
-  );
-
-  // account for images
-  if (nExpand !== 0) {
-    for (const image of ws._media) {
-      if (image.type === "image" && image.range) {
-        const { tl, br } = image.range;
-        if (tl && tl.nativeRow >= start - 1) {
-          tl.nativeRow = Math.max(0, tl.nativeRow + nExpand);
-        }
-        if (br && br.nativeRow >= start - 1) {
-          br.nativeRow = Math.max(0, br.nativeRow + nExpand);
-        }
-      }
-    }
-
-    // account for chart anchors in drawing and programmatic chart objects
-    _shiftChartAnchors(ws, "row", start - 1, nExpand);
-  }
-
   // account for merges
   _spliceMerges(ws, "row", start, count, nInserts);
 }
@@ -744,7 +846,7 @@ function _mergeCellsInternal(
   // check cells aren't already merged
   Object.values(ws._merges).forEach((merge: RangeData) => {
     if (rangeIntersects(merge, dimensions)) {
-      throw new MergeConflictError();
+      throw new ExcelMergeConflictError();
     }
   });
 
@@ -788,44 +890,6 @@ function _unMergeMaster(ws: WorksheetData, master: CellData): void {
       }
     }
     delete ws._merges[master.address];
-  }
-}
-
-function _shiftChartAnchors(
-  ws: WorksheetData,
-  axis: "row" | "col",
-  threshold: number,
-  delta: number
-): void {
-  const prop = axis === "row" ? "nativeRow" : "nativeCol";
-
-  // Drawing anchors (from loaded file)
-  type AnchorPos = { nativeRow?: number; nativeCol?: number };
-  const drawing = ws._drawing as
-    | { anchors?: { range?: { tl?: AnchorPos; br?: AnchorPos } }[] }
-    | undefined;
-  if (drawing?.anchors) {
-    for (const anchor of drawing.anchors) {
-      const tl = anchor.range?.tl;
-      const br = anchor.range?.br;
-      if (tl && tl[prop] !== undefined && tl[prop]! >= threshold) {
-        tl[prop] = Math.max(0, tl[prop]! + delta);
-      }
-      if (br && br[prop] !== undefined && br[prop]! >= threshold) {
-        br[prop] = Math.max(0, br[prop]! + delta);
-      }
-    }
-  }
-
-  // Programmatic chart objects
-  for (const chart of ws._charts) {
-    const { tl, br } = chart.range;
-    if (tl[prop] >= threshold) {
-      tl[prop] = Math.max(0, tl[prop] + delta);
-    }
-    if (br && br[prop] >= threshold) {
-      br[prop] = Math.max(0, br[prop] + delta);
-    }
   }
 }
 
@@ -926,6 +990,7 @@ function _spliceMerges(
 }
 
 export function unMergeCells(ws: WorksheetData, ...cells: RangeInput[]): void {
+  checkWorksheetAttached(ws);
   const dimensions = rangeCreate(cells);
 
   // find any cells in that range and unmerge them
@@ -945,6 +1010,34 @@ export function unMergeCells(ws: WorksheetData, ...cells: RangeInput[]): void {
   }
 }
 
+/** What {@link fillFormula} takes beside the range and the formula. */
+export interface FillFormulaOptions {
+  /**
+   * The cached result of each cell, as a grid (`results[row][col]`), a flat row-major list, or a function of the
+   * cell's row and column numbers. Without it the cells carry no cached value until the workbook is calculated.
+   */
+  readonly results?:
+    | FormulaResult[][]
+    | FormulaResult[]
+    | ((row: number, col: number) => FormulaResult | undefined);
+  /**
+   * `"shared"` (the default) writes the formula once and shares it to every other cell of the range, each cell's
+   * references shifting with it. `"array"` writes one array formula spanning the range.
+   */
+  readonly shareType?: "shared" | "array";
+}
+
+/** Fill `range` with `formula`, written once on its top-left cell and shared to the rest (or as one array formula). */
+export function fillFormula(
+  ws: WorksheetData,
+  range: string,
+  formula: string,
+  options?: FillFormulaOptions
+): void;
+/**
+ * @deprecated Pass the results and the share type in the options object:
+ * `fillFormula(ws, range, formula, { results, shareType })`. Removed in 1.0.
+ */
 export function fillFormula(
   ws: WorksheetData,
   range: string,
@@ -953,8 +1046,28 @@ export function fillFormula(
     | FormulaResult[][]
     | FormulaResult[]
     | ((row: number, col: number) => FormulaResult | undefined),
-  shareType: string = "shared"
+  shareType?: string
+): void;
+export function fillFormula(
+  ws: WorksheetData,
+  range: string,
+  formula: string,
+  resultsOrOptions?:
+    | FillFormulaOptions
+    | FormulaResult[][]
+    | FormulaResult[]
+    | ((row: number, col: number) => FormulaResult | undefined),
+  positionalShareType?: string
 ): void {
+  let results: FillFormulaOptions["results"];
+  let shareType: string;
+  if (typeof resultsOrOptions !== "function" && isRecordArgument(resultsOrOptions)) {
+    results = resultsOrOptions.results;
+    shareType = resultsOrOptions.shareType ?? "shared";
+  } else {
+    results = resultsOrOptions;
+    shareType = positionalShareType ?? "shared";
+  }
   // Define formula for top-left cell and share to rest
   const decoded = colCache.decode(range) as DecodedRange;
   const { top, left, bottom, right } = decoded;
@@ -1005,20 +1118,28 @@ export function fillFormula(
   }
 }
 
-export function addImage(ws: WorksheetData, imageId: string | number, range: AddImageRange): void {
+export function addImage(
+  ws: WorksheetData,
+  imageId: string | number,
+  range: AddImageRange
+): WorksheetImage {
+  checkWorksheetAttached(ws);
   const model = {
     type: "image",
     imageId: String(imageId),
     range
   };
-  ws._media.push(imageCreate(ws, model));
+  const image = imageCreate(ws, model);
+  ws._media.push(image);
+  return image;
 }
 
-export function addShape(ws: WorksheetData, options: AddShapeOptions): void {
+export function addShape(ws: WorksheetData, options: AddShapeOptions): ShapeModel {
+  checkWorksheetAttached(ws);
   const range = options.range;
   // A shape must cover an area, mirroring images. Reject inputs that resolve
   // to no size up front, with a clear shape-specific message — otherwise the
-  // failure surfaces much later as a confusing `ImageError` from the internal
+  // failure surfaces much later as a confusing `ExcelImageError` from the internal
   // range parser when the worksheet is serialized.
   const hasArea =
     (typeof range === "string" && range.includes(":")) ||
@@ -1026,11 +1147,11 @@ export function addShape(ws: WorksheetData, options: AddShapeOptions): void {
       range !== null &&
       ("br" in range || "ext" in range || "pos" in range));
   if (!hasArea) {
-    throw new ImageError(
+    throw new ExcelImageError(
       'addShape requires a range covering an area: a cell range like "B2:D5", or an object with `br`, `ext`, or `pos`.'
     );
   }
-  ws._shapes.push({
+  const shape: ShapeModel = {
     type: "shape",
     shapeType: options.type ?? "rect",
     range,
@@ -1039,11 +1160,24 @@ export function addShape(ws: WorksheetData, options: AddShapeOptions): void {
     lineWidth: options.lineWidth,
     text: options.text,
     name: options.name
-  });
+  };
+  ws._shapes.push(shape);
+  return shape;
 }
 
 export function getShapes(ws: WorksheetData): ShapeModel[] {
   return ws._shapes.slice();
+}
+
+/** Remove a shape — one {@link getShapes} listed, or its index in that list. Returns `true` if one was removed. */
+export function removeShape(ws: WorksheetData, shape: ShapeModel | number): boolean {
+  checkWorksheetAttached(ws);
+  const index = listPosition(ws._shapes, shape);
+  if (index < 0) {
+    return false;
+  }
+  ws._shapes.splice(index, 1);
+  return true;
 }
 
 function _resolveShapeModel(ws: WorksheetData, shape: ShapeModel): ShapeModel {
@@ -1075,6 +1209,56 @@ function _resolveShapeModel(ws: WorksheetData, shape: ShapeModel): ShapeModel {
 
 export function getImages(ws: WorksheetData): WorksheetImage[] {
   return ws._media.filter(m => m.type === "image");
+}
+
+/**
+ * The position `item` names in `list`: the index itself when it is an integer inside the list, the
+ * item's own index otherwise, `-1` when neither. A fractional or out-of-range position names nothing —
+ * `splice` would have truncated `1.5` to `1` and removed an item nobody asked for.
+ */
+function listPosition<T>(list: readonly T[], item: T | number): number {
+  if (typeof item === "number") {
+    return Number.isInteger(item) && item >= 0 && item < list.length ? item : -1;
+  }
+  return list.indexOf(item);
+}
+
+/**
+ * Replace a placed image's model — {@link applyImageModel}, recording that the picture it showed is no
+ * longer used here when the model names a different one.
+ */
+export function setImageModel(image: WorksheetImage, model: ImageModelInput): void {
+  checkWorksheetAttached(image.worksheet);
+  const previous = image.imageId;
+  applyImageModel(image, model);
+  if (previous !== undefined && previous !== image.imageId) {
+    releaseMedia(image.worksheet._workbook, previous);
+  }
+}
+
+/**
+ * Remove a placed image from the sheet — the handle `getImages` returned, or its
+ * index in that list. Returns `true` if an image was removed.
+ *
+ * Only the placement goes: the picture stays registered in the workbook, so its
+ * image id can still be placed elsewhere. A watermark is not a placed image and
+ * is removed with `removeWatermark`.
+ */
+export function removeImage(ws: WorksheetData, image: WorksheetImage | number): boolean {
+  checkWorksheetAttached(ws);
+  const images = getImages(ws);
+  const position = listPosition(images, image);
+  const target = position < 0 ? undefined : images[position];
+  if (!target || target.type !== "image") {
+    return false;
+  }
+  const idx = ws._media.indexOf(target);
+  if (idx < 0) {
+    return false;
+  }
+  ws._media.splice(idx, 1);
+  releaseMedia(ws._workbook, target.imageId);
+  return true;
 }
 
 export function addChart(
@@ -1255,6 +1439,11 @@ export function addPresetChartEx(
   return addChartEx(ws, applyChartExPreset(preset, options), range);
 }
 
+/**
+ * A chart series over ranges of `ws`: `values` (and `categories`, when given) qualified with the sheet's name, so
+ * `"B2:B9"` becomes `"'My Sheet'!$B$2:$B$9"`. A range that already names a sheet keeps that sheet, made absolute the
+ * same way.
+ */
 export function seriesFromColumns(
   ws: WorksheetData,
   options: SeriesFromColumnsOptions
@@ -1271,18 +1460,18 @@ export function addChartFromTable(
   return addChart(ws, chartOptionsFromTable(ws, table, options), range);
 }
 
-export function addChartFromRows<T extends Record<string, unknown>>(
+export function addChartFromRows<T extends object>(
   ws: WorksheetData,
-  rows: T[],
+  rows: readonly T[],
   options: AddChartFromRowsOptions<T>,
   range: AddChartRange
 ): number {
   return addChart(ws, chartOptionsFromRows(ws, rows, options), range);
 }
 
-export function addColumnChartFromRows<T extends Record<string, unknown>>(
+export function addColumnChartFromRows<T extends object>(
   ws: WorksheetData,
-  rows: T[],
+  rows: readonly T[],
   options: Omit<AddChartFromRowsOptions<T>, "type" | "barDir">,
   range: AddChartRange
 ): number {
@@ -1308,9 +1497,9 @@ export function addChartExFromTable(
   return addChartEx(ws, chartExOptionsFromTable(ws, table, options), range);
 }
 
-export function addChartExFromRows<T extends Record<string, unknown>>(
+export function addChartExFromRows<T extends object>(
   ws: WorksheetData,
-  rows: T[],
+  rows: readonly T[],
   options: AddChartExFromRowsOptions<T> & {
     type: Exclude<AddChartExOptions["type"], "regionMap">;
   },
@@ -1355,17 +1544,102 @@ export function addChartEx(
   return registerChartEx(ws, buildChartExModel(options), range);
 }
 
+// A record rather than a list so that a `ChartExType` added later fails to compile here until it is
+// listed — a list only rejects names that do not exist, not ones that are missing.
+const CHART_EX_TYPES: ReadonlySet<string> = new Set(
+  Object.keys({
+    sunburst: true,
+    treemap: true,
+    waterfall: true,
+    funnel: true,
+    histogram: true,
+    pareto: true,
+    boxWhisker: true,
+    regionMap: true
+  } satisfies Record<ChartExType, true>)
+);
+
+/**
+ * What {@link placeChart} draws. The shape of the options decides the chart family:
+ * `groups` makes a combo chart, a `type` from the Office 2016 family (`histogram`, `pareto`,
+ * `waterfall`, `funnel`, `treemap`, `sunburst`, `boxWhisker`, `regionMap`) a chartEx part, any
+ * other `type` a classic chart. Adding `pivotTable` binds a classic or combo chart to that pivot.
+ */
+export type ChartPlacement =
+  | AddChartOptions
+  | AddComboChartOptions
+  | AddChartExOptions
+  | ((AddChartOptions | AddComboChartOptions) & { pivotTable: PivotTable });
+
+/**
+ * Add a chart to the sheet and return its handle — the value every other chart operation,
+ * `removeChart` included, takes.
+ *
+ * Every chart the `add*Chart` family can make, this makes: those functions are this one with
+ * the options' `type` filled in, and the preset / table / rows variants build their options with
+ * the public option builders (`applyPreset`, `optionsFromTable`, `optionsFromRows`) first.
+ *
+ * @example
+ * ```typescript
+ * const chart = Chart.place(ws, "E1:L14", { type: "bar", barDir: "col", series });
+ * Chart.setStyle(chart, 26);
+ * Chart.remove(ws, chart);
+ * ```
+ */
+/** Whether `type` names one of the Office 2016 chart types, which are written as ChartEx parts. */
+export function isChartExType(type: unknown): boolean {
+  return typeof type === "string" && CHART_EX_TYPES.has(type);
+}
+
+export function placeChart(
+  ws: WorksheetData,
+  options: ChartPlacement,
+  range: AddChartRange
+): ChartHandle {
+  checkWorksheetAttached(ws);
+  // `pivotTable: undefined` — an optional field spread through from elsewhere — binds nothing.
+  if ("pivotTable" in options && options.pivotTable !== undefined) {
+    const { pivotTable, ...rest } = options;
+    if ("groups" in rest) {
+      addPivotComboChart(ws, pivotTable, rest, range);
+    } else {
+      addPivotChart(ws, pivotTable, rest, range);
+    }
+  } else if ("groups" in options) {
+    addComboChart(ws, options as AddComboChartOptions, range);
+  } else if (CHART_EX_TYPES.has(options.type)) {
+    addChartEx(ws, options as AddChartExOptions, range);
+  } else {
+    addChart(ws, options as AddChartOptions, range);
+  }
+  // Every chart-adding path appends exactly one handle.
+  return ws._charts[ws._charts.length - 1];
+}
+
+/**
+ * The sheet's charts, in the order they were added. A chart-adding call always appends, so
+ * `getCharts(ws).at(-1)` is the handle of the chart just added.
+ */
 export function getCharts(ws: WorksheetData): ChartHandle[] {
   return [...ws._charts];
 }
 
+/**
+ * Remove a chart from the sheet. Returns `true` if one was removed.
+ *
+ * `chart` is a handle — from `placeChart` or `getCharts` — or the chart's **position in
+ * `getCharts(ws)`**. It is never the number an `add*Chart` call returned: that is a workbook-wide
+ * part number (`chartN.xml` / `chartExN.xml`) and matches the position only by accident.
+ */
 export function removeChart(ws: WorksheetData, chart: ChartHandle | number): boolean {
-  const idx = typeof chart === "number" ? chart : ws._charts.indexOf(chart);
-  if (idx < 0 || idx >= ws._charts.length) {
+  checkWorksheetAttached(ws);
+  const idx = listPosition(ws._charts, chart);
+  if (idx < 0) {
     return false;
   }
   const removed = ws._charts.splice(idx, 1)[0];
   if (removed.chartNumber > 0) {
+    releaseChartMedia(ws._workbook, removed.chartNumber);
     removeChartEntry(ws._workbook, removed.chartNumber);
   }
   if (removed.chartExNumber > 0) {
@@ -1398,42 +1672,67 @@ export function addSparklineGroup(
   ws: WorksheetData,
   options: AddSparklineGroupOptions
 ): SparklineGroup {
+  checkWorksheetAttached(ws);
   const group = buildSparklineGroup(options);
   ws._sparklineGroups.push(group);
   return group;
 }
 
+/**
+ * The sheet's sparkline groups, in the order they were added — a new array of the groups the sheet holds and writes,
+ * so editing one changes the sheet without the checks `Sparkline.add` makes.
+ */
 export function getSparklineGroups(ws: WorksheetData): SparklineGroup[] {
   return [...ws._sparklineGroups];
 }
 
+/** Remove a sparkline group — one `Sparkline.add` returned or `getSparklineGroups` listed, or its index there. */
 export function removeSparklineGroup(
   ws: WorksheetData,
   groupOrIndex: SparklineGroup | number
 ): boolean {
-  const idx =
-    typeof groupOrIndex === "number" ? groupOrIndex : ws._sparklineGroups.indexOf(groupOrIndex);
-  if (idx < 0 || idx >= ws._sparklineGroups.length) {
+  checkWorksheetAttached(ws);
+  const idx = listPosition(ws._sparklineGroups, groupOrIndex);
+  if (idx < 0) {
     return false;
   }
   ws._sparklineGroups.splice(idx, 1);
   return true;
 }
 
+/**
+ * Set the sheet's background picture, replacing the one it had. A sheet has one background: a second
+ * call used to add another entry, which `getBackgroundImageId` never reported and the writer wrote
+ * over the first.
+ */
 export function addBackgroundImage(ws: WorksheetData, imageId: string | number): void {
+  checkWorksheetAttached(ws);
   const bookImage = getImage(ws._workbook, imageId);
   if (bookImage && isExternalImage(bookImage)) {
-    throw new ImageError(
+    throw new ExcelImageError(
       "Background images cannot be external (linked) images. " +
         "Use an embedded image (buffer/base64/filename). " +
         "External images are only supported for cell pictures and overlay watermarks."
     );
   }
+  removeBackgroundImage(ws);
   const model = {
     type: "background",
     imageId: String(imageId)
   };
   ws._media.push(imageCreate(ws, model));
+}
+
+/** Remove the sheet's background picture. Returns `true` if it had one. */
+export function removeBackgroundImage(ws: WorksheetData): boolean {
+  checkWorksheetAttached(ws);
+  const backgrounds = ws._media.filter(medium => medium.type === "background");
+  if (backgrounds.length === 0) {
+    return false;
+  }
+  ws._media = ws._media.filter(medium => medium.type !== "background");
+  backgrounds.forEach(medium => releaseMedia(ws._workbook, medium.imageId));
+  return true;
 }
 
 export function getBackgroundImageId(ws: WorksheetData): string | undefined {
@@ -1442,6 +1741,7 @@ export function getBackgroundImageId(ws: WorksheetData): string | undefined {
 }
 
 export function addWatermark(ws: WorksheetData, options: WatermarkOptions): void {
+  checkWorksheetAttached(ws);
   const mode = options.mode ?? "overlay";
 
   // Validate BEFORE mutating any state: VML header/footer images use
@@ -1451,7 +1751,7 @@ export function addWatermark(ws: WorksheetData, options: WatermarkOptions): void
   if (mode === "header") {
     const bookImage = getImage(ws._workbook, options.imageId);
     if (bookImage && isExternalImage(bookImage)) {
-      throw new ImageError(
+      throw new ExcelImageError(
         "Header watermark images cannot be external (linked) images. " +
           "Use an embedded image (buffer/base64/filename), or use overlay mode for linked images."
       );
@@ -1645,6 +1945,7 @@ function removeOwnedWatermarkMedia(ws: WorksheetData): void {
   // Identity match: the API removes exactly the entry it created, never an
   // identically-positioned image that came from the source document.
   ws._media = ws._media.filter(medium => medium !== owned);
+  releaseMedia(ws._workbook, owned.imageId);
   ws._watermarkMedia = null;
 }
 
@@ -1686,9 +1987,10 @@ export interface HeaderFooterImageEntry {
  * existing workbook can be inspected, replaced, or removed individually.
  */
 export function setHeaderFooterImage(ws: WorksheetData, options: HeaderFooterImageOptions): void {
+  checkWorksheetAttached(ws);
   const bookImage = getImage(ws._workbook, options.imageId);
   if (bookImage && isExternalImage(bookImage)) {
-    throw new ImageError(
+    throw new ExcelImageError(
       "Header/footer images cannot be external (linked) images. " +
         "Use an embedded image (buffer/base64/filename)."
     );
@@ -1734,6 +2036,7 @@ export function removeHeaderFooterImage(
   ws: WorksheetData,
   position: HeaderFooterImagePosition
 ): boolean {
+  checkWorksheetAttached(ws);
   const occupants = ws._media.filter(
     medium => medium.type === "headerImage" && (medium.position ?? "CH") === position
   );
@@ -1741,6 +2044,7 @@ export function removeHeaderFooterImage(
     return false;
   }
   ws._media = ws._media.filter(medium => !occupants.includes(medium));
+  occupants.forEach(medium => releaseMedia(ws._workbook, medium.imageId));
   ws.headerFooter = stripSectionImagePlaceholder(ws.headerFooter, position);
   if (occupants.includes(ws._watermarkMedia as never)) {
     // The single-value watermark API owned this entry; drop its bookkeeping so
@@ -1751,14 +2055,17 @@ export function removeHeaderFooterImage(
   return true;
 }
 
+/** The sheet's watermark settings, or `null` when it has none. */
 export function getWatermark(ws: WorksheetData): WatermarkOptions | null {
   return ws._watermark;
 }
 
-export function removeWatermark(ws: WorksheetData): void {
+/** Remove the sheet's watermark. Returns `true` if it had one. */
+export function removeWatermark(ws: WorksheetData): boolean {
+  checkWorksheetAttached(ws);
   const watermark = ws._watermark;
   if (!watermark) {
-    return;
+    return false;
   }
   if (watermark.mode === "header") {
     removeHeaderFooterImage(ws, watermark.position ?? "CH");
@@ -1767,6 +2074,7 @@ export function removeWatermark(ws: WorksheetData): void {
   }
   ws._watermark = null;
   ws._watermarkMedia = null;
+  return true;
 }
 
 export function addFormCheckbox(
@@ -1774,24 +2082,80 @@ export function addFormCheckbox(
   range: FormControlRange,
   options?: FormCheckboxOptions
 ): FormCheckboxData {
+  checkWorksheetAttached(ws);
   const checkbox = formCheckboxCreate(ws, range, options);
   ws.formControls.push(checkbox);
   return checkbox;
 }
 
+/**
+ * The sheet's live checkbox array — mutating it changes the sheet. Kept for the deprecated
+ * `Form.listCheckboxes`, which callers used to remove a checkbox by splicing it before
+ * `removeFormCheckbox` existed; use {@link listFormCheckboxes}.
+ */
 export function getFormCheckboxes(ws: WorksheetData): FormCheckboxData[] {
   return ws.formControls;
 }
 
+/** The sheet's checkboxes, in the order they were added — a copy, like every other `list`. */
+export function listFormCheckboxes(ws: WorksheetData): FormCheckboxData[] {
+  return [...ws.formControls];
+}
+
+/**
+ * Remove a form checkbox — the handle `addFormCheckbox` / `getFormCheckboxes`
+ * returned, or its index in that list. Returns `true` if one was removed.
+ *
+ * The remaining checkboxes keep their shape ids, and a checkbox added afterwards
+ * is given one above every id still in use, so a removal never makes two
+ * controls share an id.
+ */
+export function removeFormCheckbox(
+  ws: WorksheetData,
+  checkbox: FormCheckboxData | number
+): boolean {
+  checkWorksheetAttached(ws);
+  const idx = listPosition(ws.formControls, checkbox);
+  if (idx < 0) {
+    return false;
+  }
+  const [removed] = ws.formControls.splice(idx, 1);
+  markCheckboxRemoved(removed);
+  return true;
+}
+
+/** Options for {@link protect}: the protection flags, plus the password that unlocks them. */
+export interface ProtectSheetOptions extends Partial<SheetProtection> {
+  /** Password hashed into the sheet; omit to protect without one. */
+  password?: string;
+}
+
+/** Protect the sheet, optionally with a password: `protect(ws, { password: "pw", formatCells: true })`. */
+export function protect(ws: WorksheetData, options?: ProtectSheetOptions): Promise<void>;
+/**
+ * @deprecated Pass the password in the options object: `protect(ws, { password, ...options })`.
+ * Removed in 1.0.
+ */
+export function protect(
+  ws: WorksheetData,
+  password: string | undefined,
+  options?: Partial<SheetProtection>
+): Promise<void>;
 export async function protect(
   ws: WorksheetData,
-  password?: string,
-  options?: Partial<SheetProtection>
+  passwordOrOptions?: string | ProtectSheetOptions,
+  legacyOptions?: Partial<SheetProtection>
 ): Promise<void> {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
+  const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
   ws.sheetProtection = await buildSheetProtection(password, options);
 }
 
+/** Remove the sheet's protection, as `protect` set it. */
 export function unprotect(ws: WorksheetData): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   ws.sheetProtection = null;
 }
 
@@ -1801,43 +2165,89 @@ export function unprotect(ws: WorksheetData): void {
  * was protected without a password to check against.
  */
 export async function verifyPassword(ws: WorksheetData, password: string): Promise<boolean> {
+  checkWorksheet(ws);
+  // Checked as a password is: a number used to reach the hash and fail there with a `TypeError`.
+  argumentChecks("Worksheet.verifyPassword").required("password", password);
+  argumentChecks("Worksheet.verifyPassword").string("password", password);
   return verifySheetPassword(ws.sheetProtection, password);
 }
 
+/**
+ * Add a table to the sheet and return its handle.
+ *
+ * Nothing on the sheet changes until every check has passed: the model is validated, its values are checked as a
+ * cell's are, its area must not overlap another table, and its name and display name must be free in the workbook.
+ * (`Table.add` refuses a name Excel cannot hold before this runs; the deprecated `Table.create` corrects one.)
+ *
+ * @throws {ExcelTableError} When a check fails — the name is already taken in the workbook (case-insensitive), or the
+ * table would overlap another one.
+ */
 export function addTable(ws: WorksheetData, model: TableProperties): TableData {
-  const table = createTable(ws, model);
-  // table.name is sanitized by Table.validate() — check against the
-  // sanitized name so that e.g. "My Table" and "My_Table" (which both
-  // sanitize to "My_Table") are correctly detected as duplicates.
-  const nameKey = tableName(table).toLowerCase();
+  checkWorksheetAttached(ws);
+  // A copy, so the caller's object is not the table's model: editing it afterwards would change the table without
+  // any of the table's checks, and validation would otherwise write defaults into it.
+  const table = tablePrepare(ws, structuredClone(model) as TableModel);
+  // The name as stored: a caller's is valid already (`Table.add` refuses one that is not), a deprecated
+  // `Table.create` model's is corrected by `tableValidate`, and the duplicate checks compare that.
+  const nameKey = excelNameKey(tableName(table));
   if (ws.tables[tableName(table)]) {
-    throw new TableError(
+    throw new ExcelTableError(
       `Table name "${tableName(table)}" already exists in worksheet "${getSheetName(ws)}".`
     );
   }
   if (getSheetWorkbook(ws)._tableNames.has(nameKey)) {
-    throw new TableError(
-      `Table name "${tableName(table)}" already exists in another worksheet. ` +
-        `Table names must be unique across the entire workbook (case-insensitive).`
+    throw new ExcelTableError(
+      `Table name "${tableName(table)}" already exists in the workbook. ` +
+        `Table names must be unique across the entire workbook, compared as Excel compares them (case-insensitive).`
     );
   }
+  if (definedNamesHasName(getSheetWorkbook(ws)._definedNames, tableName(table))) {
+    throw new ExcelTableError(
+      `Table name "${tableName(table)}" is a defined name in the workbook. ` +
+        `Tables and defined names share one namespace, compared as Excel compares them (case-insensitive).`
+    );
+  }
+  checkTableNameFree(table, tableName(table), "name");
+  if (table.table.displayName !== undefined) {
+    checkTableNameFree(table, table.table.displayName, "displayName");
+  }
+  tableStore(table);
   ws.tables[tableName(table)] = table;
   getSheetWorkbook(ws)._tableNames.add(nameKey);
   return table;
 }
 
-export function removeTable(ws: WorksheetData, name: string): void {
-  if (ws.tables[name]) {
-    getSheetWorkbook(ws)._tableNames.delete(name.toLowerCase());
+/**
+ * Remove a table — by its handle, or by `name`: its stored name or the one it was added under, as
+ * {@link getTable} resolves it. Returns `true` if the sheet had it. Its handle refuses edits afterwards.
+ *
+ * @throws {ExcelPivotTableError} when a pivot table reads its data from the table: the pivot cache would name a table
+ * that no longer exists.
+ */
+export function removeTable(ws: WorksheetData, name: string | TableData): boolean {
+  checkWorksheetAttached(ws);
+  const table =
+    typeof name === "string"
+      ? getTable(ws, name)
+      : Object.values(ws.tables).find(candidate => candidate === name);
+  if (table === undefined) {
+    return false;
   }
-  delete ws.tables[name];
+  checkNotPivotSource(getSheetWorkbook(ws), { table, sheet: ws }, "Table.remove");
+  const key = Object.keys(ws.tables).find(candidate => ws.tables[candidate] === table)!;
+  getSheetWorkbook(ws)._tableNames.delete(excelNameKey(key));
+  delete ws.tables[key];
+  markTableRemoved(table);
+  return true;
 }
 
 export function addPivotTable(ws: WorksheetData, model: PivotTableModel): PivotTable {
+  checkWorksheetAttached(ws);
   const pivotTable = makePivotTable(
     { workbook: getSheetWorkbook(ws), name: getSheetName(ws) },
     model
   );
+  checkPivotPlacement(ws.pivotTables, pivotTable);
 
   ws.pivotTables.push(pivotTable);
   getSheetWorkbook(ws).pivotTables.push(pivotTable);
@@ -1845,13 +2255,110 @@ export function addPivotTable(ws: WorksheetData, model: PivotTableModel): PivotT
   return pivotTable;
 }
 
+/** The pivot tables on the worksheet, in the order they were added. */
+export function getPivotTables(ws: WorksheetData): PivotTable[] {
+  return [...ws.pivotTables];
+}
+
+/**
+ * Remove a pivot table from the sheet — the handle `addPivotTable` /
+ * `getPivotTables` returned, or its index in that list. Returns `true` if one
+ * was removed.
+ *
+ * Its pivot cache goes with it unless another pivot table shares that cache:
+ * caches are written from the pivot tables that remain.
+ *
+ * A pivot table something else is bound to cannot be removed while that binding
+ * exists, since it would point at nothing — this throws a {@link ExcelPivotTableError}:
+ * - a pivot chart (remove the chart first, `Chart.remove`);
+ * - a slicer or timeline of a loaded workbook. Those are preserved as written and
+ *   cannot be edited here, so such a pivot table stays.
+ */
+export function removePivotTable(ws: WorksheetData, pivot: PivotTable | number): boolean {
+  checkWorksheetAttached(ws);
+  const idx = listPosition(ws.pivotTables, pivot);
+  if (idx < 0) {
+    return false;
+  }
+  const target = ws.pivotTables[idx];
+  const wb = getSheetWorkbook(ws);
+  if (isPivotChartSource(wb, target)) {
+    throw new ExcelPivotTableError(
+      `Pivot table "${target.name ?? `PivotTable${target.tableNumber}`}" is the source of a pivot chart; remove the chart first.`
+    );
+  }
+  if (isPivotFilterTarget(wb, target, ws.id)) {
+    throw new ExcelPivotTableError(
+      `Pivot table "${target.name ?? `PivotTable${target.tableNumber}`}" is filtered by a slicer or timeline; it cannot be removed.`
+    );
+  }
+  ws.pivotTables.splice(idx, 1);
+  const bookIdx = wb.pivotTables.indexOf(target);
+  if (bookIdx >= 0) {
+    wb.pivotTables.splice(bookIdx, 1);
+  }
+  return true;
+}
+
 export function addConditionalFormatting(
   ws: WorksheetData,
   cf: ConditionalFormattingOptions
-): void {
+): ConditionalFormattingOptions {
+  checkWorksheetAttached(ws);
   ws.conditionalFormattings.push(cf);
+  return cf;
 }
 
+/** The sheet's conditional-formatting entries, in the order they were added. */
+export function getConditionalFormattings(ws: WorksheetData): ConditionalFormattingOptions[] {
+  return [...ws.conditionalFormattings];
+}
+
+/** Which conditional-formatting entries {@link removeConditionalFormattingEntry} removes. */
+export type ConditionalFormattingTarget =
+  | ConditionalFormattingOptions
+  | number
+  | ((
+      value: ConditionalFormattingOptions,
+      index: number,
+      array: ConditionalFormattingOptions[]
+    ) => boolean);
+
+/**
+ * Remove one conditional-formatting entry: the entry `addConditionalFormatting` returned (or
+ * `getConditionalFormattings` lists), the entry at a position in that list, or the first
+ * entry a predicate accepts. Returns `true` if one was removed. To remove every entry, call
+ * {@link clearConditionalFormattings}.
+ */
+export function removeConditionalFormattingEntry(
+  ws: WorksheetData,
+  target: ConditionalFormattingTarget
+): boolean {
+  checkWorksheetAttached(ws);
+  const entries = ws.conditionalFormattings;
+  // A predicate removes the first entry it accepts, as `remove` removes one; `clear` removes them all.
+  const index =
+    typeof target === "function" ? entries.findIndex(target) : listPosition(entries, target);
+  if (index < 0) {
+    return false;
+  }
+  entries.splice(index, 1);
+  return true;
+}
+
+/** Remove every conditional-formatting entry of the sheet. */
+export function clearConditionalFormattings(ws: WorksheetData): void {
+  checkWorksheetAttached(ws);
+  ws.conditionalFormattings = [];
+}
+
+/**
+ * Remove conditional formatting: the entry at an index, every entry a predicate
+ * matches, or — with no filter — all of them.
+ *
+ * The form behind the deprecated `Worksheet.removeConditionalFormatting`; the namespace
+ * splits it into {@link removeConditionalFormattingEntry} and {@link clearConditionalFormattings}.
+ */
 export function removeConditionalFormatting(
   ws: WorksheetData,
   filter?:
@@ -1900,6 +2407,8 @@ export function autoFitColumn(
   col: number | string,
   options?: AutoFitColumnOptions
 ): WorksheetData {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   const colNum = typeof col === "string" ? colCache.l2n(col) : col;
   _autoFitColumnImpl(ws, colNum, options);
   return ws;
@@ -1923,6 +2432,7 @@ export function autoFitColumns(
   endCol?: number | string,
   rangeOptions?: AutoFitColumnOptions
 ): WorksheetData {
+  checkWorksheetAttached(ws);
   const rangeGiven = startColOrOptions === null || typeof startColOrOptions !== "object";
   const startCol = rangeGiven ? startColOrOptions : undefined;
   const options = rangeGiven ? rangeOptions : startColOrOptions;
@@ -1946,11 +2456,14 @@ export function autoFitColumns(
 }
 
 export function autoFitRow(ws: WorksheetData, rowNumber: number): WorksheetData {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   _autoFitRowImpl(ws, rowNumber);
   return ws;
 }
 
 export function autoFitRows(ws: WorksheetData, startRow?: number, endRow?: number): WorksheetData {
+  checkWorksheetAttached(ws);
   const dims = getSheetDimensions(ws);
   if (!dims || dims.top === undefined) {
     return ws;
@@ -2069,6 +2582,7 @@ function _autoFitColumnImpl(
     if (charWidth > 0) {
       const column = getColumn(ws, colNum);
       column.width = charWidth;
+      column.customWidth = undefined;
       column.bestFit = true;
     }
   }
@@ -2159,13 +2673,13 @@ function _isColumnInAutoFilter(ws: WorksheetData, colNum: number): boolean {
   return colNum >= fromCol && colNum <= toCol;
 }
 
-export function toJSON(ws: WorksheetData, opts: SheetToJSONOptions & { header: 1 }): CellValue[][];
+export function toJSON(ws: WorksheetData, opts: SheetToJsonOptions & { header: 1 }): CellValue[][];
 
-export function toJSON(ws: WorksheetData, opts?: SheetToJSONOptions): Record<string, CellValue>[];
+export function toJSON(ws: WorksheetData, opts?: SheetToJsonOptions): Record<string, CellValue>[];
 
 export function toJSON(
   ws: WorksheetData,
-  opts?: SheetToJSONOptions
+  opts?: SheetToJsonOptions
 ): CellValue[][] | Record<string, CellValue>[] {
   const o = opts || {};
 
@@ -2199,7 +2713,7 @@ export function toJSON(
     if (!cell) {
       return null;
     }
-    return cellGetValue(cell);
+    return cellReadValue(cell);
   };
   const readCell = (row: number, col: number): CellValue => {
     if (o.raw !== false) {
@@ -2348,8 +2862,8 @@ export function toJSON(
 
 export function addJSON(
   ws: WorksheetData,
-  data: Record<string, CellValue>[],
-  opts?: AddJSONOptions
+  data: readonly Record<string, CellValue>[],
+  opts?: AddJsonOptions
 ): WorksheetData {
   if (data.length === 0) {
     return ws;
@@ -2404,7 +2918,12 @@ export function addJSON(
   return ws;
 }
 
+/**
+ * The sheet as an array of rows, **0-based** — row 1 at index `0`, column A at index `0` of each row — with `[]` for a
+ * row that does not exist and `null` for a missing cell inside one. Creates nothing.
+ */
 export function toAOA(ws: WorksheetData): CellValue[][] {
+  checkWorksheet(ws);
   const result: CellValue[][] = [];
 
   // Walk the backing arrays directly. `eachRow`/`rowEachCell` with
@@ -2422,7 +2941,7 @@ export function toAOA(ws: WorksheetData): CellValue[][] {
     const rowData: CellValue[] = [];
     for (let j = 0; j < row.cells.length; j++) {
       const cell = row.cells[j];
-      rowData[j] = cell ? cellGetValue(cell) : null;
+      rowData[j] = cell ? cellReadValue(cell) : null;
     }
     result[i] = rowData;
   }
@@ -2432,8 +2951,8 @@ export function toAOA(ws: WorksheetData): CellValue[][] {
 
 export function addAOA(
   ws: WorksheetData,
-  data: CellValue[][],
-  opts?: AddAOAOptions
+  data: readonly (readonly CellValue[])[],
+  opts?: AddAoaOptions
 ): WorksheetData {
   if (data.length === 0) {
     return ws;
@@ -2461,7 +2980,9 @@ export function addAOA(
   return ws;
 }
 
+/** The used range — the smallest range covering every cell that holds a value. A copy. */
 export function getSheetDimensions(ws: WorksheetData): RangeData {
+  checkWorksheet(ws);
   const dimensions = rangeCreate();
   ws._rows.forEach(row => {
     if (row) {
@@ -2491,6 +3012,7 @@ export function getSheetDimensions(ws: WorksheetData): RangeData {
  * {@link getColumnDefinitions} to read the definitions as detached copies.
  */
 export function getColumns(ws: WorksheetData): readonly ColumnView[] {
+  checkWorksheet(ws);
   return ws._columns;
 }
 
@@ -2506,6 +3028,7 @@ export function getColumns(ws: WorksheetData): readonly ColumnView[] {
  * `outlineLevel` normalisation and silently drifts when it changes.
  */
 export function getColumnDefinitions(ws: WorksheetData): ColumnDefn[] {
+  checkWorksheet(ws);
   return ws._columns.map(columnDefn);
 }
 
@@ -2548,10 +3071,9 @@ export function getActualColumnCount(ws: WorksheetData): number {
 }
 
 export function getLastRow(ws: WorksheetData): RowData | undefined {
-  if (ws._rows.length) {
-    return ws._rows[ws._rows.length - 1];
-  }
-  return undefined;
+  // A splice that deletes the last rows leaves holes at the end of `_rows`; the last row is the last one there.
+  const n = get_lastRowNumber(ws);
+  return n > 0 ? ws._rows[n - 1] : undefined;
 }
 
 export function getRowCount(ws: WorksheetData): number {
@@ -2567,17 +3089,21 @@ export function getActualRowCount(ws: WorksheetData): number {
   return count;
 }
 
+/** Whether the sheet has any merged region. */
 export function getHasMerges(ws: WorksheetData): boolean {
+  checkWorksheet(ws);
   // return true if this._merges has a merge object
   return Object.values(ws._merges).some(Boolean);
 }
 
+/** The sheet's merged regions, 1-based and frozen. */
 export function getMergedRegions(ws: WorksheetData): ReadonlyArray<{
   readonly top: number;
   readonly left: number;
   readonly bottom: number;
   readonly right: number;
 }> {
+  checkWorksheet(ws);
   return Object.values(ws._merges).map(merge => ({
     top: merge.top,
     left: merge.left,
@@ -2586,7 +3112,15 @@ export function getMergedRegions(ws: WorksheetData): ReadonlyArray<{
   }));
 }
 
+/**
+ * The sheet as its round-trip model — what the writers serialise and {@link setSheetModel} applies.
+ *
+ * **It shares objects with the sheet**: the cells' value records, the views, the page setup and the other settings are
+ * the sheet's own, so editing them edits the sheet without any of the setters' checks. Treat it as read-only, or
+ * apply a changed copy with `Worksheet.setModel`.
+ */
 export function getSheetModel(ws: WorksheetData): WorksheetModel {
+  checkWorksheet(ws);
   const model: WorksheetModel = {
     id: ws.id,
     name: getSheetName(ws),
@@ -2608,6 +3142,8 @@ export function getSheetModel(ws: WorksheetData): WorksheetModel {
     // Retained rather than streamed because a BIFF12 comments part is written whole at the end, and it is small: one
     // entry per annotated cell, against a row store that may be millions.
     retainedComments: ws._retainedComments,
+    // Hyperlinks a streamed sheet retained, for the same reason — see `hyperlinksFromModel`.
+    retainedHyperlinks: ws._retainedHyperlinks,
     // Carried so the writer can put the same records back — see `styledBlankRanges` above.
     styledBlankRanges: (ws as { _styledBlankRanges?: readonly StyledBlankRangeModel[] })
       ._styledBlankRanges,
@@ -2623,6 +3159,7 @@ export function getSheetModel(ws: WorksheetData): WorksheetModel {
     autoFilterCriteria: ws._autoFilterCriteria,
     sortStateXml: ws._sortStateXml,
     opaqueRels: ws._opaqueRels,
+    legacyControls: ws._legacyControls,
     chartsheetPlaceholder: ws._chartsheetPlaceholder,
     xlsbDrawingRelationshipId: ws._xlsbDrawingRelationshipId,
     worksheetNamespaceAttributes: ws._worksheetNamespaceAttributes,
@@ -2631,7 +3168,7 @@ export function getSheetModel(ws: WorksheetData): WorksheetModel {
     media: ws._media.map(medium => imageModel(medium)),
     shapes: ws._shapes.map(shape => _resolveShapeModel(ws, shape)),
     sheetProtection: ws.sheetProtection,
-    tables: Object.values(ws.tables).map(table => tableModel(table)),
+    tables: Object.values(ws.tables).map(table => tableGetModel(table)),
     pivotTables: ws.pivotTables,
     conditionalFormattings: ws.conditionalFormattings,
     formControls: ws.formControls.map(fc => fc.model),
@@ -2691,7 +3228,37 @@ export function getSheetModel(ws: WorksheetData): WorksheetModel {
   return model;
 }
 
+/**
+ * Rename the sheet, and every reference to it — formulas on every sheet, defined names, chart series, pivot sources —
+ * with it, as Excel does. A rename used to change the tab and nothing else, so `A!A1*2` elsewhere kept naming a sheet
+ * that no longer existed.
+ */
 export function setSheetName(ws: WorksheetData, name: string | undefined): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
+  const from = ws._name;
+  const wb = getSheetWorkbook(ws);
+  if (from === undefined || !wb || wb._worksheets[ws.id] !== ws) {
+    assignSheetName(ws, name);
+    return;
+  }
+  // Validated before anything is rewritten, so a refused name changes nothing. A name past 31 characters is refused
+  // rather than shortened: the caller chose it.
+  refuseLongSheetName(name);
+  const to = validateSheetName(wb, name ?? `sheet${ws.id}`, ws);
+  if (to === from) {
+    return;
+  }
+  withReferenceEdit(wb, { kind: "rename", from, to }, () => {
+    ws._name = to;
+  });
+}
+
+/**
+ * Give the sheet its name and change nothing else — for a sheet being created or loaded, where nothing can refer to
+ * it under another name yet.
+ */
+export function assignSheetName(ws: WorksheetData, name: string | undefined): void {
   if (name === undefined) {
     name = `sheet${ws.id}`;
   }
@@ -2711,7 +3278,9 @@ export function setSheetName(ws: WorksheetData, name: string | undefined): void 
   ws._name = validateSheetName(ws._workbook, name, ws);
 }
 
-export function setColumns(ws: WorksheetData, value: ColumnDefn[]): void {
+export function setColumns(ws: WorksheetData, value: readonly ColumnDefn[]): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   // calculate max header row count
   ws._headerRowCount = value.reduce((pv, cv) => {
     const headerCount = Array.isArray(cv.header) ? cv.header.length : cv.header ? 1 : 0;
@@ -2732,7 +3301,7 @@ export function setColumns(ws: WorksheetData, value: ColumnDefn[]): void {
 // Option Types for Data Conversion
 // =============================================================================
 
-export interface SheetToJSONOptions {
+export interface SheetToJsonOptions {
   /**
    * Control output format:
    * - `1`: Generate an array of arrays
@@ -2758,7 +3327,7 @@ export interface SheetToJSONOptions {
   dateFormat?: string;
 }
 
-export interface AddJSONOptions {
+export interface AddJsonOptions {
   /** Use specified field order (default: Object.keys from data) */
   header?: string[];
   /** If true, do not include header row in output */
@@ -2769,7 +3338,7 @@ export interface AddJSONOptions {
   nullError?: boolean;
 }
 
-export interface AddAOAOptions {
+export interface AddAoaOptions {
   /** Starting position: cell address string, {c, r} object, row number (0-indexed), or -1 to append */
   origin?: Origin;
 }

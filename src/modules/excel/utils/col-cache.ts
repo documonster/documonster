@@ -1,5 +1,12 @@
-import { ColumnOutOfBoundsError, InvalidAddressError } from "@excel/errors";
+import {
+  ExcelColumnOutOfBoundsError,
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError
+} from "@excel/errors";
 import type { DecodedAddress, Location } from "@excel/types";
+
+/** The last row a worksheet has. */
+const MAX_ROW = 1048576;
 
 // Internal type with required $col$row for caching
 type CachedAddress = DecodedAddress & { $col$row: string };
@@ -102,7 +109,7 @@ const colCache: ColCache = {
       // higher level. Both callers validate before reaching here; if
       // this branch fires it indicates a programming error in a future
       // caller, not a user input problem — surface that clearly rather
-      // than reusing `ColumnOutOfBoundsError` (which would lie about
+      // than reusing `ExcelColumnOutOfBoundsError` (which would lie about
       // the offending column, since `level` is a letter-count, not a
       // column number).
       throw new Error(
@@ -147,6 +154,10 @@ const colCache: ColCache = {
     }
   },
   l2n(l: string): number {
+    if (!this._l2n[l] && /[a-z]/.test(l)) {
+      // Column letters compare without regard to case, as Excel's own reference box reads them.
+      l = l.toUpperCase();
+    }
     if (!this._l2n[l]) {
       // Excel's column space stops at XFD (16,384) — three letters is
       // the maximum width any valid column letter can have. Reject
@@ -156,18 +167,18 @@ const colCache: ColCache = {
       // what the equivalent `n2l(n > 16384)` and `decodeAddress` paths
       // already report.
       if (l.length > 3) {
-        throw new ColumnOutOfBoundsError(l, "Excel supports columns from 1 to 16384");
+        throw new ExcelColumnOutOfBoundsError(l, "Excel supports columns from 1 to 16384");
       }
       this._fill(l.length);
     }
     if (!this._l2n[l]) {
-      throw new ColumnOutOfBoundsError(l, `Invalid column letter: ${l}`);
+      throw new ExcelColumnOutOfBoundsError(l, `Invalid column letter: ${l}`);
     }
     return this._l2n[l];
   },
   n2l(n: number): string {
     if (n < 1 || n > 16384) {
-      throw new ColumnOutOfBoundsError(n);
+      throw new ExcelColumnOutOfBoundsError(n);
     }
     if (!this._n2l[n]) {
       this._fill(this._level(n));
@@ -187,7 +198,11 @@ const colCache: ColCache = {
   decodeCol(value: string): number {
     let col = 0;
     for (let i = 0; i < value.length; i++) {
-      const c = value.charCodeAt(i);
+      // Lowercase letters read as their capitals, as everywhere a reference is decoded.
+      let c = value.charCodeAt(i);
+      if (c >= 97 && c <= 122) {
+        c -= 32;
+      }
       if (c >= 65 && c <= 90) {
         col = col * 26 + c - 64;
       } else {
@@ -249,7 +264,7 @@ const colCache: ColCache = {
       ok = c >= 48 && c <= 57;
     }
     if (!ok) {
-      throw new InvalidAddressError(value);
+      throw new ExcelInvalidAddressError(value);
     }
     return true;
   },
@@ -257,7 +272,7 @@ const colCache: ColCache = {
   // convert address string into structure
   decodeAddress(value: string): CachedAddress {
     if (!value || typeof value !== "string") {
-      throw new InvalidAddressError(String(value));
+      throw new ExcelInvalidAddressError(String(value));
     }
     const addr = value.length < 5 && this._hash[value];
     if (addr) {
@@ -273,8 +288,16 @@ const colCache: ColCache = {
     let colEnd = 0; // index where col letters end
     let colStart = 0; // index where col letters start (after any $)
 
+    // Column letters read without regard to case — `b2` is `B2`, as Excel's UI reads it — so a lowercase reference
+    // that a boundary check accepted decodes to the same cell instead of to no column at all. The canonical address
+    // built below is uppercase.
+    let lowercase = false;
     for (let i = 0; i < value.length; i++) {
-      const char = value.charCodeAt(i);
+      let char = value.charCodeAt(i);
+      if (!hasRow && char >= 97 && char <= 122) {
+        char -= 32;
+        lowercase = true;
+      }
       if (char === 36) {
         // '$' — skip it
         if (!hasCol && !hasRow) {
@@ -298,14 +321,19 @@ const colCache: ColCache = {
       colNumber = undefined;
     } else if (colNumber > 16384) {
       const col = value.slice(0, colEnd);
-      throw new ColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
+      // More than three letters and no row is a word, not a reference: it is malformed, not out of range.
+      if (!hasRow && colEnd - colStart > 3) {
+        throw new ExcelInvalidAddressError(value);
+      }
+      throw new ExcelColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
     }
     if (!hasRow) {
       rowNumber = undefined;
     }
 
     // Build canonical address string only when needed
-    const col = hasCol ? value.slice(colStart, colEnd) : "";
+    const letters = hasCol ? value.slice(colStart, colEnd) : "";
+    const col = lowercase ? letters.toUpperCase() : letters;
     const row = hasRow ? String(rowNumber) : "";
     const canonical = col + row;
 
@@ -327,7 +355,13 @@ const colCache: ColCache = {
 
   // convert r,c into structure (if only 1 arg, assume r is address string)
   getAddress(r: number | string, c?: number): CachedAddress {
-    if (c) {
+    if (c !== undefined) {
+      if (typeof r === "number" && (!Number.isInteger(r) || r < 1 || r > MAX_ROW)) {
+        throw new ExcelRowOutOfBoundsError(r, `Excel rows are whole numbers from 1 to ${MAX_ROW}`);
+      }
+      if (!Number.isInteger(c)) {
+        throw new ExcelColumnOutOfBoundsError(c, "Excel columns are whole numbers from 1 to 16384");
+      }
       const address = this.n2l(c) + r;
       return this.decodeAddress(address);
     }
@@ -337,7 +371,7 @@ const colCache: ColCache = {
   // convert [address], [tl:br] into address structures
   decode(value: string) {
     if (!value || typeof value !== "string") {
-      throw new InvalidAddressError(String(value));
+      throw new ExcelInvalidAddressError(String(value));
     }
     const parts = value.split(":");
     if (parts.length === 2) {
@@ -364,12 +398,13 @@ const colCache: ColCache = {
   // convert [sheetName!][$]col[$]row[[$]col[$]row] into address or range structures
   decodeEx(value: string): DecodeExResult {
     if (!value || typeof value !== "string") {
-      throw new InvalidAddressError(String(value));
+      throw new ExcelInvalidAddressError(String(value));
     }
     // Use possessive quantifiers to prevent catastrophic backtracking (ReDoS)
     const groups = value.match(/^(?:(?:(?:'((?:[^']|'')+?)')|([^'^ !]+?))!)?(.*)$/);
 
-    const sheetName = groups![1] || groups![2]; // Quoted and unquoted groups
+    // A quoted name doubles each apostrophe it holds: `'it''s'!A1` is on the sheet `it's`.
+    const sheetName = groups![1]?.replace(/''/g, "'") || groups![2];
     const reference = groups![3]; // Remaining address
 
     const parts = reference.split(":");
@@ -428,7 +463,10 @@ const colCache: ColCache = {
       case 4:
         return `${colCache.encodeAddress(args[0], args[1])}:${colCache.encodeAddress(args[2], args[3])}`;
       default:
-        throw new InvalidAddressError(String(args.length), "Can only encode with 2 or 4 arguments");
+        throw new ExcelInvalidAddressError(
+          String(args.length),
+          "Can only encode with 2 or 4 arguments"
+        );
     }
   },
 

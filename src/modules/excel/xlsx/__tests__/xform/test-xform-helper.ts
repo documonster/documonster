@@ -39,6 +39,7 @@ function cloneDeep(obj: unknown, preserveUndefined = true): unknown {
   return clone;
 }
 import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
+import { XmlWriteError } from "@xml/errors";
 import { XmlWriter } from "@xml/writer";
 import { expect } from "vitest";
 
@@ -295,6 +296,13 @@ const its: { [key: string]: (expectation: Expectation) => () => Promise<void> } 
           }
         ]
       });
+
+      if (/^\s*<\?xml/.test(getExpectation(expectation, "xml") ?? "")) {
+        // A part-level xform writes the XML declaration, which XML allows only at the very start of a document.
+        // Rendered inside another element it is refused — the writer used to emit `<compy><pre/><?xml …?>`.
+        expect(() => xform.render(new XmlWriter(), model)).toThrow(XmlWriteError);
+        return;
+      }
 
       const xmlStream = new XmlWriter();
       xform.render(xmlStream, model);

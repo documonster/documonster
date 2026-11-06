@@ -2,18 +2,18 @@
  * Word Example 31 — Walker & Mapper (transform / collect)
  *
  * Covers the low-level traversal API surface:
- *   - walkDocument / walkBlocks — visitor pattern with VisitAction
+ *   - Query.each / walkBlocks — visitor pattern with VisitAction
  *     ("continue" / "skip" / "stop")
  *   - WalkPath context (section, depth, inHeader, inFooter, …)
- *   - collectParagraphs / collectRuns / collectTables — convenience
- *   - mapDocument with DocxTransformer — pure functional rewrite
+ *   - Query.listParagraphs / Query.listRuns / Query.listTables — convenience
+ *   - Transform.map with DocxTransformer — pure functional rewrite
  *     (replace / remove / expand body content)
  *   - Visiting headers, footers, footnotes, endnotes via WalkOptions
  *
  * Edge cases:
  *   - "skip" prunes a subtree without aborting traversal
  *   - "stop" aborts cleanly mid-walk
- *   - mapDocument never mutates the input
+ *   - Transform.map never mutates the input
  *   - Removing every paragraph leaves an empty (but valid) document
  *
  * Output: tmp/word-examples/31-walker/...
@@ -22,8 +22,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Convert, Io, Query } from "../index";
-import type { DocxDocument, DocxTransformer, DocxVisitor, BodyContent } from "../index";
+import { Build, Document, Query, Transform } from "../index";
+import type { DocxTransformer, DocxVisitor, BodyContent, DocxDocument } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -40,7 +40,7 @@ function makeDoc(): DocxDocument {
   Document.addHeading(d, "Walker demo", 1);
   Document.addHeading(d, "First section", 2);
   Document.addParagraph(d, "Body paragraph 1.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.text("Body paragraph 2 with "),
@@ -63,7 +63,7 @@ function makeDoc(): DocxDocument {
 
   // Footnote
   const fnId = Document.addFootnote(d, "Footnote text");
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.text("Cite"),
@@ -75,7 +75,7 @@ function makeDoc(): DocxDocument {
   Document.setHeader(d, "default", { children: [Build.textParagraph("Header line")] });
   Document.setFooter(d, "default", { children: [Build.textParagraph("Footer line")] });
 
-  return Document.build(d);
+  return d;
 }
 
 const doc = makeDoc();
@@ -83,12 +83,14 @@ const doc = makeDoc();
 // ---------------------------------------------------------------------------
 // 1. Convenience collectors
 // ---------------------------------------------------------------------------
-console.log(`  collectParagraphs(): ${Query.collectParagraphs(doc).length}`);
-console.log(`  collectRuns():       ${Query.collectRuns(doc).length}`);
-console.log(`  collectTables():     ${Query.collectTables(doc).length}`);
+console.log(`  Query.listParagraphs(): ${Query.listParagraphs(doc).length}`);
+console.log(`  Query.listRuns():       ${Query.listRuns(doc).length}`);
+console.log(
+  `  Query.listTables():     ${Query.listTables(doc, { includeHeaders: true, includeFooters: true, includeFootnotes: true, includeEndnotes: true }).length}`
+);
 
 // Without headers/footers/notes
-const bodyOnlyParas = Query.collectParagraphs(doc, {
+const bodyOnlyParas = Query.listParagraphs(doc, {
   includeHeaders: false,
   includeFooters: false,
   includeFootnotes: false
@@ -122,7 +124,7 @@ const visitor: DocxVisitor = {
     }
   }
 };
-Query.walkDocument(doc, visitor, {
+Query.each(doc, visitor, {
   includeHeaders: true,
   includeFooters: true,
   includeFootnotes: true
@@ -133,7 +135,7 @@ console.log(`  visitor counts: ${JSON.stringify(counts)}`);
 // 3. "stop" — abort early
 // ---------------------------------------------------------------------------
 let visitedBeforeStop = 0;
-Query.walkDocument(doc, {
+Query.each(doc, {
   enterParagraph() {
     visitedBeforeStop++;
     if (visitedBeforeStop >= 2) {
@@ -153,7 +155,7 @@ const fragment: BodyContent[] = [
   Build.textParagraph("c")
 ];
 let visited = 0;
-Query.walkBlocks(fragment, {
+Query.eachBlock(fragment, {
   enterParagraph() {
     visited++;
   }
@@ -161,7 +163,7 @@ Query.walkBlocks(fragment, {
 console.log(`  walkBlocks(fragment): ${visited} paragraphs`);
 
 // ---------------------------------------------------------------------------
-// 5. mapDocument — uppercase every text run, drop tables entirely
+// 5. Transform.map — uppercase every text run, drop tables entirely
 // ---------------------------------------------------------------------------
 const transformer: DocxTransformer = {
   transformRun(run) {
@@ -178,10 +180,10 @@ const transformer: DocxTransformer = {
     return null;
   }
 };
-const transformed = Convert.mapDocument(doc, transformer);
+const transformed = Transform.map(doc, transformer);
 
 // Verify: input was not mutated
-const originalParas = Query.collectParagraphs(doc, { includeFootnotes: false });
+const originalParas = Query.listParagraphs(doc, { includeFootnotes: false });
 const originalText = originalParas.map(p =>
   p.children
     .map(c =>
@@ -196,12 +198,12 @@ const originalText = originalParas.map(p =>
 );
 console.log(`  pristine input still has lowercase: ${originalText.some(t => /[a-z]/.test(t))}`);
 
-const transformedBuf = await Io.toBuffer(transformed);
+const transformedBuf = await Document.toBuffer(transformed);
 fs.writeFileSync(path.join(outDir, "01-uppercased-no-tables.docx"), transformedBuf);
 console.log(`  → 01-uppercased-no-tables.docx (${transformedBuf.length} bytes)`);
 
 // ---------------------------------------------------------------------------
-// 6. mapDocument with body content expansion (one paragraph → many)
+// 6. Transform.map with body content expansion (one paragraph → many)
 // ---------------------------------------------------------------------------
 const expander: DocxTransformer = {
   transformBodyContent(block) {
@@ -231,19 +233,19 @@ Document.useDefaultStyles(seed);
 Document.addParagraph(seed, "Plain");
 Document.addParagraph(seed, "EXPAND:hello");
 Document.addParagraph(seed, "Plain again");
-const expanded = Convert.mapDocument(Document.build(seed), expander);
+const expanded = Transform.map(seed, expander);
 console.log(`  expander: 3 → ${expanded.body.length} body items`);
-fs.writeFileSync(path.join(outDir, "02-expanded.docx"), await Io.toBuffer(expanded));
+fs.writeFileSync(path.join(outDir, "02-expanded.docx"), await Document.toBuffer(expanded));
 console.log(`  → 02-expanded.docx`);
 
 // ---------------------------------------------------------------------------
 // 7. Edge case: removing every paragraph still produces a valid empty doc
 // ---------------------------------------------------------------------------
-const emptied = Convert.mapDocument(doc, {
+const emptied = Transform.map(doc, {
   transformBodyContent() {
     return null;
   }
 });
 console.log(`  emptied body length: ${emptied.body.length}`);
-fs.writeFileSync(path.join(outDir, "03-empty-after-map.docx"), await Io.toBuffer(emptied));
+fs.writeFileSync(path.join(outDir, "03-empty-after-map.docx"), await Document.toBuffer(emptied));
 console.log(`  → 03-empty-after-map.docx`);

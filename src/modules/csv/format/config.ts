@@ -5,8 +5,9 @@
  * Creates regex patterns, quote lookup functions, and format settings.
  */
 
-import { CsvError } from "@csv/errors";
+import { CsvArgumentError } from "@csv/errors";
 import type { CsvFormatOptions, TypeTransformMap } from "@csv/types";
+import { checkFormatOptions } from "@csv/utils/check-options";
 import { escapeRegex, normalizeQuoteOption, normalizeEscapeOption } from "@csv/utils/detect";
 import type { DecimalSeparator } from "@csv/utils/number";
 
@@ -59,6 +60,11 @@ export interface FormatRegexOptions {
   delimiter: string;
   /** The escape character (defaults to quote if not provided) */
   escape?: string | false | null;
+  /**
+   * The row separator. A field holding one of its characters has to be quoted, or a reader
+   * splits the record there; CR and LF are always treated so.
+   */
+  lineEnding?: string;
 }
 
 /**
@@ -83,6 +89,8 @@ export interface FormatFieldContext {
   decimalSeparator: DecimalSeparator;
   /** Type transform map */
   transform?: TypeTransformMap;
+  /** The public call an argument error names (`Csv.format`, `new Csv.FormatterStream`). */
+  where: string;
 }
 
 /**
@@ -107,6 +115,8 @@ export interface FormatRowOptions {
   decimalSeparator: DecimalSeparator;
   /** Type transform map */
   transform?: TypeTransformMap;
+  /** The public call an argument error names. */
+  where: string;
 }
 
 /**
@@ -125,6 +135,8 @@ export interface FormatConfig {
   regex: CsvFormatRegex;
   shouldQuoteColumn: QuoteLookupFn;
   shouldQuoteHeader: QuoteLookupFn;
+  /** The public call an argument error names (`Csv.format`, `new Csv.FormatterStream`). */
+  where: string;
 }
 
 // =============================================================================
@@ -135,7 +147,8 @@ export interface FormatConfig {
  * Create pre-compiled regex patterns for CSV formatting
  */
 export function createFormatRegex(options: FormatRegexOptions): CsvFormatRegex {
-  const { quote: quoteOption, delimiter, escape: escapeOption } = options;
+  const { quote: quoteOption, delimiter, escape: escapeOption, lineEnding = "\n" } = options;
+  const extraBreakChars = lineEnding.replace(/[\r\n]/g, "");
 
   // Use centralized normalization utilities
   const { enabled: quoteEnabled, char: quote } = normalizeQuoteOption(quoteOption);
@@ -160,14 +173,15 @@ export function createFormatRegex(options: FormatRegexOptions): CsvFormatRegex {
   const escape = escapeNormalized.char || quote;
 
   // Use fast string.includes() check for single-char delimiter, quote, and escape
-  const useFastCheck = delimiter.length === 1 && quote.length === 1 && escape.length === 1;
+  const useFastCheck =
+    delimiter.length === 1 && quote.length === 1 && escape.length === 1 && extraBreakChars === "";
 
   return {
     needsQuoteRegex: useFastCheck
       ? null // Will use fast check instead
       : (() => {
           // Build character class content using dedicated char-class escaping
-          const classContent = `${escapeForCharClass(delimiter)}${escapeForCharClass(quote)}${escape !== quote ? escapeForCharClass(escape) : ""}\r\n`;
+          const classContent = `${escapeForCharClass(delimiter)}${escapeForCharClass(quote)}${escape !== quote ? escapeForCharClass(escape) : ""}${escapeForCharClass(extraBreakChars)}\r\n`;
           return new RegExp(`[${classContent}]`);
         })(),
     escapeQuoteRegex:
@@ -204,7 +218,9 @@ export function createQuoteLookup(quoteConfig: QuoteColumnConfig | undefined): Q
     return (index: number) => !!quoteConfig[index];
   }
   // Record<string, boolean>
-  return (_index: number, header: string | undefined) => (header ? !!quoteConfig[header] : false);
+  // Own entries only, so a column named `constructor` is not quoted because of Object.prototype.
+  return (_index: number, header: string | undefined) =>
+    header !== undefined && Object.hasOwn(quoteConfig, header) ? !!quoteConfig[header] : false;
 }
 
 // =============================================================================
@@ -214,7 +230,8 @@ export function createQuoteLookup(quoteConfig: QuoteColumnConfig | undefined): Q
 /**
  * Create complete format configuration from options
  */
-export function createFormatConfig(options: CsvFormatOptions): FormatConfig {
+export function createFormatConfig(options: CsvFormatOptions, where = "Csv.format"): FormatConfig {
+  checkFormatOptions(options, where);
   const {
     delimiter = ",",
     lineEnding = "\n",
@@ -230,20 +247,19 @@ export function createFormatConfig(options: CsvFormatOptions): FormatConfig {
     typeTransform
   } = options;
 
-  // Validate decimalSeparator - only "." or "," are valid
-  if (decimalSeparator !== "." && decimalSeparator !== ",") {
-    throw new CsvError(`Invalid decimalSeparator: "${decimalSeparator}". Must be "." or ",".`);
-  }
-
-  // Prevent silent data corruption when decimalSeparator matches delimiter
-  if (decimalSeparator === delimiter) {
-    throw new CsvError("decimalSeparator cannot be the same as delimiter");
+  // Prevent silent data corruption when decimalSeparator is part of the delimiter
+  if (delimiter.includes(decimalSeparator)) {
+    throw new CsvArgumentError(
+      "options.decimalSeparator",
+      `${where}: options.decimalSeparator cannot be the same as options.delimiter`
+    );
   }
 
   const regex = createFormatRegex({
     quote: quoteOption,
     delimiter,
-    escape: escapeOption
+    escape: escapeOption,
+    lineEnding
   });
 
   const quoteAll = quoteColumns === true;
@@ -260,6 +276,7 @@ export function createFormatConfig(options: CsvFormatOptions): FormatConfig {
     typeTransform,
     regex,
     shouldQuoteColumn: createQuoteLookup(quoteColumns),
-    shouldQuoteHeader: createQuoteLookup(quoteHeaders)
+    shouldQuoteHeader: createQuoteLookup(quoteHeaders),
+    where
   };
 }

@@ -18,6 +18,7 @@
  * than the code.
  */
 
+import { Draw } from "@draw/index";
 import { BasicRasterCanvas } from "@draw/raster/canvas";
 import type { RasterFont, RasterFontSource } from "@draw/raster/glyph-outline";
 import {
@@ -78,7 +79,7 @@ function inkedPixels(canvas: BasicRasterCanvas): number {
 function render(text: string, fonts: readonly RasterFontSource[]): BasicRasterCanvas {
   const canvas = new BasicRasterCanvas(400, 60);
   canvas.setFonts(fonts, { useSystemFonts: false });
-  canvas.drawText(10, 40, text, 24, "#000000", "start");
+  canvas.drawText(10, 40, text, { fontSize: 24, color: "#000000", anchor: "start" });
   return canvas;
 }
 
@@ -90,7 +91,7 @@ function draw(
   const canvas = render(text, fonts);
   return {
     ink: inkedPixels(canvas),
-    uncovered: [...canvas.uncoveredCodePoints].sort((a, b) => a - b)
+    uncovered: canvas.getUncoveredCodePoints()
   };
 }
 
@@ -147,14 +148,49 @@ describe("raster font fallback", () => {
   });
 
   it("keeps supplied faces ahead of anything discovered", () => {
-    const chain = resolveFontChain("中文", parseInjectedFonts([cjkFont()]), true);
+    const chain = resolveFontChain("中文", parseInjectedFonts([cjkFont()]).fonts, true);
     expect(chain[0].familyName).toBe("Fixture CJK");
   });
 
-  it("skips a font it cannot parse instead of throwing", () => {
-    const fonts = parseInjectedFonts([new Uint8Array([1, 2, 3, 4]), cjkFont()]);
+  it("skips a font it cannot parse instead of throwing, and says which", () => {
+    const { fonts, warnings } = parseInjectedFonts([new Uint8Array([1, 2, 3, 4]), cjkFont()]);
     expect(fonts.map(f => f.familyName)).toEqual(["Fixture CJK"]);
     expect(draw("中", fonts).uncovered).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^fonts\[0\] could not be read \(.+\) and was skipped\.$/);
+  });
+
+  it("reports a dropped supplied font in RasterizedImage.textWarnings (R4P-C3)", () => {
+    const list = {
+      width: 40,
+      height: 20,
+      children: [
+        {
+          kind: "text" as const,
+          x: 2,
+          y: 14,
+          lines: [{ text: "中", dy: 0 }],
+          style: { size: 12, fill: { r: 0, g: 0, b: 0, a: 1 } }
+        }
+      ]
+    };
+    const image = Draw.toRgba(list, {
+      fonts: [new Uint8Array(10), cjkFont()],
+      useSystemFonts: false
+    });
+    expect(image.uncoveredCodePoints).toEqual([]);
+    expect(image.textWarnings).toEqual([
+      expect.stringMatching(/^fonts\[0\] could not be read \(.+\) and was skipped\.$/)
+    ]);
+    // A face named past the end of its collection still draws with face 0, and says so.
+    const past = Draw.toRgba(list, {
+      fonts: [{ data: cjkFont(), collectionIndex: 3 }],
+      useSystemFonts: false
+    });
+    expect(past.uncoveredCodePoints).toEqual([]);
+    expect(past.textWarnings).toEqual([
+      expect.stringMatching(/^fonts\[0\]: collectionIndex 3 is out of range .*; face 0 was used\.$/)
+    ]);
   });
 
   it("degrades a font with no outlines to one that draws nothing", () => {
@@ -176,11 +212,15 @@ describe("raster font fallback", () => {
     const withNothing = new BasicRasterCanvas(200, 60);
     withNothing.setFonts([], { useSystemFonts: false });
 
-    withCjk.drawText(10, 40, "中", 24, "#000000", "start");
-    withNothing.drawText(10, 40, "中", 24, "#000000", "start");
+    withCjk.drawText(10, 40, "中", { fontSize: 24, color: "#000000", anchor: "start" });
+    withNothing.drawText(10, 40, "中", { fontSize: 24, color: "#000000", anchor: "start" });
 
-    expect([...withCjk.uncoveredCodePoints]).toEqual([]);
-    expect([...withNothing.uncoveredCodePoints]).toEqual([HAN_ZHONG]);
+    expect(withCjk.getUncoveredCodePoints()).toEqual([]);
+    expect(withNothing.getUncoveredCodePoints()).toEqual([HAN_ZHONG]);
+    // What the canvas hands out is a copy: clearing it does not change what the render reports.
+    withNothing.getUncoveredCodePoints().length = 0;
+    withNothing.uncoveredCodePoints.clear();
+    expect(withNothing.getUncoveredCodePoints()).toEqual([HAN_ZHONG]);
     expect(inkedPixels(withCjk)).toBeGreaterThan(0);
   });
 

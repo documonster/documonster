@@ -17,7 +17,11 @@ import {
 } from "@archive/compression/compress";
 import { decompressWithStream } from "@archive/compression/compress.base";
 import { inflateRaw } from "@archive/compression/deflate-fallback";
-import { ArchiveLimitError, EntrySizeMismatchError, FileTooLargeError } from "@archive/core/errors";
+import {
+  ArchiveLimitExceededError,
+  ZipEntrySizeMismatchError,
+  ArchiveFileTooLargeError
+} from "@archive/core/errors";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { createZipSync } from "@archive/zip/zip-bytes";
 import { describe, expect, it } from "vitest";
@@ -59,21 +63,27 @@ describe("decompression output bound", () => {
 
   it("Node zlib stops at maxOutputLength (async and sync)", async () => {
     await expect(decompress(payload, { maxOutputLength: 1024 })).rejects.toBeInstanceOf(
-      ArchiveLimitError
+      ArchiveLimitExceededError
     );
-    expect(() => decompressSync(payload, { maxOutputLength: 1024 })).toThrow(ArchiveLimitError);
+    expect(() => decompressSync(payload, { maxOutputLength: 1024 })).toThrow(
+      ArchiveLimitExceededError
+    );
   });
 
   it("honours a zero bound", () => {
-    expect(() => decompressSync(payload, { maxOutputLength: 0 })).toThrow(ArchiveLimitError);
+    expect(() => decompressSync(payload, { maxOutputLength: 0 })).toThrow(
+      ArchiveLimitExceededError
+    );
   });
 
   it("pure-JS fallback stops at maxOutputLength", () => {
-    expect(() => inflateRaw(payload, 1024)).toThrow(ArchiveLimitError);
+    expect(() => inflateRaw(payload, 1024)).toThrow(ArchiveLimitExceededError);
   });
 
   it("DecompressionStream path stops at maxOutputLength", async () => {
-    await expect(decompressWithStream(payload, 1024)).rejects.toBeInstanceOf(ArchiveLimitError);
+    await expect(decompressWithStream(payload, 1024)).rejects.toBeInstanceOf(
+      ArchiveLimitExceededError
+    );
   });
 
   it("gzip and zlib honour the bound on every entry point", async () => {
@@ -81,11 +91,11 @@ describe("decompression output bound", () => {
     const gz = gzipSync(raw);
     const zl = zlibSync(raw);
     const opts = { maxOutputLength: 1024 };
-    await expect(gunzip(gz, opts)).rejects.toBeInstanceOf(ArchiveLimitError);
-    expect(() => gunzipSync(gz, opts)).toThrow(ArchiveLimitError);
-    await expect(unzlib(zl, opts)).rejects.toBeInstanceOf(ArchiveLimitError);
-    expect(() => unzlibSync(zl, opts)).toThrow(ArchiveLimitError);
-    await expect(decompressAuto(gz, opts)).rejects.toBeInstanceOf(ArchiveLimitError);
+    await expect(gunzip(gz, opts)).rejects.toBeInstanceOf(ArchiveLimitExceededError);
+    expect(() => gunzipSync(gz, opts)).toThrow(ArchiveLimitExceededError);
+    await expect(unzlib(zl, opts)).rejects.toBeInstanceOf(ArchiveLimitExceededError);
+    expect(() => unzlibSync(zl, opts)).toThrow(ArchiveLimitExceededError);
+    await expect(decompressAuto(gz, opts)).rejects.toBeInstanceOf(ArchiveLimitExceededError);
     expect((await unzlib(zl, { maxOutputLength: BOMB_SIZE })).length).toBe(BOMB_SIZE);
   });
 
@@ -101,21 +111,21 @@ describe("ZipParser bomb protection", () => {
   it("rejects an entry that inflates past its declared size (async)", async () => {
     const parser = new ZipParser(bomb);
     const err = await parser.extractAll().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(EntrySizeMismatchError);
-    expect((err as EntrySizeMismatchError).isZipBomb()).toBe(true);
-    expect((err as EntrySizeMismatchError).actual).toBeUndefined();
+    expect(err).toBeInstanceOf(ZipEntrySizeMismatchError);
+    expect((err as ZipEntrySizeMismatchError).isZipBomb()).toBe(true);
+    expect((err as ZipEntrySizeMismatchError).actual).toBeUndefined();
     expect((err as Error).message).toMatch(`exceeds its declared ${LIED_SIZE} bytes`);
-    expect((err as Error).cause).toBeInstanceOf(ArchiveLimitError);
+    expect((err as Error).cause).toBeInstanceOf(ArchiveLimitExceededError);
   });
 
   it("rejects an entry that inflates past its declared size (sync)", () => {
-    expect(() => new ZipParser(bomb).extractAllSync()).toThrow(EntrySizeMismatchError);
+    expect(() => new ZipParser(bomb).extractAllSync()).toThrow(ZipEntrySizeMismatchError);
   });
 
   it("rejects a declared size above maxEntrySize before inflating", async () => {
     const zip = createZipSync([{ name: "a.bin", data: new Uint8Array(2048) }]);
     await expect(new ZipParser(zip, { maxEntrySize: 1024 }).extract("a.bin")).rejects.toThrow(
-      FileTooLargeError
+      ArchiveFileTooLargeError
     );
   });
 
@@ -138,13 +148,13 @@ describe("ZipParser bomb protection", () => {
       { name: "b.bin", data: new Uint8Array(600) }
     ]);
     const limited = new ZipParser(zip, { maxTotalUncompressedSize: 1000 });
-    await expect(limited.extractAll()).rejects.toBeInstanceOf(ArchiveLimitError);
-    expect(() => limited.extractAllSync()).toThrow(ArchiveLimitError);
+    await expect(limited.extractAll()).rejects.toBeInstanceOf(ArchiveLimitExceededError);
+    expect(() => limited.extractAllSync()).toThrow(ArchiveLimitExceededError);
     await expect(
       limited.forEach(async (_entry, getData) => {
         await getData();
       })
-    ).rejects.toBeInstanceOf(ArchiveLimitError);
+    ).rejects.toBeInstanceOf(ArchiveLimitExceededError);
     expect((await new ZipParser(zip).extractAll()).size).toBe(2);
   });
 });
@@ -165,9 +175,9 @@ describe("maxEntries", () => {
     } catch (e) {
       err = e;
     }
-    expect(err).toBeInstanceOf(ArchiveLimitError);
-    expect((err as ArchiveLimitError).limit).toBe("maxEntries");
-    expect((err as ArchiveLimitError).allowed).toBe(49);
+    expect(err).toBeInstanceOf(ArchiveLimitExceededError);
+    expect((err as ArchiveLimitExceededError).limit).toBe("maxEntries");
+    expect((err as ArchiveLimitExceededError).allowed).toBe(49);
   });
 
   it("accepts a count at the bound, and is unbounded by default", () => {

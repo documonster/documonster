@@ -258,7 +258,7 @@ describe("parse: consumption modes", () => {
       .add("a.txt", new TextEncoder().encode("file-1"))
       .add("b.txt", new TextEncoder().encode("file-2"))
       .add("c.txt", new TextEncoder().encode("file-3"))
-      .bytes();
+      .toBuffer();
 
     // Mode A: unzip().entries()
     const pathsA: string[] = [];
@@ -410,7 +410,7 @@ describe("parse: entry interruption", () => {
       .add("1.txt", new TextEncoder().encode("one"))
       .add("2.txt", new TextEncoder().encode("two"))
       .add("3.txt", new TextEncoder().encode("three"))
-      .bytes();
+      .toBuffer();
 
     const reader = unzip(chunkBytes(zipBytes, 128));
     let seen = 0;
@@ -433,7 +433,7 @@ describe("parse: entry interruption", () => {
       const zipBytes = await zip({ level: 0 })
         .add("first.bin", new Uint8Array(1024 * 32))
         .add("second.txt", new TextEncoder().encode("still here"))
-        .bytes();
+        .toBuffer();
 
       const reader = unzip(chunkBytes(zipBytes, 4096));
       const seen: string[] = [];
@@ -469,7 +469,7 @@ describe("parse: entry interruption", () => {
       for (let i = 0; i < 6; i++) {
         z.add(`file-${i}.txt`, new TextEncoder().encode(`content-${i}`));
       }
-      const zipBytes = await z.bytes();
+      const zipBytes = await z.toBuffer();
 
       const reader = unzip(chunkBytes(zipBytes, 256));
       const results: string[] = [];
@@ -520,7 +520,7 @@ describe("parse: premature close prevention", () => {
     { timeout: 10_000 },
     async () => {
       const content = new Uint8Array(4096).fill(67);
-      const zipBytes = await zip({ level: 0 }).add("data.bin", content).bytes();
+      const zipBytes = await zip({ level: 0 }).add("data.bin", content).toBuffer();
 
       const reader = unzip(chunkBytes(zipBytes, 256));
 
@@ -548,7 +548,7 @@ describe("parse: premature close prevention", () => {
       for (let i = 0; i < 5; i++) {
         z.add(`r-${i}.bin`, new Uint8Array(2048).fill(i));
       }
-      const zipBytes = await z.bytes();
+      const zipBytes = await z.toBuffer();
 
       const reader = unzip(chunkBytes(zipBytes, 512));
       let count = 0;
@@ -620,7 +620,7 @@ describe("parse: stress + stability", () => {
     for (let i = 0; i < count; i++) {
       z.add(`s-${i}.txt`, new TextEncoder().encode(`val-${i}`));
     }
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const reader = unzip(chunkBytes(zipBytes, 64));
     let seen = 0;
@@ -649,7 +649,7 @@ describe("parse: stress + stability", () => {
       z.add(name, new TextEncoder().encode(val));
       expected.set(name, val);
     }
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const reader = unzip(chunkBytes(zipBytes, 64));
     let seen = 0;
@@ -713,7 +713,7 @@ describe("parse: stress + stability", () => {
       const zipBytes = await zip({ level: 0 })
         .add("a.bin", content1)
         .add("b.bin", content2)
-        .bytes();
+        .toBuffer();
 
       for (let round = 0; round < 10; round++) {
         const reader = unzip(chunkBytes(zipBytes, 128));
@@ -741,7 +741,7 @@ describe("parse: stress + stability", () => {
 
   it("repeat with delayed consumption 10 times", { timeout: 30_000 }, async () => {
     const content = new TextEncoder().encode("stable-content");
-    const zipBytes = await zip({ level: 0 }).add("x.txt", content).add("y.txt", content).bytes();
+    const zipBytes = await zip({ level: 0 }).add("x.txt", content).add("y.txt", content).toBuffer();
 
     for (let round = 0; round < 10; round++) {
       const reader = unzip(chunkBytes(zipBytes, 64));

@@ -7,11 +7,10 @@
  * @example
  * ```typescript
  * import { Workbook } from "documonster/excel";
- * import { excelToDocx } from "documonster/word/excel";
+ * import { WordExcel } from "documonster/word/excel";
  *
- * const wb = Workbook.create();
- * await Workbook.read(wb, buffer);
- * const doc = excelToDocx(wb);
+ * const wb = await Workbook.read(buffer);
+ * const doc = WordExcel.toDocx(wb);
  * ```
  */
 
@@ -45,10 +44,14 @@ import type {
   DoughnutChartGroup,
   SurfaceChartGroup,
   SurfaceSeries,
-  ChartAxis as ExcelChartAxis
+  ChartAxis as ExcelChartAxis,
+  DataPoint,
+  ShapeProperties
 } from "@excel/chart/model/types";
 import { renderChartSvg } from "@excel/chart/render/chart-renderer";
+import { checkChartRenderOptions } from "@excel/chart/render/render-options";
 import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
+import type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 import type { CellData as ExcelCell } from "@excel/core/cell";
 import {
   cellAlignment,
@@ -57,8 +60,8 @@ import {
   cellFont,
   cellGetValue,
   cellHyperlink,
+  cellDisplayText,
   cellSetValue,
-  cellText,
   cellType
 } from "@excel/core/cell";
 import { ValueType } from "@excel/core/enums";
@@ -80,6 +83,7 @@ import {
   rowGetCell
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
+import { ExcelChartOptionsError } from "@excel/errors";
 import { Workbook } from "@excel/index";
 import type {
   Font as ExcelFont,
@@ -89,12 +93,34 @@ import type {
   Alignment as ExcelAlignment,
   Color as ExcelColor
 } from "@excel/types";
+import { sheetNameKey } from "@utils/name-key";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import { CELL_THEME_PALETTE } from "@utils/theme-colors";
+import {
+  CHART_TYPES,
+  checkChartSeries as checkWordChartSeries,
+  checkHandle,
+  checkOneOf,
+  checkRecord,
+  invalidArgument
+} from "@word/core/argument-checks";
+import {
+  chartSpaceKeys,
+  keptChild,
+  keptPoints,
+  plotAreaKeys,
+  seriesKeys
+} from "@word/core/chart-kept";
 import type { Mutable } from "@word/core/internal-utils";
+import { checkSchema, model, w } from "@word/core/option-schema";
 import { extractParagraphText } from "@word/core/text-utils";
+import { DocxArgumentError } from "@word/errors";
 import type {
   Alignment,
   Chart,
+  ChartKeptNode,
+  ChartSeries as WordChartSeries,
   ChartType as WordChartType,
   DocxDocument,
   BodyContent,
@@ -120,7 +146,18 @@ import { EMU_PER_INCH, charWidthToPixel, pixelToPoints, ptToTwips } from "@word/
 
 /** Options for Excel → DOCX conversion. */
 export interface ExcelToDocxOptions {
-  /** Which sheets to include (by name or 0-based index). Default: all visible sheets. */
+  /**
+   * Which worksheets to include, in this order. Default: all visible ones.
+   *
+   * Pass sheet names. Numeric positions are deprecated (removed in 1.0): they
+   * are 0-based here but 1-based in `Pdf.fromExcel` and sheet ids in
+   * `Workbook.getWorksheet`.
+   *
+   * A name is compared as Excel compares names (ignoring case). A number is a
+   * 0-based position among the worksheets, not counting very hidden ones. A
+   * name or position that matches no worksheet is refused with
+   * `DocxArgumentError`.
+   */
   readonly sheets?: readonly (string | number)[];
   /** Include sheet name as heading before each table. Default: true. */
   readonly includeSheetHeadings?: boolean;
@@ -138,6 +175,32 @@ export interface ExcelToDocxOptions {
   readonly includeBorders?: boolean;
 }
 
+const excelToDocxOptionsSchema = w.record({
+  sheets: w
+    .array(
+      s.custom<string | number>(
+        v => typeof v === "string" || (Number.isInteger(v) && (v as number) >= 0),
+        "an integer ≥ 0"
+      )
+    )
+    .optional(),
+  includeSheetHeadings: w.boolean().optional(),
+  // Written as the `HeadingN` style of the sheet titles.
+  sheetHeadingLevel: w.integer({ min: 1, max: 9 }).optional(),
+  includeTitlePage: w.boolean().optional(),
+  maxColumns: w.integer({ min: 0 }).optional(),
+  maxRows: w.integer({ min: 0 }).optional(),
+  preserveFormatting: w.boolean().optional(),
+  includeBorders: w.boolean().optional()
+});
+const _excelToDocxOptionsMatch: SchemaMatches<typeof excelToDocxOptionsSchema, ExcelToDocxOptions> =
+  true;
+void _excelToDocxOptionsMatch;
+
+function checkExcelToDocxOptions(options: ExcelToDocxOptions | undefined, where: string): void {
+  checkSchema(excelToDocxOptionsSchema.optional(), options, where);
+}
+
 /**
  * Convert an Excel Workbook to a DocxDocument model.
  *
@@ -145,10 +208,51 @@ export interface ExcelToDocxOptions {
  * Preserves cell formatting (fonts, colors, alignment) as run/paragraph properties.
  *
  * @param workbook - The Excel Workbook to convert.
- * @param options - Conversion options.
+ * @param options - Conversion options. Pass sheet names in `sheets`.
  * @returns A DocxDocument model ready for packaging, PDF conversion, or Markdown output.
  */
+export function excelToDocx(
+  workbook: WorkbookData,
+  options?: Omit<ExcelToDocxOptions, "sheets"> & {
+    /**
+     * The worksheets to include, by name, in this order. Default: all
+     * visible ones. Compared as Excel compares names (ignoring case); a name
+     * that matches no worksheet is refused with `DocxArgumentError`.
+     */
+    readonly sheets?: readonly string[];
+  }
+): DocxDocument;
+/**
+ * @deprecated Pass sheet names. Numeric positions are deprecated (removed in 1.0): they
+ * are 0-based here but 1-based in `Pdf.fromExcel` and sheet ids in
+ * `Workbook.getWorksheet`.
+ *
+ * The form that takes numeric positions in `sheets`; it works exactly as
+ * before until it is removed.
+ */
+export function excelToDocx(
+  workbook: WorkbookData,
+  // `sheets` is required here, so only a value that certainly carries a list able to hold a
+  // number — a literal with one, a variable inferred as `number[]` — resolves to this form.
+  options: Omit<ExcelToDocxOptions, "sheets"> & { readonly sheets: readonly (string | number)[] }
+): DocxDocument;
+/**
+ * Convert an Excel Workbook to a DocxDocument model, with options typed as the published
+ * {@link ExcelToDocxOptions}. Not deprecated: such a value may well hold only names, and
+ * striking it through would flag valid code. Prefer names in `sheets`.
+ */
+export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions): DocxDocument;
 export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions): DocxDocument {
+  // Excel's own test for a workbook handle (`checkWorkbook`): it carries its sheet list.
+  if ((workbook as { _worksheets?: unknown } | null | undefined)?._worksheets === undefined) {
+    invalidArgument(
+      "WordExcel.toDocx",
+      "workbook",
+      "a workbook (from Workbook.create or Workbook.read)",
+      workbook
+    );
+  }
+  checkExcelToDocxOptions(options, "WordExcel.toDocx");
   const opts: Required<ExcelToDocxOptions> = {
     sheets: options?.sheets ?? [],
     includeSheetHeadings: options?.includeSheetHeadings ?? true,
@@ -242,27 +346,34 @@ export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions
 // =============================================================================
 
 function selectSheets(workbook: WorkbookData, filter: readonly (string | number)[]): Worksheet[] {
-  const all = getWorksheets(workbook).filter(ws => ws && ws.state !== "veryHidden");
+  const worksheets = getWorksheets(workbook).filter(ws => ws);
+  const all = worksheets.filter(ws => ws.state !== "veryHidden");
 
   if (filter.length === 0) {
     return all.filter(ws => ws.state !== "hidden");
   }
 
-  const result: Worksheet[] = [];
-  for (const spec of filter) {
-    if (typeof spec === "number") {
-      const ws = all[spec];
-      if (ws) {
-        result.push(ws);
-      }
-    } else {
-      const ws = all.find(s => getSheetName(s) === spec);
-      if (ws) {
-        result.push(ws);
-      }
+  // A selector that matches no sheet is refused, as `Pdf.fromExcel` refuses
+  // it: skipping it dropped a requested sheet without a word.
+  return filter.map((spec, i) => {
+    const ws =
+      typeof spec === "number"
+        ? all[spec]
+        : worksheets.find(s => sheetNameKey(getSheetName(s)) === sheetNameKey(spec));
+    if (ws === undefined) {
+      invalidArgument(
+        "WordExcel.toDocx",
+        `options.sheets[${i}]`,
+        typeof spec === "number"
+          ? `a 0-based worksheet position below ${all.length}`
+          : `the name of one of the workbook's worksheets (${worksheets
+              .map(s => JSON.stringify(getSheetName(s)))
+              .join(", ")})`,
+        spec
+      );
     }
-  }
-  return result;
+    return ws;
+  });
 }
 
 // =============================================================================
@@ -426,49 +537,11 @@ function wrapHyperlink(
 }
 
 function renderCellText(cell: ExcelCell): string {
-  if (cellType(cell) === ValueType.Null || cellType(cell) === ValueType.Merge) {
-    return "";
-  }
-
-  if (cellText(cell) !== undefined && cellText(cell) !== null) {
-    return String(cellText(cell));
-  }
-
-  const value = cellGetValue(cell);
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  if (typeof value === "object") {
-    if ("result" in value) {
-      const result = value.result;
-      if (result === null || result === undefined) {
-        return "";
-      }
-      if (result instanceof Date) {
-        return fmtDate(result);
-      }
-      return String(result);
-    }
-    if ("richText" in value) {
-      return (value.richText as ReadonlyArray<{ text?: string }>).map(s => s.text ?? "").join("");
-    }
-    if ("text" in value) {
-      return String(value.text);
-    }
-    if ("checkbox" in value) {
-      return value.checkbox ? "\u2611" : "\u2610";
-    }
-    if ("error" in value) {
-      return String(value.error);
-    }
-  }
-
-  if (value instanceof Date) {
-    return fmtDate(value);
-  }
-
-  return String(value);
+  // As the cell shows in Excel, `Cell.getDisplayText` and `Pdf.fromExcel`: its
+  // number format applied to the value (a date by its calendar fields, so the
+  // text does not depend on the machine's timezone), the text of anything else.
+  // A cell merged into another holds nothing of its own.
+  return cellType(cell) === ValueType.Merge ? "" : cellDisplayText(cell);
 }
 
 // =============================================================================
@@ -665,7 +738,7 @@ function fmtDate(date: Date | string): string {
 export type { AddChartExOptions, ChartExModel, ChartExType, ChartModel };
 
 /** Options for creating a ChartEx in a Word document. */
-export interface WordChartExOptions {
+export interface DocxChartExOptions {
   /** ChartEx type (sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap). */
   readonly type: ChartExType;
   /** Series data (with literal categories/values for Word context). */
@@ -682,6 +755,32 @@ export interface WordChartExOptions {
   readonly legendPosition?: "b" | "l" | "r" | "t" | "tr";
 }
 
+const chartExOptionsSchema = w.record({
+  type: w.oneOf([
+    "sunburst",
+    "treemap",
+    "waterfall",
+    "funnel",
+    "histogram",
+    "pareto",
+    "boxWhisker",
+    "regionMap"
+  ]),
+  // Chart series as the Word chart helpers take them: a name, categories and finite values.
+  series: w.array(
+    w.record({
+      name: w.string(),
+      categories: w.array(w.string()).optional(),
+      values: w.array(w.finite())
+    })
+  ),
+  title: w.string().nullable().optional(),
+  showLegend: w.boolean().optional(),
+  legendPosition: w.oneOf(["b", "l", "r", "t", "tr"]).optional()
+});
+const _chartExOptionsMatch: SchemaMatches<typeof chartExOptionsSchema, DocxChartExOptions> = true;
+void _chartExOptionsMatch;
+
 /**
  * Build a ChartEx XML part for embedding in a Word document.
  *
@@ -691,7 +790,9 @@ export interface WordChartExOptions {
  * @param options - Chart configuration.
  * @returns The complete ChartEx XML string for the chart part.
  */
-export function buildWordChartExXml(options: WordChartExOptions): string {
+export function buildWordChartExXml(options: DocxChartExOptions): string {
+  const where = "WordExcel.toChartExXml";
+  checkSchema(chartExOptionsSchema, options, where);
   // Convert Word-friendly options to Excel's AddChartExOptions format
   const excelOptions: AddChartExOptions = {
     type: options.type,
@@ -717,6 +818,27 @@ export function buildWordChartExXml(options: WordChartExOptions): string {
 // Classic Chart Bridge — Render Word Chart definitions to SVG
 // =============================================================================
 
+// The chart engine's theme-colour type, named in `DocxChartSvgOptions`; re-exported here
+// because only this bridge may reach into `@excel`.
+export type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
+
+/** Options for {@link renderWordChartSvg} (`WordExcel.toChartSvg`). */
+export interface DocxChartSvgOptions {
+  /**
+   * The colour scheme the chart's automatic series colours and scheme colours resolve against:
+   * six hex digits per theme slot — the document's `doc.theme.colorScheme.colors` (which
+   * `Layout.toSvg` hands its `renderChart` callback as `context.themeColors`). Default: the
+   * default Office theme.
+   */
+  readonly themeColors?: ChartThemeColors;
+}
+
+/** `themeColors` is checked by the chart engine's own check, `checkChartRenderOptions`. */
+const chartSvgOptionsSchema = w.record({ themeColors: model<ChartThemeColors>() });
+const _chartSvgOptionsMatch: SchemaMatches<typeof chartSvgOptionsSchema, DocxChartSvgOptions> =
+  true;
+void _chartSvgOptionsMatch;
+
 /**
  * Render a Word Chart to SVG string for HTML embedding.
  *
@@ -724,13 +846,30 @@ export function buildWordChartExXml(options: WordChartExOptions): string {
  * a ChartModel with literal (inline) data and delegating to renderChartSvg.
  *
  * @param chart - The Word Chart definition.
+ * @param options - The document theme's colours (`themeColors`).
  * @returns SVG markup string.
+ * @throws {DocxArgumentError} `chart` is not a Word chart, or `options` is malformed (field
+ *   `options.themeColors.<slot>`, …).
  */
-export function renderWordChartSvg(chart: Chart): string {
-  const model = wordChartToChartModel(chart);
+export function renderWordChartSvg(chart: Chart, options?: DocxChartSvgOptions): string {
+  const where = "WordExcel.toChartSvg";
+  checkWordChart(chart, where);
+  checkSchema(chartSvgOptionsSchema.optional(), options, where);
+  const themeColors = options?.themeColors;
+  try {
+    checkChartRenderOptions(where, { themeColors });
+  } catch (error) {
+    // The chart engine's check, in this module's class.
+    if (error instanceof ExcelChartOptionsError) {
+      throw new DocxArgumentError(error.field, error.message, { cause: error });
+    }
+    throw error;
+  }
+  const model = chartModelOf(chart);
   return renderChartSvg(model, {
     width: chart.width ? Math.round((chart.width / EMU_PER_INCH) * 96) : undefined,
-    height: chart.height ? Math.round((chart.height / EMU_PER_INCH) * 96) : undefined
+    height: chart.height ? Math.round((chart.height / EMU_PER_INCH) * 96) : undefined,
+    ...(themeColors === undefined ? {} : { themeColors })
   });
 }
 
@@ -751,7 +890,8 @@ export function renderWordChartSvg(chart: Chart): string {
  */
 export async function generateChartEmbeddedXlsx(
   series: readonly { name: string; categories: readonly string[]; values: readonly number[] }[]
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
+  checkWordChartSeries(series, "series", "WordExcel.toChartXlsx");
   // `createWorkbook` comes from the static import at the top with `addWorksheet`, which the next
   // line calls. It was an `await import()` of the very same module, which bought nothing — the
   // module was already static in this file, so rolldown reported the pair as
@@ -908,13 +1048,40 @@ function mapLegendPosition(legend: string | undefined): LegendPosition | undefin
  * @returns A fully constructed ChartModel suitable for Excel's chart renderer.
  */
 export function wordChartToChartModel(chart: Chart): ChartModel {
+  checkWordChart(chart, "WordExcel.toChartModel");
+  return chartModelOf(chart);
+}
+
+/** A Word chart as `Build.chart` makes one: a known type and series of names, categories and finite values. */
+function checkWordChart(chart: unknown, where: string): void {
+  checkRecord(chart, "chart", where);
+  const c = chart as { type?: unknown; series?: unknown };
+  checkOneOf(c.type, CHART_TYPES, "chart.type", where);
+  checkWordChartSeries(c.series, "chart.series", where);
+}
+
+function chartModelOf(chart: Chart): ChartModel {
   const mapping = mapWordChartType(chart.type);
+  const kept = chart._kept;
   const chartTypeGroup = buildChartTypeGroupFromWord(chart, mapping);
   const axes = buildAxesForType(mapping, chart);
   const legend =
     chart.legend && chart.legend !== "none"
-      ? { legendPos: mapLegendPosition(chart.legend) }
+      ? {
+          legendPos: mapLegendPosition(chart.legend),
+          ...keptShape("spPr", keptChild(kept?.legend, "spPr", {})?.xml),
+          ...keptShape("txPr", keptChild(kept?.legend, "txPr", {})?.xml)
+        }
       : undefined;
+  const plotAreaSpPr = areaShape(
+    keptChild(kept?.plotArea, "spPr", plotAreaKeys(chart))?.xml,
+    chart.plotAreaColor
+  );
+  const chartSpPr = areaShape(
+    keptChild(kept?.space, "spPr", chartSpaceKeys(chart))?.xml,
+    chart.chartAreaColor
+  );
+  const chartTxPr = keptChild(kept?.space, "txPr", {})?.xml;
 
   return {
     chart: {
@@ -924,17 +1091,107 @@ export function wordChartToChartModel(chart: Chart): ChartModel {
       autoTitleDeleted: !chart.title,
       plotArea: {
         chartTypes: [chartTypeGroup],
-        axes
+        axes,
+        ...(plotAreaSpPr !== undefined && { spPr: plotAreaSpPr })
       },
       legend,
       plotVisOnly: true
-    }
+    },
+    ...(chartSpPr !== undefined && { spPr: chartSpPr }),
+    ...(chartTxPr !== undefined && { txPr: { _rawXml: chartTxPr } })
   };
+}
+
+/** A kept element as the Excel model holds one — its markup, which the renderer reads. */
+function keptShape<K extends string>(
+  key: K,
+  markup: string | undefined
+): { [P in K]?: { _rawXml: string } } {
+  return (markup === undefined ? {} : { [key]: { _rawXml: markup } }) as {
+    [P in K]?: { _rawXml: string };
+  };
+}
+
+/** The plot or chart area's fill: the kept `c:spPr` while its colour is what was read, else the colour. */
+function areaShape(
+  kept: string | undefined,
+  color: string | undefined
+): ShapeProperties | undefined {
+  if (kept !== undefined) {
+    return { _rawXml: kept };
+  }
+  return color ? { fill: { solid: { srgb: color } } } : undefined;
+}
+
+/**
+ * A Word series' formatting as the Excel model holds it, chosen as the Word
+ * writer chooses it: the `c:spPr` and each `c:dPt` the reader kept while
+ * `color` and the point's `pointColors` entry are what was read from them,
+ * else those fields — a line series' colour strokes its line as well, as the
+ * writer writes it.
+ */
+function seriesFormatting(
+  chart: Chart,
+  series: WordChartSeries,
+  index: number,
+  lineLike: boolean
+): { spPr?: ShapeProperties; dataPoints?: DataPoint[] } {
+  const keys = seriesKeys(series, index, series.chartType ?? chart.type);
+  const keptSpPr = keptChild(series._kept?.node, "spPr", keys)?.xml;
+  const color = series.color;
+  const spPr: ShapeProperties | undefined =
+    keptSpPr !== undefined
+      ? { _rawXml: keptSpPr }
+      : color
+        ? {
+            fill: { solid: { srgb: color } },
+            ...(lineLike && { line: { width: 28575, color: { srgb: color } } })
+          }
+        : undefined;
+  const dataPoints: DataPoint[] = [];
+  const kept = new Set<number>();
+  for (const point of keptPoints(series)) {
+    kept.add(point.index!);
+    if (point.spPr !== undefined) {
+      dataPoints.push({ index: point.index!, spPr: { _rawXml: point.spPr } });
+    }
+  }
+  series.pointColors?.forEach((pointColor, pointIndex) => {
+    if (pointColor !== undefined && !kept.has(pointIndex)) {
+      dataPoints.push({ index: pointIndex, spPr: { fill: { solid: { srgb: pointColor } } } });
+    }
+  });
+  dataPoints.sort((a, b) => a.index - b.index);
+  return {
+    ...(spPr !== undefined && { spPr }),
+    ...(dataPoints !== undefined && dataPoints.length > 0 && { dataPoints })
+  };
+}
+
+/** An axis' kept gridlines, `c:spPr` and `c:txPr` as the Excel axis holds them. */
+function axisFormatting(
+  node: ChartKeptNode | undefined
+): Pick<ExcelChartAxis, "majorGridlines" | "minorGridlines" | "spPr" | "txPr"> {
+  const major = keptChild(node, "majorGridlines", {})?.xml;
+  const minor = keptChild(node, "minorGridlines", {})?.xml;
+  return {
+    ...(major !== undefined && { majorGridlines: gridlineShape(major) }),
+    ...(minor !== undefined && { minorGridlines: gridlineShape(minor) }),
+    ...keptShape("spPr", keptChild(node, "spPr", {})?.xml),
+    ...keptShape("txPr", keptChild(node, "txPr", {})?.xml)
+  };
+}
+
+/** A gridlines element's `c:spPr` (its only child) — `{}`, Office's default line, when it has none. */
+function gridlineShape(element: string): ShapeProperties {
+  const inner = /^<[^>]*[^/]>([\s\S]*)<\/[^>]+>$/.exec(element)?.[1];
+  return inner ? { _rawXml: inner } : {};
 }
 
 /** Build the chart type group from Word series data. */
 function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): ChartTypeGroup {
   const { type } = mapping;
+  const lineLike = type === "line" || type === "line3D" || type === "scatter";
 
   switch (type) {
     case "bar":
@@ -943,6 +1200,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -962,6 +1220,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -980,6 +1239,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -995,6 +1255,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -1012,6 +1273,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -1029,6 +1291,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         xVal: makeLiteralCat(s.categories),
         yVal: makeLiteralVal(s.values)
       }));
@@ -1046,6 +1309,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -1064,6 +1328,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -1081,6 +1346,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         xVal: makeLiteralCat(s.categories),
         yVal: makeLiteralVal(s.values)
       }));
@@ -1098,6 +1364,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -1116,6 +1383,7 @@ function buildChartTypeGroupFromWord(chart: Chart, mapping: ExcelChartMapping): 
         index: idx,
         order: idx,
         tx: { value: s.name },
+        ...seriesFormatting(chart, s, idx, lineLike),
         cat: makeLiteralCat(s.categories),
         val: makeLiteralVal(s.values)
       }));
@@ -1146,7 +1414,8 @@ function buildAxesForType(mapping: ExcelChartMapping, chart: Chart): ExcelChartA
     axPos: "b",
     crossAx: 2,
     scaling: {},
-    delete: chart.categoryAxis?.hidden
+    delete: chart.categoryAxis?.hidden,
+    ...axisFormatting(chart._kept?.axes.find(a => a.role === "category")?.node)
   };
 
   const valAxis: ExcelChartAxis = {
@@ -1162,7 +1431,8 @@ function buildAxesForType(mapping: ExcelChartMapping, chart: Chart): ExcelChartA
     delete: chart.valueAxis?.hidden,
     numFmt: chart.valueAxis?.numberFormat
       ? { formatCode: chart.valueAxis.numberFormat, sourceLinked: false }
-      : undefined
+      : undefined,
+    ...axisFormatting(chart._kept?.axes.find(a => a.role === "value")?.node)
   };
 
   const axes: ExcelChartAxis[] = [catAxis, valAxis];
@@ -1191,6 +1461,7 @@ function buildAxesForType(mapping: ExcelChartMapping, chart: Chart): ExcelChartA
 export function extractTablesToExcel(
   doc: DocxDocument
 ): { name: string; data: (string | number | null)[][] }[] {
+  checkHandle(doc, "document", "doc", "WordExcel.extractTables");
   const results: { name: string; data: (string | number | null)[][] }[] = [];
   let tableIndex = 0;
 

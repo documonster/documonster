@@ -535,8 +535,8 @@ describe("SUMX2MY2 / SUMX2PY2 / SUMXMY2", () => {
     expect(asNumber(fnSUMXMY2([xs, ys]))).toBe(14);
   });
 
-  it("SUMX2MY2 returns #VALUE! when either argument is not an array", () => {
-    expect(fnSUMX2MY2([rvNumber(1), ys])).toEqual(ERRORS.VALUE);
+  it("SUMX2MY2 reads a single value as 1×1 (shape mismatch → #N/A)", () => {
+    expect(fnSUMX2MY2([rvNumber(1), ys])).toEqual(ERRORS.NA);
   });
 
   it("SUMX2MY2 propagates errors in array cells", () => {
@@ -1813,8 +1813,8 @@ describe("SUMX2MY2 / SUMX2PY2 / SUMXMY2 extra", () => {
     const a = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
     expect(asNumber(fnSUMXMY2([a, a]))).toBe(0);
   });
-  it("SUMX2MY2 scalar first arg → #VALUE!", () => {
-    expect(fnSUMX2MY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(ERRORS.VALUE);
+  it("SUMX2MY2 scalar first arg is 1×1", () => {
+    expect(fnSUMX2MY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(rvNumber(-3));
   });
   it("SUMXMY2 different-shape arrays return #N/A (Excel behaviour)", () => {
     // Regression: previously silently clamped to the min dim, hiding
@@ -2336,8 +2336,8 @@ describe("SUMX2PY2 / SUMXMY2 (extra coverage)", () => {
   it("SUMXMY2 propagates errors from either array", () => {
     expect(fnSUMXMY2([rvArray([[ERRORS.NA]]), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.NA);
   });
-  it("SUMX2PY2 scalar arg returns #VALUE!", () => {
-    expect(fnSUMX2PY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(ERRORS.VALUE);
+  it("SUMX2PY2 scalar arg is 1×1", () => {
+    expect(fnSUMX2PY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(rvNumber(5));
   });
 });
 
@@ -3297,11 +3297,11 @@ describe("SUMSQ / SUMX2MY2 / SUMX2PY2 / SUMXMY2 deep coverage", () => {
     ]);
     expect(asNumber(fnSUMXMY2([x, y]))).toBe(79);
   });
-  it("SUMX2PY2 with scalar first arg → #VALUE!", () => {
-    expect(fnSUMX2PY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(ERRORS.VALUE);
+  it("SUMX2PY2 with scalar first arg is 1×1", () => {
+    expect(fnSUMX2PY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(rvNumber(5));
   });
-  it("SUMX2MY2 with scalar second arg → #VALUE!", () => {
-    expect(fnSUMX2MY2([rvArray([[rvNumber(1)]]), rvNumber(2)])).toEqual(ERRORS.VALUE);
+  it("SUMX2MY2 with scalar second arg is 1×1", () => {
+    expect(fnSUMX2MY2([rvArray([[rvNumber(1)]]), rvNumber(2)])).toEqual(rvNumber(-3));
   });
   it("SUMXMY2 propagates error from first array", () => {
     expect(fnSUMXMY2([rvArray([[ERRORS.VALUE]]), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
@@ -4406,14 +4406,14 @@ describe("SUMX2MY2 / SUMX2PY2 / SUMXMY2 saturation", () => {
     const b = rvArray([[rvNumber(0), rvNumber(0), rvNumber(0)]]);
     expect(asNumber(fnSUMXMY2([a, b]))).toBe(1 + 9);
   });
-  it("SUMX2MY2 first arg scalar → #VALUE!", () => {
-    expect(fnSUMX2MY2([rvNumber(1), ys])).toEqual(ERRORS.VALUE);
+  it("SUMX2MY2 first arg scalar vs 2 cells → #N/A", () => {
+    expect(fnSUMX2MY2([rvNumber(1), ys])).toEqual(ERRORS.NA);
   });
-  it("SUMX2PY2 second arg scalar → #VALUE!", () => {
-    expect(fnSUMX2PY2([xs, rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("SUMX2PY2 second arg scalar vs 2 cells → #N/A", () => {
+    expect(fnSUMX2PY2([xs, rvNumber(1)])).toEqual(ERRORS.NA);
   });
-  it("SUMXMY2 both scalars → #VALUE!", () => {
-    expect(fnSUMXMY2([rvNumber(1), rvNumber(2)])).toEqual(ERRORS.VALUE);
+  it("SUMXMY2 both scalars are 1×1", () => {
+    expect(fnSUMXMY2([rvNumber(1), rvNumber(2)])).toEqual(rvNumber(1));
   });
   it("SUMX2MY2 propagates x error", () => {
     const bad = rvArray([[rvNumber(1), ERRORS.NA]]);

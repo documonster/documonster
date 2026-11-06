@@ -28,6 +28,13 @@ export interface FormulaFunction {
   readonly minArity: number;
   readonly maxArity: number;
   readonly volatile?: boolean;
+  /**
+   * Whether the function returns an array that a formula calling it spills. Its own declaration decides — over a
+   * built-in of the same name — for a cell whose host leaves `isDynamicArray` out. A function that does not say so and
+   * returns an array anyway is intersected to the array's top-left value, as Excel computes an ordinary formula.
+   * @default false
+   */
+  readonly returnsArray?: boolean;
   readonly invoke: (args: RuntimeValue[]) => RuntimeValue;
 }
 
@@ -50,7 +57,7 @@ export interface FormulaCalculationResult {
  * **Supported formula features:**
  * - Cell references: `A1`, `$B$2`, `Sheet1!A1`, `'Sheet Name'!A1:B10`
  * - Operators: `+ - * / ^`, `& (concat)`, `= <> < > <= >=`, `%`
- * - 448 built-in functions across math, text, logical, date, lookup,
+ * - 467 built-in functions across math, text, logical, date, lookup,
  *   statistical, financial, dynamic-array, database and engineering
  *   categories.
  * - Shared formulas, array constants, nested expressions

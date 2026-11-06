@@ -219,7 +219,7 @@ describe("XLSB read → write, package structure", () => {
     // A second read-write must not start duplicating either.
     const again = Workbook.create();
     await Workbook.read(again, written);
-    Cell.setValue(Workbook.getWorksheets(again)[0]!, "ZZ998", "edited");
+    Cell.setValue(Workbook.listWorksheets(again)[0]!, "ZZ998", "edited");
     const { writeXlsbPackage } = await import("@excel/xlsb/write/package");
     const { getWorkbookModel } = await import("@excel/core/workbook.browser");
     const report = await writeXlsbPackage(getWorkbookModel(again));

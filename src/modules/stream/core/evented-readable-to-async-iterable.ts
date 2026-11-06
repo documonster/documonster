@@ -9,6 +9,9 @@
  *   without implicitly destroying the underlying stream.
  */
 
+import { checkStreamArgument } from "@stream/arguments";
+import { s } from "@utils/schema";
+
 /**
  * Listener accepted by {@link EventedReadableLike}. The events consumed here
  * carry differing payloads (`data` → chunk, `end`/`close` → none, `error` →
@@ -25,9 +28,26 @@ export interface EventedReadableLike<T> {
   resume?(): unknown;
 }
 
+const eventedReadableSchema = s.custom(
+  v => typeof (v as { on?: unknown } | null)?.on === "function",
+  "an evented readable"
+);
+
+/**
+ * Iterate an evented readable (`on("data" | "end" | "close" | "error")`, optional
+ * `pause`/`resume`) as an async iterable. Breaking out of the loop removes the listeners
+ * and pauses the source but never destroys or ends it, unlike a Node readable's own
+ * iterator. Published as `Streams.LowLevel.eventsToAsyncIterableNoDestroy`.
+ */
 export function eventedReadableToAsyncIterableNoDestroy<T>(
   stream: EventedReadableLike<T>
 ): AsyncIterable<T> {
+  checkStreamArgument(
+    eventedReadableSchema,
+    stream,
+    "Streams.LowLevel.eventsToAsyncIterableNoDestroy",
+    "stream"
+  );
   return {
     [Symbol.asyncIterator](): AsyncIterator<T, undefined> {
       const chunks: T[] = [];

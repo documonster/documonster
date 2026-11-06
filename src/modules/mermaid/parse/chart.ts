@@ -9,7 +9,7 @@
  * contains a comma would become two nodes.
  */
 
-import { decodeLabel, splitStatements, unquote, linesOf } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, linesOf, splitStatementsAt, unquote } from "@mermaid/parse/lex";
 import type {
   QuadrantDiagram,
   QuadrantPoint,
@@ -27,7 +27,9 @@ export function parseQuadrant(source: string): QuadrantDiagram {
   let xAxis: [string, string] | undefined;
   let yAxis: [string, string] | undefined;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^quadrantChart\b/i.test(text)) {
       continue;
     }
@@ -63,8 +65,13 @@ export function parseQuadrant(source: string): QuadrantDiagram {
       const y = Number.parseFloat(point[3]);
       if (Number.isFinite(x) && Number.isFinite(y)) {
         points.push({ label: decodeLabel(point[1]), x, y });
+        continue;
       }
     }
+    if (/^(classDef|accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
@@ -73,7 +80,8 @@ export function parseQuadrant(source: string): QuadrantDiagram {
     ...(xAxis === undefined ? {} : { xAxis }),
     ...(yAxis === undefined ? {} : { yAxis }),
     quadrants,
-    points
+    points,
+    ...skipped.report()
   };
 }
 
@@ -87,7 +95,9 @@ export function parseXy(source: string): XyDiagram {
   let yRange: [number, number] | undefined;
   let horizontal = false;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     const header = /^xychart(?:-beta)?\b\s*(horizontal)?/i.exec(text);
     if (header) {
       horizontal = header[1] !== undefined;
@@ -141,18 +151,28 @@ export function parseXy(source: string): XyDiagram {
       const body = plot[2].trim();
       const bracket = /\[(.*)\]/.exec(body);
       if (!bracket) {
+        skipped.add(statement);
         continue;
       }
       const caption = decodeLabel(body.replace(/\[.*\]/, ""));
-      const values = splitFields(bracket[1])
-        .map(field => Number.parseFloat(field))
-        .filter(value => Number.isFinite(value));
+      const read = splitFields(bracket[1]).map(field => Number.parseFloat(field));
+      // A value that is not a number is dropped — and reported, since every later value then
+      // lines up with the wrong category.
+      const values = read.filter(value => Number.isFinite(value));
+      if (values.length !== read.length) {
+        skipped.add(statement);
+      }
       series.push({
         type: plot[1].toLowerCase() as "bar" | "line",
         ...(caption === "" ? {} : { title: caption }),
         values
       });
+      continue;
     }
+    if (/^(accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
@@ -163,7 +183,8 @@ export function parseXy(source: string): XyDiagram {
     ...(yTitle === undefined ? {} : { yTitle }),
     categories,
     ...(yRange === undefined ? {} : { yRange }),
-    series
+    series,
+    ...skipped.report()
   };
 }
 
@@ -172,9 +193,12 @@ export function parseSankey(source: string): SankeyDiagram {
   const links: SankeyLink[] = [];
   let title: string | undefined;
 
-  for (const raw of linesOf(source)) {
+  const skipped = new SkipLog();
+  const lines = linesOf(source);
+  for (let index = 0; index < lines.length; index++) {
     // `linesOf` has already removed comments, including a trailing one — which this used to
     // leave in place, so `A,B,10 %% note` put `10 %% note` through `parseFloat`.
+    const raw = lines[index];
     const line = raw.trim();
     if (line === "" || /^sankey(?:-beta)?\s*$/i.test(line)) {
       continue;
@@ -185,11 +209,9 @@ export function parseSankey(source: string): SankeyDiagram {
       continue;
     }
     const fields = splitFields(line);
-    if (fields.length < 3) {
-      continue;
-    }
-    const value = Number.parseFloat(fields[2]);
+    const value = fields.length < 3 ? Number.NaN : Number.parseFloat(fields[2]);
     if (!Number.isFinite(value) || value <= 0) {
+      skipped.addLine(raw, index + 1);
       continue;
     }
     links.push({ from: unquote(fields[0]), to: unquote(fields[1]), value });
@@ -198,7 +220,8 @@ export function parseSankey(source: string): SankeyDiagram {
   return {
     kind: "sankey",
     ...(title === undefined ? {} : { title }),
-    links
+    links,
+    ...skipped.report()
   };
 }
 

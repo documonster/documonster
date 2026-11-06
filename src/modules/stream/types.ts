@@ -84,7 +84,7 @@ export type DestroyCallback = (error?: Error | null) => void;
 /**
  * Event listener type
  */
-export type EventListener = (...args: any[]) => void;
+export type StreamEventListener = (...args: any[]) => void;
 
 /**
  * Minimal duck-typed emitter shape for utilities that accept any emitter-like object.
@@ -100,10 +100,10 @@ export type EventEmitterLike = {
  * Common event emitter interface
  */
 export interface IEventEmitter {
-  on(event: string, listener: EventListener): this;
-  once(event: string, listener: EventListener): this;
-  off(event: string, listener: EventListener): this;
-  removeListener(event: string | symbol, listener: EventListener): this;
+  on(event: string, listener: StreamEventListener): this;
+  once(event: string, listener: StreamEventListener): this;
+  off(event: string, listener: StreamEventListener): this;
+  removeListener(event: string | symbol, listener: StreamEventListener): this;
   emit(event: string, ...args: any[]): boolean;
   removeAllListeners(event?: string): this;
 }
@@ -257,6 +257,12 @@ export type PullStreamOptions = {
   highWaterMark?: number;
 };
 
+/** Options for `PullStream.pullUntil`. */
+export interface PullUntilOptions {
+  /** Include the pattern at the end of the result (default `false`); it is consumed either way. */
+  includePattern?: boolean;
+}
+
 /**
  * Pull stream interface - allows pulling data on demand
  */
@@ -267,8 +273,8 @@ export interface IPullStream extends IEventEmitter {
 
   /** Pull exactly N bytes from buffer */
   pull(size: number): Promise<Uint8Array>;
-  /** Pull until pattern is found */
-  pullUntil(pattern: Uint8Array, includePattern?: boolean): Promise<Uint8Array>;
+  /** Pull until pattern is found; `{ includePattern: true }` keeps the pattern in the result */
+  pullUntil(pattern: Uint8Array, options?: PullUntilOptions | boolean): Promise<Uint8Array>;
 
   readonly length: number;
   readonly isFinished: boolean;
@@ -295,6 +301,10 @@ export interface IBufferedStream extends IEventEmitter {
   read(size?: number): Uint8Array | null;
   end(chunk?: Uint8Array | string): void;
   destroy(error?: Error): void;
+  /**
+   * @deprecated The class's `readAll()` is the same read under a name that says it consumes.
+   * Removed in 1.0.
+   */
   toUint8Array(): Uint8Array;
 
   readonly bufferedLength: number;
@@ -354,8 +364,16 @@ export type PipelineDestination<T, R> = IWritable<T> | ((source: AsyncIterable<T
 /**
  * Data chunk interface for flexible chunk handling
  */
-export interface DataChunk {
+export interface StreamDataChunk {
   readonly length: number;
   copy(target: Uint8Array, targetOffset: number, offset: number, length: number): number;
   toUint8Array(): Uint8Array;
 }
+
+/** @deprecated Use {@link StreamDataChunk}. Removed in 1.0. */
+export type DataChunk = StreamDataChunk;
+/**
+ * @deprecated Use {@link StreamEventListener}; the bare name shadows the DOM's global
+ * `EventListener`. Removed in 1.0.
+ */
+export type EventListener = StreamEventListener;

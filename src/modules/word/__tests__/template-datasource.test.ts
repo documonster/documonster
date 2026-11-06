@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import { DocxArgumentError } from "../errors";
 import {
   createJsonDataSource,
   createXmlDataSource,
@@ -367,5 +368,44 @@ describe("fillTemplateFromSource", () => {
     const para = result.body[0] as Paragraph;
     const run = para.children[0] as Run;
     expect((run.content[0] as { type: "text"; text: string }).text).toBe("No placeholders here");
+  });
+});
+
+// =============================================================================
+// Argument checks
+// =============================================================================
+
+describe("data sources check what they are given", () => {
+  it("refuses input that is not data, with the module's argument error", () => {
+    const cases: [string, () => unknown, string][] = [
+      ["json number", () => createJsonDataSource(42 as never), "input"],
+      ["json array", () => createJsonDataSource("[1]"), "input"],
+      ["json bad", () => createJsonDataSource("{"), "input"],
+      ["xml malformed", () => createXmlDataSource("<a"), "xml"],
+      ["xml not string", () => createXmlDataSource(null as never), "xml"],
+      ["csv null", () => createCsvDataSource(null as never), "csv"],
+      ["csv delimiter", () => createCsvDataSource("a,b", { delimiter: "" }), "options.delimiter"],
+      ["composite null", () => createCompositeDataSource(null as never), "sources"]
+    ];
+    for (const [label, run, field] of cases) {
+      let error: unknown;
+      try {
+        run();
+      } catch (e) {
+        error = e;
+      }
+      expect(error, label).toBeInstanceOf(DocxArgumentError);
+      expect((error as DocxArgumentError).field, label).toBe(field);
+      expect((error as Error).message, label).toMatch(/^Template\.create\w+DataSource: /);
+    }
+  });
+
+  it("uses the element rootTag names as the root", () => {
+    const xml = "<envelope><meta>m</meta><data><name>N</name></data></envelope>";
+    expect(createXmlDataSource(xml, "data").getValue("name")).toBe("N");
+    expect(createXmlDataSource(xml, "envelope").getValue("meta")).toBe("m");
+    // A rootTag naming no element is ignored, as it always was: the document
+    // element is the data.
+    expect(createXmlDataSource(xml, "nope").getValue("meta")).toBe("m");
   });
 });

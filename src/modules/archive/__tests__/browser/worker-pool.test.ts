@@ -15,12 +15,14 @@
 import type { WorkerPoolOptions } from "@archive/compression/worker-pool/index.browser";
 import {
   WorkerPool,
+  getDefaultPool,
   getDefaultWorkerPool,
   terminateDefaultWorkerPool,
   deflateWithPool,
   inflateWithPool,
   hasWorkerSupport
 } from "@archive/compression/worker-pool/index.browser";
+import { ArchiveArgumentError } from "@archive/core/errors";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // Helper to create test data
@@ -545,6 +547,20 @@ describe("WorkerPool", () => {
       const pool2 = getDefaultWorkerPool();
       expect(pool2).not.toBe(pool1);
       expect(pool2.isTerminated()).toBe(false);
+    });
+
+    it("getDefaultPool refuses options for a pool that already exists, rather than ignore them", () => {
+      if (!hasWorkerSupport()) {
+        return;
+      }
+
+      const pool = getDefaultPool();
+      expect(getDefaultPool()).toBe(pool);
+      expect(() => getDefaultPool({ maxWorkers: 1 })).toThrow(ArchiveArgumentError);
+      terminateDefaultWorkerPool();
+      const configured = getDefaultPool({ maxWorkers: 1 });
+      expect(configured).not.toBe(pool);
+      terminateDefaultWorkerPool();
     });
   });
 

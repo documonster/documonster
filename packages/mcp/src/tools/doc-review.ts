@@ -14,7 +14,7 @@
  * make.
  */
 
-import { Diff, Io, Query } from "documonster/word";
+import { Diff, Document, Query } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -109,7 +109,7 @@ async function compare(config: ServerConfig, aPath: string, bPath: string): Prom
     assertReadableSize(config, bResolved, bPath)
   ]);
   const [a, b] = await Promise.all([readWord(aResolved, aPath), readWord(bResolved, bPath)]);
-  const diff = Diff.documents(a, b);
+  const diff = Diff.compare(a, b);
 
   if (diff.summary.added === 0 && diff.summary.deleted === 0 && diff.summary.modified === 0) {
     return [
@@ -237,17 +237,19 @@ async function reviewRevisions(
   // number handled, so the listing's instance must not be reused.
   const fresh = await readWord(resolved, args.path);
   const handled =
-    args.apply === "accept-all" ? Query.acceptAllRevisions(fresh) : Query.rejectAllRevisions(fresh);
+    args.apply === "accept-all"
+      ? Document.acceptAllRevisions(fresh)
+      : Document.rejectAllRevisions(fresh);
 
   const writeTarget = await resolveEditTarget(config, args.path, args.out);
   const inPlace = isSameFile(writeTarget.path, resolved);
   const backupPath = inPlace && (args.backup ?? true) ? await backupOnce(writeTarget) : undefined;
 
   if (inPlace) {
-    await replaceAtomically(writeTarget.path, temporary => Io.writeFile(fresh, temporary));
+    await replaceAtomically(writeTarget.path, temporary => Document.writeFile(fresh, temporary));
   } else {
     await writeWithPolicy(writeTarget.path, args.overwrite === true, temporary =>
-      Io.writeFile(fresh, temporary)
+      Document.writeFile(fresh, temporary)
     );
   }
 
@@ -271,7 +273,7 @@ async function reviewRevisions(
  * isolation. Whatever the cause, a verification step must not be able to fail
  * the write that already succeeded.
  */
-function countRevisions(doc: Awaited<ReturnType<typeof Io.readFile>>): string {
+function countRevisions(doc: Awaited<ReturnType<typeof Document.readFile>>): string {
   try {
     return String(Query.listRevisions(doc).length);
   } catch {
@@ -288,14 +290,16 @@ function countRevisions(doc: Awaited<ReturnType<typeof Io.readFile>>): string {
  * because a malformed revision arrangement has been seen to break the walker and
  * a listing must not fail for want of an annotation.
  */
-function collectRevisionText(doc: Awaited<ReturnType<typeof Io.readFile>>): Map<number, string> {
+function collectRevisionText(
+  doc: Awaited<ReturnType<typeof Document.readFile>>
+): Map<number, string> {
   const found = new Map<number, string>();
 
   const runText = (run: { readonly content?: readonly { readonly text?: string }[] }): string =>
     (run.content ?? []).map(item => item.text ?? "").join("");
 
   try {
-    Query.walkDocument(doc, {
+    Query.each(doc, {
       visitInsertedRun(node: { revision?: { id?: number }; run?: unknown }) {
         const id = node.revision?.id;
         if (id !== undefined) {
@@ -325,7 +329,7 @@ function quote(text: string | undefined): string {
 }
 
 async function readWord(resolved: string, displayPath: string) {
-  return await Io.readFile(resolved).catch((cause: unknown) => {
+  return await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${displayPath} as a Word document`,
       "doc_review works with .docx only. Run doc_inspect to check the real file type.",

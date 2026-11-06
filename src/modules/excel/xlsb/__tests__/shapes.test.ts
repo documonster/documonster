@@ -87,7 +87,7 @@ describe("shapes through an XLSB workbook", () => {
 
   it("keeps every shape byte through a read-modify-write", async () => {
     // The asymmetry worth pinning: this reader does not *model* drawings, so it preserves the part
-    // verbatim. `Image.getShapes` on the reopened workbook returns nothing, and the shapes are still in
+    // verbatim. `Image.listShapes` on the reopened workbook returns nothing, and the shapes are still in
     // the file — asserting the bytes is what distinguishes "not modelled" from "lost".
     const first = await Workbook.toBuffer(build(), { format: "xlsb" });
     const reopened = Workbook.create();
@@ -96,7 +96,7 @@ describe("shapes through an XLSB workbook", () => {
     const drawingOf = async (bytes: Uint8Array): Promise<string> =>
       new TextDecoder().decode((await extractAll(bytes)).get("xl/drawings/drawing1.xml")!.data);
     expect(await drawingOf(second)).toBe(await drawingOf(first));
-    expect(Image.getShapes(Workbook.getWorksheet(reopened, "S")!)).toEqual([]);
+    expect(Image.listShapes(Workbook.getWorksheet(reopened, "S")!)).toEqual([]);
   });
 
   it("no longer reports a shape as a loss", async () => {

@@ -25,13 +25,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 import { Csv } from "documonster/csv";
-import { Cell, Workbook, Worksheet } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { Cell, Column, Workbook, Worksheet } from "documonster/excel";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
-import { Build, Document, Io } from "documonster/word";
-import { markdownToDocx } from "documonster/word/markdown";
+import { Build, Document } from "documonster/word";
+import { WordMarkdown } from "documonster/word/markdown";
 
 const workspace = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -79,13 +79,13 @@ const months = {
   ])
 };
 
-const zip = new ArchiveFile();
+const zip = new Archive.ArchiveFile();
 for (const [month, csv] of Object.entries(months)) {
   // Note the argument order: addText(content, entryName).
   zip.addText(csv, `reports/${month}.csv`);
 }
 zip.addText("Monthly regional sales exports. Semicolon separated.\n", "reports/README.txt");
-await zip.writeToFile(path.join(workspace, "reports.zip"));
+await zip.writeFile(path.join(workspace, "reports.zip"));
 
 // A loose copy as well, so a prompt can skip the archive step.
 fs.writeFileSync(path.join(workspace, "june.csv"), months["2026-06"]);
@@ -133,7 +133,7 @@ for (const column of ["B", "C", "D"]) {
     Cell.setNumFmt(summary, `${column}${row}`, "#,##0");
   }
 }
-Worksheet.setColumns(summary, [{ width: 16 }, { width: 12 }, { width: 12 }, { width: 12 }]);
+Column.setDefinitions(summary, [{ width: 16 }, { width: 12 }, { width: 12 }, { width: 12 }]);
 summary.views = [{ state: "frozen", ySplit: 3 }];
 
 /** A detail sheet with `count` line items. Engineering is deliberately long. */
@@ -162,7 +162,7 @@ addDetail("Ops", 45, 3);
 // An empty sheet: a real shape that reports a zero-based dimension.
 Workbook.addWorksheet(budget, "Archive");
 
-calculateFormulas(budget);
+ExcelFormula.calculate(budget);
 await Workbook.writeFile(budget, path.join(workspace, "budget.xlsx"));
 
 // =============================================================================
@@ -223,7 +223,7 @@ Document.addParagraph(
 Document.addHeading(spec, "Exceptions", 2);
 Document.addParagraph(spec, "Education customers are exempt from the increase.");
 Document.addBulletList(spec, ["Universities", "Registered schools", "Public libraries"]);
-await Io.writeFile(Document.build(spec), path.join(workspace, "spec.docx"));
+await Document.writeFile(spec, path.join(workspace, "spec.docx"));
 
 // =============================================================================
 // 6. A Word TEMPLATE — the best-shaped task in the whole server.
@@ -248,7 +248,7 @@ Document.addParagraph(
 Document.addHeading(template, "Line items", 2);
 Document.addParagraph(template, "{{#each items}}{{.description}} — {{.amount}}{{/each}}");
 Document.addParagraph(template, "Total: {{invoice.total}}");
-await Io.writeFile(Document.build(template), path.join(workspace, "invoice-template.docx"));
+await Document.writeFile(template, path.join(workspace, "invoice-template.docx"));
 
 // =============================================================================
 // 7. A PDF with extractable text, and a note about what has no tool.
@@ -257,7 +257,7 @@ await Io.writeFile(Document.build(template), path.join(workspace, "invoice-templ
 // real text and real page numbers.
 // =============================================================================
 
-const brief = await markdownToDocx(
+const brief = await WordMarkdown.toDocx(
   [
     "# Q3 Board Brief",
     "",
@@ -282,8 +282,8 @@ fs.writeFileSync(path.join(workspace, "brief.pdf"), await Pdf.fromDocx(brief));
 //
 // Same self-describing shape as the template: `form_fill` with no `values`
 // lists the fields, so the model has nothing to guess. The PDF exists to cover
-// a specific trap — AcroForm values survive only an incremental save, so a
-// filled PDF that reads back empty means the tool took the wrong save path.
+// a specific trap — a filled PDF that reads back empty — which `form_fill` guards
+// against by re-reading its own output before writing it.
 // =============================================================================
 
 const wordForm = Document.create();
@@ -303,7 +303,7 @@ Document.addContent(wordForm, {
     Build.formCheckboxField({ name: "approved", default: false })
   ]
 });
-await Io.writeFile(Document.build(wordForm), path.join(workspace, "leave-request.docx"));
+await Document.writeFile(wordForm, path.join(workspace, "leave-request.docx"));
 
 const pdfForm = new Pdf.Builder();
 const formPage = pdfForm.addPage();
@@ -314,7 +314,7 @@ formPage.drawText("Amount:", { x: 60, y: 660, fontSize: 11 });
 formPage.addFormField({ type: "text", name: "amount", rect: [140, 654, 260, 676] });
 formPage.drawText("Receipts attached:", { x: 60, y: 620, fontSize: 11 });
 formPage.addFormField({ type: "checkbox", name: "receipts", rect: [200, 618, 216, 634] });
-fs.writeFileSync(path.join(workspace, "expense-claim.pdf"), await pdfForm.build());
+fs.writeFileSync(path.join(workspace, "expense-claim.pdf"), await pdfForm.toBuffer());
 
 // =============================================================================
 // 9. Two contract versions, and one with tracked changes.
@@ -331,7 +331,7 @@ async function writeContract(name: string, clauses: readonly string[]): Promise<
   for (const clause of clauses) {
     Document.addParagraph(doc, clause);
   }
-  await Io.writeFile(Document.build(doc), path.join(workspace, name));
+  await Document.writeFile(doc, path.join(workspace, name));
 }
 
 const baseClauses = [
@@ -368,7 +368,7 @@ Document.addContent(redlined, {
   ]
 });
 Document.addParagraph(redlined, "This agreement is governed by the law of New South Wales.");
-await Io.writeFile(Document.build(redlined), path.join(workspace, "contract-redlined.docx"));
+await Document.writeFile(redlined, path.join(workspace, "contract-redlined.docx"));
 
 // =============================================================================
 // Report + ready-to-paste client configuration

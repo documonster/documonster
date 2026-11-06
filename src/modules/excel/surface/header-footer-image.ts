@@ -1,3 +1,9 @@
+import type { HeaderFooterImageEntry, HeaderFooterImageOptions } from "@excel/core/worksheet";
+import {
+  getHeaderFooterImages,
+  removeHeaderFooterImage,
+  setHeaderFooterImage
+} from "@excel/core/worksheet";
 /**
  * `HeaderFooterImage` namespace surface — Excel's six printable
  * header/footer image sections.
@@ -11,14 +17,48 @@
  * single-value convenience API for the common "one centred header image"
  * case.
  */
-export {
-  setHeaderFooterImage as set,
-  getHeaderFooterImages as list,
-  removeHeaderFooterImage as remove
-} from "@excel/core/worksheet";
+import { checkWorksheet } from "@excel/core/worksheet-core";
+import type { WorksheetData } from "@excel/core/worksheet-core";
+import {
+  headerFooterImageOptionsSchema,
+  checkHeaderPosition,
+  checkImageId
+} from "@excel/surface/argument-checks";
+import type { HeaderFooterImagePosition } from "@excel/types";
+import { checkSchema } from "@excel/utils/arguments";
 
-export type {
-  HeaderFooterImageEntry as Entry,
-  HeaderFooterImageOptions as Options
-} from "@excel/core/worksheet";
-export type { HeaderFooterImagePosition as Position } from "@excel/types";
+/** The images in the sheet's header and footer sections — new objects each call, so changing one changes nothing. */
+export function list(ws: WorksheetData): HeaderFooterImageEntry[] {
+  checkWorksheet(ws);
+  return getHeaderFooterImages(ws);
+}
+
+/** Remove the image in one header/footer section. Returns `true` if there was one. */
+export function remove(ws: WorksheetData, position: HeaderFooterImagePosition): boolean {
+  checkWorksheet(ws);
+  // A section that is not one (`"bogus"`) answered `false`, as if that section simply had no picture.
+  checkHeaderPosition("HeaderFooterImage.remove", "position", position);
+  return removeHeaderFooterImage(ws, position);
+}
+
+/**
+ * Put an image in one of the six header/footer sections, replacing what was there.
+ *
+ * @throws {ExcelImageError} when the workbook has no image `imageId`.
+ * @throws {ExcelArgumentError} when `position` or `applyTo` is outside its vocabulary, or a size is not a
+ * non-negative number of points.
+ */
+export function set(ws: WorksheetData, options: HeaderFooterImageOptions): void {
+  checkWorksheet(ws);
+  checkSchema("HeaderFooterImage.set", "options", headerFooterImageOptionsSchema, options);
+  checkImageId("HeaderFooterImage.set", ws, options.imageId);
+  setHeaderFooterImage(ws, options);
+}
+
+// The flat names are the public ones; these namespace aliases repeated them.
+/** @deprecated Use the flat `HeaderFooterImageEntry` type. Removed in 1.0. */
+export type Entry = HeaderFooterImageEntry;
+/** @deprecated Use the flat `HeaderFooterImageOptions` type. Removed in 1.0. */
+export type Options = HeaderFooterImageOptions;
+/** @deprecated Use the flat `HeaderFooterImagePosition` type. Removed in 1.0. */
+export type Position = HeaderFooterImagePosition;

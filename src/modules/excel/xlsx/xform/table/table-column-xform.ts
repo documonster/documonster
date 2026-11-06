@@ -1,3 +1,4 @@
+import { fromFileFormula, toFileFormula } from "@excel/utils/future-functions";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { decodeOoxmlEscape, encodeOoxmlAttr } from "@utils/utils";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -18,6 +19,11 @@ type ChildTextTag = "calculatedColumnFormula" | "totalsRowFormula";
 class TableColumnXform extends BaseXform<TableColumnModel> {
   private _childTag: ChildTextTag | undefined;
   private _childText = "";
+  /**
+   * The name of the table whose columns are being rendered, set by `TableXform.render`. An unnamed this-row
+   * reference in a column's formula is written with it.
+   */
+  tableName: string | undefined;
 
   constructor() {
     super();
@@ -63,10 +69,18 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
     if (model.calculatedColumnFormula || emitTotalsFormula) {
       xmlStream.openNode(this.tag, this._renderAttributes(model));
       if (model.calculatedColumnFormula) {
-        xmlStream.leafNode("calculatedColumnFormula", undefined, model.calculatedColumnFormula);
+        xmlStream.leafNode(
+          "calculatedColumnFormula",
+          undefined,
+          toFileFormula(model.calculatedColumnFormula, { table: this.tableName })
+        );
       }
       if (emitTotalsFormula) {
-        xmlStream.leafNode("totalsRowFormula", undefined, model.totalsRowFormula);
+        xmlStream.leafNode(
+          "totalsRowFormula",
+          undefined,
+          toFileFormula(model.totalsRowFormula!, { table: this.tableName })
+        );
       }
       xmlStream.closeNode();
     } else {
@@ -107,7 +121,7 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
     }
     // Closing a recognised child element — store captured text
     if (this._childTag && name === this._childTag) {
-      this.model![this._childTag] = this._childText;
+      this.model![this._childTag] = fromFileFormula(this._childText);
       this._childTag = undefined;
     }
     return true;

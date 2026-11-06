@@ -343,9 +343,25 @@ export const STD_DOC_ATTRIBUTES = {
 export const DEFAULT_PAGE_WIDTH = 12240; // 8.5 inches
 export const DEFAULT_PAGE_HEIGHT = 15840; // 11 inches
 
-/** A4 page size in twips. */
-export const A4_PAGE_WIDTH = 11906; // 210mm
-export const A4_PAGE_HEIGHT = 16838; // 297mm
+/** The paper sizes {@link PageSizes} names — the same names `Pdf.PageSizes` uses. */
+export type DocxPageSizeName = "A3" | "A4" | "A5" | "LETTER" | "LEGAL" | "TABLOID";
+
+/**
+ * Common paper sizes in twips, portrait, for `SectionProperties.pageSize`:
+ * `Document.setSectionProperties(doc, { pageSize: PageSizes.A4 })`. For landscape, swap
+ * `width` and `height` and set `orientation: "landscape"`. Frozen, so an edit cannot change
+ * every later document in the process.
+ */
+export const PageSizes: Readonly<
+  Record<DocxPageSizeName, Readonly<{ width: number; height: number }>>
+> = Object.freeze({
+  A3: Object.freeze({ width: 16838, height: 23811 }),
+  A4: Object.freeze({ width: 11906, height: 16838 }),
+  A5: Object.freeze({ width: 8391, height: 11906 }),
+  LETTER: Object.freeze({ width: 12240, height: 15840 }),
+  LEGAL: Object.freeze({ width: 12240, height: 20160 }),
+  TABLOID: Object.freeze({ width: 15840, height: 24480 })
+});
 
 /** Default margins: 1 inch all around. */
 export const DEFAULT_MARGIN = 1440; // 1 inch in twips

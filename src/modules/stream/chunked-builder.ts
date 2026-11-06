@@ -5,8 +5,11 @@
  * This file provides the same API but works in browser environments.
  */
 
-import { StreamStateError } from "@stream/errors";
+import { checkStreamArgument } from "@stream/arguments";
+import { StreamStateError, StreamArgumentError } from "@stream/errors";
 import { textEncoder } from "@utils/binary";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /**
  * Options for ChunkedBuilder
@@ -16,6 +19,32 @@ export interface ChunkedBuilderOptions {
   chunkSize?: number;
   /** Initial capacity hint */
   initialCapacity?: number;
+}
+
+const chunkedBuilderOptionsSchema = s.object(
+  {
+    chunkSize: s
+      .number({ integer: true, min: 1, expected: "a positive integer chunkSize" })
+      .optional(),
+    initialCapacity: s
+      .number({ integer: true, min: 0, expected: "a non-negative integer initialCapacity" })
+      .optional()
+  },
+  { expected: "an options object" }
+);
+const _chunkedBuilderOptionsMatch: SchemaMatches<
+  typeof chunkedBuilderOptionsSchema,
+  ChunkedBuilderOptions
+> = true;
+void _chunkedBuilderOptionsMatch;
+
+function checkPiece(piece: unknown, where = "Streams.ChunkedBuilder#push", field = "piece"): void {
+  if (typeof piece !== "string") {
+    throw new StreamArgumentError("a string piece", piece === null ? "null" : typeof piece, {
+      field,
+      where
+    });
+  }
 }
 
 /**
@@ -28,14 +57,21 @@ export class ChunkedBuilder {
   protected readonly _chunkSize: number;
   protected _totalLength: number = 0;
 
+  /** The public name the constructor's argument errors start with. */
+  protected static readonly publicName: string = "Streams.ChunkedBuilder";
+
   constructor(options: ChunkedBuilderOptions = {}) {
-    this._chunkSize = options.chunkSize ?? 10000;
+    const where = (new.target as typeof ChunkedBuilder).publicName;
+    checkStreamArgument(chunkedBuilderOptionsSchema, options, where, "options");
+    const { chunkSize } = options;
+    this._chunkSize = chunkSize ?? 10000;
   }
 
   /**
    * Add a piece to the builder
    */
   push(piece: string): void {
+    checkPiece(piece);
     this._pieces.push(piece);
     this._totalLength += piece.length;
     if (this._pieces.length >= this._chunkSize) {
@@ -46,7 +82,19 @@ export class ChunkedBuilder {
   /**
    * Add multiple pieces
    */
-  pushAll(pieces: string[]): void {
+  pushAll(pieces: readonly string[]): void {
+    if (!Array.isArray(pieces)) {
+      throw new StreamArgumentError(
+        "an array of string pieces",
+        pieces === null ? "null" : typeof pieces,
+        { field: "pieces", where: "Streams.ChunkedBuilder#pushAll" }
+      );
+    }
+    // Checked before any is added, so a refusal leaves the builder as it was.
+    // An index loop, so a refusal names the piece: `pieces[3]`.
+    for (let i = 0; i < pieces.length; i++) {
+      checkPiece(pieces[i], "Streams.ChunkedBuilder#pushAll", `pieces[${i}]`);
+    }
     const len = pieces.length;
     for (let i = 0; i < len; i++) {
       this._pieces.push(pieces[i]);
@@ -106,40 +154,22 @@ export class ChunkedBuilder {
   }
 
   /**
-   * Build final string
+   * Build final string. A read: the builder is left as it was.
    */
   toString(): string {
-    const chunksLen = this._chunks.length;
-    const piecesLen = this._pieces.length;
-
-    // Fast path: only pieces, no chunks
-    if (chunksLen === 0) {
-      if (piecesLen === 0) {
-        return "";
-      }
-      if (piecesLen === 1) {
-        return this._pieces[0];
-      }
-      return this._pieces.join("");
+    if (this._chunks.length === 0) {
+      return this._pieces.length === 1 ? this._pieces[0] : this._pieces.join("");
     }
-
-    // Has chunks - consolidate and join
-    if (piecesLen > 0) {
-      this._chunks.push(this._pieces.join(""));
-      this._pieces.length = 0;
+    if (this._pieces.length === 0) {
+      return this._chunks.length === 1 ? this._chunks[0] : this._chunks.join("");
     }
-
-    if (this._chunks.length === 1) {
-      return this._chunks[0];
-    }
-
-    return this._chunks.join("");
+    return this._chunks.join("") + this._pieces.join("");
   }
 
   /**
    * Convert to Uint8Array (browser-compatible)
    */
-  toUint8Array(): Uint8Array {
+  toUint8Array(): Uint8Array<ArrayBuffer> {
     return textEncoder.encode(this.toString());
   }
 }
@@ -158,6 +188,8 @@ export interface BuilderSnapshot {
  * Browser-compatible version
  */
 export class TransactionalChunkedBuilder extends ChunkedBuilder {
+  protected static override readonly publicName: string = "Streams.TransactionalChunkedBuilder";
+
   private _snapshots: BuilderSnapshot[] = [];
 
   /**

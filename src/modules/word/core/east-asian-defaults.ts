@@ -12,7 +12,7 @@
  * and applying Simplified Chinese proofing to Japanese is worse than applying none.
  * With the content in hand this is a statement about it.
  *
- * Shared by the Markdown importer and `Document.build` because it is one fact about
+ * Shared by the Markdown importer and the `Document.create()` write path because it is one fact about
  * one question. Keeping a copy per call site is how the two would drift into
  * disagreeing about the same document.
  *

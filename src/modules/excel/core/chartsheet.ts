@@ -1,6 +1,7 @@
 import { createChart } from "@excel/chart/chart-handle";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/model/chart-ex-types";
 import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/model/types";
+import { checkChartsheet } from "@excel/core/feature-handles";
 import {
   getChartEntry,
   getChartExStructuredEntry,
@@ -9,7 +10,11 @@ import {
 import type { WorkbookData } from "@excel/core/workbook-core";
 import type { ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
 import type { HeaderFooter } from "@excel/types";
+import { checkSchema } from "@excel/utils/arguments";
+import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 export type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
@@ -57,6 +62,90 @@ export interface AddChartsheetOptions extends ChartsheetOptions {
 export interface AddPivotChartsheetOptions extends ChartsheetOptions {
   /** Classic chart or combo chart to place on the chartsheet as a pivot chart. */
   chart: AddChartOptions | AddComboChartOptions;
+}
+
+const margin = () => s.number({ finite: true }).optional();
+/** `pageMargins`: a key the margins do not have was kept and never written. */
+export const chartsheetMarginsSchema = s.object(
+  {
+    l: margin(),
+    r: margin(),
+    t: margin(),
+    b: margin(),
+    left: margin(),
+    right: margin(),
+    top: margin(),
+    bottom: margin(),
+    header: margin(),
+    footer: margin()
+  },
+  { unknownKeys: "reject" }
+);
+const _marginsMatch: SchemaMatches<
+  typeof chartsheetMarginsSchema,
+  NonNullable<ChartsheetModel["pageMargins"]>
+> = true;
+void _marginsMatch;
+
+const viewOptionsShape = {
+  tabSelected: s.boolean().optional(),
+  zoomScale: s.number({ integer: true, min: 0 }).optional(),
+  workbookViewId: s.number({ integer: true, min: 0 }).optional(),
+  zoomToFit: s.boolean().optional()
+};
+const viewOptionsSchema = s.object(viewOptionsShape);
+const _viewOptionsMatch: SchemaMatches<typeof viewOptionsSchema, ChartsheetViewOptions> = true;
+void _viewOptionsMatch;
+
+const chartsheetOptionsShape = {
+  ...viewOptionsShape,
+  state: s.literal("visible", "hidden", "veryHidden").optional(),
+  pageMargins: chartsheetMarginsSchema.optional(),
+  // Checked with a worksheet's settings by `checkSheetSettings`, below.
+  pageSetup: s.unknown<ChartsheetModel["pageSetup"]>().optional(),
+  headerFooter: s.unknown<Partial<HeaderFooter>>().optional()
+};
+const chartsheetOptionsSchema = s.object(chartsheetOptionsShape);
+const _chartsheetOptionsMatch: SchemaMatches<typeof chartsheetOptionsSchema, ChartsheetOptions> =
+  true;
+void _chartsheetOptionsMatch;
+
+// The chart is checked by the chart validator, which names the series at fault.
+const addChartsheetOptionsSchema = s.object({
+  ...chartsheetOptionsShape,
+  chart: s.unknown<AddChartOptions | AddComboChartOptions | AddChartExOptions>()
+});
+const _addChartsheetOptionsMatch: SchemaMatches<
+  typeof addChartsheetOptionsSchema,
+  AddChartsheetOptions
+> = true;
+void _addChartsheetOptionsMatch;
+const addPivotChartsheetOptionsSchema = s.object({
+  ...chartsheetOptionsShape,
+  chart: s.unknown<AddChartOptions | AddComboChartOptions>()
+});
+const _addPivotChartsheetOptionsMatch: SchemaMatches<
+  typeof addPivotChartsheetOptionsSchema,
+  AddPivotChartsheetOptions
+> = true;
+void _addPivotChartsheetOptionsMatch;
+
+/** Check `Workbook.addChartsheet`'s or `Workbook.addPivotChartsheet`'s options, before anything is added. */
+export function checkChartsheetOptions(where: string, options: unknown, pivot: boolean): void {
+  checkSchema(
+    where,
+    "options",
+    pivot ? addPivotChartsheetOptionsSchema : addChartsheetOptionsSchema,
+    options
+  );
+  const { pageSetup, headerFooter } = options as ChartsheetOptions;
+  checkSheetSettings(where, { pageSetup, headerFooter }, path => `options.${path}`);
+  checkSchema(
+    where,
+    "options.pageSetup",
+    s.object({ paperHeight: s.string().optional(), paperWidth: s.string().optional() }).optional(),
+    pageSetup
+  );
 }
 
 /**
@@ -133,18 +222,22 @@ export function createChartsheet(model: ChartsheetModel, workbook?: WorkbookData
 }
 
 export function chartsheetId(cs: ChartsheetData): number {
+  checkChartsheet(cs);
   return cs._model.id;
 }
 
 export function chartsheetSheetNo(cs: ChartsheetData): number {
+  checkChartsheet(cs);
   return cs._model.sheetNo;
 }
 
 export function chartsheetName(cs: ChartsheetData): string {
+  checkChartsheet(cs);
   return cs._model.name;
 }
 
 export function chartsheetSetName(cs: ChartsheetData, value: string): void {
+  checkChartsheet(cs);
   // Go through the workbook's unified validator so a chartsheet can never
   // silently land on a name that collides with a worksheet (or another
   // chartsheet), includes illegal characters, or exceeds Excel's 31-char limit.
@@ -156,28 +249,34 @@ export function chartsheetSetName(cs: ChartsheetData, value: string): void {
 }
 
 export function chartsheetState(cs: ChartsheetData): ChartsheetModel["state"] {
+  checkChartsheet(cs);
   return cs._model.state;
 }
 
 export function chartsheetSetState(cs: ChartsheetData, value: ChartsheetModel["state"]): void {
+  checkChartsheet(cs);
   cs._model.state = value;
 }
 
 export function chartsheetChartNumber(cs: ChartsheetData): number | undefined {
+  checkChartsheet(cs);
   return cs._model.chartNumber;
 }
 
 export function chartsheetChartExNumber(cs: ChartsheetData): number | undefined {
+  checkChartsheet(cs);
   return cs._model.chartExNumber;
 }
 
 export function chartsheetChartModel(cs: ChartsheetData): ChartModel | undefined {
+  checkChartsheet(cs);
   return cs._model.chartNumber
     ? (cs._workbook ? getChartEntry(cs._workbook, cs._model.chartNumber) : undefined)?.model
     : undefined;
 }
 
 export function chartsheetChartExModel(cs: ChartsheetData): ChartExModel | undefined {
+  checkChartsheet(cs);
   return cs._model.chartExNumber
     ? (cs._workbook ? getChartExStructuredEntry(cs._workbook, cs._model.chartExNumber) : undefined)
         ?.model
@@ -193,6 +292,7 @@ export function chartsheetChartExModel(cs: ChartsheetData): ChartExModel | undef
  * {@link chartsheetChartExModel} directly.
  */
 export function chartsheetChart(cs: ChartsheetData): ChartHandle | undefined {
+  checkChartsheet(cs);
   if (!cs._workbook || (!cs._model.chartNumber && !cs._model.chartExNumber)) {
     return undefined;
   }
@@ -209,14 +309,17 @@ export function chartsheetChart(cs: ChartsheetData): ChartHandle | undefined {
 }
 
 export function chartsheetIsChartEx(cs: ChartsheetData): boolean {
+  checkChartsheet(cs);
   return !!cs._model.chartExNumber;
 }
 
 export function chartsheetModel(cs: ChartsheetData): ChartsheetModel {
+  checkChartsheet(cs);
   return cs._model;
 }
 
 export function chartsheetPageMargins(cs: ChartsheetData): ChartsheetModel["pageMargins"] {
+  checkChartsheet(cs);
   return cs._model.pageMargins;
 }
 
@@ -224,10 +327,12 @@ export function chartsheetSetPageMargins(
   cs: ChartsheetData,
   value: ChartsheetModel["pageMargins"]
 ): void {
+  checkChartsheet(cs);
   cs._model.pageMargins = value;
 }
 
 export function chartsheetPageSetup(cs: ChartsheetData): ChartsheetModel["pageSetup"] {
+  checkChartsheet(cs);
   return cs._model.pageSetup;
 }
 
@@ -235,10 +340,12 @@ export function chartsheetSetPageSetup(
   cs: ChartsheetData,
   value: ChartsheetModel["pageSetup"]
 ): void {
+  checkChartsheet(cs);
   cs._model.pageSetup = value;
 }
 
 export function chartsheetHeaderFooter(cs: ChartsheetData): ChartsheetModel["headerFooter"] {
+  checkChartsheet(cs);
   return cs._model.headerFooter;
 }
 
@@ -246,37 +353,46 @@ export function chartsheetSetHeaderFooter(
   cs: ChartsheetData,
   value: ChartsheetModel["headerFooter"]
 ): void {
+  checkChartsheet(cs);
   cs._model.headerFooter = value;
 }
 
 export function chartsheetTabSelected(cs: ChartsheetData): boolean | undefined {
+  checkChartsheet(cs);
   return cs._model.tabSelected;
 }
 
 export function chartsheetSetTabSelected(cs: ChartsheetData, value: boolean | undefined): void {
+  checkChartsheet(cs);
   cs._model.tabSelected = value;
 }
 
 export function chartsheetZoomScale(cs: ChartsheetData): number | undefined {
+  checkChartsheet(cs);
   return cs._model.zoomScale;
 }
 
 export function chartsheetSetZoomScale(cs: ChartsheetData, value: number | undefined): void {
+  checkChartsheet(cs);
   cs._model.zoomScale = value;
 }
 
 export function chartsheetWorkbookViewId(cs: ChartsheetData): number | undefined {
+  checkChartsheet(cs);
   return cs._model.workbookViewId;
 }
 
 export function chartsheetSetWorkbookViewId(cs: ChartsheetData, value: number | undefined): void {
+  checkChartsheet(cs);
   cs._model.workbookViewId = value;
 }
 
 export function chartsheetZoomToFit(cs: ChartsheetData): boolean | undefined {
+  checkChartsheet(cs);
   return cs._model.zoomToFit;
 }
 
 export function chartsheetSetZoomToFit(cs: ChartsheetData, value: boolean | undefined): void {
+  checkChartsheet(cs);
   cs._model.zoomToFit = value;
 }

@@ -1,4 +1,12 @@
-import { derivedRuleFormula } from "@excel/core/conditional-formula";
+import {
+  derivedRuleFormula,
+  missingRuleFormula,
+  textRuleHasSearchString,
+  textRuleKind,
+  textRuleReadShape,
+  type TextRuleKind
+} from "@excel/core/conditional-formula";
+import { XlsbParseError } from "@excel/errors";
 /**
  * Conditional formatting: `BrtBeginConditionalFormatting` and the `BrtBeginCFRule` records inside it.
  *
@@ -29,18 +37,28 @@ import { derivedRuleFormula } from "@excel/core/conditional-formula";
  */
 import type { Cfvo, Color, Style } from "@excel/types";
 import {
+  type BiffRange,
+  boundingTopLeft,
   encodeNullableWideString,
   encodeRange,
   rangeReference,
-  readRange,
-  tryDecodeRange
+  readNullableWideString,
+  readSheetRange,
+  tryDecodeRange,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import { encodeColor } from "@excel/xlsb/color";
-import { encodePtg, type PtgContext } from "@excel/xlsb/formula/ptg";
+import { encodeDxf } from "@excel/xlsb/dxf";
+import {
+  encodeFormula,
+  encodeParsedFormula,
+  formulaText,
+  type EncodedFormula,
+  type PtgContext
+} from "@excel/xlsb/formula/ptg";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
-import { parse } from "@formula/syntax/parser";
-import { tokenize } from "@formula/syntax/tokenizer";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import type { BinaryReader } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** `CFType`, MS-XLSB 2.5.18. */
 const CF_TYPE = {
@@ -73,6 +91,34 @@ const CF_TEMPLATE = {
   duplicateValues: 0x1b
 } as const;
 
+/** `CF_TEMPLATE_EQUALABOVEAVERAGE` and `CF_TEMPLATE_EQUALBELOWAVERAGE`: the average itself included. */
+const CF_TEMPLATE_EQUAL_ABOVE_AVERAGE = 0x1d;
+const CF_TEMPLATE_EQUAL_BELOW_AVERAGE = 0x1e;
+
+/**
+ * `CFTextOper`, MS-XLSB 2.5.17 — the `iParam` of a `CF_TEMPLATE_CONTAINSTEXT` rule.
+ *
+ * **One template, four conditions, and `iParam` says which.** This wrote 0 for all of them, so a "does not contain"
+ * rule was stored as "contains": Excel would highlight exactly the cells the author had asked to leave alone, and
+ * the reader — which never looked at `iParam` — gave back `containsText` and wrote `NOT(ISERROR(SEARCH(…)))` for it.
+ * The specification's description of `CF_TEXTOPER_ENDSWITH` repeats "does not begin with"; the name and the value
+ * are the reliable half.
+ */
+const CF_TEXT_OPER: Readonly<Partial<Record<TextRuleKind, number>>> = {
+  containsText: 0,
+  notContainsText: 1,
+  beginsWith: 2,
+  endsWith: 3
+};
+
+/** The `CFTemp` of each text condition without a search string. */
+const CF_TEXT_TEMPLATE: Readonly<Partial<Record<TextRuleKind, number>>> = {
+  containsBlanks: CF_TEMPLATE.containsBlanks,
+  notContainsBlanks: CF_TEMPLATE.notContainsBlanks,
+  containsErrors: CF_TEMPLATE.containsErrors,
+  notContainsErrors: CF_TEMPLATE.notContainsErrors
+};
+
 /** `CFTemp` values for the twelve time periods, keyed by the model's name. */
 const CF_TIME_PERIOD: Readonly<Record<string, number>> = {
   today: 0x0f,
@@ -85,6 +131,25 @@ const CF_TIME_PERIOD: Readonly<Record<string, number>> = {
   nextWeek: 0x16,
   lastWeek: 0x17,
   thisMonth: 0x18
+};
+
+/**
+ * `CFDateOper`, MS-XLSB 2.5.12 — the `iParam` a time-period rule MUST carry, keyed by the model's name.
+ *
+ * Its own enumeration, in its own order, starting at 0. This wrote the `CFTemp` value here as well (`0x0F` for
+ * today), which BrtBeginCFRule's table rules out: "a CFDateOper that MUST be CF_TIMEPERIOD_TODAY".
+ */
+const CF_DATE_OPER: Readonly<Record<string, number>> = {
+  today: 0,
+  yesterday: 1,
+  last7Days: 2,
+  thisWeek: 3,
+  lastWeek: 4,
+  lastMonth: 5,
+  tomorrow: 6,
+  nextWeek: 7,
+  nextMonth: 8,
+  thisMonth: 9
 };
 
 /** `CFOper`, MS-XLSB 2.5.15. Note it starts at 1, not 0. */
@@ -114,6 +179,8 @@ export interface SheetCfRule {
   readonly percent?: boolean;
   readonly bottom?: boolean;
   readonly aboveAverage?: boolean;
+  readonly equalAverage?: boolean;
+  readonly stdDev?: number;
   readonly stopIfTrue?: boolean;
   readonly style?: Partial<Style>;
   /**
@@ -156,25 +223,46 @@ export interface CfLoss {
  */
 export function collectDxfs(
   blocks: readonly SheetConditionalFormatting[],
-  options: {
-    readonly source?: readonly (Partial<Style> | undefined)[];
-    readonly describe?: (style: Partial<Style>) => {
-      readonly writable: boolean;
-      readonly dropped: readonly string[];
-    };
-  } = {}
-): {
+  options: DxfCollectorOptions = {}
+): DxfTable {
+  const table = createDxfTable(options);
+  table.add(blocks);
+  return table;
+}
+
+/** Where the table starts, and how to tell a format this writer can encode — see {@link collectDxfs}. */
+export interface DxfCollectorOptions {
+  readonly source?: readonly (Partial<Style> | undefined)[];
+  readonly describe?: (style: Partial<Style>) => {
+    readonly writable: boolean;
+    readonly dropped: readonly string[];
+  };
+}
+
+/** The differential-format table, open to more blocks — see {@link createDxfTable}. */
+export interface DxfTable {
   readonly styles: readonly Partial<Style>[];
   readonly indexOf: (style: unknown) => number;
   readonly fromSource: (sourceId: number) => number | undefined;
   readonly lost: readonly string[];
-} {
+  /** Add the formats of more blocks. A format already in the table keeps its index. */
+  readonly add: (blocks: readonly SheetConditionalFormatting[]) => void;
+}
+
+/**
+ * {@link collectDxfs} for a writer that meets its blocks one sheet at a time.
+ *
+ * A streamed sheet's part is closed before the next sheet exists, so its rules need their `dxfId`s then; the
+ * table grows as each sheet ends and the styles part, written last, carries all of it. Indices are only ever
+ * appended, so an id a closed sheet wrote still names the same format.
+ */
+export function createDxfTable(options: DxfCollectorOptions = {}): DxfTable {
   const { source = [], describe = () => ({ writable: true, dropped: [] }) } = options;
   const styles: Partial<Style>[] = [];
   const lost: string[] = [];
   const indexByKey = new Map<string, number>();
   const indexByIdentity = new Map<unknown, number>();
-  const add = (style: Partial<Style>): number => {
+  const addStyle = (style: Partial<Style>): number => {
     const known = indexByIdentity.get(style);
     if (known !== undefined) {
       return known;
@@ -192,14 +280,7 @@ export function collectDxfs(
     indexByIdentity.set(style, index);
     return index;
   };
-  const sourceIndex = source.map(style => (style === undefined ? NO_DXF : add(style)));
-  for (const block of blocks) {
-    for (const rule of block.rules ?? []) {
-      if (rule.style !== undefined) {
-        add(rule.style);
-      }
-    }
-  }
+  const sourceIndex = source.map(style => (style === undefined ? NO_DXF : addStyle(style)));
   return {
     styles,
     indexOf: style =>
@@ -215,7 +296,59 @@ export function collectDxfs(
       const index = sourceIndex[sourceId];
       return index === undefined || index === NO_DXF ? undefined : index;
     },
-    lost
+    lost,
+    add: blocks => {
+      for (const block of blocks) {
+        for (const rule of block.rules ?? []) {
+          if (rule.style !== undefined) {
+            addStyle(rule.style);
+          }
+        }
+      }
+    }
+  };
+}
+
+/**
+ * The workbook's differential-format table as the XLSB package writes it: after the table it was read with, and holding
+ * only formats the styles part can encode. One definition for the buffered and the streamed writer, so a `dxfId` a
+ * streamed sheet wrote is the one the styles part states.
+ */
+export function createWorkbookDxfTable(source?: readonly (Partial<Style> | undefined)[]): DxfTable {
+  return createDxfTable({
+    ...(source === undefined ? {} : { source }),
+    // The number-format id does not decide whether a format is writable, only which number it is written under —
+    // that is allocated with the styles part, so any id serves for the question asked here.
+    describe: style => {
+      const { payload, dropped } = encodeDxf(style, () => 0);
+      return { writable: payload !== undefined, dropped };
+    }
+  });
+}
+
+/**
+ * Hands out workbook-unique rule priorities (`iPri`, which "MUST NOT duplicate" another rule's).
+ *
+ * The model's priorities are per block and routinely collide, so they cannot simply be copied — but they also cannot
+ * simply be replaced, which is what a running counter did: Excel keeps the numbers a file states, and comparing this
+ * library's output against an XLSB Excel wrote for the same workbook showed every rule renumbered. So a stated priority
+ * is honoured when it is a positive integer nobody has claimed, and the counter fills in for the rest. Workbook-wide,
+ * which is stricter than the record requires and costs nothing — and is what a streamed workbook, whose sheets are
+ * written one at a time, shares across them.
+ */
+export function createCfPriorities(): (stated: number | undefined) => number {
+  const claimed = new Set<number>();
+  let counter = 0;
+  return stated => {
+    if (stated !== undefined && Number.isInteger(stated) && stated > 0 && !claimed.has(stated)) {
+      claimed.add(stated);
+      return stated;
+    }
+    do {
+      counter += 1;
+    } while (claimed.has(counter));
+    claimed.add(counter);
+    return counter;
   };
 }
 
@@ -241,8 +374,8 @@ export function conditionalFormattingRecords(
   // converted this library's XLSX, which had the four separate. Both are legal; merging is what makes a
   // record-level comparison against Excel readable, and it is what a reader gets from Excel's own files.
   for (const block of mergeByRange(blocks)) {
-    const range = tryDecodeRange(block.ref);
-    if (range === undefined) {
+    const ranges = sqrefRanges(block.ref);
+    if (ranges === undefined) {
       lost.push(`conditional formatting on ${block.ref ?? "an unnamed range"}`);
       continue;
     }
@@ -252,6 +385,12 @@ export function conditionalFormattingRecords(
         // still applies, but without its formatting — which is a loss, and was silent.
         if (rule.style !== undefined && dxf.indexOf(rule.style) === NO_DXF) {
           lost.push(`conditional formatting format on ${block.ref ?? "an unnamed range"}`);
+        }
+        const x14 = dataBarExtensionSettings(rule);
+        if (x14.length > 0) {
+          lost.push(
+            `conditional formatting data bar on ${block.ref ?? "an unnamed range"}: ${x14.join(", ")}`
+          );
         }
         // The block's range travels with the rule, because a derived formula is written relative to the
         // range's top-left cell and a single rule does not carry the range itself.
@@ -284,8 +423,14 @@ export function conditionalFormattingRecords(
         concatUint8Arrays([
           // `ccf` counts the rules that follow, so it is the *usable* count — a header promising more
           // rules than follow leaves a reader walking off the end of the collection.
-          new BinaryWriter().writeUint32(usable.length).writeUint32(0).writeInt32(1).toUint8Array(),
-          encodeRange(range)
+          // `sqrfx` is an `UncheckedSqRfX` (MS-XLSB 2.5.156): a count, then that many ranges. This wrote a count
+          // of 1 and the first range whatever the block covered, so `B2:B4 D6:D8` lost its second half.
+          new BinaryWriter()
+            .writeUint32(usable.length)
+            .writeUint32(0)
+            .writeInt32(ranges.length)
+            .toUint8Array(),
+          ...ranges.map(range => encodeRange(range))
         ])
       )
     );
@@ -303,6 +448,23 @@ export function conditionalFormattingRecords(
     records.push(record("BrtEndConditionalFormatting"));
   }
   return { records, lost };
+}
+
+/**
+ * The ranges of a space-separated `sqref`, or `undefined` when any of them does not decode.
+ *
+ * All or nothing: writing the ranges that decode and dropping the rest would apply the rule to part of the cells
+ * it was given, with nothing said.
+ */
+function sqrefRanges(reference: string | undefined): BiffRange[] | undefined {
+  const parts = (reference ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(part => part !== "");
+  const ranges = parts.map(part => tryDecodeRange(part));
+  return ranges.length === 0 || ranges.some(range => range === undefined)
+    ? undefined
+    : (ranges as BiffRange[]);
 }
 
 /**
@@ -345,6 +507,12 @@ function encodeRule(
       reason: `conditional formatting rule of type ${JSON.stringify(rule.type ?? "unknown")}`
     };
   }
+  const missing = missingRuleFormula(rule);
+  if (missing !== undefined) {
+    // Written, this was a rule with `cbFmla1 = 0`: a comparison against nothing. The XLSX writer skips the same
+    // rules for the same reason, and both report them.
+    return { reason: `conditional formatting on ${rule.ref ?? "an unnamed range"}: ${missing}` };
+  }
   // `dxfId` MUST be 0xFFFFFFFF for the three graphical types, and those are refused above — so any rule
   // reaching here may carry one.
   const dxfId = dxf.indexOf(rule.style);
@@ -357,7 +525,11 @@ function encodeRule(
   // `CF_TEMPLATE_EQUALABOVEAVERAGE` (0x1D) counts too. Written as the literal rather than as arithmetic
   // on another constant, which the first version of this did — `CF_TEMPLATE.expr + 0x1d - CF_TEMPLATE.expr`
   // is 0x1D by a route that says nothing.
-  flags |= shape.template === CF_TEMPLATE.aboveAverage || shape.template === 0x1d ? 1 << 2 : 0;
+  flags |=
+    shape.template === CF_TEMPLATE.aboveAverage ||
+    shape.template === CF_TEMPLATE_EQUAL_ABOVE_AVERAGE
+      ? 1 << 2
+      : 0;
   if (shape.type === CF_TYPE.filter) {
     flags |= rule.bottom === true ? 1 << 3 : 0;
     flags |= rule.percent === true ? 1 << 4 : 0;
@@ -372,11 +544,23 @@ function encodeRule(
     shape.formulaCount === 0
       ? []
       : (derived === undefined ? stated : [derived]).slice(0, shape.formulaCount);
-  const tokens: Uint8Array[] = [];
-  // The range's top-left, which every reference in the formula is an offset from.
-  const anchor = tryDecodeRange(rule.ref);
-  const origin =
-    anchor === undefined ? undefined : { row: anchor.firstRow, column: anchor.firstColumn };
+  // `strParam` "MUST be greater than 0 and less than 256 characters long" for the text template. A rule without
+  // one is not a rule Excel can read — and its formula, derived from the same string, searches for nothing.
+  if (
+    shape.template === CF_TEMPLATE.containsText &&
+    (rule.text === undefined || rule.text.length === 0 || rule.text.length > 255)
+  ) {
+    return {
+      reason: `conditional formatting text rule on ${rule.ref ?? "an unnamed range"}: the search string must be 1 to 255 characters`
+    };
+  }
+  const tokens: EncodedFormula[] = [];
+  // **The top-left of the bounding box of the whole sqref**, which every relative reference is an offset from — as
+  // Excel measures it: its own `H6>A6` on `G2:G4 H6:H8` is `4c 04 00 00 00 01 c0`, row 4 and column 1 from G2. The
+  // first range's corner was used instead, so a rule whose first range was not its top-left one was shifted —
+  // `H6>A6` written on `H6:H8 G2:G4` showed as `G2>XFD2`.
+  const ranges = sqrefRanges(rule.ref);
+  const origin = ranges === undefined ? undefined : boundingTopLeft(ranges);
   for (const formula of formulae) {
     const encoded = encodeCfFormula(formula, context, origin);
     if (encoded === undefined) {
@@ -407,8 +591,8 @@ function encodeRule(
       // presence flag with a length-shaped value, and Excel's own choice — the token length plus its two-byte
       // `cce`, `0x1A` where this writes `0x18` — is one of several that satisfy it. Worth stating because the
       // difference shows up in a byte comparison against Excel and is not a defect.
-      .writeUint32(tokens[0]?.length ?? 0)
-      .writeUint32(tokens[1]?.length ?? 0)
+      .writeUint32(tokens[0]?.rgce.length ?? 0)
+      .writeUint32(tokens[1]?.rgce.length ?? 0)
       .writeUint32(0)
       .toUint8Array(),
     // `strParam` MUST be NULL unless the template is `containsText`.
@@ -418,14 +602,45 @@ function encodeRule(
     // ended four bytes early. Its absence very nearly cancelled the two surplus flag bytes above, which is
     // how a 55-byte record passed for one that should be 57: two defects, and any check that only compared
     // a total would have called it a near miss rather than two separate faults.
-    ...tokens.map(bytes =>
-      concatUint8Arrays([
-        new BinaryWriter().writeUint32(bytes.length).toUint8Array(),
-        bytes,
-        new BinaryWriter().writeUint32(0).toUint8Array()
-      ])
-    )
+    ...tokens.map(encoded => encodeParsedFormula(encoded.rgce, encoded.extra))
   ]);
+}
+
+/**
+ * The Excel 2010 data-bar settings a rule states that `BrtBeginDatabar` cannot carry.
+ *
+ * Those live in the `x14:dataBar` extension — in XLSB a `BrtCFRuleExt` and its `BrtBeginCFRule14` /
+ * `BrtBeginDatabar14` future records — which this writer does not emit. Only settings away from their defaults are
+ * named: the XLSX reader gives every extended data bar the full set, and a gradient-filled, border-less bar with
+ * matching negative colours is exactly what the base record produces.
+ */
+function dataBarExtensionSettings(rule: unknown): string[] {
+  const bar = rule as {
+    type?: string;
+    border?: boolean;
+    gradient?: boolean;
+    negativeBarColorSameAsPositive?: boolean;
+    negativeBarBorderColorSameAsPositive?: boolean;
+    axisPosition?: string;
+    direction?: string;
+  };
+  if (bar.type !== "dataBar") {
+    return [];
+  }
+  return [
+    bar.border === true ? "border" : undefined,
+    bar.gradient === false ? "solid fill" : undefined,
+    bar.negativeBarColorSameAsPositive === false ? "negative fill colour" : undefined,
+    bar.negativeBarBorderColorSameAsPositive === false ? "negative border colour" : undefined,
+    bar.axisPosition !== undefined && bar.axisPosition !== "auto"
+      ? `axis ${bar.axisPosition}`
+      : undefined,
+    bar.direction !== undefined && bar.direction !== "leftToRight"
+      ? `direction ${bar.direction}`
+      : undefined
+  ]
+    .filter((entry): entry is string => entry !== undefined)
+    .map(entry => `${entry} (an x14 extension XLSB does not write)`);
 }
 
 /**
@@ -437,6 +652,26 @@ function encodeRule(
 function ruleShape(
   rule: SheetCfRule
 ): { type: number; template: number; param: number; formulaCount: number } | undefined {
+  // **The text family, in either of the model's spellings** — `{ type: "beginsWith" }` or `{ type: "containsText",
+  // operator: "beginsWith" }`. Only the second was recognised, and of its operators only the five this switch had
+  // templates for: `notContains`, `beginsWith` and `endsWith` were all written as "contains".
+  //
+  // **One formula, not none.** These rules are *specified* in terms of a formula the file has to carry: Excel's
+  // own `BrtBeginCFRule` for `containsText "AP"` is 82 bytes against this writer's 50 at the time, and the
+  // difference is `NOT(ISERROR(SEARCH("AP",A2)))`. `derivedRuleFormula` supplies it — the same function the XML
+  // writer uses, so the two containers cannot disagree about what a condition means.
+  const kind = textRuleKind(rule);
+  if (kind !== undefined) {
+    const textOperator = CF_TEXT_OPER[kind];
+    return textOperator === undefined
+      ? { type: CF_TYPE.expris, template: CF_TEXT_TEMPLATE[kind]!, param: 0, formulaCount: 1 }
+      : {
+          type: CF_TYPE.expris,
+          template: CF_TEMPLATE.containsText,
+          param: textOperator,
+          formulaCount: 1
+        };
+  }
   switch (rule.type) {
     case "cellIs":
       return {
@@ -448,32 +683,17 @@ function ruleShape(
       };
     case "expression":
       return { type: CF_TYPE.expris, template: CF_TEMPLATE.fmla, param: 0, formulaCount: 1 };
-    case "containsText": {
-      // The model folds five conditions into one type, distinguished by `operator` — and only the first
-      // of them uses `strParam`.
-      const template =
-        rule.operator === "containsBlanks"
-          ? CF_TEMPLATE.containsBlanks
-          : rule.operator === "notContainsBlanks"
-            ? CF_TEMPLATE.notContainsBlanks
-            : rule.operator === "containsErrors"
-              ? CF_TEMPLATE.containsErrors
-              : rule.operator === "notContainsErrors"
-                ? CF_TEMPLATE.notContainsErrors
-                : CF_TEMPLATE.containsText;
-      // **One formula, not none.** These rules are *specified* in terms of a formula the file has to carry:
-      // Excel's own `BrtBeginCFRule` for `containsText "AP"` is 82 bytes against this writer's 50, and the
-      // difference is `NOT(ISERROR(SEARCH("AP",A2)))`. With `formulaCount: 0` the rule went out complete-
-      // looking, matched nothing, and reported no loss. `derivedRuleFormula` supplies it — the same function
-      // the XML writer uses, so the two containers cannot disagree about what `containsText` means.
-      return { type: CF_TYPE.expris, template, param: 0, formulaCount: 1 };
-    }
     case "timePeriod": {
       const template = CF_TIME_PERIOD[rule.timePeriod ?? "today"];
-      // Likewise: "last week" is arithmetic over `TODAY()`, and the file is where that arithmetic lives.
+      // "Last week" is arithmetic over `TODAY()`, and the file is where that arithmetic lives — so one formula.
       return template === undefined
         ? undefined
-        : { type: CF_TYPE.expris, template, param: template, formulaCount: 1 };
+        : {
+            type: CF_TYPE.expris,
+            template,
+            param: CF_DATE_OPER[rule.timePeriod ?? "today"]!,
+            formulaCount: 1
+          };
     }
     case "top10":
       return {
@@ -483,13 +703,25 @@ function ruleShape(
         param: Math.max(1, Math.trunc(rule.rank ?? 10)),
         formulaCount: 0
       };
-    case "aboveAverage":
+    case "aboveAverage": {
+      const above = rule.aboveAverage !== false;
+      // `equalAverage` has templates of its own, whose `iParam` MUST be 0; otherwise `iParam` is the number of
+      // standard deviations, 0 to 3. Both were dropped, so "at or above average" came back as "above".
+      if (rule.equalAverage === true) {
+        return {
+          type: CF_TYPE.expris,
+          template: above ? CF_TEMPLATE_EQUAL_ABOVE_AVERAGE : CF_TEMPLATE_EQUAL_BELOW_AVERAGE,
+          param: 0,
+          formulaCount: 0
+        };
+      }
       return {
         type: CF_TYPE.expris,
-        template: rule.aboveAverage === false ? CF_TEMPLATE.belowAverage : CF_TEMPLATE.aboveAverage,
-        param: 0,
+        template: above ? CF_TEMPLATE.aboveAverage : CF_TEMPLATE.belowAverage,
+        param: Math.max(0, Math.min(3, Math.trunc(rule.stdDev ?? 0))),
         formulaCount: 0
       };
+    }
     case "uniqueValues":
       return {
         type: CF_TYPE.expris,
@@ -704,23 +936,22 @@ function encodeCfFormula(
   formula: string | number,
   context: PtgContext,
   origin: { readonly row: number; readonly column: number } | undefined
-): Uint8Array | undefined {
+): EncodedFormula | undefined {
   try {
     const text = typeof formula === "number" ? String(formula) : formula.replace(/^=/, "");
     return text === ""
       ? undefined
-      : encodePtg(
-          parse(tokenize(text)),
-          origin === undefined ? context : { ...context, origin, relativeToOrigin: true },
+      : encodeFormula(
+          text,
+          origin === undefined
+            ? { ...context, role: "conditional" }
+            : { ...context, origin, relativeToOrigin: true, role: "conditional" },
           "conditional format"
         );
   } catch {
     return undefined;
   }
 }
-
-/** Colours a `BrtDXF` carries, for the styles table. */
-export type CfDxfColor = Partial<Color>;
 
 // =============================================================================
 // Reading
@@ -738,14 +969,15 @@ const TIME_PERIOD_BY_VALUE = new Map(
   Object.entries(CF_TIME_PERIOD).map(([name, value]) => [value, name])
 );
 
-/** `containsText` templates, back to the operator the model distinguishes them by. */
-const CONTAINS_OPERATOR_BY_TEMPLATE = new Map<number, string>([
-  [CF_TEMPLATE.containsText, "containsText"],
-  [CF_TEMPLATE.containsBlanks, "containsBlanks"],
-  [CF_TEMPLATE.notContainsBlanks, "notContainsBlanks"],
-  [CF_TEMPLATE.containsErrors, "containsErrors"],
-  [CF_TEMPLATE.notContainsErrors, "notContainsErrors"]
-]);
+/** The text conditions without a search string, back from their templates. */
+const TEXT_KIND_BY_TEMPLATE = new Map(
+  Object.entries(CF_TEXT_TEMPLATE).map(([kind, template]) => [template, kind as TextRuleKind])
+);
+
+/** `CFTextOper` back to the condition, inverted from the table the writer uses. */
+const TEXT_KIND_BY_OPER = new Map(
+  Object.entries(CF_TEXT_OPER).map(([kind, oper]) => [oper, kind as TextRuleKind])
+);
 
 /** One block of conditional formatting, as the model holds it. */
 export interface ReadConditionalFormatting {
@@ -790,26 +1022,37 @@ export function readCfvo(payload: Uint8Array): Cfvo | undefined {
     : ({ type: name, value } as Cfvo);
 }
 
-/** Read a `BrtBeginDatabar`: the two lengths and whether the value shows beside the bar. */
+/**
+ * Read a `BrtBeginDatabar`: the two lengths and whether the value shows beside the bar.
+ *
+ * **A value at its schema default is left out**, as it is from the XLSX Excel writes and therefore from what the
+ * XLSX reader returns: `minLength` 10, `maxLength` 90 and `showValue` on are what an absent attribute means. The
+ * record has no way to say "absent", so reporting them made every data bar read from XLSB carry three settings the
+ * same rule read from XLSX does not — and a model that differs by container for one document.
+ */
 export function readDatabar(payload: Uint8Array):
   | {
-      readonly minLength: number;
-      readonly maxLength: number;
-      readonly showValue: boolean;
+      readonly minLength?: number;
+      readonly maxLength?: number;
+      readonly showValue?: boolean;
     }
   | undefined {
   if (payload.length < 3) {
     return undefined;
   }
-  return { minLength: payload[0]!, maxLength: payload[1]!, showValue: payload[2] !== 0 };
+  return {
+    ...(payload[0] === DATABAR_MIN_LENGTH ? {} : { minLength: payload[0]! }),
+    ...(payload[1] === DATABAR_MAX_LENGTH ? {} : { maxLength: payload[1]! }),
+    ...(payload[2] !== 0 ? {} : { showValue: false })
+  };
 }
 
 /** Read a `BrtBeginIconSet`: which set, and the two display bits. */
 export function readIconSet(payload: Uint8Array):
   | {
       readonly iconSet: string;
-      readonly showValue: boolean;
-      readonly reverse: boolean;
+      readonly showValue?: boolean;
+      readonly reverse?: boolean;
     }
   | undefined {
   if (payload.length < 6) {
@@ -817,10 +1060,11 @@ export function readIconSet(payload: Uint8Array):
   }
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   const flags = view.getUint16(4, true);
+  // As for a data bar, the defaults — values shown, not reversed — are what an absent attribute means.
   return {
     iconSet: ICON_SET_NAME.get(view.getUint32(0, true)) ?? "3TrafficLights1",
-    showValue: (flags & (1 << 1)) === 0,
-    reverse: (flags & (1 << 2)) !== 0
+    ...((flags & (1 << 1)) === 0 ? {} : { showValue: false }),
+    ...((flags & (1 << 2)) !== 0 ? { reverse: true } : {})
   };
 }
 
@@ -838,7 +1082,17 @@ export function readConditionalFormattingBlock(
   if (payload.length < 12 + 16) {
     return undefined;
   }
-  return { ref: rangeReference(readRange(new BinaryReader(payload, 12, part))), rules: [] };
+  // `sqrfx` is an `UncheckedSqRfX`: a count and that many ranges, of which this read only the first.
+  const reader = new XlsbReader(payload, 8, part);
+  const count = reader.readInt32();
+  if (count < 1 || count > Math.floor(reader.remaining / 16)) {
+    return undefined;
+  }
+  const ranges: string[] = [];
+  for (let index = 0; index < count; index++) {
+    ranges.push(rangeReference(readSheetRange(reader, "BrtBeginConditionalFormatting")));
+  }
+  return { ref: ranges.join(" "), rules: [] };
 }
 
 /**
@@ -848,19 +1102,30 @@ export function readConditionalFormattingBlock(
  * other direction. `iParam` means a different thing for each: an operator for a comparison, a time period for
  * a date rule, a rank for a top-N.
  *
- * The formula token streams are *not* decoded back into formula text. That is a genuine narrowing and it is
- * named rather than hidden: `formulae` comes back empty, so a rule that compared against `5` returns as a
- * rule with no operand. Decoding `Rgce` to text needs the reverse of `encodeParsedFormula`, which this module
- * does not have — and inventing a plausible operand would be worse, because the rule would then look complete
- * and evaluate differently.
+ * **The formulas are decoded back to text,** through the same `decodePtg`/`printAst` pair the cell and the
+ * data-validation readers use, relative to the top-left of `ref` — the origin the writer encoded them from.
+ * This returned `formulae: []` once, on the grounds that the reverse of the encoder was missing; it was not,
+ * and the narrowing it accepted was not harmless: a `cellIs` rule with no operand compares against nothing,
+ * and writing it to XLSX produced a `<cfRule>` with no `<formula>`, which the XLSX writer then failed on when
+ * the file was read back and saved. Only the rules whose condition *is* a formula carry one here — a
+ * comparison and an expression. The others state theirs in other fields, and their formula is derived from
+ * those again on write.
+ *
+ * @throws XlsbParseError when a formula the rule depends on cannot be decoded. Not returned as a rule without
+ *         one, because that rule would look complete and evaluate differently.
  */
-export function readCfRule(payload: Uint8Array, part: string): SheetCfRule | undefined {
+export function readCfRule(
+  payload: Uint8Array,
+  part: string,
+  context: PtgContext = {},
+  ref?: string
+): SheetCfRule | undefined {
   // 28 fixed bytes, a two-byte flag word, three formula lengths and a null `strParam` — the shortest legal
   // rule. This said 44, which is what the four-byte flag field made it look like.
   if (payload.length < 46) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const type = reader.readUint32();
   const template = reader.readUint32();
   const dxfId = reader.readUint32();
@@ -874,6 +1139,9 @@ export function readCfRule(payload: Uint8Array, part: string): SheetCfRule | und
   const stopIfTrue = (flags & (1 << 1)) !== 0;
   const bottom = (flags & (1 << 3)) !== 0;
   const percent = (flags & (1 << 4)) !== 0;
+  const formulaLengths = [reader.readUint32(), reader.readUint32(), reader.readUint32()];
+  const text = readNullableWideString(reader, part);
+  const formulas = (): string[] => readRuleFormulas(reader, formulaLengths, part, context, ref);
   const base: SheetCfRule = {
     priority,
     ...(stopIfTrue ? { stopIfTrue: true } : {}),
@@ -885,7 +1153,7 @@ export function readCfRule(payload: Uint8Array, part: string): SheetCfRule | und
       ...base,
       type: "cellIs",
       ...(operator === undefined ? {} : { operator }),
-      formulae: []
+      formulae: formulas()
     };
   }
   if (type === CF_TYPE.filter) {
@@ -915,21 +1183,50 @@ export function readCfRule(payload: Uint8Array, part: string): SheetCfRule | und
     return undefined;
   }
   if (template === CF_TEMPLATE.fmla) {
-    return { ...base, type: "expression", formulae: [] };
+    return { ...base, type: "expression", formulae: formulas() };
   }
-  const containsOperator = CONTAINS_OPERATOR_BY_TEMPLATE.get(template);
-  if (containsOperator !== undefined) {
-    return { ...base, type: "containsText", operator: containsOperator };
+  // The text family, in the shape the XLSX reader gives it — see `textRuleReadShape`. For the text template
+  // `iParam` is the condition (`CFTextOper`); this ignored it, so every text rule read back as "contains".
+  const textKind =
+    template === CF_TEMPLATE.containsText
+      ? TEXT_KIND_BY_OPER.get(param)
+      : TEXT_KIND_BY_TEMPLATE.get(template);
+  if (textKind !== undefined) {
+    return {
+      ...base,
+      ...textRuleReadShape(textKind),
+      ...(text === undefined || !textRuleHasSearchString(textKind) ? {} : { text }),
+      ...derivedFormulae(formulas)
+    };
+  }
+  if (template === CF_TEMPLATE.containsText) {
+    // A `CFTextOper` outside the enumeration: no condition this reader can name.
+    return undefined;
   }
   const timePeriod = TIME_PERIOD_BY_VALUE.get(template);
   if (timePeriod !== undefined) {
-    return { ...base, type: "timePeriod", timePeriod };
+    return { ...base, type: "timePeriod", timePeriod, ...derivedFormulae(formulas) };
   }
-  if (template === CF_TEMPLATE.aboveAverage || template === 0x1d) {
-    return { ...base, type: "aboveAverage", aboveAverage: true };
+  if (template === CF_TEMPLATE.aboveAverage || template === CF_TEMPLATE.belowAverage) {
+    return {
+      ...base,
+      type: "aboveAverage",
+      // Only the non-default states — as `readDatabar` explains, a default is what an absent attribute means.
+      ...(template === CF_TEMPLATE.aboveAverage ? {} : { aboveAverage: false }),
+      ...(param > 0 ? { stdDev: param } : {})
+    };
   }
-  if (template === CF_TEMPLATE.belowAverage) {
-    return { ...base, type: "aboveAverage", aboveAverage: false };
+  if (
+    template === CF_TEMPLATE_EQUAL_ABOVE_AVERAGE ||
+    template === CF_TEMPLATE_EQUAL_BELOW_AVERAGE
+  ) {
+    // `CF_TEMPLATE_EQUALBELOWAVERAGE` was not recognised at all, so such a rule was dropped on read.
+    return {
+      ...base,
+      type: "aboveAverage",
+      ...(template === CF_TEMPLATE_EQUAL_ABOVE_AVERAGE ? {} : { aboveAverage: false }),
+      equalAverage: true
+    };
   }
   if (template === CF_TEMPLATE.uniqueValues) {
     return { ...base, type: "uniqueValues" };
@@ -938,4 +1235,62 @@ export function readCfRule(payload: Uint8Array, part: string): SheetCfRule | und
     return { ...base, type: "duplicateValues" };
   }
   return undefined;
+}
+
+/**
+ * The formula of a rule that states its condition in other fields, as the XLSX reader reports it.
+ *
+ * Excel writes the formula for these rules too — it is what the condition evaluates — and the XLSX reader returns
+ * it in `formulae`, so this does as well. Unlike a comparison's operand it is not what the rule *means*: a writer
+ * derives it again from `text` or `timePeriod` when it is absent. So a formula that cannot be decoded leaves the
+ * rule without one, rather than costing the rule.
+ */
+function derivedFormulae(formulas: () => string[]): { formulae?: string[] } {
+  try {
+    const formulae = formulas();
+    return formulae.length === 0 ? {} : { formulae };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The `CFParsedFormula`s after a rule's fixed fields, as text: `cce`, that many bytes of `rgce`, then `cb` and that
+ * many bytes of `rgcb`. A zero `cbFmla` means the formula is absent, not empty, and nothing is stored for it.
+ */
+function readRuleFormulas(
+  reader: BinaryReader,
+  lengths: readonly number[],
+  part: string,
+  context: PtgContext,
+  ref: string | undefined
+): string[] {
+  // Relative to the top-left of the bounding box of the whole block, as Excel writes it — see `encodeRule`. Excel's
+  // own `SUM($A:$A)>C5` on `F1 C5:D9` stores C5 as row 4, column 0 from C1; reading it from F1, the first range's
+  // corner, gave `$A:$A>F5`.
+  const ranges = sqrefRanges(ref);
+  const origin = ranges === undefined ? undefined : boundingTopLeft(ranges);
+  const where = `${part} conditional formatting formula`;
+  const formulae: string[] = [];
+  for (const length of lengths) {
+    if (length === 0) {
+      continue;
+    }
+    const tokens = reader.readBytes(reader.readUint32());
+    const extra = reader.readBytes(reader.readUint32());
+    const decoded = formulaText(
+      tokens,
+      origin === undefined
+        ? { ...context, role: "conditional" }
+        : { ...context, origin, role: "conditional" },
+      where,
+      extra
+    );
+    if (typeof decoded !== "string") {
+      // `CFParsedFormula` may not contain `PtgExp`; reading one as a reference would invent a condition.
+      throw new XlsbParseError(where, "PtgExp is not allowed in a conditional formatting formula");
+    }
+    formulae.push(decoded);
+  }
+  return formulae;
 }

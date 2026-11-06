@@ -1,22 +1,20 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Address, Cell, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
 const filename = process.argv[2] ?? path.join(exampleDir, "data/table.xlsx");
 
-const workbook = Workbook.create();
-Workbook.readFile(workbook, filename)
-  .then(() => {
-    Workbook.eachSheet(workbook, worksheet => {
+Workbook.readFile(filename)
+  .then(workbook => {
+    Workbook.eachWorksheet(workbook, worksheet => {
       console.log(
-        `Sheet ${worksheet.id} - ${Worksheet.getName(worksheet)}, Dims=${JSON.stringify(Worksheet.dimensions(worksheet))}`
+        `Sheet ${worksheet.id} - ${Worksheet.getName(worksheet)}, Dims=${JSON.stringify(Worksheet.getDimensions(worksheet))}`
       );
-      Worksheet.eachRow(worksheet, row => {
-        Row.eachCell(worksheet, row.number, (_cell, colNumber) => {
-          const addr = `${Address.encodeCol(colNumber - 1)}${row.number}`;
+      Row.each(worksheet, rowNumber => {
+        Row.eachAddress(worksheet, rowNumber, addr => {
           if (Cell.getFont(worksheet, addr)?.strike) {
             console.log(`Strikethrough: ${Cell.getValue(worksheet, addr)}`);
           }

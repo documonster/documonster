@@ -6,15 +6,16 @@ import {
   ArchiveError,
   AbortError,
   ZipParseError,
+  ZipInvalidSignatureError,
   InvalidZipSignatureError,
-  EocdNotFoundError,
-  Crc32MismatchError,
-  DecryptionError,
-  PasswordRequiredError,
-  RangeNotSupportedError,
-  HttpRangeError,
-  FileTooLargeError,
-  UnsupportedCompressionError,
+  ZipEocdNotFoundError,
+  ZipCrc32MismatchError,
+  ZipDecryptionError,
+  ZipPasswordRequiredError,
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError,
+  ArchiveFileTooLargeError,
+  ZipUnsupportedCompressionError,
   toError,
   suppressUnhandledRejection
 } from "@archive/core/errors";
@@ -61,113 +62,118 @@ describe("errors", () => {
     });
   });
 
-  describe("InvalidZipSignatureError", () => {
+  describe("ZipInvalidSignatureError", () => {
     it("should format signature mismatch without context", () => {
-      const error = new InvalidZipSignatureError("0x04034b50", 0x12345678);
+      const error = new ZipInvalidSignatureError("0x04034b50", 0x12345678);
       expect(error.message).toBe("Invalid signature: expected 0x04034b50, got 0x12345678");
-      expect(error.name).toBe("InvalidZipSignatureError");
+      expect(error.name).toBe("ZipInvalidSignatureError");
     });
 
     it("should format signature mismatch with context", () => {
-      const error = new InvalidZipSignatureError("0x04034b50", 0x12345678, "local file header");
+      const error = new ZipInvalidSignatureError("0x04034b50", 0x12345678, "local file header");
       expect(error.message).toBe("Invalid local file header: expected 0x04034b50, got 0x12345678");
     });
 
     it("should pad signature to 8 hex digits", () => {
-      const error = new InvalidZipSignatureError("0x04034b50", 0x00000001);
+      const error = new ZipInvalidSignatureError("0x04034b50", 0x00000001);
       expect(error.message).toContain("0x00000001");
+    });
+
+    it("keeps InvalidZipSignatureError as a deprecated name of the same class", () => {
+      expect(InvalidZipSignatureError).toBe(ZipInvalidSignatureError);
+      expect(new InvalidZipSignatureError("0x04034b50", 0).name).toBe("ZipInvalidSignatureError");
     });
   });
 
-  describe("EocdNotFoundError", () => {
+  describe("ZipEocdNotFoundError", () => {
     it("should have standard message", () => {
-      const error = new EocdNotFoundError();
+      const error = new ZipEocdNotFoundError();
       expect(error.message).toBe("Invalid ZIP file: End of Central Directory not found");
-      expect(error.name).toBe("EocdNotFoundError");
+      expect(error.name).toBe("ZipEocdNotFoundError");
       expect(error).toBeInstanceOf(ZipParseError);
     });
   });
 
-  describe("Crc32MismatchError", () => {
+  describe("ZipCrc32MismatchError", () => {
     it("should format CRC32 mismatch with path and values", () => {
-      const error = new Crc32MismatchError("test.txt", 0xaabbccdd, 0x11223344);
+      const error = new ZipCrc32MismatchError("test.txt", 0xaabbccdd, 0x11223344);
       expect(error.message).toBe(
         'CRC32 mismatch for "test.txt": expected 0xaabbccdd, got 0x11223344'
       );
-      expect(error.name).toBe("Crc32MismatchError");
+      expect(error.name).toBe("ZipCrc32MismatchError");
       expect(error.path).toBe("test.txt");
       expect(error.expected).toBe(0xaabbccdd);
       expect(error.actual).toBe(0x11223344);
     });
 
     it("should pad CRC32 to 8 hex digits", () => {
-      const error = new Crc32MismatchError("file.bin", 0x00000001, 0x00000002);
+      const error = new ZipCrc32MismatchError("file.bin", 0x00000001, 0x00000002);
       expect(error.message).toContain("0x00000001");
       expect(error.message).toContain("0x00000002");
     });
   });
 
-  describe("DecryptionError", () => {
+  describe("ZipDecryptionError", () => {
     it("should format without details", () => {
-      const error = new DecryptionError("secret.txt");
+      const error = new ZipDecryptionError("secret.txt");
       expect(error.message).toBe(
         'Failed to decrypt "secret.txt": incorrect password or corrupted data'
       );
-      expect(error.name).toBe("DecryptionError");
+      expect(error.name).toBe("ZipDecryptionError");
     });
 
     it("should format with details", () => {
-      const error = new DecryptionError("secret.txt", "AES key derivation failed");
+      const error = new ZipDecryptionError("secret.txt", "AES key derivation failed");
       expect(error.message).toBe('Failed to decrypt "secret.txt": AES key derivation failed');
     });
   });
 
-  describe("PasswordRequiredError", () => {
+  describe("ZipPasswordRequiredError", () => {
     it("should format with path", () => {
-      const error = new PasswordRequiredError("encrypted.zip");
+      const error = new ZipPasswordRequiredError("encrypted.zip");
       expect(error.message).toBe(
         'File "encrypted.zip" is encrypted. Please provide a password to extract.'
       );
-      expect(error.name).toBe("PasswordRequiredError");
+      expect(error.name).toBe("ZipPasswordRequiredError");
     });
   });
 
-  describe("RangeNotSupportedError", () => {
+  describe("ArchiveRangeNotSupportedError", () => {
     it("should format with URL", () => {
-      const error = new RangeNotSupportedError("https://example.com/file.zip");
+      const error = new ArchiveRangeNotSupportedError("https://example.com/file.zip");
       expect(error.message).toBe(
         "Server does not support Range requests for: https://example.com/file.zip"
       );
-      expect(error.name).toBe("RangeNotSupportedError");
+      expect(error.name).toBe("ArchiveRangeNotSupportedError");
     });
   });
 
-  describe("HttpRangeError", () => {
+  describe("ArchiveHttpRangeError", () => {
     it("should format with URL and status", () => {
-      const error = new HttpRangeError("https://example.com/file.zip", 404, "Not Found");
+      const error = new ArchiveHttpRangeError("https://example.com/file.zip", 404, "Not Found");
       expect(error.message).toBe("HTTP 404 Not Found for: https://example.com/file.zip");
-      expect(error.name).toBe("HttpRangeError");
+      expect(error.name).toBe("ArchiveHttpRangeError");
       expect(error.url).toBe("https://example.com/file.zip");
       expect(error.status).toBe(404);
       expect(error.statusText).toBe("Not Found");
     });
   });
 
-  describe("FileTooLargeError", () => {
+  describe("ArchiveFileTooLargeError", () => {
     it("should format with path and reason", () => {
-      const error = new FileTooLargeError("huge.bin", "exceeds 100MB limit");
+      const error = new ArchiveFileTooLargeError("huge.bin", "exceeds 100MB limit");
       expect(error.message).toBe(
         'File "huge.bin" is too large to extract into memory (exceeds 100MB limit)'
       );
-      expect(error.name).toBe("FileTooLargeError");
+      expect(error.name).toBe("ArchiveFileTooLargeError");
     });
   });
 
-  describe("UnsupportedCompressionError", () => {
+  describe("ZipUnsupportedCompressionError", () => {
     it("should format with method number", () => {
-      const error = new UnsupportedCompressionError(99);
+      const error = new ZipUnsupportedCompressionError(99);
       expect(error.message).toBe("Unsupported compression method: 99");
-      expect(error.name).toBe("UnsupportedCompressionError");
+      expect(error.name).toBe("ZipUnsupportedCompressionError");
     });
   });
 

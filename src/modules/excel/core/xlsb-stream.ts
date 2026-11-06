@@ -44,6 +44,7 @@ import type { WorkbookModel } from "@excel/core/workbook.browser";
 import type { XlsxWritable } from "@excel/core/xlsx-io-types";
 import { StreamingSink, type StreamingZipLike } from "@excel/utils/package-sink-adapters";
 import { writeXlsbPackage } from "@excel/xlsb/write/package";
+import type { RegisteredFunctions } from "@formula/syntax/array-result";
 
 /**
  * The zip writer this needs, plus the two lifecycle members a sink does not use.
@@ -67,20 +68,26 @@ export async function streamXlsbPackage(
   model: WorkbookModel,
   stream: XlsxWritable,
   createZip: () => StreamingZipDriver | Promise<StreamingZipDriver>,
-  /**
-   * Called with what the writer could not express, **before the archive is finalised**.
-   *
-   * **The refusal used to happen after.** `writeXlsbToStream` awaited this function and *then* consulted the policy, so
-   * a write with the default `unsupported: "error"` handed a complete package to the caller's destination and threw
-   * afterwards — leaving a finished file beside a rejected promise. And once `toStream` was rebuilt on this path the
-   * consequence became visible: the readable had already been ended, so the throw reached nobody and a workbook with
-   * unwritable content streamed to a clean finish.
-   *
-   * Refusing here means the ZIP is never finalised, so the destination gets a truncated archive and an error rather
-   * than a plausible one and a promise nobody is watching. A truncated ZIP has no central directory and no reader will
-   * accept it, which is the honest outcome for a write that was refused.
-   */
-  refuse?: (unsupported: readonly string[]) => void
+  options: {
+    /** See `XlsbWriteOptions.releasedMedia`. */
+    readonly releasedMedia?: ReadonlySet<number>;
+    /** See `XlsbWriteOptions.registeredFunctions`. */
+    readonly registeredFunctions?: RegisteredFunctions;
+    /**
+     * Called with what the writer could not express, **before the archive is finalised**.
+     *
+     * **The refusal used to happen after.** `writeXlsbToStream` awaited this function and *then* consulted the policy, so
+     * a write with the default `unsupported: "error"` handed a complete package to the caller's destination and threw
+     * afterwards — leaving a finished file beside a rejected promise. And once `toStream` was rebuilt on this path the
+     * consequence became visible: the readable had already been ended, so the throw reached nobody and a workbook with
+     * unwritable content streamed to a clean finish.
+     *
+     * Refusing here means the ZIP is never finalised, so the destination gets a truncated archive and an error rather
+     * than a plausible one and a promise nobody is watching. A truncated ZIP has no central directory and no reader will
+     * accept it, which is the honest outcome for a write that was refused.
+     */
+    readonly refuse?: (unsupported: readonly string[]) => void;
+  } = {}
 ): Promise<{ readonly unsupported: readonly string[] }> {
   const zip = await createZip();
   zip.pipe(stream);
@@ -97,7 +104,12 @@ export async function streamXlsbPackage(
     });
   });
 
-  const written = await writeXlsbPackage(model, { sink: new StreamingSink(zip) });
+  const { refuse, releasedMedia, registeredFunctions } = options;
+  const written = await writeXlsbPackage(model, {
+    sink: new StreamingSink(zip),
+    releasedMedia,
+    registeredFunctions
+  });
   // Before `finalize`, so a refusal leaves no complete archive behind — see `refuse`.
   if (refuse !== undefined) {
     try {
@@ -115,7 +127,7 @@ export async function streamXlsbPackage(
   await finished;
   // `finish` on the zip means "every byte has been handed to the sink", which is not the same as "the sink has
   // finished with them". A file stream still has bytes in flight, so a caller that read the file as soon as
-  // `writeStream` resolved got `EocdNotFoundError` on a package that was written perfectly.
+  // `writeStream` resolved got `ZipEocdNotFoundError` on a package that was written perfectly.
   await settled(stream);
   return { unsupported: written.unsupported };
 }

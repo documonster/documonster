@@ -86,7 +86,7 @@ describe("DOCX XML Compliance", () => {
     it("should have w:document root with namespace, w:body, w:p, w:r, w:t elements", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Hello World");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -126,7 +126,7 @@ describe("DOCX XML Compliance", () => {
       const h = Document.create();
       Document.useDefaultStyles(h);
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/styles.xml");
@@ -162,7 +162,7 @@ describe("DOCX XML Compliance", () => {
     it("should have w:numbering root with abstractNum and num elements when lists exist", async () => {
       const h = Document.create();
       Document.addBulletList(h, ["Item 1", "Item 2"]);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/numbering.xml");
@@ -202,7 +202,7 @@ describe("DOCX XML Compliance", () => {
     it("should have valid _rels/.rels with Id, Type, Target attributes", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "_rels/.rels");
@@ -219,7 +219,7 @@ describe("DOCX XML Compliance", () => {
     it("should have document.xml.rels targets that exist in the ZIP", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/_rels/document.xml.rels");
@@ -254,7 +254,7 @@ describe("DOCX XML Compliance", () => {
     it("should have Override entries whose PartName files exist in ZIP", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "[Content_Types].xml");
@@ -275,7 +275,7 @@ describe("DOCX XML Compliance", () => {
     it("should have Default entries covering rels and xml extensions", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "[Content_Types].xml");
@@ -296,7 +296,7 @@ describe("DOCX XML Compliance", () => {
       const h = Document.create();
       Document.useDefaultStyles(h);
       Document.addHeading(h, "My Heading", 1);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -315,7 +315,7 @@ describe("DOCX XML Compliance", () => {
     it("should write w:numPr with w:numId and w:ilvl for numbered paragraphs", async () => {
       const h = Document.create();
       Document.addBulletList(h, ["Item"]);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -343,7 +343,7 @@ describe("DOCX XML Compliance", () => {
     it("should write w:jc for paragraph alignment", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Centered", { alignment: "center" });
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -367,7 +367,7 @@ describe("DOCX XML Compliance", () => {
     it("should write w:b for bold runs", async () => {
       const h = Document.create();
       Document.addContent(h, Build.paragraph([Build.bold("Bold Text")]));
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -383,7 +383,7 @@ describe("DOCX XML Compliance", () => {
     it("should write w:i for italic runs", async () => {
       const h = Document.create();
       Document.addContent(h, Build.paragraph([Build.italic("Italic Text")]));
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -400,7 +400,7 @@ describe("DOCX XML Compliance", () => {
       const h = Document.create();
       // size 24 half-points = 12pt
       Document.addContent(h, Build.paragraph([Build.text("Sized", { size: 24 })]));
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -420,7 +420,7 @@ describe("DOCX XML Compliance", () => {
     it("should write w:color with 6-digit hex value", async () => {
       const h = Document.create();
       Document.addContent(h, Build.paragraph([Build.text("Red Text", { color: "FF0000" })]));
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -453,7 +453,7 @@ describe("DOCX XML Compliance", () => {
         ],
         { columnWidths: [4000, 4000] }
       );
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -496,7 +496,7 @@ describe("DOCX XML Compliance", () => {
         ["A", "B", "C"],
         ["1", "2", "3"]
       ]);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
       const tbl = findChild(findChild(parseEntry(files, "word/document.xml"), "w:body")!, "w:tbl")!;
       const tblGrid = findChild(tbl, "w:tblGrid");
@@ -514,7 +514,7 @@ describe("DOCX XML Compliance", () => {
       // Word strict mode rejects table cells without <w:tcW>.
       const h = Document.create();
       Document.addTable(h, [["only"]]);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
       const tbl = findChild(findChild(parseEntry(files, "word/document.xml"), "w:body")!, "w:tbl")!;
       const tc = findChild(findChild(tbl, "w:tr")!, "w:tc")!;
@@ -536,8 +536,8 @@ describe("DOCX XML Compliance", () => {
         rows: [{ cells: [{ content: [inner] }] }]
       };
       const h = Document.create();
-      Document.addTableElement(h, outer);
-      const bytes = await Io.package(Document.build(h));
+      Document.addTable(h, outer);
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
       const outerTbl = findChild(
         findChild(parseEntry(files, "word/document.xml"), "w:body")!,
@@ -559,7 +559,7 @@ describe("DOCX XML Compliance", () => {
       const h = Document.create();
       Document.addTable(h, [["A"]]);
       Document.addTable(h, [["B"]]);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
       const body = findChild(parseEntry(files, "word/document.xml"), "w:body")!;
       const elementChildren = body.children.filter(c => c.type === "element");
@@ -584,7 +584,7 @@ describe("DOCX XML Compliance", () => {
       const doc = {
         body: [{ type: "paragraph", children: [] }]
       } as any;
-      const bytes = await Io.package(doc);
+      const bytes = await Io.toBuffer(doc);
       const files = await extractDocx(bytes);
       const body = findChild(parseEntry(files, "word/document.xml"), "w:body")!;
       const sectPr = findChild(body, "w:sectPr");
@@ -595,7 +595,7 @@ describe("DOCX XML Compliance", () => {
 
     it("synthesises a <w:p> when the model body is empty", async () => {
       const doc = { body: [] } as any;
-      const bytes = await Io.package(doc);
+      const bytes = await Io.toBuffer(doc);
       const files = await extractDocx(bytes);
       const body = findChild(parseEntry(files, "word/document.xml"), "w:body")!;
       // Must contain at least one <w:p>
@@ -609,7 +609,7 @@ describe("DOCX XML Compliance", () => {
       Document.addParagraph(h, "body");
       Document.setHeader(h, "default", { children: [] });
       Document.setFooter(h, "default", { children: [] });
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
       const headerName = [...files.keys()].find(n => /^word\/header\d+\.xml$/.test(n))!;
       const footerName = [...files.keys()].find(n => /^word\/footer\d+\.xml$/.test(n))!;
@@ -647,7 +647,7 @@ describe("DOCX XML Compliance", () => {
           }
         ]
       } as any;
-      const bytes = await Io.package(doc);
+      const bytes = await Io.toBuffer(doc);
       const files = await extractDocx(bytes);
       const docXml = decoder.decode(files.get("word/document.xml")!);
       // Cached value must NOT contain a literal newline inside a <w:t>
@@ -673,7 +673,7 @@ describe("DOCX XML Compliance", () => {
         h,
         Build.paragraph([Build.hyperlink("Click me", { url: "https://example.com" })])
       );
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -699,7 +699,7 @@ describe("DOCX XML Compliance", () => {
     it("should degrade hyperlink without r:id and without anchor to bare runs (avoid CT_Hyperlink schema violation)", async () => {
       const h = Document.create();
       Document.addContent(h, Build.paragraph([Build.hyperlink("plain text", {})]));
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/document.xml");
@@ -735,7 +735,7 @@ describe("DOCX XML Compliance", () => {
         footers: [{ type: "default", rId: "" }]
       });
       Document.addParagraph(h, "Body");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       // Find header file
@@ -799,7 +799,7 @@ describe("DOCX XML Compliance", () => {
           Build.commentReference(commentId)
         ])
       );
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       // comments.xml exists
@@ -839,7 +839,7 @@ describe("DOCX XML Compliance", () => {
     it("should have w:settings root with namespace", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/settings.xml");
@@ -861,7 +861,7 @@ describe("DOCX XML Compliance", () => {
       const h = Document.create();
       Document.useDefaultStyles(h);
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/fontTable.xml");
@@ -886,7 +886,7 @@ describe("DOCX XML Compliance", () => {
     it("should have a:theme root with a:themeElements containing color, font, and format schemes", async () => {
       const h = Document.create();
       Document.addParagraph(h, "Test");
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       const root = parseEntry(files, "word/theme/theme1.xml");
@@ -915,7 +915,7 @@ describe("DOCX XML Compliance", () => {
     it("should have image Relationship in rels with media file in ZIP and blip reference", async () => {
       const h = Document.create();
       Document.addImage(h, MINI_PNG, "png", 914400, 914400);
-      const bytes = await Io.package(Document.build(h));
+      const bytes = await Io.toBuffer(h);
       const files = await extractDocx(bytes);
 
       // Find image relationship in document.xml.rels
@@ -1031,7 +1031,7 @@ describe("DOCX XML Compliance", () => {
         ]
       };
 
-      const bytes = await Io.package(doc);
+      const bytes = await Io.toBuffer(doc);
       const files = await extractDocx(bytes);
       const { ids, cNv } = collectDocPrIds(files);
 
@@ -1085,7 +1085,7 @@ describe("DOCX XML Compliance", () => {
         ]
       };
 
-      const bytes = await Io.package(doc as never);
+      const bytes = await Io.toBuffer(doc as never);
       const files = await extractDocx(bytes);
       const { ids } = collectDocPrIds(files);
 

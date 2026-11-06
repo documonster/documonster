@@ -15,7 +15,7 @@
  * and for input parsing.
  */
 
-import { serialToParts } from "./excel-serial";
+import { partsToSerial, serialToParts, utcDateToParts } from "./excel-serial";
 import type { FormatCompareOp, FormatDatePart, FormatSection, FormatToken } from "./number-format";
 import { DAY_NAMES, MONTH_NAMES, parseNumberFormat } from "./number-format";
 
@@ -39,6 +39,33 @@ const EPOCH_1904_OFFSET = 1462;
 
 /** Excel accepts at most three decimal places of a second (`ss.000`); more is an invalid format. */
 const MAX_SECOND_DECIMALS = 3;
+
+/** The format a `Date` under `General` is shown in when its time is midnight… */
+const GENERAL_DATE_FORMAT = "yyyy-mm-dd";
+/** …and when it is not. */
+const GENERAL_DATETIME_FORMAT = "yyyy-mm-dd hh:mm:ss";
+
+/**
+ * A `Date` shown under the `General` format — a date value with no number format.
+ *
+ * Excel substitutes a locale-dependent short date there (US `m/d/yyyy`); this library shows
+ * an unambiguous ISO-like form instead: `yyyy-mm-dd` when the time is midnight, else
+ * `yyyy-mm-dd hh:mm:ss`. The calendar value is the `Date`'s **UTC** fields — the convention
+ * for a `Date` carrying a spreadsheet value (see `./excel-serial`) — so the text is the same
+ * on every machine, whatever its locale and timezone. Rendering the serial through `General`
+ * would show the raw number (`45306`), which is never what a caller wants.
+ *
+ * The one rule for every exit that shows such a date: an Excel cell's display text and
+ * `Pdf.fromTable` alike.
+ */
+export function formatDateAsGeneral(value: Date, date1904 = false): string {
+  const serial = partsToSerial(utcDateToParts(value), date1904);
+  return renderNumberFormat(
+    serial % 1 === 0 ? GENERAL_DATE_FORMAT : GENERAL_DATETIME_FORMAT,
+    serial,
+    { date1904 }
+  );
+}
 
 /**
  * Format `value` as Excel would display it under `fmt`.

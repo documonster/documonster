@@ -350,8 +350,8 @@ export class FontManager {
    * Note that this face came from scanning the host, not from the caller.
    *
    * Reported by {@link reportDiagnostics}, which every pipeline calls — the warning
-   * used to be raised at the one discovery site inside `PdfDocumentBuilder.build()`,
-   * so `Pdf.create`, `Pdf.fromExcel` and `Pdf.fromDocx` embedded a face off the host
+   * used to be raised at the one discovery site inside `PdfDocumentBuilder.toBuffer()`,
+   * so `Pdf.fromTable`, `Pdf.fromExcel` and `Pdf.fromDocx` embedded a face off the host
    * and said nothing. Those are the entry points most likely to be producing a
    * golden file, and the output stops being reproducible the moment it happens.
    *
@@ -412,7 +412,7 @@ export class FontManager {
 
   /**
    * Read-only view of the non-WinAnsi code points encountered so far when
-   * no font is embedded. Used by callers (`PdfDocumentBuilder.build()`)
+   * no font is embedded. Used by callers (`PdfDocumentBuilder.toBuffer()`)
    * to decide whether to auto-discover a system font before the Type3
    * fallback kicks in. Returns a defensive copy so consumers cannot
    * mutate the internal set.
@@ -485,12 +485,12 @@ export class FontManager {
   /**
    * Report non-WinAnsi characters that will render as Type3 NOTDEF boxes.
    *
-   * This lives here rather than in `PdfDocumentBuilder.build()` because it is the
+   * This lives here rather than in `PdfDocumentBuilder.toBuffer()` because it is the
    * condition `PdfExportOptions.onWarning` documents — "characters that no
    * configured typeface covers … without this callback the condition is
    * invisible" — and the builder's copy was reachable only from the Word bridge.
    * The spreadsheet exporter is a separate pipeline that never ran it, so
-   * `Pdf.create` and `Pdf.fromExcel` produced a PDF with tofu boxes in it and
+   * `Pdf.fromTable` and `Pdf.fromExcel` produced a PDF with tofu boxes in it and
    * said nothing at all. `missingCodePoints` below does not cover this case: it is
    * recorded while routing text through an *embedded* face's cmap, and here there
    * is no embedded face to route through.
@@ -665,7 +665,7 @@ export class FontManager {
    * Must be called for every text string before writing the PDF.
    *
    * Two sets are maintained because font selection may be decided *after*
-   * drawing (e.g. `PdfDocumentBuilder.build()` auto-discovers and embeds a
+   * drawing (e.g. `PdfDocumentBuilder.toBuffer()` auto-discovers and embeds a
    * system font once it sees the accumulated non-WinAnsi code points):
    *
    *   - `usedCodePoints` — every code point seen, always. If an embedded
@@ -1443,7 +1443,7 @@ export class FontManager {
     // Last moment the subset can still grow, and the only one every pipeline passes
     // through. Hooking this to `prepare()` instead left the whole builder path unshaped:
     // `PdfDocumentBuilder` never calls it — only the spreadsheet exporter does — so the
-    // glyphs were registered for `Pdf.fromExcel` and not for `Pdf.create`. Doing it here
+    // glyphs were registered for `Pdf.fromExcel` and not for `Pdf.fromTable`. Doing it here
     // needs no cooperation from the caller and cannot be forgotten by a new one.
     this.registerShapedGlyphs();
     const fontObjectMap = new Map<string, number>();

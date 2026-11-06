@@ -38,8 +38,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { Io } from "documonster/word";
-import { markdownToDocx } from "documonster/word/markdown";
+import { Document } from "documonster/word";
+import { WordMarkdown } from "documonster/word/markdown";
 
 import {
   fitToColumn,
@@ -180,15 +180,15 @@ for (const note of prepared.notes) {
   console.log(`  ${note}`);
 }
 
-const doc = await markdownToDocx(prepared.markdown, {
+const doc = await WordMarkdown.toDocx(prepared.markdown, {
   ...(prepared.resolveImage === undefined ? {} : { resolveImage: prepared.resolveImage })
 });
 const file = path.join(out, "diagram-paging.docx");
 // Re-runnable: the example is run again against its own previous output, and
-// `Io.writeFile` replaces rather than refusing.
-await Io.writeFile(doc, file);
+// `Document.writeFile` replaces rather than refusing.
+await Document.writeFile(doc, file);
 
-const written = await Io.readFile(file);
+const written = await Document.readFile(file);
 console.log(
   `\nwrote ${path.relative(process.cwd(), file)} — ${written.images?.length ?? 0} image(s) for ${CASES.length} diagram(s)`
 );

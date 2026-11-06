@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,9 +28,9 @@ const filename = process.argv[2] ?? path.join(outDir, "xlsb-formatting.xlsb");
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Invoice");
 
-Worksheet.addRow(ws, ["Item", "Qty", "Price", "Total"]);
-Worksheet.addRow(ws, ["Widget", 3, 9.99, 29.97]);
-Worksheet.addRow(ws, ["Gadget", 1, 24.5, 24.5]);
+Row.add(ws, ["Item", "Qty", "Price", "Total"]);
+Row.add(ws, ["Widget", 3, 9.99, 29.97]);
+Row.add(ws, ["Gadget", 1, 24.5, 24.5]);
 
 // A header row, styled as a row rather than cell by cell. The row's format index used to be written
 // as a hardcoded zero, so this had no way into the file at all.
@@ -69,9 +69,8 @@ ws.properties = { ...ws.properties, defaultRowHeight: 16, tabColor: { argb: "FF3
 await Workbook.writeFile(wb, filename);
 console.log(`wrote ${filename}`);
 
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
-const read = Workbook.getWorksheets(reopened)[0]!;
+const reopened = await Workbook.readFile(filename);
+const read = Workbook.listWorksheets(reopened)[0]!;
 
 console.log("row 1 style:", JSON.stringify(Row.getStyle(read, 1)));
 console.log("column 3 style:", JSON.stringify(Column.getStyle(read, 3)));

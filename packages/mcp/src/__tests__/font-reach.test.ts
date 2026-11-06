@@ -110,7 +110,7 @@ describe("overlay text gets the face, including a face inside a collection", () 
   });
 
   it("omits collectionIndex for a single-face file rather than sending 0", async () => {
-    // `embedFont(bytes, 0)` and `embedFont(bytes)` mean the same thing today, but stating an
+    // `embedFont({ data: bytes, collectionIndex: 0 })` and `embedFont(bytes)` mean the same thing today, but stating an
     // index that was never asked for turns a default into a decision.
     const config = await configured(["face.ttf"]);
     expect(overlayFaces(config)[0]).not.toHaveProperty("collectionIndex");

@@ -22,9 +22,9 @@ const { results, dropped } = await writeBoth(workbook, "xlsb-defined-names");
 report("names after a round trip", results, reloaded => {
   // `getAllEntries`, not `getNames` — the latter answers "which names cover *this cell*" and needs an address,
   // so calling it with only the container throws. Two members whose names suggest the same thing.
-  const entries = DefinedNames.getAllEntries(
-    Workbook.getDefinedNames(reloaded) as never
-  ) as readonly { readonly name?: string }[];
+  const entries = DefinedNames.list(Workbook.getDefinedNames(reloaded) as never) as readonly {
+    readonly name?: string;
+  }[];
   return entries.length === 0
     ? "none survived"
     : entries
@@ -35,7 +35,7 @@ report("names after a round trip", results, reloaded => {
 
 report("what they point at", results, reloaded => {
   const container = Workbook.getDefinedNames(reloaded) as never;
-  const entries = DefinedNames.getAllEntries(container) as readonly {
+  const entries = DefinedNames.list(container) as readonly {
     readonly name?: string;
     readonly ranges?: readonly string[];
     readonly formula?: string;

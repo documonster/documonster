@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Row, Stream, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import type { Alignment } from "@excel/types";
 
 import { Pdf } from "../index";
@@ -66,26 +66,33 @@ function addSection(
   cellValue: string | ((i: number) => string),
   wrap = false
 ): void {
-  Cell.setValue(ws, titleRow, 1, title);
-  Cell.setStyle(ws, titleRow, 1, { font: { bold: true, size: 14 } });
+  Cell.setValue(ws, { row: titleRow, col: 1 }, title);
+  Cell.setStyle(ws, { row: titleRow, col: 1 }, { font: { bold: true, size: 14 } });
   Worksheet.merge(ws, titleRow, 1, titleRow, 6);
 
   for (let c = 0; c < 6; c++) {
-    Cell.setValue(ws, headerRow, c + 1, headers[c]);
-    Cell.setStyle(ws, headerRow, c + 1, { font: { size: 8 } });
+    Cell.setValue(ws, { row: headerRow, col: c + 1 }, headers[c]);
+    Cell.setStyle(ws, { row: headerRow, col: c + 1 }, { font: { size: 8 } });
   }
 
   Row.setHeight(ws, dataRow, rowHeight);
   for (let c = 0; c < 6; c++) {
-    const cell = Row.getCell(ws, dataRow, c + 1);
-    Stream.setCellValue(cell, typeof cellValue === "function" ? cellValue(c) : cellValue);
-    Stream.setCellAlignment(cell, {
-      horizontal: combos[c].h,
-      vertical: combos[c].v,
-      textRotation: rotation,
-      wrapText: wrap
-    });
-    Stream.setCellBorder(cell, thinBorder);
+    Cell.setValue(
+      ws,
+      { row: dataRow, col: c + 1 },
+      typeof cellValue === "function" ? cellValue(c) : cellValue
+    );
+    Cell.setAlignment(
+      ws,
+      { row: dataRow, col: c + 1 },
+      {
+        horizontal: combos[c].h,
+        vertical: combos[c].v,
+        textRotation: rotation,
+        wrapText: wrap
+      }
+    );
+    Cell.setBorder(ws, { row: dataRow, col: c + 1 }, thinBorder);
   }
 }
 

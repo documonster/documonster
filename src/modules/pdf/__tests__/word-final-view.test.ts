@@ -33,7 +33,7 @@ describe("docxToPdf — final view", () => {
       ],
       styles: []
     } as unknown as DocxDocument;
-    const read = await Pdf.read(await docxToPdf(doc));
+    const read = await Pdf.extract(await docxToPdf(doc));
     const text = read.pages
       .map(p => p.text)
       .join(" ")

@@ -60,6 +60,25 @@ describe("BaseError", () => {
     expect(json.cause).toBeDefined();
     expect((json.cause as any).message).toBe("cause message");
   });
+
+  it("should serialize the error's own data fields", () => {
+    class FieldError extends BaseError {
+      override name = "FieldError";
+      readonly field: string;
+      readonly inner: Error;
+      constructor(field: string) {
+        super(`bad ${field}`);
+        this.field = field;
+        this.inner = new BaseError("inner");
+      }
+    }
+    const json = new FieldError("options.level").toJSON();
+    expect(json.name).toBe("FieldError");
+    expect(json.message).toBe("bad options.level");
+    expect(json.field).toBe("options.level");
+    expect((json.inner as any).message).toBe("inner");
+    expect(JSON.parse(JSON.stringify(new FieldError("x"))).field).toBe("x");
+  });
 });
 
 describe("AbortError", () => {

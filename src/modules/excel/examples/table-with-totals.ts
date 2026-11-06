@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Table, Workbook, Worksheet } from "@excel/index";
+import { Column, Table, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -27,7 +27,7 @@ function getRows() {
   return rows;
 }
 
-Worksheet.setColumns(ws, [{ key: "date", width: 16 }, { key: "number" }]);
+Column.setDefinitions(ws, [{ key: "date", width: 16 }, { key: "number" }]);
 
 Table.add(ws, {
   name: "TestTable",

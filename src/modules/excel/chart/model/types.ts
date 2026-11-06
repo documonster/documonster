@@ -7,6 +7,7 @@
  */
 
 import type { AnchorModel } from "@excel/core/anchor";
+import type { ColorTransform, ColorTransformKind } from "@utils/theme-colors";
 
 // ============================================================================
 // Chart Type Enums
@@ -214,7 +215,32 @@ export interface ChartColor {
   lumOff?: number;
   /** Alpha (OOXML percentage, 0-100000; 100000 = fully opaque) */
   alpha?: number;
+  /**
+   * Every DrawingML colour transform the colour carries (ECMA-376 §20.1.2.3) — `lumMod`, `satOff`, `hueOff`,
+   * `alphaMod`, `comp`, `gamma`, `redMod`, … — in document order, each `val` in the element's own unit (the raw
+   * OOXML integer, `tint` included: `80000` is 80 %). A read sets it whenever the colour has a transform; the order
+   * matters (`tint` then `lumMod` is not `lumMod` then `tint`), and most transforms have no named field.
+   *
+   * The named fields ({@link tint}, {@link shade}, {@link satMod}, {@link lumMod}, {@link lumOff}, {@link alpha}) are
+   * views of this list, and **a named field that is present wins**: the writers and the renderer use the list with
+   * each present field replacing the value of the first entry of its kind (in place), or appended when the list has
+   * none. A field that is absent leaves the list as it is. So editing `lumMod` on a read colour takes effect and keeps
+   * every other transform; to remove a transform, remove it from this list (or delete the list, and the named fields
+   * are all there is). Without the list, the named fields are written as they always were.
+   */
+  transforms?: readonly ChartColorTransform[];
 }
+
+/**
+ * One DrawingML colour transform — `{ kind: "lumMod", val: 75000 }`, `{ kind: "comp" }` — as
+ * {@link ChartColor.transforms} lists them. `val` is in the element's own unit: thousandths of a percent for a
+ * percentage (`100000` is 100 %), 60 000ths of a degree for `hue` / `hueOff`; the flag transforms (`comp`, `inv`,
+ * `gray`, `gamma`, `invGamma`) take none.
+ */
+export type ChartColorTransform = ColorTransform;
+
+/** The transform elements of a DrawingML colour, as the markup names them. */
+export type ChartColorTransformKind = ColorTransformKind;
 
 /**
  * Line (outline) properties.
@@ -2013,6 +2039,11 @@ export interface ChartColorVariation {
   satMod?: number;
   /** `<a:alpha val="…"/>`. */
   alpha?: number;
+  /**
+   * Every transform of the variation, in document order — see {@link ChartColor.transforms}, whose rule for the named
+   * fields applies here too (with `tint` as the raw OOXML integer, as this type stores it).
+   */
+  transforms?: readonly ChartColorTransform[];
 }
 
 /**
@@ -2039,6 +2070,11 @@ export interface ChartColorsEntry {
   satMod?: number;
   /** Alpha (0-100000) */
   alpha?: number;
+  /**
+   * Every transform of the entry, in document order — see {@link ChartColor.transforms}, whose rule for the named
+   * fields applies here too (with `tint` as the raw OOXML integer, as this type stores it).
+   */
+  transforms?: readonly ChartColorTransform[];
 }
 
 /** Pivot source information written as c:pivotSource for classic pivot charts. */

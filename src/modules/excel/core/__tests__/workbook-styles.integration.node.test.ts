@@ -1,7 +1,8 @@
 import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
 import { columnAlignment, columnFont } from "@excel/core/column";
 import { rowFont, rowSetFont } from "@excel/core/row";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Column, Workbook } from "@excel/index";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
@@ -25,7 +26,7 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "blort");
 
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "A1", width: 10 },
         {
           header: "B1",
@@ -38,7 +39,7 @@ describe("Workbook", () => {
         { header: "C1", width: 30 }
       ]);
 
-      rowSetFont(Worksheet.getRow(ws, 2), testUtils.styles.fonts.broadwayRedOutline20);
+      rowSetFont(getRow(ws, 2), testUtils.styles.fonts.broadwayRedOutline20);
 
       Cell.setValue(ws, "A2", "A2");
       Cell.setValue(ws, "B2", "B2");
@@ -67,9 +68,7 @@ describe("Workbook", () => {
       expect(columnFont(getColumn(ws2, 2))).toEqual(testUtils.styles.fonts.comicSansUdB16);
       expect(columnAlignment(getColumn(ws2, 2))).toEqual(testUtils.styles.alignments[1].alignment);
 
-      expect(rowFont(Worksheet.getRow(ws2, 2))).toEqual(
-        testUtils.styles.fonts.broadwayRedOutline20
-      );
+      expect(rowFont(getRow(ws2, 2))).toEqual(testUtils.styles.fonts.broadwayRedOutline20);
     });
 
     it("in-cell formats properly in xlsx file", async () => {

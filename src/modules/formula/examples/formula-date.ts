@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -48,7 +48,7 @@ Cell.setValue(ws, "E2", { formula: "WORKDAY(A1, 10)" }); // 10 business days out
 // Formatting (YYYY-MM-DD)
 Cell.setValue(ws, "F1", { formula: 'TEXT(A1, "yyyy-mm-dd")' });
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of [
   "B1",

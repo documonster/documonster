@@ -8,44 +8,84 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "toAsyncIterable",
   "toReadableStream",
 
-  // High-level archive API
-  "zip",
-  "editZip",
-  "editZipUrl",
-  "unzip",
-  "ZipArchive",
-  "ZipEditor",
-  "ZipEditPlan",
-  "ZipReader",
-  "UnzipEntry",
-
-  // TAR archive support (basic - no gzip)
-  "TAR_BLOCK_SIZE",
-  "TAR_TYPE",
-  "TarArchive",
-  "TarReader",
-  "createTarReaderEntry",
-  "createTarArchive",
-  "createTarReader",
-  "tar",
-  "tarSync",
+  // Format matrix — builder, reader, one-shot pack/unpack, entry lists
+  "createZip",
+  "openZip",
+  "packZip",
+  "packZipSync",
+  "unpackZip",
+  "unpackZipSync",
+  "createTar",
+  "openTar",
+  "packTar",
+  "packTarSync",
+  "unpackTar",
+  "unpackTarSync",
   "parseTar",
   "parseTarStream",
-  "untar",
+  "createTarGz",
+  "openTarGz",
+  "packTarGz",
+  "packTarGzSync",
+  "unpackTarGz",
+  "unpackTarGzSync",
+  "parseTarGz",
+  "parseTarGzStream",
+
+  // Classes behind the factories
+  "ZipArchive",
+  "ZipReader",
+  "TarArchive",
+  "TarReader",
+  "TarGzArchive",
+
+  // ZIP editing and entries
+  "ZipEditor",
+  "ZipEditPlan",
+  "UnzipEntry",
+
+  // TAR entries and constants
+  "TAR_BLOCK_SIZE",
+  "TarType",
+  "createTarReaderEntry",
   "isTarFile",
   "isTarDirectory",
   "isTarSymlink",
   "isTarHardLink",
   "isTarDataEntry",
 
+  // Deprecated forwards
+  "zip",
+  "unzip",
+  "editZip",
+  "editZipUrl",
+  "createTarArchive",
+  "createTarReader",
+  "tar",
+  "tarSync",
+  "untar",
+  "TAR_TYPE",
+  "createAbortError",
+  "isAbortError",
+  "base64ToUint8Array",
+  "uint8ArrayToBase64",
+  "concatUint8Arrays",
+  "stringToUint8Array",
+  "uint8ArrayToString",
+
+  // CRC-32 and PNG encoding
+  "crc32",
+  "crc32Update",
+  "crc32Finalize",
+  "encodePng",
+
   // Random access / HTTP Range reading
   "HttpRangeReader",
+  "Crypto",
   "createBufferReader",
   "RemoteZipReader",
 
-  // Abort utilities
-  "createAbortError",
-  "isAbortError",
+  // Abort utility
   "throwIfAborted",
 
   // Crypto - ZipCrypto
@@ -74,14 +114,7 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "AES_VENDOR_ID",
   "AES_VERSION_AE1",
   "AES_VERSION_AE2",
-  "COMPRESSION_METHOD_AES",
-
-  // Binary / encoding utilities
-  "base64ToUint8Array",
-  "uint8ArrayToBase64",
-  "concatUint8Arrays",
-  "stringToUint8Array",
-  "uint8ArrayToString"
+  "COMPRESSION_METHOD_AES"
 ] as const;
 
 /**
@@ -91,8 +124,12 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
  * compression/CRC primitives, and error classes.
  */
 export const ARCHIVE_BROWSER_EXPORTS = [
-  // Domain namespace
+  // Domain namespaces
   "Archive",
+  "Compression",
+
+  // Everything below except constants and errors is a deprecated forward to a
+  // namespace member.
 
   // CRC32 (platform-specific implementation)
   "crc32",
@@ -158,12 +195,32 @@ export const ARCHIVE_BROWSER_EXPORTS = [
   // Error types
   "ArchiveError",
   "AbortError",
+  "isAbortError",
   "ZipParseError",
+  "ZipInvalidSignatureError",
   "InvalidZipSignatureError",
+  "ZipEocdNotFoundError",
+  "ZipCrc32MismatchError",
+  "ZipEntrySizeMismatchError",
+  "ArchiveLimitExceededError",
+  "ArchiveLimitError",
+  "ArchiveWorkerStreamStartError",
+  "ArchiveWorkerUnsupportedError",
+  "ArchiveArgumentError",
+  "ZipDecryptionError",
+  "ZipPasswordRequiredError",
+  "ArchiveRangeNotSupportedError",
+  "ArchiveHttpRangeError",
+  "ArchiveFileTooLargeError",
+  "ArchiveFileError",
+  "ZipUnsupportedCompressionError",
+  "isArchiveError",
+
+  // Deprecated error names
   "EocdNotFoundError",
   "Crc32MismatchError",
   "EntrySizeMismatchError",
-  "ArchiveLimitError",
+  "WorkerStreamStartError",
   "DecryptionError",
   "PasswordRequiredError",
   "RangeNotSupportedError",
@@ -176,6 +233,9 @@ export const ARCHIVE_BROWSER_EXPORTS = [
  * File system convenience layer exports (Node.js only)
  */
 export const ARCHIVE_NODE_EXPORTS = [
+  // File-system namespace
+  "Fs",
+
   // Node stream adapter
   "toNodeReadable",
 
@@ -228,6 +288,42 @@ export const ARCHIVE_RUNTIME_EXPORTS = [
   ...ARCHIVE_NODE_EXPORTS
 ] as const;
 
+/** Members only the Node entry's `Archive` namespace carries. */
+export const ARCHIVE_NODE_NAMESPACE_EXPORTS = ["ArchiveFile", "toNodeReadable"] as const;
+
+/** Members of the `Compression` namespace (identical on both entries). */
+export const COMPRESSION_NAMESPACE_EXPORTS = [
+  "deflate",
+  "deflateSync",
+  "inflate",
+  "inflateSync",
+  "gzip",
+  "gunzip",
+  "gzipSync",
+  "gunzipSync",
+  "isGzipData",
+  "zlib",
+  "unzlib",
+  "zlibSync",
+  "unzlibSync",
+  "isZlibData",
+  "decompressAuto",
+  "decompressAutoSync",
+  "detectFormat",
+  "hasCompressionStream",
+  "hasWorkerSupport",
+  "hasGzipCompressionStream",
+  "hasGzipDecompressionStream",
+  "createDeflateStream",
+  "createInflateStream",
+  "createGzipStream",
+  "createGunzipStream",
+  "createZlibStream",
+  "createUnzlibStream",
+  "hasDeflateRaw",
+  "Workers"
+] as const;
+
 export type ArchiveNamespaceExport = (typeof ARCHIVE_NAMESPACE_EXPORTS)[number];
 export type ArchiveBrowserExport = (typeof ARCHIVE_BROWSER_EXPORTS)[number];
 export type ArchiveNodeExport = (typeof ARCHIVE_NODE_EXPORTS)[number];
@@ -236,3 +332,36 @@ export type ArchiveRuntimeExport = (typeof ARCHIVE_RUNTIME_EXPORTS)[number];
 export function getRuntimeExportKeys(moduleNamespace: object): string[] {
   return Object.keys(moduleNamespace).sort();
 }
+
+/** Members of the Node-only `Fs` namespace. */
+export const FS_NAMESPACE_EXPORTS = [
+  "traverseDirectory",
+  "traverseDirectorySync",
+  "glob",
+  "globSync",
+  "globToRegex",
+  "matchGlob",
+  "matchGlobAny",
+  "ensureDir",
+  "ensureDirSync",
+  "fileExists",
+  "fileExistsSync",
+  "readFileBytes",
+  "readFileBytesSync",
+  "writeFileBytes",
+  "writeFileBytesSync",
+  "setFileTime",
+  "setFileTimeSync",
+  "safeStats",
+  "safeStatsSync",
+  "readFileText",
+  "readFileTextSync",
+  "writeFileText",
+  "writeFileTextSync",
+  "remove",
+  "removeSync",
+  "copyFile",
+  "copyFileSync",
+  "createTempDir",
+  "createTempDirSync"
+] as const;

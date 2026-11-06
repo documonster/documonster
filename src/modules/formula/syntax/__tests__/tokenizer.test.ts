@@ -7,6 +7,7 @@
  * whitespace and the intersection operator, and invalid character fallback.
  */
 
+import { FormulaParseError } from "@formula/errors";
 import { describe, it, expect } from "vitest";
 
 import type {
@@ -27,7 +28,7 @@ import type {
   StructuredRefToken
 } from "../token-types";
 import { TokenType, stripFunctionPrefix } from "../token-types";
-import { tokenize } from "../tokenizer";
+import { tokenize, tokenizeWithSpans } from "../tokenizer";
 
 function typesOf(tokens: readonly Token[]): TokenType[] {
   return tokens.map(t => t.type);
@@ -76,11 +77,10 @@ describe("tokenizer — numbers", () => {
   });
 
   it("does not merge '..' into a fractional run", () => {
-    // "1..2" → 1, then '.' handled as unknown (dropped), then .2 etc.
-    // Main invariant: the first number must end at position 1 (just "1").
-    const toks = tokenize("1..2");
-    expect(toks[0].type).toBe(TokenType.Number);
-    expect((toks[0] as NumberToken).value).toBe("1");
+    // "1..2": the first number ends at "1", and the stray "." is refused at its offset
+    // (it used to be dropped silently).
+    expect(() => tokenize("1..2")).toThrow(FormulaParseError);
+    expect(() => tokenize("1..2")).toThrow(/at position 1/);
   });
 
   it("tokenises a percent literal (number followed by percent token)", () => {
@@ -351,6 +351,20 @@ describe("tokenizer — sheet-qualified references", () => {
     expect(sr.sheetName).toBe("Sheet1");
     expect(sr.endSheetName).toBe("Sheet3");
   });
+
+  it("reads Data!$B$2:Data!B4 as a range whose ends are both qualified, not a 3D prefix", () => {
+    // After `Data!`, `$B$2` is a cell — it cannot start a sheet range `$B$2:Data!`.
+    const toks = tokenize("Data!$B$2:Data!B4");
+    expect(toks.map(token => token.type)).toEqual([
+      TokenType.SheetRef,
+      TokenType.CellRef,
+      TokenType.Colon,
+      TokenType.SheetRef,
+      TokenType.CellRef
+    ]);
+    expect((toks[3] as SheetRefToken).sheetName).toBe("Data");
+    expect((toks[3] as SheetRefToken).endSheetName).toBeUndefined();
+  });
 });
 
 describe("tokenizer — function calls and operators", () => {
@@ -455,6 +469,15 @@ describe("tokenizer — structured references", () => {
     expect(sr.tableName).toBe("T");
     expect(sr.columns).toEqual(["Col1", "Col2"]);
   });
+
+  it("tokenises a this-row column range [@[Col1]:[Col2]]", () => {
+    const toks = tokenize("T[@[Col1]:[Col2]]");
+    expect(toks).toHaveLength(1);
+    const sr = toks[0] as StructuredRefToken;
+    expect(sr.tableName).toBe("T");
+    expect(sr.specials).toEqual(["#This Row"]);
+    expect(sr.columns).toEqual(["Col1", "Col2"]);
+  });
 });
 
 describe("tokenizer — defined names and _XLFN prefix", () => {
@@ -537,16 +560,10 @@ describe("tokenizer — external refs and unknown characters", () => {
     }
   });
 
-  it("silently skips unknown punctuation that is not a recognised operator", () => {
-    // "`" is not a known operator — should be skipped without throwing.
-    const toks = tokenize("1`2");
-    // 1 and 2 must both be present; whatever happens to "`" is unspecified.
-    expect(toks.some(t => t.type === TokenType.Number)).toBe(true);
-    const nums = toks
-      .filter((t): t is NumberToken => t.type === TokenType.Number)
-      .map(t => t.value);
-    expect(nums).toContain("1");
-    expect(nums).toContain("2");
+  it("refuses punctuation that is not a recognised operator", () => {
+    // It used to be skipped, so "1`2" read as two numbers.
+    expect(() => tokenize("1`2")).toThrow(FormulaParseError);
+    expect(() => tokenize("1~2")).toThrow(/Unexpected character "~"/);
   });
 
   it("tokenises the @ implicit intersection prefix as AtSign", () => {
@@ -586,5 +603,53 @@ describe("the leading equals sign", () => {
 
   it("leaves a formula that is nothing but an equals sign alone", () => {
     expect(tokenize("=")).toEqual([]);
+  });
+});
+
+describe("tokenizeWithSpans", () => {
+  /** Each token with the text it was read from. */
+  function texts(formula: string): Array<[TokenType, string]> {
+    const { tokens, spans } = tokenizeWithSpans(formula);
+    expect(spans).toHaveLength(tokens.length);
+    return tokens.map((token, i) => [token.type, formula.slice(spans[i][0], spans[i][1])]);
+  }
+
+  it("locates references, sheet prefixes and functions in the source text", () => {
+    expect(texts("=SUM('My Sheet'!$A$1:B2, Data!C3) + LOG10(a1)")).toEqual([
+      [TokenType.Function, "SUM"],
+      [TokenType.OpenParen, "("],
+      [TokenType.SheetRef, "'My Sheet'!"],
+      [TokenType.Range, "$A$1:B2"],
+      [TokenType.Comma, ","],
+      [TokenType.SheetRef, "Data!"],
+      [TokenType.CellRef, "C3"],
+      [TokenType.CloseParen, ")"],
+      [TokenType.Operator, "+"],
+      [TokenType.Function, "LOG10"],
+      [TokenType.OpenParen, "("],
+      [TokenType.CellRef, "a1"],
+      [TokenType.CloseParen, ")"]
+    ]);
+  });
+
+  it("spans the whole source of tokens that decode their text", () => {
+    expect(texts('"a""b"&[1]Sheet1!A1:B2&S1:S3!A:A&Table1[[#This Row],[Col]]')).toEqual([
+      [TokenType.String, '"a""b"'],
+      [TokenType.Operator, "&"],
+      [TokenType.Error, "[1]Sheet1!A1:B2"],
+      [TokenType.Operator, "&"],
+      [TokenType.SheetRef, "S1:S3!"],
+      [TokenType.ColRange, "A:A"],
+      [TokenType.Operator, "&"],
+      [TokenType.StructuredRef, "Table1[[#This Row],[Col]]"]
+    ]);
+  });
+
+  it("gives an intersection the whitespace that forms it", () => {
+    expect(texts("A1:A3  B1:B3")).toEqual([
+      [TokenType.Range, "A1:A3"],
+      [TokenType.Intersect, "  "],
+      [TokenType.Range, "B1:B3"]
+    ]);
   });
 });

@@ -1,27 +1,17 @@
 /**
- * `Io` namespace surface — document serialization / deserialization,
- * incremental editing, and field updates.
+ * `Io` namespace surface — deprecated: reading and writing a document are
+ * `Document.read`, `Document.toBuffer`, `Document.toBase64`,
+ * `Document.toFlatOpc`, and on Node `Document.readFile` / `Document.writeFile`,
+ * beside `Document.create`.
  *
- * `import { Io } from "documonster/word"` →
- *   `Io.package(doc)`, `Io.read(buffer)`, `Io.toBuffer(doc)`,
- *   `Io.readFile(path)`, `Io.writeFile(doc, path)` (Node only),
- *   `Io.patchDocument(...)`, `Io.updateFields(doc)`, … — tree-shaken via
- *   `export * as Io`.
+ * The browser build resolves this module to `io.browser.ts`, which publishes no
+ * file-path member.
  */
-export { packageDocx as package } from "@word/writer/docx-packager";
-export { readDocx as read } from "@word/reader/docx-reader";
-export {
-  toBuffer,
-  toBase64,
-  readFile,
-  writeFile,
-  patchDocument,
-  compileTemplate,
-  patchTemplate,
-  fillTemplateFromBuffer,
-  toFlatOpcFromDoc
-} from "@word/document-io";
-export { editDocxIncremental, listDocxParts, readDocxPart } from "@word/incremental-edit";
-export { updateFields, updateTableOfContents } from "@word/advanced/field-engine";
-export { mergeDocuments as merge } from "@word/query/merge";
-export { splitDocument as split } from "@word/query/split";
+import { readFile as readFileImpl, writeFile as writeFileImpl } from "@word/document-io";
+
+export * from "@word/surface/io-portable";
+
+/** @deprecated Use `Document.readFile`. Removed in 1.0. */
+export const readFile = readFileImpl;
+/** @deprecated Use `Document.writeFile`. Removed in 1.0. */
+export const writeFile = writeFileImpl;

@@ -47,5 +47,5 @@ export type ZipStreamOptions = ArchiveStreamOptions<ZipProgress>;
  */
 export type ZipOperation = ArchiveOperationBase<ZipProgress> & {
   /** Async iterable of ZIP output chunks */
-  iterable: AsyncIterable<Uint8Array>;
+  iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 };

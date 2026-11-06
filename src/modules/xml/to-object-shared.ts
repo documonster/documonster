@@ -5,7 +5,8 @@
  * `parseXmlToObject` (SAX-direct path). Not part of the public API.
  */
 
-import type { ToPlainObjectOptions } from "@xml/types";
+import { checkPlainObjectOptions } from "@xml/arguments";
+import type { XmlToPlainObjectOptions } from "@xml/types";
 
 // =============================================================================
 // Resolved Options
@@ -22,7 +23,11 @@ export interface ResolvedOptions {
   readonly ignoreWS: boolean;
 }
 
-export function resolveOptions(options?: ToPlainObjectOptions): ResolvedOptions {
+export function resolveOptions(
+  options?: XmlToPlainObjectOptions,
+  where = "Xml.toPlainObject"
+): ResolvedOptions {
+  checkPlainObjectOptions(where, options);
   return {
     ignoreAttributes: options?.ignoreAttributes ?? false,
     attrPrefix: options?.attributePrefix ?? "@_",

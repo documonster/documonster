@@ -148,11 +148,29 @@ export function parseSvgPointPairs(value: string | undefined): SvgPoint[] {
 }
 
 /**
+ * Whether `value` is one of the keywords that mean "no paint": SVG's `none` and CSS's
+ * `transparent` (ASCII case-insensitive, as CSS keywords are).
+ *
+ * {@link parseCssColor} answers `undefined` for these and for junk alike; a caller that
+ * turns an unreadable colour into a visible fallback asks this first, so a shape asked to
+ * be transparent is not painted black.
+ */
+export function isNoPaintColor(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  const text = value.trim().toLowerCase();
+  return text === "none" || text === "transparent";
+}
+
+/**
  * Parse a colour the way CSS and SVG define it.
  *
  * Supported: `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(…)`, `rgba(…)` with
- * 0..255 or percentage channels, plus the `none` / `transparent` keywords which
- * return `undefined` so callers can distinguish "no paint" from "black".
+ * 0..255 or percentage channels, `hsl(…)` / `hsla(…)`, the 148 named colours of
+ * CSS Color 4 (case-insensitive), plus the `none` / `transparent` keywords which
+ * return `undefined` so callers can distinguish "no paint" from "black" (see
+ * {@link isNoPaintColor}).
  *
  * The 4- and 8-digit hex forms put alpha **last**, per CSS Color 4. This is the
  * opposite of OOXML's `AARRGGBB`; see the module note.
@@ -162,13 +180,27 @@ export function parseCssColor(value: string | undefined): Rgba01 | undefined {
     return undefined;
   }
   const text = value.trim();
-  if (text === "" || text === "none" || text === "transparent") {
+  if (text === "" || isNoPaintColor(text)) {
     return undefined;
   }
 
   const fn = /^rgba?\(([^)]*)\)$/i.exec(text);
   if (fn) {
     return parseRgbFunction(fn[1]);
+  }
+  const hslFn = /^hsla?\(([^)]*)\)$/i.exec(text);
+  if (hslFn) {
+    return parseHslFunction(hslFn[1]);
+  }
+  const key = text.toLowerCase();
+  if (Object.hasOwn(CSS_NAMED_COLORS, key)) {
+    const named = CSS_NAMED_COLORS[key];
+    return {
+      r: ((named >> 16) & 0xff) / 255,
+      g: ((named >> 8) & 0xff) / 255,
+      b: (named & 0xff) / 255,
+      a: 1
+    };
   }
 
   const hex = text.startsWith("#") ? text.slice(1) : text;
@@ -233,6 +265,211 @@ function parseRgbFunction(args: string): Rgba01 | undefined {
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
+
+const HUE_UNITS: Readonly<Record<string, number>> = {
+  "": 1,
+  deg: 1,
+  grad: 360 / 400,
+  rad: 180 / Math.PI,
+  turn: 360
+};
+
+/**
+ * Parse the argument list of `hsl()` / `hsla()`, converting with the algorithm of CSS
+ * Color 4 §7.1. Hue is a number of degrees or an angle (`deg`, `grad`, `rad`, `turn`);
+ * saturation and lightness are percentages (a bare number reads as one, as the modern
+ * syntax allows); alpha is as for `rgb()`.
+ */
+function parseHslFunction(args: string): Rgba01 | undefined {
+  const tokens = args
+    .trim()
+    .split(/[\s,/]+/)
+    .filter(token => token !== "");
+  if (tokens.length < 3 || tokens.length > 4) {
+    return undefined;
+  }
+  const hueMatch = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(deg|grad|rad|turn)?$/i.exec(
+    tokens[0]
+  );
+  if (!hueMatch) {
+    return undefined;
+  }
+  const hue = Number(hueMatch[1]) * HUE_UNITS[(hueMatch[2] ?? "").toLowerCase()];
+  const percent = (token: string): number | undefined => {
+    const num = Number.parseFloat(token);
+    return Number.isFinite(num) ? clamp01(num / 100) : undefined;
+  };
+  const sat = percent(tokens[1]);
+  const light = percent(tokens[2]);
+  if (!Number.isFinite(hue) || sat === undefined || light === undefined) {
+    return undefined;
+  }
+  let a = 1;
+  if (tokens.length === 4) {
+    const raw = Number.parseFloat(tokens[3]);
+    if (!Number.isFinite(raw)) {
+      return undefined;
+    }
+    a = clamp01(tokens[3].endsWith("%") ? raw / 100 : raw);
+  }
+  const h = ((hue % 360) + 360) % 360;
+  const k = (n: number): number => (n + h / 30) % 12;
+  const amount = sat * Math.min(light, 1 - light);
+  const f = (n: number): number => light - amount * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return { r: f(0), g: f(8), b: f(4), a };
+}
+
+/** The named colours of CSS Color 4 §6.1, as `0xRRGGBB`. */
+const CSS_NAMED_COLORS: Readonly<Record<string, number>> = {
+  aliceblue: 0xf0f8ff,
+  antiquewhite: 0xfaebd7,
+  aqua: 0x00ffff,
+  aquamarine: 0x7fffd4,
+  azure: 0xf0ffff,
+  beige: 0xf5f5dc,
+  bisque: 0xffe4c4,
+  black: 0x000000,
+  blanchedalmond: 0xffebcd,
+  blue: 0x0000ff,
+  blueviolet: 0x8a2be2,
+  brown: 0xa52a2a,
+  burlywood: 0xdeb887,
+  cadetblue: 0x5f9ea0,
+  chartreuse: 0x7fff00,
+  chocolate: 0xd2691e,
+  coral: 0xff7f50,
+  cornflowerblue: 0x6495ed,
+  cornsilk: 0xfff8dc,
+  crimson: 0xdc143c,
+  cyan: 0x00ffff,
+  darkblue: 0x00008b,
+  darkcyan: 0x008b8b,
+  darkgoldenrod: 0xb8860b,
+  darkgray: 0xa9a9a9,
+  darkgreen: 0x006400,
+  darkgrey: 0xa9a9a9,
+  darkkhaki: 0xbdb76b,
+  darkmagenta: 0x8b008b,
+  darkolivegreen: 0x556b2f,
+  darkorange: 0xff8c00,
+  darkorchid: 0x9932cc,
+  darkred: 0x8b0000,
+  darksalmon: 0xe9967a,
+  darkseagreen: 0x8fbc8f,
+  darkslateblue: 0x483d8b,
+  darkslategray: 0x2f4f4f,
+  darkslategrey: 0x2f4f4f,
+  darkturquoise: 0x00ced1,
+  darkviolet: 0x9400d3,
+  deeppink: 0xff1493,
+  deepskyblue: 0x00bfff,
+  dimgray: 0x696969,
+  dimgrey: 0x696969,
+  dodgerblue: 0x1e90ff,
+  firebrick: 0xb22222,
+  floralwhite: 0xfffaf0,
+  forestgreen: 0x228b22,
+  fuchsia: 0xff00ff,
+  gainsboro: 0xdcdcdc,
+  ghostwhite: 0xf8f8ff,
+  gold: 0xffd700,
+  goldenrod: 0xdaa520,
+  gray: 0x808080,
+  green: 0x008000,
+  greenyellow: 0xadff2f,
+  grey: 0x808080,
+  honeydew: 0xf0fff0,
+  hotpink: 0xff69b4,
+  indianred: 0xcd5c5c,
+  indigo: 0x4b0082,
+  ivory: 0xfffff0,
+  khaki: 0xf0e68c,
+  lavender: 0xe6e6fa,
+  lavenderblush: 0xfff0f5,
+  lawngreen: 0x7cfc00,
+  lemonchiffon: 0xfffacd,
+  lightblue: 0xadd8e6,
+  lightcoral: 0xf08080,
+  lightcyan: 0xe0ffff,
+  lightgoldenrodyellow: 0xfafad2,
+  lightgray: 0xd3d3d3,
+  lightgreen: 0x90ee90,
+  lightgrey: 0xd3d3d3,
+  lightpink: 0xffb6c1,
+  lightsalmon: 0xffa07a,
+  lightseagreen: 0x20b2aa,
+  lightskyblue: 0x87cefa,
+  lightslategray: 0x778899,
+  lightslategrey: 0x778899,
+  lightsteelblue: 0xb0c4de,
+  lightyellow: 0xffffe0,
+  lime: 0x00ff00,
+  limegreen: 0x32cd32,
+  linen: 0xfaf0e6,
+  magenta: 0xff00ff,
+  maroon: 0x800000,
+  mediumaquamarine: 0x66cdaa,
+  mediumblue: 0x0000cd,
+  mediumorchid: 0xba55d3,
+  mediumpurple: 0x9370db,
+  mediumseagreen: 0x3cb371,
+  mediumslateblue: 0x7b68ee,
+  mediumspringgreen: 0x00fa9a,
+  mediumturquoise: 0x48d1cc,
+  mediumvioletred: 0xc71585,
+  midnightblue: 0x191970,
+  mintcream: 0xf5fffa,
+  mistyrose: 0xffe4e1,
+  moccasin: 0xffe4b5,
+  navajowhite: 0xffdead,
+  navy: 0x000080,
+  oldlace: 0xfdf5e6,
+  olive: 0x808000,
+  olivedrab: 0x6b8e23,
+  orange: 0xffa500,
+  orangered: 0xff4500,
+  orchid: 0xda70d6,
+  palegoldenrod: 0xeee8aa,
+  palegreen: 0x98fb98,
+  paleturquoise: 0xafeeee,
+  palevioletred: 0xdb7093,
+  papayawhip: 0xffefd5,
+  peachpuff: 0xffdab9,
+  peru: 0xcd853f,
+  pink: 0xffc0cb,
+  plum: 0xdda0dd,
+  powderblue: 0xb0e0e6,
+  purple: 0x800080,
+  rebeccapurple: 0x663399,
+  red: 0xff0000,
+  rosybrown: 0xbc8f8f,
+  royalblue: 0x4169e1,
+  saddlebrown: 0x8b4513,
+  salmon: 0xfa8072,
+  sandybrown: 0xf4a460,
+  seagreen: 0x2e8b57,
+  seashell: 0xfff5ee,
+  sienna: 0xa0522d,
+  silver: 0xc0c0c0,
+  skyblue: 0x87ceeb,
+  slateblue: 0x6a5acd,
+  slategray: 0x708090,
+  slategrey: 0x708090,
+  snow: 0xfffafa,
+  springgreen: 0x00ff7f,
+  steelblue: 0x4682b4,
+  tan: 0xd2b48c,
+  teal: 0x008080,
+  thistle: 0xd8bfd8,
+  tomato: 0xff6347,
+  turquoise: 0x40e0d0,
+  violet: 0xee82ee,
+  wheat: 0xf5deb3,
+  white: 0xffffff,
+  whitesmoke: 0xf5f5f5,
+  yellow: 0xffff00,
+  yellowgreen: 0x9acd32
+};
 
 /**
  * Parse the `rotate(angle [cx cy])` form of a `transform` attribute.

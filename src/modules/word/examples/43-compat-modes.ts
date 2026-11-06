@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Io, Query } from "../index";
+import { Document, Query } from "../index";
 import type { CompatibilityMode, CompatFlag, DocumentSettings } from "../index";
 
 const outDir = path.resolve(
@@ -36,8 +36,7 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "Default compatibility mode demo.");
-  const built = Document.build(d);
-  console.log(`  default getCompatibilityMode: ${Query.getCompatibilityMode(built)}`);
+  console.log(`  default getCompatibilityMode: ${Query.getCompatibilityMode(d)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -48,18 +47,17 @@ for (const mode of modes) {
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, `Targeting compatibility mode ${mode}.`);
-  const model = Document.build(d);
-  Query.setCompatibilityMode(model, mode);
-  console.log(`  set/get mode ${mode}: ${Query.getCompatibilityMode(model)}`);
+  Document.setCompatibilityMode(d, mode);
+  console.log(`  set/get mode ${mode}: ${Query.getCompatibilityMode(d)}`);
 
-  const bytes = await Io.toBuffer(model);
+  const bytes = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, `compat-${mode}.docx`), bytes);
 
   // Re-read and verify the chosen mode survives a full write/read round-trip.
   // The mode is persisted as the w:compatSetting named "compatibilityMode"
   // inside word/settings.xml and restored into settings.compatibilityMode on
   // read, so getCompatibilityMode returns the same value we set.
-  const reread = await Io.read(bytes);
+  const reread = await Document.read(bytes);
   console.log(`    after round-trip: ${Query.getCompatibilityMode(reread)}`);
 }
 
@@ -78,12 +76,11 @@ for (const mode of modes) {
   ];
   const settings: DocumentSettings = { compatFlags: flags };
   Document.setSettings(d, settings);
-  const built = Document.build(d);
-  Query.setCompatibilityMode(built, 14);
+  Document.setCompatibilityMode(d, 14);
 
-  const bytes = await Io.toBuffer(built);
+  const bytes = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "with-compat-flags.docx"), bytes);
-  const reread = await Io.read(bytes);
+  const reread = await Document.read(bytes);
   console.log(
     `  custom flags: mode=${Query.getCompatibilityMode(reread)}, flags=${reread.settings?.compatFlags?.length ?? 0}`
   );

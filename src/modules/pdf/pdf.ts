@@ -8,7 +8,7 @@
  * ```typescript
  * import { Pdf } from "documonster/pdf";
  *
- * const bytes = await Pdf.create([
+ * const bytes = await Pdf.fromTable([
  *   ["Product", "Revenue"],
  *   ["Widget", 1000],
  *   ["Gadget", 2500]
@@ -17,7 +17,7 @@
  *
  * @example With options:
  * ```typescript
- * const bytes = await Pdf.create([
+ * const bytes = await Pdf.fromTable([
  *   ["Name", "Score"],
  *   ["Alice", 95],
  *   ["Bob", 87]
@@ -26,7 +26,7 @@
  *
  * @example Multiple sheets:
  * ```typescript
- * const bytes = await Pdf.create({
+ * const bytes = await Pdf.fromTable({
  *   sheets: [
  *     { name: "Sales", data: [["Product", "Revenue"], ["Widget", 1000]] },
  *     { name: "Costs", data: [["Item", "Amount"], ["Rent", 500]] }
@@ -36,7 +36,7 @@
  *
  * @example With column widths and styles:
  * ```typescript
- * const bytes = await Pdf.create({
+ * const bytes = await Pdf.fromTable({
  *   name: "Report",
  *   columns: [{ width: 25 }, { width: 15 }],
  *   data: [
@@ -59,12 +59,20 @@ import type {
   PdfExportOptions
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
+import { formatDateAsGeneral } from "@utils/number-format-render";
 
 // =============================================================================
 // Input Types
 // =============================================================================
 
-/** A cell value: string, number, boolean, Date, null, or a styled cell object. */
+/**
+ * A cell value: string, number, boolean, Date, null, or a styled cell object.
+ *
+ * A `Date` is shown from its **UTC** fields, as `Pdf.fromExcel` shows a date cell with no
+ * number format: `2024-01-15` when its time is midnight UTC, `2024-01-15 13:05:09` otherwise —
+ * the same text on every machine. (Build it with `Date.UTC(…)`; `new Date(2024, 0, 15)` is
+ * local midnight, which is another instant and, west of UTC, another day.)
+ */
 export type PdfCellValue = string | number | boolean | Date | null | undefined | PdfCell;
 
 /** A cell with an explicit value and optional style overrides. */
@@ -142,7 +150,7 @@ export type PdfInput = PdfRow[] | PdfSheet | PdfBook;
  * Generate a PDF.
  *
  * Accepts anything from a plain 2D array to a multi-sheet workbook.
- * Yields to the event loop between each output page during layout and rendering.
+ * Yields to the event loop between output pages during layout and rendering.
  *
  * @param input   - 2D array, sheet object, or workbook object
  * @param options - PDF export options (page size, margins, etc.)
@@ -361,7 +369,10 @@ function normalizeCell(value: PdfCellValue, col: number): PdfCellData | null {
     return { type: PdfCellType.Boolean, value, text: value ? "TRUE" : "FALSE", col };
   }
   if (value instanceof Date) {
-    return { type: PdfCellType.Date, value, text: value.toLocaleDateString(), col };
+    // As `Pdf.fromExcel` shows a date cell with no number format: from the UTC fields, the
+    // same on every machine. `toLocaleDateString()` gave a different text per locale and, west
+    // of UTC, a different day.
+    return { type: PdfCellType.Date, value, text: formatDateAsGeneral(value), col };
   }
 
   return null;

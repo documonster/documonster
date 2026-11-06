@@ -11,13 +11,13 @@ Node.js stream classes and helpers that run unchanged in Node.js and in browsers
   backpressure, event order and teardown.
 
 Web Streams (`ReadableStream`, `WritableStream`, `TransformStream`) are accepted wherever a stream
-is, on both. Convert them with `readableFromWeb` / `readableToWeb` / `writableFromWeb` /
-`writableToWeb`, which behave the same on Node.js, Bun and browsers; the classes' own
+is, on both. Convert them with `Streams.fromWebReadable` / `Streams.toWebReadable` / `Streams.fromWebWritable` /
+`Streams.toWebWritable`, which behave the same on Node.js, Bun and browsers; the classes' own
 `Readable.fromWeb` and friends keep Node's behaviour, defects included (see
 [Converting between Node-style and Web streams](#converting-between-node-style-and-web-streams)).
 
 ```typescript
-import { Readable, pipeline, createTransform } from "documonster/stream";
+import { Readable, pipeline, Streams } from "documonster/stream";
 ```
 
 ## Features
@@ -40,25 +40,19 @@ import {
   Duplex,
   pipeline,
   finished,
-  createTransform,
-  createCollector
+  Streams
 } from "documonster/stream";
 ```
 
 ## Quick Start
 
 ```typescript
-import {
-  createReadableFromArray,
-  createTransform,
-  createCollector,
-  pipeline
-} from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Create a pipeline that doubles numbers
-const source = createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = createCollector<number>({ objectMode: true });
+const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(source, double, collector);
 console.log(collector.chunks); // [2, 4, 6, 8, 10]
@@ -115,10 +109,10 @@ emitter.removeAllListeners("data");
 A readable stream for consuming data.
 
 ```typescript
-import { Readable, createReadableFromArray } from "documonster/stream";
+import { Readable, Streams } from "documonster/stream";
 
 // Create from array
-const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
+const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
 
 // Using async iteration (recommended)
 for await (const chunk of readable) {
@@ -222,10 +216,10 @@ writable.uncork(); // Flush all at once
 A duplex stream that transforms data as it passes through.
 
 ```typescript
-import { Transform, createTransform } from "documonster/stream";
+import { Transform, Streams } from "documonster/stream";
 
 // Simple transform with factory function (recommended)
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
 
 // Using class constructor
 const uppercase = new Transform({
@@ -236,7 +230,7 @@ const uppercase = new Transform({
 });
 
 // Async transform function
-const asyncTransform = createTransform<string, string>(
+const asyncTransform = Streams.createTransform<string, string>(
   async chunk => {
     await delay(100);
     return chunk.toUpperCase();
@@ -276,10 +270,10 @@ const nodeStyle = new Transform({
 A stream that is both readable and writable independently.
 
 ```typescript
-import { Duplex, createDuplex, duplexPair } from "documonster/stream";
+import { Duplex, duplexPair, Streams } from "documonster/stream";
 
 // Create duplex stream
-const duplex = createDuplex({
+const duplex = Streams.createDuplex<string, unknown>({
   objectMode: true,
   read() {
     this.push("data from readable side");
@@ -312,10 +306,10 @@ client.on("data", data => console.log("Client received:", data));
 Collects all data from a stream into an array.
 
 ```typescript
-import { createCollector, pipeline, finished } from "documonster/stream";
+import { pipeline, finished, Streams } from "documonster/stream";
 
 // Collect objects
-const collector = createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 collector.write(1);
 collector.write(2);
 collector.write(3);
@@ -325,14 +319,14 @@ await finished(collector);
 console.log(collector.chunks); // [1, 2, 3]
 
 // Use in pipeline
-const source = createReadableFromArray(["a", "b", "c"], { objectMode: true });
-const collector2 = createCollector<string>({ objectMode: true });
+const source = Streams.createReadableFromArray(["a", "b", "c"], { objectMode: true });
+const collector2 = new Streams.Collector<string>({ objectMode: true });
 
 await pipeline(source, collector2);
 console.log(collector2.chunks); // ["a", "b", "c"]
 
 // Collect binary data and convert
-const binaryCollector = createCollector<Uint8Array>();
+const binaryCollector = new Streams.Collector<Uint8Array>();
 binaryCollector.write(new Uint8Array([1, 2, 3]));
 binaryCollector.write(new Uint8Array([4, 5, 6]));
 binaryCollector.end();
@@ -349,9 +343,9 @@ const text = binaryCollector.toString(); // Decode as UTF-8 string
 A transform stream with pull-based reading and pattern matching. Useful for parsing protocols and file formats.
 
 ```typescript
-import { createPullStream } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const pull = createPullStream();
+const pull = new Streams.PullStream();
 
 // Write data
 pull.write(Buffer.from("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"));
@@ -362,7 +356,7 @@ const statusLine = await pull.pullUntil(Buffer.from("\r\n"));
 console.log(statusLine.toString()); // "HTTP/1.1 200 OK"
 
 // Pull until pattern, including the pattern in result
-const headerWithNewline = await pull.pullUntil(Buffer.from("\r\n"), true);
+const headerWithNewline = await pull.pullUntil(Buffer.from("\r\n"), { includePattern: true });
 
 // Pull exact number of bytes (e.g., read body based on Content-Length)
 const body = await pull.pull(5);
@@ -381,7 +375,7 @@ console.log(pull.matchPosition);
 **Pattern Matching:**
 
 ```typescript
-const pull = createPullStream();
+const pull = new Streams.PullStream();
 pull.write(Buffer.from("key1=value1&key2=value2"));
 pull.end();
 
@@ -399,9 +393,9 @@ const val2 = await pull.pull(Infinity); // "value2" (rest of stream)
 Duplex stream with efficient internal buffering.
 
 ```typescript
-import { createBufferedStream, BufferedStream } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const buffered = createBufferedStream();
+const buffered = new Streams.BufferedStream();
 
 // Write various data types
 buffered.write("Hello ");
@@ -412,8 +406,8 @@ buffered.write(new Uint8Array([33])); // "!"
 console.log(buffered.bufferedLength); // 12
 
 // Get all data
-console.log(buffered.toString()); // "Hello World!"
-console.log(buffered.toUint8Array()); // Uint8Array
+const all = buffered.read(); // Uint8Array, or null when empty
+console.log(new TextDecoder().decode(all ?? new Uint8Array())); // "Hello World!"
 
 // Check state
 console.log(buffered.isFinished);
@@ -426,9 +420,9 @@ console.log(buffered.isFinished);
 Efficient string builder with Uint8Array output. Useful for building large strings/XML/JSON efficiently.
 
 ```typescript
-import { ChunkedBuilder } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const builder = new ChunkedBuilder();
+const builder = new Streams.ChunkedBuilder();
 
 // Push strings
 builder.push("<xml>");
@@ -452,9 +446,9 @@ console.log(builder.toString()); // "<xml><item>Hello</item><item>World</item></
 ChunkedBuilder with snapshot/rollback support. Useful for speculative parsing where you might need to backtrack.
 
 ```typescript
-import { TransactionalChunkedBuilder } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const builder = new TransactionalChunkedBuilder();
+const builder = new Streams.TransactionalChunkedBuilder();
 
 builder.push("header");
 
@@ -494,20 +488,15 @@ builder.commit(); // Confirm level 1
 Pipe streams together with proper error handling and cleanup. Returns a promise.
 
 ```typescript
-import {
-  pipeline,
-  createReadableFromArray,
-  createTransform,
-  createCollector
-} from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
-const source = createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
-const filter = createTransform<number, number>(
+const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
+const filter = Streams.createTransform<number, number>(
   n => (n % 2 === 0 ? n : undefined), // undefined = skip
   { objectMode: true }
 );
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = createCollector<number>({ objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 // Chain multiple streams
 await pipeline(source, filter, double, collector);
@@ -518,7 +507,7 @@ console.log(collector.chunks); // [4, 8] (2*2=4, 4*2=8)
 try {
   await pipeline(source, badTransform, collector);
 } catch (err) {
-  console.error("Pipeline failed:", err.message);
+  console.error("Pipeline failed:", (err as Error).message);
 }
 ```
 
@@ -529,9 +518,9 @@ try {
 Wait for a stream to finish (end, close, or error).
 
 ```typescript
-import { finished, createReadableFromArray } from "documonster/stream";
+import { finished, Streams } from "documonster/stream";
 
-const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
+const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
 
 // Consume data
 readable.on("data", chunk => console.log(chunk));
@@ -541,7 +530,7 @@ await finished(readable);
 console.log("Stream completed");
 
 // Also works with writables
-const writable = createCollector();
+const writable = new Streams.Collector<string>({ objectMode: true });
 writable.write("data");
 writable.end();
 await finished(writable);
@@ -559,17 +548,17 @@ against the stages, just as Node's `compose` checks nothing; the result is the e
 on Node it goes wherever `node:stream`'s `compose` result goes.
 
 ```typescript
-import { compose, createTransform, createReadableFromArray, pipeline } from "documonster/stream";
+import { compose, pipeline, Streams } from "documonster/stream";
 
-const addOne = createTransform<number, number>(n => n + 1, { objectMode: true });
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-const square = createTransform<number, number>(n => n * n, { objectMode: true });
+const addOne = Streams.createTransform<number, number>(n => n + 1, { objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+const square = Streams.createTransform<number, number>(n => n * n, { objectMode: true });
 
 // Combine into single transform: (n + 1) * 2, then square
 const combined = compose(addOne, double, square);
 
-const source = createReadableFromArray([1, 2, 3], { objectMode: true });
-const collector = createCollector<number>({ objectMode: true });
+const source = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(source, combined, collector);
 console.log(collector.chunks); // [16, 36, 64]
@@ -580,22 +569,22 @@ console.log(collector.chunks); // [16, 36, 64]
 
 ---
 
-### finishedAll
+### Streams.waitForFinished
 
 Wait for multiple streams to finish.
 
 ```typescript
-import { finishedAll, createReadableFromArray } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const stream1 = createReadableFromArray([1, 2, 3], { objectMode: true });
-const stream2 = createReadableFromArray([4, 5, 6], { objectMode: true });
+const stream1 = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+const stream2 = Streams.createReadableFromArray([4, 5, 6], { objectMode: true });
 
 // Start consuming
 stream1.on("data", () => {});
 stream2.on("data", () => {});
 
 // Wait for both to finish
-await finishedAll([stream1, stream2]);
+await Streams.waitForFinished([stream1, stream2]);
 console.log("All streams completed");
 ```
 
@@ -606,10 +595,10 @@ console.log("All streams completed");
 Add abort signal handling to any stream.
 
 ```typescript
-import { addAbortSignal, createReadableFromArray, finished } from "documonster/stream";
+import { addAbortSignal, finished, Streams } from "documonster/stream";
 
 const controller = new AbortController();
-const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
+const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
 
 // Attach abort signal
 addAbortSignal(controller.signal, readable);
@@ -625,7 +614,7 @@ readable.on("data", chunk => {
 try {
   await finished(readable);
 } catch (err) {
-  console.log("Stream aborted:", err.message);
+  console.log("Stream aborted:", (err as Error).message);
 }
 ```
 
@@ -633,18 +622,18 @@ try {
 
 ## Factory Functions
 
-### createReadableFromArray
+### Streams.createReadableFromArray
 
 Create a readable stream from an array.
 
 ```typescript
-import { createReadableFromArray } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Object mode (for non-binary data)
-const objectStream = createReadableFromArray([{ a: 1 }, { b: 2 }], { objectMode: true });
+const objectStream = Streams.createReadableFromArray([{ a: 1 }, { b: 2 }], { objectMode: true });
 
 // Binary mode
-const binaryStream = createReadableFromArray([
+const binaryStream = Streams.createReadableFromArray([
   new Uint8Array([1, 2, 3]),
   new Uint8Array([4, 5, 6])
 ]);
@@ -652,12 +641,12 @@ const binaryStream = createReadableFromArray([
 
 ---
 
-### createReadableFromAsyncIterable
+### Streams.createReadableFromAsyncIterable
 
 Create a readable stream from an async iterable.
 
 ```typescript
-import { createReadableFromAsyncIterable } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 async function* generateNumbers() {
   for (let i = 1; i <= 5; i++) {
@@ -666,7 +655,7 @@ async function* generateNumbers() {
   }
 }
 
-const readable = createReadableFromAsyncIterable(generateNumbers());
+const readable = Streams.createReadableFromAsyncIterable(generateNumbers());
 
 for await (const n of readable) {
   console.log(n); // 1, 2, 3, 4, 5
@@ -675,14 +664,14 @@ for await (const n of readable) {
 
 ---
 
-### createReadableFromGenerator
+### Streams.createReadableFromGenerator
 
 Create a readable stream from a generator function.
 
 ```typescript
-import { createReadableFromGenerator } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const readable = createReadableFromGenerator(async function* () {
+const readable = Streams.createReadableFromGenerator(async function* () {
   yield await fetch("/api/part1").then(r => r.json());
   yield await fetch("/api/part2").then(r => r.json());
   yield await fetch("/api/part3").then(r => r.json());
@@ -691,14 +680,14 @@ const readable = createReadableFromGenerator(async function* () {
 
 ---
 
-### createReadableFromPromise
+### Streams.createReadableFromPromise
 
 Create a readable stream from a promise (emits single value).
 
 ```typescript
-import { createReadableFromPromise } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const readable = createReadableFromPromise(
+const readable = Streams.createReadableFromPromise(
   fetch("/api/data").then(r => r.json()),
   { objectMode: true }
 );
@@ -710,27 +699,27 @@ for await (const data of readable) {
 
 ---
 
-### createEmptyReadable
+### Streams.createEmptyReadable
 
 Create a readable that immediately ends with no data.
 
 ```typescript
-import { createEmptyReadable, pipeline } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
-const empty = createEmptyReadable();
+const empty = Streams.createEmptyReadable();
 // Useful for conditional pipelines or testing
 ```
 
 ---
 
-### createNullWritable
+### Streams.createNullWritable
 
 Create a writable that discards all data (like `/dev/null`).
 
 ```typescript
-import { createNullWritable, pipeline } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
-const devNull = createNullWritable();
+const devNull = Streams.createNullWritable();
 
 // Drain a stream without collecting data
 await pipeline(source, devNull);
@@ -743,9 +732,9 @@ await pipeline(source, devNull);
 Utility functions for consuming entire streams.
 
 ```typescript
-import { consumers, createReadableFromArray } from "documonster/stream";
+import { consumers, Streams } from "documonster/stream";
 
-const readable = createReadableFromArray([
+const readable = Streams.createReadableFromArray([
   new Uint8Array([123, 34, 110, 97, 109, 101, 34, 58, 34, 116, 101, 115, 116, 34, 125])
 ]);
 
@@ -771,22 +760,23 @@ const arrayBuffer = await consumers.arrayBuffer(readable);
 ## Type Guards
 
 ```typescript
-import { isReadable, isWritable, isTransform, isDuplex, isStream } from "documonster/stream";
+import { isReadable, isWritable, Streams } from "documonster/stream";
 
 // Check stream types
 isReadable(stream); // true if readable stream
 isWritable(stream); // true if writable stream
-isTransform(stream); // true if transform stream
-isDuplex(stream); // true if duplex stream
-isStream(stream); // true if any stream type
+Streams.isTransform(stream); // true if transform stream
+Streams.isDuplex(stream); // true if duplex stream
+Streams.isStream(stream); // true if any stream type
 
 // Usage
-async function processStream(input: unknown) {
+function processStream(input: unknown) {
   if (isReadable(input)) {
-    // TypeScript knows input is Readable here
-    for await (const chunk of input) {
+    // `input` is a ReadableLike here: something that can be listened to and piped. It is not
+    // necessarily async-iterable (a legacy stream is not), so read it through its events:
+    input.on("data", chunk => {
       // ...
-    }
+    });
   }
 }
 ```
@@ -839,18 +829,18 @@ for (const a of arrays) {
 
 ## Promise Utilities
 
-### onceEvent
+### Streams.LowLevel.onceEvent
 
 Wait for a single event from an emitter.
 
 ```typescript
-import { onceEvent } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Wait for a single event (resolves to void when the event fires)
-await onceEvent(emitter, "data");
+await Streams.LowLevel.onceEvent(emitter, "data");
 console.log("data event fired");
 
-// NOTE: onceEvent takes only (emitter, event) and returns Promise<void>.
+// NOTE: Streams.LowLevel.onceEvent takes only (emitter, event) and returns Promise<void>.
 // It does not accept an AbortSignal and does not resolve with event arguments.
 // For Node's argument-returning `once` with { signal }, import from node:events:
 //   import { once } from "node:events";
@@ -858,21 +848,21 @@ console.log("data event fired");
 
 ---
 
-### promisify
+### Streams.LowLevel.fromCallback
 
-Convert callback-style function to promise.
+Run a callback-style operation once and await its result.
 
 ```typescript
-import { promisify } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Callback-style function
 function fetchData(callback: (err: Error | null, data?: string) => void) {
   setTimeout(() => callback(null, "result"), 100);
 }
 
-// Convert to promise
-const fetchDataAsync = promisify(fetchData);
-const data = await fetchDataAsync();
+// Run it once and await its result. Unlike node:util's `promisify`, this does not
+// return a wrapped function: it calls `fetchData` now and settles with its callback.
+const data = await Streams.LowLevel.fromCallback<string>(fetchData);
 ```
 
 ---
@@ -935,10 +925,10 @@ const writable = new Writable({
 ## Error Handling
 
 ```typescript
-import { pipeline, createTransform, createReadableFromArray } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Error in transform function
-const badTransform = createTransform(
+const badTransform = Streams.createTransform<string, string>(
   chunk => {
     if (chunk === "bad") {
       throw new Error("Invalid data");
@@ -952,7 +942,7 @@ const badTransform = createTransform(
 try {
   await pipeline(source, badTransform, destination);
 } catch (err) {
-  console.error("Pipeline failed:", err.message);
+  console.error("Pipeline failed:", (err as Error).message);
 }
 
 // Event-based error handling
@@ -964,6 +954,12 @@ badTransform.on("error", err => {
 // Manual stream destruction
 stream.destroy(new Error("Manual destruction"));
 ```
+
+An argument this module refuses is a `StreamArgumentError` or `StreamUnsupportedTypeError` (both
+`StreamError`s, so `isStreamError` answers for them): `field` names the argument
+(`options.highWaterMark`, `stream`) and the message starts with the call (`Streams.bytes: …`).
+An aborted stream fails with `AbortError`, the same class `documonster/archive` exports; it is
+not a `StreamError`.
 
 ---
 
@@ -1006,12 +1002,7 @@ The API is **identical** between Node.js and browsers, allowing you to write cod
 ### CSV Processing
 
 ```typescript
-import {
-  createReadableFromArray,
-  createTransform,
-  createCollector,
-  pipeline
-} from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 interface Person {
   name: string;
@@ -1024,13 +1015,13 @@ const data: Person[] = [
   { name: "Charlie", age: 35 }
 ];
 
-const source = createReadableFromArray(data, { objectMode: true });
+const source = Streams.createReadableFromArray(data, { objectMode: true });
 
-const toCsv = createTransform<Person, string>(row => `${row.name},${row.age}\n`, {
+const toCsv = Streams.createTransform<Person, string>(row => `${row.name},${row.age}\n`, {
   objectMode: true
 });
 
-const collector = createCollector<string>({ objectMode: true });
+const collector = new Streams.Collector<string>({ objectMode: true });
 
 await pipeline(source, toCsv, collector);
 console.log(collector.chunks.join(""));
@@ -1042,16 +1033,18 @@ console.log(collector.chunks.join(""));
 ### Data Filtering and Transformation
 
 ```typescript
-const numbers = createReadableFromArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], { objectMode: true });
+const numbers = Streams.createReadableFromArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], {
+  objectMode: true
+});
 
-const filterEven = createTransform<number, number>(
+const filterEven = Streams.createTransform<number, number>(
   n => (n % 2 === 0 ? n : undefined), // undefined skips
   { objectMode: true }
 );
 
-const square = createTransform<number, number>(n => n * n, { objectMode: true });
+const square = Streams.createTransform<number, number>(n => n * n, { objectMode: true });
 
-const collector = createCollector<number>({ objectMode: true });
+const collector = new Streams.Collector<number>({ objectMode: true });
 
 await pipeline(numbers, filterEven, square, collector);
 console.log(collector.chunks); // [4, 16, 36, 64, 100]
@@ -1062,7 +1055,7 @@ console.log(collector.chunks); // [4, 16, 36, 64, 100]
 ### Async Data Processing
 
 ```typescript
-const urls = createReadableFromArray(
+const urls = Streams.createReadableFromArray(
   [
     "https://api.example.com/users/1",
     "https://api.example.com/users/2",
@@ -1071,7 +1064,7 @@ const urls = createReadableFromArray(
   { objectMode: true }
 );
 
-const fetchData = createTransform<string, object>(
+const fetchData = Streams.createTransform<string, object>(
   async url => {
     const response = await fetch(url);
     return response.json();
@@ -1079,7 +1072,7 @@ const fetchData = createTransform<string, object>(
   { objectMode: true }
 );
 
-const collector = createCollector<object>({ objectMode: true });
+const collector = new Streams.Collector<object>({ objectMode: true });
 
 await pipeline(urls, fetchData, collector);
 console.log(collector.chunks); // Array of user objects
@@ -1090,10 +1083,10 @@ console.log(collector.chunks); // Array of user objects
 ### Protocol Parsing with PullStream
 
 ```typescript
-import { createPullStream } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Parse a simple protocol: LENGTH:DATA
-const pull = createPullStream();
+const pull = new Streams.PullStream();
 pull.write(Buffer.from("5:Hello3:World"));
 pull.end();
 
@@ -1125,10 +1118,10 @@ console.log(messages); // ["Hello", "World"]
 
 ```typescript
 import { createReadStream, createWriteStream } from "fs";
-import { pipeline, createTransform } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Transform file content to uppercase
-const uppercase = createTransform<Buffer, Buffer>(chunk =>
+const uppercase = Streams.createTransform<Buffer, Buffer>(chunk =>
   Buffer.from(chunk.toString().toUpperCase())
 );
 
@@ -1140,16 +1133,16 @@ await pipeline(createReadStream("input.txt"), uppercase, createWriteStream("outp
 ### Fetch API Integration (Browser)
 
 ```typescript
-import { readableFromWeb, pipeline, createCollector } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Fetch and process response
 const response = await fetch("/api/large-data");
 
 // Convert the Web ReadableStream to a Node-style Readable (or pass `response.body` to
 // `pipeline` directly — it accepts Web streams as they are)
-const readable = readableFromWeb(response.body!);
+const readable = Streams.fromWebReadable(response.body!);
 
-const collector = createCollector<Uint8Array>();
+const collector = new Streams.Collector<Uint8Array>();
 
 await pipeline(readable, collector);
 const data = collector.toUint8Array();
@@ -1161,79 +1154,91 @@ const data = collector.toUint8Array();
 
 ### Classes
 
-| Class                         | Description                             |
-| ----------------------------- | --------------------------------------- |
-| `Readable`                    | Readable stream class                   |
-| `Writable`                    | Writable stream class                   |
-| `Transform`                   | Transform stream class                  |
-| `Duplex`                      | Duplex stream class                     |
-| `PassThrough`                 | Pass-through transform (no-op)          |
-| `Collector`                   | Collects stream data into array         |
-| `PullStream`                  | Pull-based stream with pattern matching |
-| `BufferedStream`              | Stream with internal buffering          |
-| `ChunkedBuilder`              | Efficient string builder                |
-| `TransactionalChunkedBuilder` | Builder with snapshot/rollback          |
-| `createStringChunk()`         | String data chunk factory               |
-| `createByteChunk()`           | Binary data chunk factory               |
+| Class                                       | Description                             |
+| ------------------------------------------- | --------------------------------------- |
+| `Readable`                                  | Readable stream class                   |
+| `Writable`                                  | Writable stream class                   |
+| `Transform`                                 | Transform stream class                  |
+| `Duplex`                                    | Duplex stream class                     |
+| `PassThrough`                               | Pass-through transform (no-op)          |
+| `new Streams.Collector()`                   | Collects stream data into array         |
+| `new Streams.PullStream()`                  | Pull-based stream with pattern matching |
+| `new Streams.BufferedStream()`              | Stream with internal buffering          |
+| `new Streams.ChunkedBuilder()`              | Efficient string builder                |
+| `new Streams.TransactionalChunkedBuilder()` | Builder with snapshot/rollback          |
+| `Streams.createStringChunk()`               | String data chunk factory               |
+| `Streams.createByteChunk()`                 | Binary data chunk factory               |
+
+The classes themselves are public values (`Streams.Collector`, `Streams.PullStream`, …) for
+`instanceof` checks and subclassing; the `create*` factories are the usual way to build one.
+
+### Adapting emitters, sinks and callbacks (`Streams.LowLevel`)
+
+| Function                                                  | Description                                                                                                                                                                    |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Streams.LowLevel.eventsToAsyncIterableNoDestroy(stream)` | Iterate an evented readable; an early `break` removes the listeners and pauses it, never destroys it                                                                           |
+| `new Streams.LowLevel.SinkAdapter(sink)`                  | Wrap a Web `WritableStream`, a Node writable or a `{ write, end }` object in a `Streams.LowLevel.SinkAdapter` with awaited `write`/`end`; sink errors surface on the next call |
+
+```typescript
+import { Streams } from "documonster/stream";
+
+for await (const chunk of Streams.LowLevel.eventsToAsyncIterableNoDestroy<string>(source)) {
+  if (chunk === "stop") break; // source is paused, not destroyed
+}
+
+const sink = new Streams.LowLevel.SinkAdapter(anyWritable);
+await sink.write(new TextEncoder().encode("hello"));
+await sink.end();
+```
 
 ### Factory Functions
 
-| Function                            | Description                         |
-| ----------------------------------- | ----------------------------------- |
-| `createReadable()`                  | Create readable with custom options |
-| `createReadableFromArray()`         | Create readable from array          |
-| `createReadableFromAsyncIterable()` | Create readable from async iterable |
-| `createReadableFromGenerator()`     | Create readable from generator      |
-| `createReadableFromPromise()`       | Create readable from promise        |
-| `createEmptyReadable()`             | Create empty readable               |
-| `createWritable()`                  | Create writable with custom options |
-| `createNullWritable()`              | Create writable that discards data  |
-| `createTransform()`                 | Create transform with function      |
-| `createDuplex()`                    | Create duplex stream                |
-| `createPassThrough()`               | Create pass-through transform       |
-| `createCollector()`                 | Create data collector               |
-| `createPullStream()`                | Create pull stream                  |
-| `createBufferedStream()`            | Create buffered stream              |
-| `duplexPair()`                      | Create connected duplex pair        |
+| Function                                    | Description                         |
+| ------------------------------------------- | ----------------------------------- |
+| `Streams.createReadable()`                  | Create readable with custom options |
+| `Streams.createReadableFromArray()`         | Create readable from array          |
+| `Streams.createReadableFromAsyncIterable()` | Create readable from async iterable |
+| `Streams.createReadableFromGenerator()`     | Create readable from generator      |
+| `Streams.createReadableFromPromise()`       | Create readable from promise        |
+| `Streams.createEmptyReadable()`             | Create empty readable               |
+| `Streams.createWritable()`                  | Create writable with custom options |
+| `Streams.createNullWritable()`              | Create writable that discards data  |
+| `Streams.createTransform()`                 | Create transform with function      |
+| `Streams.createDuplex()`                    | Create duplex stream                |
+| `Streams.createPassThrough()`               | Create pass-through transform       |
+| `duplexPair()`                              | Create connected duplex pair        |
 
 ### Utility Functions
 
-| Function               | Description                               |
-| ---------------------- | ----------------------------------------- |
-| `pipeline()`           | Pipe streams with error handling          |
-| `finished()`           | Wait for stream to finish                 |
-| `compose()`            | Compose multiple transforms               |
-| `finishedAll()`        | Wait for multiple streams                 |
-| `addAbortSignal()`     | Add abort signal to stream                |
-| `onceEvent()`          | Wait for a single event; resolves to void |
-| `promisify()`          | Convert callback to promise               |
-| `streamToUint8Array()` | Collect stream to Uint8Array              |
-| `streamToString()`     | Collect stream to string                  |
-| `drainStream()`        | Consume stream without collecting         |
-| `copyStream()`         | Copy source to destination                |
+| Function                          | Description                                 |
+| --------------------------------- | ------------------------------------------- |
+| `pipeline()`                      | Pipe streams with error handling            |
+| `finished()`                      | Wait for stream to finish                   |
+| `compose()`                       | Compose multiple transforms                 |
+| `Streams.waitForFinished()`       | Wait for multiple streams                   |
+| `addAbortSignal()`                | Add abort signal to stream                  |
+| `Streams.LowLevel.onceEvent()`    | Wait for a single event; resolves to void   |
+| `Streams.LowLevel.fromCallback()` | Run a callback-style operation as a promise |
+| `Streams.bytes()`                 | Collect stream to Uint8Array                |
+| `Streams.text()`                  | Collect stream to string                    |
+| `Streams.discard()`               | Consume stream without collecting           |
 
 ### Binary Utilities
 
-These helpers are re-exported from `documonster/archive` (not `documonster/stream`).
-
-| Function               | Description             |
-| ---------------------- | ----------------------- |
-| `stringToUint8Array()` | Convert string to bytes |
-| `uint8ArrayToString()` | Convert bytes to string |
-| `concatUint8Arrays()`  | Concatenate arrays      |
+Use the platform built-ins — see [Binary Utilities](#binary-utilities) above.
 
 ### Type Guards
 
-| Function        | Returns true if      |
-| --------------- | -------------------- |
-| `isReadable()`  | Readable stream      |
-| `isWritable()`  | Writable stream      |
-| `isTransform()` | Transform stream     |
-| `isDuplex()`    | Duplex stream        |
-| `isStream()`    | Any stream type      |
-| `isDestroyed()` | Stream is destroyed  |
-| `isDisturbed()` | Stream has been read |
-| `isErrored()`   | Stream has errored   |
+| Function                | Returns true if      |
+| ----------------------- | -------------------- |
+| `isReadable()`          | Readable stream      |
+| `isWritable()`          | Writable stream      |
+| `Streams.isTransform()` | Transform stream     |
+| `Streams.isDuplex()`    | Duplex stream        |
+| `Streams.isStream()`    | Any stream type      |
+| `isDestroyed()`         | Stream is destroyed  |
+| `isDisturbed()`         | Stream has been read |
+| `isErrored()`           | Stream has errored   |
 
 ---
 
@@ -1249,7 +1254,7 @@ Node offers (or, for `instanceof`, without redefining what it means):
 | **Event scheduling**                    | `process.nextTick`                                                                                  | One microtask drains every tick queued meanwhile, in order                                                                       | The order of a stream's own events and callbacks matches Node, and so does a tick's placement when queued from a task (event handler, timer, I/O). Queued from inside a promise continuation, Node runs it only once the whole microtask queue is empty; no browser primitive can, so it runs earlier. Both measured in `__tests__/stream-scheduling.node.test.ts`. |
 | **`_readableState` / `_writableState`** | Node's internal state objects                                                                       | The same field names, but a different object                                                                                     | Internal: use the public getters (`readableLength`, `writableNeedDrain`, …).                                                                                                                                                                                                                                                                                        |
 | **`isDisturbed(webStream)`**            | Answered by Node's own Web Streams                                                                  | Exact for an unlocked stream (probed through `new Response(stream)`, which neither locks nor reads it); `false` for a locked one | For a locked stream the true answer is "unknown": one that was read cannot be told from one that was not, so `false` there means "not known to be disturbed".                                                                                                                                                                                                       |
-| **`instanceof` a stream class**         | `true` for every `node:stream` stream, whoever made it                                              | `true` only for streams made by this module's classes                                                                            | Streams from elsewhere (`readable-stream`, another library) are still recognised and driven by every function here, which checks the stream protocol rather than the class, as Node does. Test with `isReadable` / `isWritable` / `isStream`, not `instanceof`.                                                                                                     |
+| **`instanceof` a stream class**         | `true` for every `node:stream` stream, whoever made it                                              | `true` only for streams made by this module's classes                                                                            | Streams from elsewhere (`readable-stream`, another library) are still recognised and driven by every function here, which checks the stream protocol rather than the class, as Node does. Test with `isReadable` / `isWritable` / `Streams.isStream`, not `instanceof`.                                                                                             |
 | **`finished(webStream)`**               | Any Web stream                                                                                      | Not supported: rejects at once, without locking the stream                                                                       | The standard API has no lock-free completion signal, and a Web stream's queue is only known to be drained by the reader that drains it. Await your reader's or writer's `closed` promise.                                                                                                                                                                           |
 
 ### Converting between Node-style and Web streams
@@ -1257,10 +1262,10 @@ Node offers (or, for `instanceof`, without redefining what it means):
 Use the module's own conversions; they behave the same on both entries:
 
 ```ts
-import { readableFromWeb, readableToWeb, writableFromWeb, writableToWeb } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const nodeStyle = readableFromWeb(response.body!);
-const web = writableToWeb(nodeStyleWritable);
+const nodeStyle = Streams.fromWebReadable(response.body!);
+const web = Streams.toWebWritable(nodeStyleWritable);
 ```
 
 The class statics (`Readable.fromWeb`, `Writable.toWeb`, `Duplex.fromWeb`, …) are Node's on
@@ -1268,16 +1273,16 @@ The class statics (`Readable.fromWeb`, `Writable.toWeb`, `Duplex.fromWeb`, …) 
 written against them behaves the same everywhere, defects included. As of Node 26 five of their
 behaviours are wrong, and the module's functions above fix all five, identically on both entries:
 
-| Class static (Node's behaviour)                                                                                    | Module function                                       |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| `Readable.fromWeb` pushes a `null` read, which ends the stream and silently drops the rest                         | `readableFromWeb` fails with `ERR_STREAM_NULL_VALUES` |
-| `Readable.fromWeb` / `Writable.fromWeb` / `Duplex.fromWeb` keep the Web stream locked for good                     | the lock is handed back once the adapter is done      |
-| `Writable.toWeb(w)` while `w.writableNeedDrain`: the next Web write resolves without reaching `w.write()`          | the chunk is written, then the write waits for drain  |
-| `Readable.toWeb(r)` after `r.setEncoding(...)`: once strings queue, `RangeError` is thrown from `'data'`, uncaught | strings are sized in characters                       |
-| `Readable.toWeb` / `Writable.toWeb` leave their `'data'` / `'drain'` listener on the source once done              | the listener is removed                               |
+| Class static (Node's behaviour)                                                                                    | Module function                                               |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `Readable.fromWeb` pushes a `null` read, which ends the stream and silently drops the rest                         | `Streams.fromWebReadable` fails with `ERR_STREAM_NULL_VALUES` |
+| `Readable.fromWeb` / `Writable.fromWeb` / `Duplex.fromWeb` keep the Web stream locked for good                     | the lock is handed back once the adapter is done              |
+| `Writable.toWeb(w)` while `w.writableNeedDrain`: the next Web write resolves without reaching `w.write()`          | the chunk is written, then the write waits for drain          |
+| `Readable.toWeb(r)` after `r.setEncoding(...)`: once strings queue, `RangeError` is thrown from `'data'`, uncaught | strings are sized in characters                               |
+| `Readable.toWeb` / `Writable.toWeb` leave their `'data'` / `'drain'` listener on the source once done              | the listener is removed                                       |
 
-`pipeline` and `compose` read and write Web streams themselves, and `toWritable` goes through
-`writableFromWeb`, so none of them shares these defects, on either entry.
+`pipeline` and `compose` read and write Web streams themselves, and `Streams.toWritable` goes through
+`Streams.fromWebWritable`, so none of them shares these defects, on either entry.
 
 On Bun the Node entry's classes are Bun's own `node:stream`, so their statics are Bun's: Bun 1.4,
 for one, releases `Readable.fromWeb`'s lock once the stream ends, where Node keeps it. The module's

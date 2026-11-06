@@ -6,7 +6,9 @@
  * orchestration of the higher-level parsers.
  */
 
+import { resolvePartPath } from "@word/core/opc-paths";
 import type { ParsedRelationship } from "@word/reader/reader-context";
+import { hashAlgorithmOfSid } from "@word/security/hash-names";
 import { findChild, findChildren } from "@xml/dom";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import type { XmlElement } from "@xml/types";
@@ -53,6 +55,14 @@ export function safeParseInt(value: string | undefined, fallback: number): numbe
 export function localName(name: string): string {
   const idx = name.indexOf(":");
   return idx >= 0 ? name.slice(idx + 1) : name;
+}
+
+/**
+ * `name` without a leading `w:` prefix — what `name.replace(/^w:/, "")` gives,
+ * without running a regex for every element the reader dispatches on.
+ */
+export function stripWPrefix(name: string): string {
+  return name.charCodeAt(0) === 0x77 && name.charCodeAt(1) === 0x3a ? name.slice(2) : name;
 }
 
 /** Find a child element by local name (matches both `w:name` and bare `name`). */
@@ -105,11 +115,24 @@ export function attrLocal(el: XmlElement, name: string): string | undefined {
 }
 
 /**
+ * An OOXML on/off attribute (`ST_OnOff`, ECMA-376 §22.9.2.7): `"0"`,
+ * `"false"` and `"off"` are false, any other value (`"1"`, `"true"`, `"on"`)
+ * is true; missing yields `undefined`.
+ */
+export function attrOnOff(el: XmlElement, name: string): boolean | undefined {
+  const v = attrVal(el, name);
+  if (v === undefined) {
+    return undefined;
+  }
+  return v !== "0" && v !== "false" && v !== "off";
+}
+
+/**
  * Check for a boolean toggle element.
  *
  * In OOXML, many properties are represented as toggle elements where:
  * - Element present = true
- * - Element with `w:val="0"` or `"false"` = explicit false
+ * - Element with `w:val` `"0"`, `"false"` or `"off"` = explicit false (`ST_OnOff`)
  * - Element absent = undefined (use parent's default)
  */
 export function boolToggle(parent: XmlElement, name: string): boolean | undefined {
@@ -117,11 +140,7 @@ export function boolToggle(parent: XmlElement, name: string): boolean | undefine
   if (!el) {
     return undefined;
   }
-  const v = attrVal(el, "val");
-  if (v === "0" || v === "false") {
-    return false;
-  }
-  return true;
+  return attrOnOff(el, "val") ?? true;
 }
 
 // =============================================================================
@@ -167,45 +186,7 @@ export function collectRIds(el: XmlElement, out: Set<string>): void {
 // Path / Relationship Helpers
 // =============================================================================
 
-export { getPartRelsPath, getFileName, getFileExt } from "@word/core/opc-paths";
-
-/**
- * Resolve an OPC relationship target against its source part.
- *
- * - Leading `/` → package root absolute
- * - `../` / `./` → resolved relative to the source part's directory
- * - Plain paths → resolved relative to the source part's directory
- *
- * Returns an empty string when the resolved path would escape the package
- * root (i.e. more `..` segments than there are directories above the
- * source). The previous behaviour silently treated extra `..` as a no-op,
- * which let a malicious or malformed `Target` value point at an entirely
- * different part than the directory traversal would suggest.
- */
-export function resolvePartPath(sourcePart: string, target: string): string {
-  if (!target) {
-    return "";
-  }
-  if (target.startsWith("/")) {
-    return target.slice(1);
-  }
-  const lastSlash = sourcePart.lastIndexOf("/");
-  const baseDir = lastSlash >= 0 ? sourcePart.substring(0, lastSlash).split("/") : [];
-  const segs = target.split("/");
-  for (const seg of segs) {
-    if (seg === "..") {
-      if (baseDir.length === 0) {
-        // The target asks to step above the package root. Treat as
-        // unresolvable instead of silently swallowing the segment.
-        return "";
-      }
-      baseDir.pop();
-    } else if (seg !== "." && seg !== "") {
-      baseDir.push(seg);
-    }
-  }
-  return baseDir.join("/");
-}
+export { getPartRelsPath, getFileName, getFileExt, resolvePartPath } from "@word/core/opc-paths";
 
 /**
  * Find the first relationship of a given type and resolve its target path.
@@ -230,27 +211,7 @@ export function resolveRelTarget(
 
 /** Convert OOXML cryptAlgorithmSid to human-readable algorithm name. */
 export function sidToHashAlgorithm(sid: string | undefined): string | undefined {
-  if (!sid) {
-    return undefined;
-  }
-  switch (sid) {
-    case "1":
-      return "MD2";
-    case "2":
-      return "MD4";
-    case "3":
-      return "MD5";
-    case "4":
-      return "SHA-1";
-    case "12":
-      return "SHA-256";
-    case "13":
-      return "SHA-384";
-    case "14":
-      return "SHA-512";
-    default:
-      return `SID-${sid}`;
-  }
+  return hashAlgorithmOfSid(sid);
 }
 
 // =============================================================================

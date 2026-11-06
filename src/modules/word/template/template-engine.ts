@@ -16,9 +16,27 @@
  */
 
 import { isForbiddenKey } from "@utils/object";
-import { utf8Encoder } from "@word/core/internal-utils";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle, checkNamedValues, checkRecord } from "@word/core/argument-checks";
+import { imageKeys, isSamePicture } from "@word/core/image-keys";
+import { assertImageMediaType } from "@word/core/image-media";
+import { cloneModel, utf8Encoder } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived, ownTree } from "@word/core/ownership";
+import type { RangeAnchor } from "@word/core/range-markers";
+import {
+  collectRangeAnchors,
+  keepClonedRangeMarkers,
+  listRangeAnchors,
+  repeatedRanges,
+  replaceParagraphChildren,
+  settleRangeMarkers,
+  withParagraphChildren,
+  withRangeMarkersBefore
+} from "@word/core/range-markers";
 import { isRun } from "@word/core/text-utils";
-import { TemplateError } from "@word/errors";
+import { DocxTemplateError } from "@word/errors";
 import type {
   DocxDocument,
   BodyContent,
@@ -34,6 +52,8 @@ import type {
   Chart,
   ChartContent,
   AltChunk,
+  CommentReference,
+  RangeMarker,
   StructuredDocumentTag
 } from "@word/types";
 
@@ -46,12 +66,33 @@ export interface TemplateOptions {
   /** Custom delimiters (default: ["{{", "}}"]). */
   readonly delimiters?: readonly [string, string];
   /**
-   * If true (default), throw `TemplateError` when a placeholder cannot be
+   * If true (default), throw `DocxTemplateError` when a placeholder cannot be
    * resolved. If false, unresolved variables render as the empty string and
    * unresolved control directives are skipped silently.
    */
   readonly strict?: boolean;
+  /**
+   * Also resolve the rich placeholders — image (`{{%path}}`), rich text
+   * (`{{&path}}`), sub-document (`{{>path}}`), chart (`{{^path}}`) and HTML
+   * chunks (`{{!path}}`) — in addition to variables, conditionals and loops,
+   * wherever those can appear, loop bodies included. Each must be the whole
+   * text of its paragraph. Default: false.
+   *
+   * Read by `Template.fill` and the entry points built on it; it does not
+   * change whether the input is modified (`fill` never modifies it).
+   */
+  readonly richPlaceholders?: boolean;
 }
+
+/**
+ * {@link TemplateOptions} as the deprecated entry points (`fillTemplate`,
+ * `fillTemplateEnhanced` and the `…FromSource` / `…FromBuffer` forms) take
+ * them. They predate `richPlaceholders`, and which placeholders each resolves
+ * is fixed by its name, so the option is not part of their signature.
+ *
+ * @deprecated Use {@link TemplateOptions} with `Template.fill`. Removed in 1.0.
+ */
+export type LegacyTemplateOptions = Omit<TemplateOptions, "richPlaceholders">;
 
 /** An image value to be inserted by the template engine. */
 export interface TemplateImage {
@@ -171,8 +212,9 @@ type Token =
 /**
  * Fill a DOCX template document with data.
  *
- * Processes all body content, headers, footers, footnotes, and endnotes.
- * Operates on the document model in-place and returns it.
+ * Resolves variables, conditionals and loops in the body, headers, footers,
+ * footnotes and endnotes — not rich placeholders, and not comment bodies.
+ * Operates on the document model in place and returns it.
  *
  * @param doc - The parsed DocxDocument model.
  * @param data - Data to fill into the template.
@@ -182,13 +224,96 @@ type Token =
 export function fillTemplate(
   doc: DocxDocument,
   data: Record<string, unknown>,
-  options?: TemplateOptions
+  options?: LegacyTemplateOptions
+): DocxDocument {
+  checkFillArguments(data, options, "Template.fillTemplate");
+  ownTree(doc);
+  return fillInPlace(doc, data, options, {
+    where: "Template.fillTemplate",
+    rich: false,
+    comments: false
+  });
+}
+
+/**
+ * The delimiters a template is read with: two non-empty strings that differ.
+ * An empty one matches everywhere, and a pair that is one string cannot tell
+ * where a tag ends.
+ */
+const delimitersSchema = s
+  .custom<readonly [string, string]>(
+    d =>
+      Array.isArray(d) &&
+      d.length === 2 &&
+      typeof d[0] === "string" &&
+      typeof d[1] === "string" &&
+      d[0] !== "" &&
+      d[1] !== "" &&
+      d[0] !== d[1],
+    "two different non-empty strings [open, close]"
+  )
+  .optional();
+
+export const templateOptionsShape = {
+  delimiters: delimitersSchema,
+  strict: w.boolean().optional(),
+  richPlaceholders: w.boolean().optional()
+};
+
+const templateOptionsSchema = w.record(templateOptionsShape);
+const _templateOptionsMatch: SchemaMatches<typeof templateOptionsSchema, TemplateOptions> = true;
+void _templateOptionsMatch;
+
+const delimiterOptionsSchema = w.record({ delimiters: delimitersSchema }).optional();
+
+/** What every fill takes: data to fill with, and options. */
+/**
+ * The data a fill is given, as an object: `Template.fill` and
+ * `Package.fillTemplate` take a plain object or a `Map` keyed by name, as the
+ * other filling functions (`Document.mailMerge`, `Transform.fillFormFields`)
+ * do. A `Map` becomes the top level of the data; nested values are read as
+ * they are.
+ */
+export function fillData(data: unknown, where: string): Record<string, unknown> {
+  const entries = checkNamedValues(data, "data", where);
+  return data instanceof Map ? Object.fromEntries(entries) : (data as Record<string, unknown>);
+}
+
+function checkFillArguments(data: unknown, options: unknown, where: string): void {
+  checkRecord(data, "data", where);
+  checkSchema(templateOptionsSchema.optional(), options, where);
+}
+
+/** Which parts of the template language a fill resolves, beyond the basic one. */
+interface FillScope {
+  /** The public call filling, which an error names. */
+  readonly where: string;
+  /** Rich placeholders (images, rich text, sub-documents, charts, HTML chunks). */
+  readonly rich: boolean;
+  /** Comment bodies, as well as the body, headers, footers and notes. */
+  readonly comments: boolean;
+}
+
+/**
+ * The fill itself: replaces the body, the children of every header and
+ * footer, and the content of every note (and comment, when `scope` says so)
+ * of `doc` in place, and adds the pictures rich placeholders inserted to its
+ * images.
+ */
+function fillInPlace(
+  doc: DocxDocument,
+  data: Record<string, unknown>,
+  options: LegacyTemplateOptions | undefined,
+  scope: FillScope
 ): DocxDocument {
   const open = options?.delimiters?.[0] ?? "{{";
   const close = options?.delimiters?.[1] ?? "}}";
   const strict = options?.strict ?? true;
 
-  const ctx: TemplateContext = { open, close, strict, data };
+  const rich: RichState | undefined = scope.rich
+    ? { images: createTemplateImageSink(doc.images, scope.where), depth: 0 }
+    : undefined;
+  const ctx: TemplateContext = { open, close, strict, data, rich };
 
   // Process body
   const newBody = processBodyContent(doc.body as BodyContent[], ctx, "body");
@@ -240,6 +365,24 @@ export function fillTemplate(
     }
   }
 
+  if (scope.comments && doc.comments) {
+    for (const comment of doc.comments) {
+      const processed = processBlockList(
+        comment.content as Paragraph[],
+        ctx,
+        `comment:${comment.id}`
+      );
+      (comment as { content: readonly Paragraph[] }).content = processed as Paragraph[];
+    }
+  }
+
+  if (rich) {
+    // Each added picture already has a key and a file name of its own (see
+    // `createTemplateImageSink`).
+    const images = [...(doc.images ?? []), ...rich.images.added];
+    (doc as { images?: readonly ImageDef[] }).images = images.length > 0 ? images : undefined;
+  }
+
   return doc;
 }
 
@@ -252,7 +395,27 @@ interface TemplateContext {
   readonly close: string;
   readonly strict: boolean;
   readonly data: Record<string, unknown>;
+  /** Set when rich placeholders are resolved. */
+  readonly rich?: RichState;
 }
+
+/** What resolving rich placeholders accumulates over one fill. */
+interface RichState {
+  /**
+   * Pictures inserted, to be added to the document's images. A picture
+   * placed many times — by a loop, say — is stored once.
+   */
+  readonly images: TemplateImageSink;
+  /** How many sub-documents the content being filled is nested in. */
+  readonly depth: number;
+}
+
+/**
+ * How deeply sub-document placeholders may nest. An inserted sub-document is
+ * filled like the rest of the template, so one that inserts itself would
+ * otherwise never finish.
+ */
+const MAX_SUB_DOCUMENT_DEPTH = 32;
 
 // =============================================================================
 // Cross-run text merging
@@ -282,7 +445,16 @@ function extractParagraphText(para: Paragraph): string {
 // Tokenizer
 // =============================================================================
 
-function tokenize(text: string, open: string, close: string): Token[] {
+/**
+ * The tokens of `text`. With `spans`, the source range of each token is
+ * pushed to it, in step with the tokens.
+ */
+function tokenize(
+  text: string,
+  open: string,
+  close: string,
+  spans?: [start: number, end: number][]
+): Token[] {
   const tokens: Token[] = [];
   let pos = 0;
 
@@ -290,22 +462,26 @@ function tokenize(text: string, open: string, close: string): Token[] {
     const startIdx = text.indexOf(open, pos);
     if (startIdx === -1) {
       tokens.push({ type: TokenType.Text, value: text.slice(pos) });
+      spans?.push([pos, text.length]);
       break;
     }
 
     if (startIdx > pos) {
       tokens.push({ type: TokenType.Text, value: text.slice(pos, startIdx) });
+      spans?.push([pos, startIdx]);
     }
 
     const endIdx = text.indexOf(close, startIdx + open.length);
     if (endIdx === -1) {
       // Unclosed delimiter — treat rest as text
       tokens.push({ type: TokenType.Text, value: text.slice(startIdx) });
+      spans?.push([startIdx, text.length]);
       break;
     }
 
     const expr = text.slice(startIdx + open.length, endIdx).trim();
     pos = endIdx + close.length;
+    spans?.push([startIdx, pos]);
 
     if (expr.startsWith("#if ")) {
       tokens.push({ type: TokenType.IfOpen, condition: expr.slice(4).trim() });
@@ -382,7 +558,22 @@ function processBodyContent(
   ctx: TemplateContext,
   location: string
 ): BodyContent[] {
-  const result: BodyContent[] = [];
+  return settleRangeMarkers(processBodyItems(blocks, ctx, location));
+}
+
+/**
+ * {@link processBodyContent} without settling: the range markers and comment
+ * references of the blocks it removes (directive paragraphs, branches not
+ * taken, loop bodies with no items) stay in the result as items of their own,
+ * where the blocks were, so the ranges they open or close stay paired and no
+ * comment loses its reference.
+ */
+function processBodyItems(
+  blocks: BodyContent[],
+  ctx: TemplateContext,
+  location: string
+): (BodyContent | RangeAnchor)[] {
+  const result: (BodyContent | RangeAnchor)[] = [];
   let i = 0;
 
   while (i < blocks.length) {
@@ -396,7 +587,7 @@ function processBodyContent(
         const collectionExpr = extractDirectiveArg(text, ctx.open, ctx.close, "#each ");
         const endIdx = findClosingBlock(blocks, i, ctx, "#each ", "/each");
         if (endIdx === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed {{#each ${collectionExpr}}}`,
             `#each ${collectionExpr}`,
             location,
@@ -411,19 +602,25 @@ function processBodyContent(
         const innerBlocks = blocks.slice(i + 1, endIdx);
         const items = resolvePath(ctx.data, collectionExpr);
 
-        if (Array.isArray(items)) {
+        result.push(...listRangeAnchors([block]));
+        if (Array.isArray(items) && items.length > 0) {
+          const ranges = repeatedRanges(innerBlocks);
           for (let idx = 0; idx < items.length; idx++) {
             const itemData = buildLoopData(items[idx], idx, ctx.data);
             const innerCtx: TemplateContext = { ...ctx, data: itemData };
-            const processed = processBodyContent(
-              cloneBlocks(innerBlocks),
+            const processed = processBodyItems(
+              keepClonedRangeMarkers(cloneBlocks(innerBlocks), idx, items.length, ranges),
               innerCtx,
               `${location}[${idx}]`
             );
             result.push(...processed);
           }
-        } else if (ctx.strict && items !== undefined && items !== null) {
-          throw new TemplateError(
+        } else {
+          result.push(...listRangeAnchors(innerBlocks));
+        }
+        result.push(...listRangeAnchors([blocks[endIdx]!]));
+        if (!Array.isArray(items) && ctx.strict && items !== undefined && items !== null) {
+          throw new DocxTemplateError(
             `{{#each ${collectionExpr}}} expects an array, got ${typeof items}`,
             `#each ${collectionExpr}`,
             location,
@@ -444,7 +641,7 @@ function processBodyContent(
         const condExpr = extractDirectiveArg(text, ctx.open, ctx.close, "#if ");
         const { elseIdx, endIdx } = findIfBlock(blocks, i, ctx);
         if (endIdx === -1) {
-          throw new TemplateError(`Unclosed {{#if ${condExpr}}}`, `#if ${condExpr}`, location, {
+          throw new DocxTemplateError(`Unclosed {{#if ${condExpr}}}`, `#if ${condExpr}`, location, {
             tagName: `#if ${condExpr}`,
             paragraphIndex: i,
             sectionPath: location
@@ -452,15 +649,25 @@ function processBodyContent(
         }
 
         const condValue = resolvePath(ctx.data, condExpr);
-        let innerBlocks: BodyContent[];
-        if (isTruthy(condValue)) {
-          innerBlocks = blocks.slice(i + 1, elseIdx !== -1 ? elseIdx : endIdx);
-        } else {
-          innerBlocks = elseIdx !== -1 ? blocks.slice(elseIdx + 1, endIdx) : [];
-        }
+        const thenBlocks = blocks.slice(i + 1, elseIdx !== -1 ? elseIdx : endIdx);
+        const elseBlocks = elseIdx !== -1 ? blocks.slice(elseIdx + 1, endIdx) : [];
+        const taken = isTruthy(condValue);
 
-        const processed = processBodyContent(cloneBlocks(innerBlocks), ctx, location);
-        result.push(...processed);
+        result.push(...listRangeAnchors([block]));
+        if (taken) {
+          result.push(...processBodyItems(cloneBlocks(thenBlocks), ctx, location));
+        } else {
+          result.push(...listRangeAnchors(thenBlocks));
+        }
+        if (elseIdx !== -1) {
+          result.push(...listRangeAnchors([blocks[elseIdx]!]));
+        }
+        if (taken) {
+          result.push(...listRangeAnchors(elseBlocks));
+        } else {
+          result.push(...processBodyItems(cloneBlocks(elseBlocks), ctx, location));
+        }
+        result.push(...listRangeAnchors([blocks[endIdx]!]));
 
         i = endIdx + 1;
         continue;
@@ -468,11 +675,15 @@ function processBodyContent(
 
       // Regular paragraph — process inline templates
       try {
-        const processed = processParagraph(block, ctx, `${location} para ${i}`);
-        result.push(processed);
+        const replaced = ctx.rich ? resolveRichParagraph(block, ctx, location) : undefined;
+        if (replaced) {
+          result.push(...replaced);
+        } else {
+          result.push(processParagraph(block, ctx, `${location} para ${i}`));
+        }
       } catch (err) {
-        if (err instanceof TemplateError && err.tagName === undefined) {
-          throw new TemplateError(err.message, err.placeholder, err.location, {
+        if (err instanceof DocxTemplateError && err.tagName === undefined) {
+          throw new DocxTemplateError(err.message, err.placeholder, err.location, {
             cause: err.cause,
             tagName: err.placeholder,
             paragraphIndex: i,
@@ -483,8 +694,7 @@ function processBodyContent(
       }
       i++;
     } else if (block.type === "table") {
-      const processed = processTable(block, ctx, `${location} table ${i}`);
-      result.push(processed);
+      result.push(...processTable(block, ctx, `${location} table ${i}`));
       i++;
     } else if (block.type === "sdt") {
       // Recursively process SDT content (StructuredDocumentTag)
@@ -530,6 +740,11 @@ function processParagraph(para: Paragraph, ctx: TemplateContext, location: strin
     return para;
   }
 
+  // A field keeps its place among the text around it.
+  if (holdsField(para)) {
+    return processTextAroundFields(para, ctx, location);
+  }
+
   // Tokenize and evaluate inline expressions
   const tokens = tokenize(fullText, ctx.open, ctx.close);
   const resolved = evaluateInlineTokens(tokens, ctx, location);
@@ -541,6 +756,132 @@ function processParagraph(para: Paragraph, ctx: TemplateContext, location: strin
 
   // Rebuild the paragraph runs with the resolved text
   return rebuildParagraphText(para, resolved);
+}
+
+/** Whether any run of `para` holds a field, whole or in pieces. */
+function holdsField(para: Paragraph): boolean {
+  return para.children.some(child => isRun(child) && child.content.some(c => c.type === "field"));
+}
+
+/** A text content item of a run directly in the paragraph, outside every field. */
+interface FreeText {
+  readonly child: number;
+  readonly content: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * {@link processParagraph} for a paragraph holding fields: the placeholders in
+ * the text of its runs outside every field are resolved in place, each run
+ * keeping its formatting and every field — whole, or in pieces with its
+ * instruction and result — staying where it is, as does the text in a field's
+ * result (which Word computes). A placeholder's value goes where it starts.
+ */
+function processTextAroundFields(
+  para: Paragraph,
+  ctx: TemplateContext,
+  location: string
+): Paragraph {
+  const items: FreeText[] = [];
+  let text = "";
+  let depth = 0;
+  para.children.forEach((child, ci) => {
+    if (!isRun(child)) {
+      return;
+    }
+    child.content.forEach((c, k) => {
+      if (c.type === "field") {
+        if (c.fieldChar === "begin") {
+          depth++;
+        } else if (c.fieldChar === "end") {
+          depth = Math.max(0, depth - 1);
+        }
+      } else if (c.type === "text" && depth === 0) {
+        items.push({ child: ci, content: k, start: text.length, end: text.length + c.text.length });
+        text += c.text;
+      }
+    });
+  });
+  if (!text.includes(ctx.open)) {
+    return para;
+  }
+  const spans: [number, number][] = [];
+  const tokens = tokenize(text, ctx.open, ctx.close, spans);
+  // Top-level segments of the source: literal text, or what an expression
+  // (an inline block from its open tag to its close) evaluates to.
+  const segments: { start: number; end: number; output?: string }[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    const [start, end] = spans[i]!;
+    if (token.type === TokenType.Text) {
+      segments.push({ start, end });
+      continue;
+    }
+    let last = i;
+    if (token.type === TokenType.IfOpen) {
+      last = collectInlineIf(tokens, i).endIndex;
+    } else if (token.type === TokenType.EachOpen) {
+      last = collectInlineEach(tokens, i).endIndex;
+    }
+    // An unclosed block throws as it does in a paragraph without fields.
+    const slice = last === -1 ? tokens.slice(i) : tokens.slice(i, last + 1);
+    const output = evaluateInlineTokens(slice, ctx, location);
+    segments.push({ start, end: last === -1 ? text.length : spans[last]![1], output });
+    if (last === -1) {
+      break;
+    }
+    i = last;
+  }
+  const replaced = new Map<string, string>();
+  for (const item of items) {
+    let out = "";
+    for (const seg of segments) {
+      if (seg.output === undefined) {
+        const from = Math.max(seg.start, item.start);
+        const to = Math.min(seg.end, item.end);
+        if (from < to) {
+          out += text.slice(from, to);
+        }
+      } else if (seg.start >= item.start && seg.start < item.end) {
+        out += seg.output;
+      }
+    }
+    if (out !== text.slice(item.start, item.end)) {
+      replaced.set(`${item.child}:${item.content}`, out);
+    }
+  }
+  if (replaced.size === 0) {
+    return para;
+  }
+  const children: (ParagraphChild | RangeMarker)[] = [];
+  para.children.forEach((child, ci) => {
+    if (!isRun(child)) {
+      children.push(child);
+      return;
+    }
+    let changed = false;
+    const content: Run["content"][number][] = [];
+    child.content.forEach((c, k) => {
+      const next = replaced.get(`${ci}:${k}`);
+      if (next === undefined || c.type !== "text") {
+        content.push(c);
+        return;
+      }
+      changed = true;
+      if (next !== "") {
+        content.push({ ...c, text: next });
+      }
+    });
+    if (!changed) {
+      children.push(child);
+    } else if (content.length > 0) {
+      children.push({ ...child, content });
+    } else {
+      children.push(...(child.rangeMarkersBefore ?? []));
+    }
+  });
+  return withParagraphChildren({ ...para, children: [] }, children);
 }
 
 /**
@@ -569,7 +910,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
           value = resolvePath(ctx.data, path);
         }
         if (value === undefined && ctx.strict) {
-          throw new TemplateError(`Unresolved variable: {{${path}}}`, path, location, {
+          throw new DocxTemplateError(`Unresolved variable: {{${path}}}`, path, location, {
             tagName: path,
             sectionPath: location
           });
@@ -584,7 +925,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
         const condValue = resolvePath(ctx.data, token.condition);
         const { trueBranch, falseBranch, endIndex } = collectInlineIf(tokens, i);
         if (endIndex === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed inline {{#if ${token.condition}}}`,
             `#if ${token.condition}`,
             location,
@@ -606,7 +947,7 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
         const items = resolvePath(ctx.data, token.collection);
         const { body, endIndex } = collectInlineEach(tokens, i);
         if (endIndex === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed inline {{#each ${token.collection}}}`,
             `#each ${token.collection}`,
             location,
@@ -748,7 +1089,16 @@ function rebuildParagraphText(para: Paragraph, newText: string): Paragraph {
   //     their original index. Reordering these silently miswires bookmark and
   //     comment ranges, since the start/end markers stop bracketing the
   //     intended content.
+  // The markers that rode on the absorbed runs (range permissions) move onto
+  // the surviving run, in source order, so their ranges stay paired.
+  const absorbedMarkers: RangeMarker[] = [];
+  for (const child of para.children) {
+    if (isRun(child) && child.rangeMarkersBefore) {
+      absorbedMarkers.push(...child.rangeMarkersBefore);
+    }
+  }
   const newRun: Run = {
+    ...(absorbedMarkers.length > 0 ? { rangeMarkersBefore: absorbedMarkers } : {}),
     properties: refProperties,
     content: [{ type: "text", text: newText }]
   };
@@ -782,8 +1132,35 @@ function rebuildParagraphText(para: Paragraph, newText: string): Paragraph {
 // Table processing (row-level loops)
 // =============================================================================
 
-function processTable(table: Table, ctx: TemplateContext, location: string): Table {
+/**
+ * The table filled — its row loops repeated, and with rich placeholders its
+ * column loops too — followed by the comment references of any rows it
+ * removed. A table cannot hold a reference outside a cell, so they are left
+ * for the content around the table to take (see {@link settleRangeMarkers}).
+ */
+function processTable(
+  source: Table,
+  ctx: TemplateContext,
+  location: string
+): (Table | CommentReference)[] {
+  const references: CommentReference[] = [];
+  const table = ctx.rich ? processTableColumnLoop(source, ctx, references) : source;
   const newRows: TableRow[] = [];
+  // Range markers of removed rows, waiting for the next row that is kept.
+  let pending: RangeMarker[] = [];
+  const pushRow = (row: TableRow): void => {
+    newRows.push(withRangeMarkersBefore(row, pending));
+    pending = [];
+  };
+  const dropRows = (rows: readonly TableRow[]): void => {
+    for (const anchor of listTableRowAnchors(rows)) {
+      if (anchor.type === "commentReference") {
+        references.push(anchor);
+      } else {
+        pending.push(anchor);
+      }
+    }
+  };
 
   let i = 0;
   while (i < table.rows.length) {
@@ -791,14 +1168,15 @@ function processTable(table: Table, ctx: TemplateContext, location: string): Tab
     const rowText = extractRowText(row);
 
     // Check if this row contains a #each directive
-    if (rowText.includes(ctx.open + "#each ") || rowText.includes(ctx.open + " #each ")) {
-      const collectionExpr = extractDirectiveFromText(rowText, ctx.open, ctx.close, "#each ");
+    const openTag = [...rowText.matchAll(eachTagPatterns(ctx).open)][0];
+    if (openTag) {
+      const collectionExpr = openTag[1]!.trim();
 
       if (collectionExpr) {
         // Find the closing row
         const endRowIdx = findClosingTableRow(table.rows, i, ctx);
         if (endRowIdx === -1) {
-          throw new TemplateError(
+          throw new DocxTemplateError(
             `Unclosed {{#each ${collectionExpr}}} in table row`,
             `#each ${collectionExpr}`,
             location,
@@ -812,29 +1190,62 @@ function processTable(table: Table, ctx: TemplateContext, location: string): Tab
 
         const items = resolvePath(ctx.data, collectionExpr);
 
-        if (Array.isArray(items)) {
+        if (!Array.isArray(items) || items.length === 0) {
+          // The loop rows go; the ranges they opened or closed stay paired.
+          dropRows(table.rows.slice(i, endRowIdx + 1));
+        } else {
           // If the loop is on a single row (open and close on same row)
           if (endRowIdx === i) {
+            // Tags in one paragraph are filled as an inline loop, as before;
+            // tags in different paragraphs go before the row is filled, as
+            // over several rows, or they read as unclosed inline loops.
+            const tags = eachTagPatterns(ctx);
+            const templateRow = loopTagsShareParagraph(row, tags)
+              ? row
+              : removeRowTag(removeMatchingRowClose(row, tags), tags.open, "first");
+            const ranges = repeatedRanges(templateRow);
             for (let idx = 0; idx < items.length; idx++) {
               const itemData = buildLoopData(items[idx], idx, ctx.data);
               const innerCtx: TemplateContext = { ...ctx, data: itemData };
-              const clonedRow = cloneRow(row);
+              const clonedRow = keepClonedRangeMarkers(
+                cloneRow(templateRow),
+                idx,
+                items.length,
+                ranges
+              );
               const processedRow = processTableRow(clonedRow, innerCtx, location);
               // Strip the #each and /each tags from the row
-              const cleanedRow = stripDirectivesFromRow(processedRow, ctx, "#each ", "/each");
-              newRows.push(cleanedRow);
+              const cleanedRow = stripDirectivesFromRow(processedRow, ctx);
+              pushRow(cleanedRow);
             }
           } else {
             // Multi-row loop: duplicate all rows between open and close
+            // The opening tag sits in the first row and the closing one in the
+            // last; each row is processed on its own, so remove the loop's own
+            // tags first or they read as an unclosed inline loop.
             const templateRows = table.rows.slice(i, endRowIdx + 1);
+            const tags = eachTagPatterns(ctx);
+            templateRows[0] = removeRowTag(templateRows[0]!, tags.open, "first");
+            templateRows[templateRows.length - 1] = removeRowTag(
+              templateRows[templateRows.length - 1]!,
+              tags.close,
+              "last"
+            );
+            const ranges = repeatedRanges(templateRows);
             for (let idx = 0; idx < items.length; idx++) {
               const itemData = buildLoopData(items[idx], idx, ctx.data);
               const innerCtx: TemplateContext = { ...ctx, data: itemData };
-              for (const templateRow of templateRows) {
-                const clonedRow = cloneRow(templateRow);
+              // One loop iteration's rows are one copy of the repeated content.
+              const clonedRows = keepClonedRangeMarkers(
+                templateRows.map(cloneRow),
+                idx,
+                items.length,
+                ranges
+              );
+              for (const clonedRow of clonedRows) {
                 const processedRow = processTableRow(clonedRow, innerCtx, location);
-                const cleanedRow = stripDirectivesFromRow(processedRow, ctx, "#each ", "/each");
-                newRows.push(cleanedRow);
+                const cleanedRow = stripDirectivesFromRow(processedRow, ctx);
+                pushRow(cleanedRow);
               }
             }
           }
@@ -847,44 +1258,158 @@ function processTable(table: Table, ctx: TemplateContext, location: string): Tab
 
     // Regular row: process inline templates in each cell
     const processedRow = processTableRow(row, ctx, location);
-    newRows.push(processedRow);
+    pushRow(processedRow);
     i++;
   }
 
-  return {
+  const filled: Table = {
     ...table,
-    rows: newRows
+    rows: newRows,
+    ...(pending.length > 0
+      ? { rangeMarkersAfter: [...pending, ...(table.rangeMarkersAfter ?? [])] }
+      : {})
   };
+  return [filled, ...references];
+}
+
+/**
+ * Every range marker and comment reference in `rows` — on and between them
+ * and in their cells — in source order.
+ */
+function listTableRowAnchors(rows: readonly TableRow[]): RangeAnchor[] {
+  return listRangeAnchors([{ type: "table", rows } as unknown as Table]);
 }
 
 function processTableRow(row: TableRow, ctx: TemplateContext, location: string): TableRow {
   const newCells: TableCell[] = [];
   for (const cell of row.cells) {
-    const newContent: (Paragraph | Table)[] = [];
-    for (const block of cell.content) {
-      if (block.type === "paragraph") {
-        newContent.push(processParagraph(block, ctx, location));
-      } else if (block.type === "table") {
-        newContent.push(processTable(block, ctx, location));
-      } else {
-        newContent.push(block as Paragraph | Table);
-      }
-    }
-    newCells.push({ ...cell, content: newContent });
+    newCells.push({ ...cell, content: processCellContent(cell.content, ctx, location) });
   }
   return { ...row, cells: newCells };
 }
 
-function extractRowText(row: TableRow): string {
-  let text = "";
-  for (const cell of row.cells) {
-    for (const block of cell.content) {
-      if (block.type === "paragraph") {
-        text += extractParagraphText(block);
+/**
+ * A cell's paragraphs filled inline (block directives are not looked for in a
+ * cell; a row's loop tags are handled by its table) and its nested tables
+ * filled as tables.
+ */
+function processCellContent(
+  content: readonly (Paragraph | Table)[],
+  ctx: TemplateContext,
+  location: string
+): (Paragraph | Table)[] {
+  const items: (BodyContent | RangeAnchor)[] = [];
+  for (const block of content) {
+    if (block.type === "paragraph") {
+      const replaced = ctx.rich ? resolveRichParagraph(block, ctx, location) : undefined;
+      if (replaced) {
+        items.push(...replaced);
+      } else {
+        items.push(processParagraph(block, ctx, location));
       }
+    } else if (block.type === "table") {
+      items.push(...processTable(block, ctx, location));
+    } else {
+      items.push(block as BodyContent);
     }
   }
-  return text;
+  return settleRangeMarkers(items) as (Paragraph | Table)[];
+}
+
+function extractRowText(row: TableRow): string {
+  return rowParagraphs(row)
+    .map(({ para }) => extractParagraphText(para))
+    .join("");
+}
+
+/**
+ * The paragraphs a table row's loop tags are looked for in: the top-level
+ * paragraphs of every cell. A nested table is a scope of its own — its loops
+ * are expanded when that table is processed — so detection, matching and
+ * removal all leave it alone.
+ */
+function rowParagraphs(row: TableRow): { c: number; b: number; para: Paragraph }[] {
+  const out: { c: number; b: number; para: Paragraph }[] = [];
+  row.cells.forEach((cell, c) => {
+    cell.content.forEach((block, b) => {
+      if (block.type === "paragraph") {
+        out.push({ c, b, para: block });
+      }
+    });
+  });
+  return out;
+}
+
+/** The `{{#each …}}` (capturing its argument) and `{{/each}}` tags, spacing inside the delimiters allowed. */
+function eachTagPatterns(ctx: TemplateContext): { open: RegExp; close: RegExp } {
+  const open = escapeRegex(ctx.open);
+  const close = escapeRegex(ctx.close);
+  return {
+    open: new RegExp(`${open}\\s*#each\\s+([^${escapeRegex(ctx.close.charAt(0))}]*)${close}`, "g"),
+    close: new RegExp(`${open}\\s*/each\\s*${close}`, "g")
+  };
+}
+
+/**
+ * `para` without the run text at the offsets `mask` marks, where offsets
+ * count the text of its top-level runs ({@link extractParagraphText}). Each
+ * run keeps its own formatting, and every other child (a hyperlink, a field,
+ * a range marker) stays as it is. A run left empty is dropped; the range
+ * markers it carried stay paired.
+ */
+function removeMaskedText(para: Paragraph, mask: readonly boolean[]): Paragraph {
+  let offset = 0;
+  const items: (ParagraphChild | RangeMarker)[] = [];
+  let changed = false;
+  for (const child of para.children) {
+    if (!isRun(child)) {
+      items.push(child);
+      continue;
+    }
+    const content: Run["content"][number][] = [];
+    let runChanged = false;
+    for (const c of child.content) {
+      if (c.type !== "text") {
+        content.push(c);
+        continue;
+      }
+      let text = "";
+      for (let i = 0; i < c.text.length; i++) {
+        if (!mask[offset + i]) {
+          text += c.text[i];
+        }
+      }
+      offset += c.text.length;
+      if (text === c.text) {
+        content.push(c);
+        continue;
+      }
+      runChanged = true;
+      if (text.length > 0) {
+        content.push({ ...c, text });
+      }
+    }
+    if (!runChanged) {
+      items.push(child);
+      continue;
+    }
+    changed = true;
+    if (content.length > 0) {
+      items.push({ ...child, content });
+    } else {
+      items.push(...(child.rangeMarkersBefore ?? []));
+    }
+  }
+  return changed ? withParagraphChildren(para, items) : para;
+}
+
+/** A mask over `text` marking every match of `patterns`. */
+function maskMatches(text: string, matches: Iterable<RegExpMatchArray>): boolean[] {
+  const mask = Array.from({ length: text.length }, () => false);
+  for (const m of matches) {
+    mask.fill(true, m.index!, m.index! + m[0].length);
+  }
+  return mask;
 }
 
 function findClosingTableRow(
@@ -903,10 +1428,11 @@ function findClosingTableRow(
   // rows containing two opens and one close (depth ends at 1, but the
   // intermediate calculation hit a transient zero).
   let depth = 1;
+  const tags = eachTagPatterns(ctx);
   for (let i = startIdx; i < rows.length; i++) {
     const text = extractRowText(rows[i]);
-    let opens = countOccurrences(text, ctx.open + "#each ");
-    const closes = countOccurrences(text, ctx.open + "/each" + ctx.close);
+    let opens = [...text.matchAll(tags.open)].length;
+    const closes = [...text.matchAll(tags.close)].length;
     // The opening `{{#each ...}}` of the current loop is in row
     // startIdx; don't count it as opening a new nested loop.
     if (i === startIdx && opens > 0) {
@@ -934,68 +1460,126 @@ function findClosingTableRow(
   return -1;
 }
 
-function stripDirectivesFromRow(
+/**
+ * `row` without the first (`which` "first") or last match of `tag` — the
+ * loop's own `{{#each …}}` or `{{/each}}` — in its {@link rowParagraphs}.
+ * The tag is removed from the runs that hold it, so the rest of the
+ * paragraph keeps its formatting.
+ */
+function removeRowTag(row: TableRow, tag: RegExp, which: "first" | "last"): TableRow {
+  const order = rowParagraphs(row);
+  if (which === "last") {
+    order.reverse();
+  }
+  for (const { c, b, para } of order) {
+    const matches = [...extractParagraphText(para).matchAll(tag)];
+    const match = which === "first" ? matches[0] : matches[matches.length - 1];
+    if (match) {
+      const text = extractParagraphText(para);
+      return replaceRowParagraph(row, c, b, removeMaskedText(para, maskMatches(text, [match])));
+    }
+  }
+  return row;
+}
+
+/**
+ * Where the `{{/each}}` matching a row's first `{{#each …}}` sits: the
+ * row's tags are walked in document order with a depth counter, so a loop
+ * nested inside the first one does not stand in for its close. `undefined`
+ * when the row does not close it.
+ */
+function findMatchingRowClose(
   row: TableRow,
-  ctx: TemplateContext,
-  openDir: string,
-  closeDir: string
-): TableRow {
-  const newCells: TableCell[] = [];
-  for (const cell of row.cells) {
-    const newContent: (Paragraph | Table)[] = [];
-    for (const block of cell.content) {
-      if (block.type === "paragraph") {
-        const text = extractParagraphText(block);
-        // Remove directive tags
-        const openPattern = ctx.open + openDir;
-        const closePattern = ctx.open + closeDir + ctx.close;
-
-        if (text.includes(openPattern) || text.includes(closePattern)) {
-          let cleaned = text;
-          // Remove the entire {{#each ...}} tag
-          const eachOpenRegex = new RegExp(
-            escapeRegex(ctx.open) +
-              "\\s*" +
-              escapeRegex(openDir) +
-              "[^" +
-              escapeRegex(ctx.close.charAt(0)) +
-              "]*" +
-              escapeRegex(ctx.close),
-            "g"
-          );
-          cleaned = cleaned.replace(eachOpenRegex, "");
-          // Remove {{/each}}
-          const eachCloseRegex = new RegExp(
-            escapeRegex(ctx.open) +
-              "\\s*" +
-              escapeRegex(closeDir) +
-              "\\s*" +
-              escapeRegex(ctx.close),
-            "g"
-          );
-          cleaned = cleaned.replace(eachCloseRegex, "");
-          cleaned = cleaned.trim();
-
-          if (cleaned.length > 0) {
-            newContent.push(rebuildParagraphText(block, cleaned));
-          } else {
-            // Keep at least one paragraph in a cell
-            newContent.push(rebuildParagraphText(block, ""));
-          }
-        } else {
-          newContent.push(block);
+  tags: { open: RegExp; close: RegExp }
+): { c: number; b: number; index: number; length: number; sameParagraph: boolean } | undefined {
+  let depth = 0;
+  let openPara: { c: number; b: number } | undefined;
+  for (const { c, b, para } of rowParagraphs(row)) {
+    const text = extractParagraphText(para);
+    const found = [
+      ...[...text.matchAll(tags.open)].map(m => ({ m, delta: 1 })),
+      ...[...text.matchAll(tags.close)].map(m => ({ m, delta: -1 }))
+    ].sort((x, y) => x.m.index! - y.m.index!);
+    for (const { m, delta } of found) {
+      if (!openPara) {
+        if (delta < 0) {
+          continue;
         }
-      } else {
-        newContent.push(block);
+        openPara = { c, b };
+      }
+      depth += delta;
+      if (depth === 0) {
+        return {
+          c,
+          b,
+          index: m.index!,
+          length: m[0].length,
+          sameParagraph: openPara.c === c && openPara.b === b
+        };
       }
     }
-    newCells.push({
-      ...cell,
-      content:
-        newContent.length > 0 ? newContent : [{ type: "paragraph", children: [] } as Paragraph]
-    });
   }
-  return { ...row, cells: newCells };
+  return undefined;
+}
+
+/** Whether a row's first `{{#each …}}` is closed in its own paragraph. */
+function loopTagsShareParagraph(row: TableRow, tags: { open: RegExp; close: RegExp }): boolean {
+  return findMatchingRowClose(row, tags)?.sameParagraph ?? false;
+}
+
+/** `row` without the `{{/each}}` matching its first `{{#each …}}`. */
+function removeMatchingRowClose(row: TableRow, tags: { open: RegExp; close: RegExp }): TableRow {
+  const close = findMatchingRowClose(row, tags);
+  if (!close) {
+    return removeRowTag(row, tags.close, "last");
+  }
+  const para = rowParagraphs(row).find(p => p.c === close.c && p.b === close.b)!.para;
+  const text = extractParagraphText(para);
+  const match = [...text.matchAll(tags.close)].find(m => m.index === close.index)!;
+  return replaceRowParagraph(
+    row,
+    close.c,
+    close.b,
+    removeMaskedText(para, maskMatches(text, [match]))
+  );
+}
+
+function replaceRowParagraph(row: TableRow, c: number, b: number, para: Paragraph): TableRow {
+  return {
+    ...row,
+    cells: row.cells.map((cell, i) =>
+      i === c
+        ? { ...cell, content: cell.content.map((block, j) => (j === b ? para : block)) }
+        : cell
+    )
+  };
+}
+
+/**
+ * `row` without any `{{#each …}}` or `{{/each}}` tag in its
+ * {@link rowParagraphs}, and without the whitespace a removed tag leaves at
+ * the start or end of its paragraph. The tags are removed from the runs that
+ * hold them, so the rest of each paragraph keeps its formatting.
+ */
+function stripDirectivesFromRow(row: TableRow, ctx: TemplateContext): TableRow {
+  const tags = eachTagPatterns(ctx);
+  let out = row;
+  for (const { c, b, para } of rowParagraphs(row)) {
+    const text = extractParagraphText(para);
+    const matches = [...text.matchAll(tags.open), ...text.matchAll(tags.close)];
+    if (matches.length === 0) {
+      continue;
+    }
+    const mask = maskMatches(text, matches);
+    for (let i = 0; i < text.length && (mask[i] || /\s/.test(text[i]!)); i++) {
+      mask[i] = true;
+    }
+    for (let i = text.length - 1; i >= 0 && (mask[i] || /\s/.test(text[i]!)); i--) {
+      mask[i] = true;
+    }
+    out = replaceRowParagraph(out, c, b, removeMaskedText(para, mask));
+  }
+  return out;
 }
 
 // =============================================================================
@@ -1196,11 +1780,11 @@ function buildLoopData(
 // =============================================================================
 
 function cloneBlocks(blocks: BodyContent[]): BodyContent[] {
-  return structuredClone(blocks);
+  return cloneModel(blocks);
 }
 
 function cloneRow(row: TableRow): TableRow {
-  return structuredClone(row);
+  return cloneModel(row);
 }
 
 // =============================================================================
@@ -1233,7 +1817,8 @@ function escapeRegex(str: string): string {
  * List all template tags found in a document.
  *
  * Scans body, headers, footers, footnotes, and endnotes for template
- * placeholders. Useful for validating data objects against templates.
+ * placeholders — not comment bodies, which the deprecated fills it pairs with
+ * leave alone. Useful for validating data objects against templates.
  *
  * @param doc - The parsed DocxDocument model.
  * @param options - Optional settings (custom delimiters).
@@ -1243,6 +1828,36 @@ export function listTemplateTags(
   doc: DocxDocument,
   options?: Pick<TemplateOptions, "delimiters">
 ): TemplateTag[] {
+  return scanTemplateTags(doc, options, false);
+}
+
+/**
+ * List every template tag in a document: in the body, headers, footers,
+ * footnotes, endnotes and comment bodies — everywhere `fill` fills.
+ * Useful for validating data objects against templates.
+ *
+ * @param doc - The parsed DocxDocument model.
+ * @param options - Optional settings (custom delimiters).
+ * @returns Every tag, with where it was found (`"comment:3 paragraph 0"`, …).
+ */
+export function listTags(
+  doc: DocxDocument,
+  options?: Pick<TemplateOptions, "delimiters">
+): TemplateTag[] {
+  checkHandle(doc, "document", "doc", "Template.listTags");
+  return scanTemplateTags(doc, options, true);
+}
+
+function scanTemplateTags(
+  doc: DocxDocument,
+  options: Pick<TemplateOptions, "delimiters"> | undefined,
+  includeComments: boolean
+): TemplateTag[] {
+  checkSchema(
+    delimiterOptionsSchema,
+    options,
+    includeComments ? "Template.listTags" : "Template.listTemplateTags"
+  );
   const open = options?.delimiters?.[0] ?? "{{";
   const close = options?.delimiters?.[1] ?? "}}";
   const tags: TemplateTag[] = [];
@@ -1361,6 +1976,12 @@ export function listTemplateTags(
     }
   }
 
+  if (includeComments && doc.comments) {
+    for (const comment of doc.comments) {
+      scanBlocks(comment.content as BodyContent[], `comment:${comment.id}`);
+    }
+  }
+
   return tags;
 }
 
@@ -1402,9 +2023,91 @@ function isTemplateHtmlChunk(v: unknown): v is TemplateHtmlChunk {
 }
 
 /**
- * Enhanced fillTemplate that supports image (%img), richText (&rt),
- * subDocument (>sub), and chart (^chart) placeholders in addition to the
- * standard variable, conditional, and loop directives.
+ * Fill a DOCX template document with data.
+ *
+ * Resolves variables, conditionals and loops in the body, headers, footers,
+ * footnotes, endnotes and comment bodies. Pass `richPlaceholders: true` to
+ * also resolve image, rich-text, sub-document, chart and HTML-chunk
+ * placeholders — inside loops too, against the item being repeated.
+ *
+ * Returns a new document; the input is never modified, and neither is the
+ * template when the result is edited afterwards: every top-level collection of
+ * the result is its own, so filling one template many times and calling
+ * `Document.addStyle` / `Document.addImage` / … on each result never reaches
+ * the template or the other results. Unchanged nodes inside those collections
+ * are shared, which no `Document.*` helper can observe.
+ *
+ * The deprecated names keep what they did: `fillTemplate` fills in place and
+ * resolves no rich placeholder; `fillTemplateEnhanced` returns a new document
+ * and always resolves them; neither fills comment bodies.
+ *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
+ * @example
+ * ```ts
+ * import { Document, Template } from "documonster/word";
+ *
+ * const doc = await Document.read(bytes);
+ * const filled = Template.fill(doc, { name: "Ada" });
+ * ```
+ */
+export function fill(
+  doc: DocxDocument,
+  data: Readonly<Record<string, unknown>> | ReadonlyMap<string, unknown>,
+  options?: TemplateOptions
+): DocxDocument {
+  return fillDocument(doc, data, options, "Template.fill");
+}
+
+/** {@link fill} in the name of `where` (`Package.fillTemplate`, `Template.fillFromSource`). */
+export function fillDocument(
+  doc: DocxDocument,
+  data: unknown,
+  options: TemplateOptions | undefined,
+  where: string
+): DocxDocument {
+  checkHandle(doc, "document", "doc", where);
+  const record = fillData(data, where);
+  checkFillArguments(record, options, where);
+  return markDerived(
+    fillInPlace(copyFillTargets(doc), record, options, {
+      where,
+      rich: options?.richPlaceholders === true,
+      comments: true
+    }),
+    doc
+  );
+}
+
+/**
+ * A copy of `doc` that {@link fillInPlace} can write into without reaching the
+ * original: it replaces the body, the children of each header and footer, the
+ * content of each note and comment, and the images, so those containers are
+ * copied; the nodes inside them are rebuilt by the fill, not edited.
+ */
+function copyFillTargets(doc: DocxDocument): DocxDocument {
+  const copyParts = <T extends { readonly content: object }>(
+    parts: ReadonlyMap<string, T> | undefined
+  ): Map<string, T> | undefined =>
+    parts && new Map(Array.from(parts, ([k, v]) => [k, { ...v, content: { ...v.content } }]));
+  return {
+    ...doc,
+    body: [...doc.body],
+    headers: copyParts(doc.headers),
+    footers: copyParts(doc.footers),
+    footnotes: doc.footnotes?.map(n => ({ ...n })),
+    endnotes: doc.endnotes?.map(n => ({ ...n })),
+    comments: doc.comments?.map(c => ({ ...c }))
+  };
+}
+
+/**
+ * Fill a template, resolving image (`{{%img}}`), rich-text (`{{&rt}}`),
+ * sub-document (`{{>sub}}`), chart (`{{^chart}}`) and HTML-chunk
+ * (`{{!html}}`) placeholders as well as variables, conditionals and loops.
+ * Returns a new document; the input is left untouched. Comment bodies are not
+ * filled.
  *
  * Image placeholder: {{%imagePath}} — value must be a TemplateImage object.
  * RichText placeholder: {{&richPath}} — value must be TemplateRichText (Run[]).
@@ -1414,307 +2117,142 @@ function isTemplateHtmlChunk(v: unknown): v is TemplateHtmlChunk {
 export function fillTemplateEnhanced(
   doc: DocxDocument,
   data: Record<string, unknown>,
-  options?: TemplateOptions
+  options?: LegacyTemplateOptions
 ): DocxDocument {
-  const open = options?.delimiters?.[0] ?? "{{";
-  const close = options?.delimiters?.[1] ?? "}}";
-  const strict = options?.strict ?? true;
-
-  // First pass: handle image / richText / subDocument in body
-  const collectedImages: ImageDef[] = [];
-  const newBody = processEnhancedBody(
-    doc.body as BodyContent[],
-    data,
-    open,
-    close,
-    strict,
-    collectedImages
+  checkFillArguments(data, options, "Template.fillTemplateEnhanced");
+  return markDerived(
+    fillInPlace(copyFillTargets(doc), data, options, {
+      where: "Template.fillTemplateEnhanced",
+      rich: true,
+      comments: false
+    }),
+    doc
   );
-
-  // Second pass: standard fillTemplate. Note that `fillTemplate` mutates
-  // its input doc in place (it edits `headerDef.content.children` and the
-  // body array directly), so we hand it a deep-cloned wrapper to avoid
-  // sneaking edits back into the caller's doc through shared references
-  // (`modifiedDoc.headers === doc.headers` would otherwise propagate
-  // mutations into `doc`).
-  // Built before the images are merged, because the header and footer passes below
-  // append to `collectedImages` while this object literal is being evaluated — so
-  // the merge has to read it afterwards.
-  const modifiedDoc: DocxDocument = {
-    ...doc,
-    body: newBody,
-    // Headers and footers get the enhanced pass too, not just the clone. A logo in
-    // a header is the case a template author is most likely to reach for, and
-    // running only the basic fill there left `{{%logo}}` in the document as literal
-    // text — or, under `strict`, failed the whole fill over a placeholder that had
-    // been supplied correctly.
-    ...(doc.headers
-      ? {
-          headers: new Map(
-            Array.from(doc.headers, ([k, h]) => [
-              k,
-              {
-                ...h,
-                content: {
-                  ...h.content,
-                  children: processEnhancedBody(
-                    h.content.children as BodyContent[],
-                    data,
-                    open,
-                    close,
-                    strict,
-                    collectedImages
-                  ) as readonly (Paragraph | Table)[]
-                }
-              }
-            ])
-          )
-        }
-      : {}),
-    ...(doc.footers
-      ? {
-          footers: new Map(
-            Array.from(doc.footers, ([k, f]) => [
-              k,
-              {
-                ...f,
-                content: {
-                  ...f.content,
-                  children: processEnhancedBody(
-                    f.content.children as BodyContent[],
-                    data,
-                    open,
-                    close,
-                    strict,
-                    collectedImages
-                  ) as readonly (Paragraph | Table)[]
-                }
-              }
-            ])
-          )
-        }
-      : {}),
-    ...(doc.footnotes
-      ? { footnotes: doc.footnotes.map(fn => ({ ...fn, content: [...fn.content] })) }
-      : {}),
-    ...(doc.endnotes
-      ? { endnotes: doc.endnotes.map(en => ({ ...en, content: [...en.content] })) }
-      : {})
-  };
-
-  // Merged now, not while `modifiedDoc` was built: the header and footer passes above
-  // append to `collectedImages`, so reading it any earlier would drop every picture
-  // that came from one. Duplicates are avoided by file name, which is why a caller
-  // supplying two images must give them distinct names.
-  const images = doc.images ? [...doc.images] : [];
-  for (const img of collectedImages) {
-    if (!images.some(existing => existing.fileName === img.fileName)) {
-      images.push(img);
-    }
-  }
-
-  return fillTemplate(
-    { ...modifiedDoc, images: images.length > 0 ? images : undefined },
-    data,
-    options
-  );
-}
-
-function processEnhancedBody(
-  blocks: readonly BodyContent[],
-  data: Record<string, unknown>,
-  open: string,
-  close: string,
-  strict: boolean,
-  collectedImages: ImageDef[]
-): BodyContent[] {
-  const result: BodyContent[] = [];
-  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
-    const block = blocks[blockIndex];
-    if (block.type === "paragraph") {
-      const text = extractParagraphText(block);
-      // Check for HTML chunk placeholder ({{!htmlPath}})
-      const htmlMatch = matchSinglePlaceholder(text, open, close, "!");
-      if (htmlMatch) {
-        const value = resolvePath(data, htmlMatch);
-        if (isTemplateHtmlChunk(value)) {
-          const seq = nextAltChunkSeq();
-          const altChunk: AltChunk = {
-            type: "altChunk",
-            // Use a process-monotonic sequence so two `fillTemplate`
-            // calls on the same template don't collide on rId or path.
-            rId: `rId_altchunk_${seq}`,
-            contentType: value.contentType ?? "text/html",
-            data: utf8Encoder.encode(value.html),
-            fileName: `afchunk${seq}.html`
-          };
-          result.push(altChunk);
-          continue;
-        }
-      }
-      // Check for sub-document placeholder (entire paragraph is the placeholder)
-      const subMatch = matchSinglePlaceholder(text, open, close, ">");
-      if (subMatch) {
-        const value = resolvePath(data, subMatch);
-        if (isTemplateSubDocument(value)) {
-          result.push(...value);
-          continue;
-        }
-      }
-      // Check for image placeholder (with optional conditional prefix)
-      const imgMatch = matchSinglePlaceholder(text, open, close, "%");
-      if (imgMatch) {
-        // Check for conditional image: {{%?condPath.imagePath}}
-        if (imgMatch.startsWith("?")) {
-          const rest = imgMatch.slice(1); // remove leading '?'
-          const dotIdx = rest.indexOf(".");
-          if (dotIdx !== -1) {
-            const condPath = rest.slice(0, dotIdx);
-            const imagePath = rest.slice(dotIdx + 1);
-            const condValue = resolvePath(data, condPath);
-            if (!isTruthy(condValue)) {
-              // Condition is falsy — skip, don't insert anything
-              continue;
-            }
-            // Condition is truthy — resolve the image
-            const value = resolvePath(data, imagePath);
-            if (isTemplateImage(value)) {
-              const safeFileName = sanitizeTemplateImageFileName(value.image.fileName);
-              const rId = value.image.rId ?? `rId_tpl_${nextTemplateImageSeq()}`;
-              const imgContent: InlineImageContent = {
-                type: "image",
-                rId,
-                width: value.width,
-                height: value.height,
-                altText: value.altText ?? safeFileName,
-                name: safeFileName
-              };
-              const newPara: Paragraph = {
-                type: "paragraph",
-                properties: block.properties,
-                children: [{ content: [imgContent] } as Run]
-              };
-              result.push(newPara);
-              collectedImages.push({ ...value.image, rId, fileName: safeFileName } as ImageDef);
-              continue;
-            }
-          }
-        }
-        // Standard image placeholder (no conditional)
-        const value = resolvePath(data, imgMatch);
-        if (isTemplateImage(value)) {
-          const safeFileName = sanitizeTemplateImageFileName(value.image.fileName);
-          const rId = value.image.rId ?? `rId_tpl_${nextTemplateImageSeq()}`;
-          const imgContent: InlineImageContent = {
-            type: "image",
-            rId,
-            width: value.width,
-            height: value.height,
-            altText: value.altText ?? safeFileName,
-            name: safeFileName
-          };
-          const newPara: Paragraph = {
-            type: "paragraph",
-            properties: block.properties,
-            children: [{ content: [imgContent] } as Run]
-          };
-          result.push(newPara);
-          // Register image for packaging
-          collectedImages.push({ ...value.image, rId, fileName: safeFileName } as ImageDef);
-          continue;
-        }
-      }
-      // Check for richText placeholder
-      const rtMatch = matchSinglePlaceholder(text, open, close, "&");
-      if (rtMatch) {
-        const value = resolvePath(data, rtMatch);
-        if (isTemplateRichText(value)) {
-          const newPara: Paragraph = {
-            type: "paragraph",
-            properties: block.properties,
-            children: [...value] as ParagraphChild[]
-          };
-          result.push(newPara);
-          continue;
-        }
-      }
-      // Check for chart placeholder
-      const chartMatch = matchSinglePlaceholder(text, open, close, "^");
-      if (chartMatch) {
-        const value = resolvePath(data, chartMatch);
-        if (isTemplateChart(value)) {
-          const chartContent: ChartContent = {
-            type: "chart",
-            chart: value.chart,
-            altText: value.altText,
-            name: value.name
-          };
-          result.push(chartContent);
-          continue;
-        }
-      }
-      result.push(block);
-    } else if (block.type === "table") {
-      // Process table column loops, then the enhanced placeholders inside each
-      // cell. A cell holds the same block list a body does, so the same pass
-      // applies — and a picture in a table cell is how a great many templates lay
-      // out a letterhead, so not descending here made the commonest placement the
-      // one that could not be filled.
-      const processed = processTableColumnLoop(block, data, open, close, strict);
-      result.push(processEnhancedTable(processed, data, open, close, strict, collectedImages));
-    } else if (block.type === "sdt") {
-      // Recursively process SDT content
-      const sdt = block as StructuredDocumentTag;
-      const processedContent = processEnhancedBody(
-        sdt.content as BodyContent[],
-        data,
-        open,
-        close,
-        strict,
-        collectedImages
-      );
-      result.push({
-        ...sdt,
-        content: processedContent as readonly (Paragraph | Run | Table)[]
-      });
-    } else {
-      result.push(block);
-    }
-  }
-  return result;
 }
 
 /**
- * Run the enhanced pass over every cell of a table.
+ * What a paragraph that is one rich placeholder becomes — the blocks and
+ * anchors to put in its place — or `undefined` when it is not one, or its
+ * value is not of the placeholder's kind (it is then filled as ordinary text).
+ * Resolved against `ctx.data`, so inside a loop `{{%.photo}}` is the item's.
  *
- * Rebuilt rather than mutated because `Table`, `TableRow` and `TableCell` are all
- * readonly, and a cell's content is the same `Paragraph | Table` list the body holds
- * — so nested tables are handled by the recursion rather than by a special case.
+ * A placeholder replaced by something other than a paragraph (or by nothing)
+ * leaves the paragraph's range markers and comment references where it was,
+ * around what replaced it.
  */
-function processEnhancedTable(
-  table: Table,
-  data: Record<string, unknown>,
-  open: string,
-  close: string,
-  strict: boolean,
-  collectedImages: ImageDef[]
-): Table {
+function resolveRichParagraph(
+  para: Paragraph,
+  ctx: TemplateContext,
+  location: string
+): (BodyContent | RangeAnchor)[] | undefined {
+  const rich = ctx.rich!;
+  const { open, close, data } = ctx;
+  const text = extractParagraphText(para);
+  if (!text.includes(open)) {
+    return undefined;
+  }
+  const replaceBlock = (replacement: readonly (BodyContent | RangeAnchor)[]) => {
+    const { leading, trailing } = collectRangeAnchors([para]);
+    return [...leading, ...replacement, ...trailing];
+  };
+
+  // HTML chunk placeholder ({{!htmlPath}})
+  const htmlMatch = matchSinglePlaceholder(text, open, close, "!");
+  if (htmlMatch) {
+    const value = resolvePath(data, htmlMatch);
+    if (isTemplateHtmlChunk(value)) {
+      const seq = nextAltChunkSeq();
+      const altChunk: AltChunk = {
+        type: "altChunk",
+        // A process-monotonic sequence, so two fills of the same template
+        // don't collide on rId or path.
+        rId: `rId_altchunk_${seq}`,
+        contentType: value.contentType ?? "text/html",
+        data: utf8Encoder.encode(value.html),
+        fileName: `afchunk${seq}.html`
+      };
+      return replaceBlock([altChunk]);
+    }
+  }
+  // Sub-document placeholder: the blocks are inserted, then filled like the
+  // rest of the template.
+  const subMatch = matchSinglePlaceholder(text, open, close, ">");
+  if (subMatch) {
+    const value = resolvePath(data, subMatch);
+    if (isTemplateSubDocument(value)) {
+      if (rich.depth >= MAX_SUB_DOCUMENT_DEPTH) {
+        throw new DocxTemplateError(
+          `Sub-document placeholders nest more than ${MAX_SUB_DOCUMENT_DEPTH} deep: {{>${subMatch}}}`,
+          `>${subMatch}`,
+          location,
+          { tagName: `>${subMatch}`, sectionPath: location }
+        );
+      }
+      const nested: TemplateContext = { ...ctx, rich: { ...rich, depth: rich.depth + 1 } };
+      return replaceBlock(processBodyItems(cloneModel([...value]), nested, location));
+    }
+  }
+  // Image placeholder, optionally conditional: {{%?condPath.imagePath}}
+  const imgMatch = matchSinglePlaceholder(text, open, close, "%");
+  if (imgMatch) {
+    let imagePath = imgMatch;
+    if (imgMatch.startsWith("?")) {
+      const rest = imgMatch.slice(1);
+      const dotIdx = rest.indexOf(".");
+      if (dotIdx !== -1) {
+        if (!isTruthy(resolvePath(data, rest.slice(0, dotIdx)))) {
+          // Condition is falsy — nothing is inserted.
+          return replaceBlock([]);
+        }
+        imagePath = rest.slice(dotIdx + 1);
+      }
+    }
+    const value = resolvePath(data, imagePath);
+    if (isTemplateImage(value)) {
+      return [replaceParagraphChildren(para, [{ content: [templateImageContent(value, rich)] }])];
+    }
+  }
+  // Rich text placeholder: the runs are inserted as they are — they are data,
+  // not template text, so they are not filled again.
+  const rtMatch = matchSinglePlaceholder(text, open, close, "&");
+  if (rtMatch) {
+    const value = resolvePath(data, rtMatch);
+    if (isTemplateRichText(value)) {
+      return [replaceParagraphChildren(para, cloneModel([...value]) as ParagraphChild[])];
+    }
+  }
+  // Chart placeholder
+  const chartMatch = matchSinglePlaceholder(text, open, close, "^");
+  if (chartMatch) {
+    const value = resolvePath(data, chartMatch);
+    if (isTemplateChart(value)) {
+      const chartContent: ChartContent = {
+        type: "chart",
+        chart: value.chart,
+        altText: value.altText,
+        name: value.name
+      };
+      return replaceBlock([chartContent]);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The inline image a picture placeholder becomes, registering the picture for
+ * packaging. The same supplied picture placed many times — by a loop, say —
+ * is stored once and referenced from every place.
+ */
+function templateImageContent(value: TemplateImage, rich: RichState): InlineImageContent {
+  const safeFileName = sanitizeTemplateImageFileName(value.image.fileName);
+  const rId = rich.images.place(value.image);
   return {
-    ...table,
-    rows: table.rows.map(row => ({
-      ...row,
-      cells: row.cells.map(cell => ({
-        ...cell,
-        content: processEnhancedBody(
-          cell.content as BodyContent[],
-          data,
-          open,
-          close,
-          strict,
-          collectedImages
-        ) as readonly (Paragraph | Table)[]
-      }))
-    }))
+    type: "image",
+    rId,
+    width: value.width,
+    height: value.height,
+    altText: value.altText ?? safeFileName,
+    name: safeFileName
   };
 }
 
@@ -1740,13 +2278,18 @@ function matchSinglePlaceholder(
 // Table Column Loop: {{#cols items}}...{{/cols}}
 // =============================================================================
 
+/**
+ * `table` with its `{{#cols items}}…{{/cols}}` columns repeated once per item
+ * and each copy filled for that item (leniently: an unresolved variable in a
+ * column copy renders empty). The comment references of columns removed for
+ * an empty collection go to `references`.
+ */
 function processTableColumnLoop(
   table: Table,
-  data: Record<string, unknown>,
-  open: string,
-  close: string,
-  _strict: boolean
+  ctx: TemplateContext,
+  references: CommentReference[]
 ): Table {
+  const { open, close, data } = ctx;
   // Check if any cell in the first row contains a #cols directive
   if (table.rows.length === 0) {
     return table;
@@ -1798,6 +2341,16 @@ function processTableColumnLoop(
     return table;
   }
 
+  const colsOpenRegex = new RegExp(
+    escapeRegex(open) +
+      "\\s*#cols\\s+[^" +
+      escapeRegex(close.charAt(0)) +
+      "]*" +
+      escapeRegex(close),
+    "g"
+  );
+  const colsCloseRegex = new RegExp(escapeRegex(open) + "\\s*/cols\\s*" + escapeRegex(close), "g");
+
   // For each row, duplicate the template columns for each item
   const newRows: TableRow[] = [];
   for (const row of table.rows) {
@@ -1806,53 +2359,69 @@ function processTableColumnLoop(
     const afterCells = row.cells.slice(closeColIdx + 1);
 
     const expandedCells: TableCell[] = [...beforeCells];
+    const ranges = repeatedRanges(templateCells);
 
     for (let idx = 0; idx < items.length; idx++) {
-      for (const templateCell of templateCells) {
-        const clonedCell: TableCell = structuredClone(templateCell);
-        // Strip #cols and /cols directives from text
-        for (let b = 0; b < clonedCell.content.length; b++) {
-          const block = clonedCell.content[b];
-          if (block.type === "paragraph") {
-            const text = extractParagraphText(block as Paragraph);
-            let cleaned = text;
-            const colsOpenRegex = new RegExp(
-              escapeRegex(open) +
-                "\\s*#cols\\s+[^" +
-                escapeRegex(close.charAt(0)) +
-                "]*" +
-                escapeRegex(close),
-              "g"
-            );
-            cleaned = cleaned.replace(colsOpenRegex, "");
-            const colsCloseRegex = new RegExp(
-              escapeRegex(open) + "\\s*/cols\\s*" + escapeRegex(close),
-              "g"
-            );
-            cleaned = cleaned.replace(colsCloseRegex, "");
-
-            // Resolve item variables
-            const itemData = buildLoopData(items[idx], idx, data);
-            const tokens = tokenize(cleaned, open, close);
-            const ctx: TemplateContext = { open, close, strict: false, data: itemData };
-            const resolved = evaluateInlineTokens(tokens, ctx, "colLoop");
-            if (resolved !== text) {
-              (clonedCell.content as (Paragraph | Table)[])[b] = rebuildParagraphText(
-                block as Paragraph,
-                resolved
-              );
-            } else if (cleaned !== text) {
-              (clonedCell.content as (Paragraph | Table)[])[b] = rebuildParagraphText(
-                block as Paragraph,
-                cleaned
-              );
-            }
+      const itemCtx: TemplateContext = {
+        ...ctx,
+        strict: false,
+        data: buildLoopData(items[idx], idx, data)
+      };
+      // One iteration's cells are one copy of the repeated content.
+      const clonedCells = keepClonedRangeMarkers(
+        cloneModel(templateCells),
+        idx,
+        items.length,
+        ranges
+      );
+      for (const clonedCell of clonedCells) {
+        // Strip #cols and /cols directives from the text, then fill the copy.
+        const stripped = clonedCell.content.map(block => {
+          if (block.type !== "paragraph") {
+            return block;
           }
-        }
-        expandedCells.push(clonedCell);
+          const text = extractParagraphText(block as Paragraph);
+          const cleaned = text.replace(colsOpenRegex, "").replace(colsCloseRegex, "");
+          return cleaned === text ? block : rebuildParagraphText(block as Paragraph, cleaned);
+        });
+        expandedCells.push({
+          ...clonedCell,
+          content: processCellContent(stripped, itemCtx, "colLoop")
+        });
       }
     }
 
+    if (items.length === 0) {
+      // The template columns go; the ranges their cells opened or closed stay
+      // paired, and the comments they referenced keep their references.
+      const dropped: RangeMarker[] = [];
+      for (const anchor of listTableRowAnchors([
+        {
+          ...row,
+          cells: templateCells,
+          rangeMarkersBefore: undefined,
+          rangeMarkersAfter: undefined
+        }
+      ])) {
+        if (anchor.type === "commentReference") {
+          references.push(anchor);
+        } else {
+          dropped.push(anchor);
+        }
+      }
+      if (dropped.length > 0) {
+        if (afterCells.length > 0) {
+          afterCells[0] = withRangeMarkersBefore(afterCells[0]!, dropped);
+        } else {
+          newRows.push({
+            ...row,
+            cells: expandedCells,
+            rangeMarkersAfter: [...dropped, ...(row.rangeMarkersAfter ?? [])]
+          });
+          continue;
+        }
+      }
+    }
     expandedCells.push(...afterCells);
 
     // Update grid (tblGrid) if needed: we'll leave that to the caller
@@ -1882,6 +2451,71 @@ function nextAltChunkSeq(): number {
 function nextTemplateImageSeq(): number {
   _templateImageSeq++;
   return _templateImageSeq;
+}
+
+/** Where a fill registers the pictures its placeholders show. */
+interface TemplateImageSink {
+  /**
+   * Register a picture a placeholder shows and return the key its run names.
+   * The key is the picture's own `rId` when that is free or already names the
+   * same picture — supplying one of the template's own images reuses it — and
+   * a fresh one otherwise, so a caller's picture never takes over a key the
+   * template uses for another.
+   */
+  place(image: ImageDef): string;
+  /** The pictures registered, for the document's image table. */
+  readonly added: ImageDef[];
+}
+
+function createTemplateImageSink(
+  existing: readonly ImageDef[] | undefined,
+  where: string
+): TemplateImageSink {
+  const owners = new Map<string, ImageDef>();
+  for (const img of existing ?? []) {
+    for (const key of imageKeys(img)) {
+      if (!owners.has(key)) {
+        owners.set(key, img);
+      }
+    }
+  }
+  const usedFileNames = new Set((existing ?? []).map(img => img.fileName));
+  const placed = new Map<ImageDef, string>();
+  const added: ImageDef[] = [];
+  return {
+    added,
+    place(image) {
+      const again = placed.get(image);
+      if (again !== undefined) {
+        return again;
+      }
+      // The picture came from the fill's data.
+      assertImageMediaType(image.mediaType, where, "data");
+      const wanted = image.rId;
+      const owner = wanted !== undefined ? owners.get(wanted) : undefined;
+      if (wanted !== undefined && owner && isSamePicture(owner, image)) {
+        placed.set(image, wanted);
+        return wanted;
+      }
+      let key = wanted !== undefined && !owner ? wanted : `rId_tpl_${nextTemplateImageSeq()}`;
+      while (owners.has(key)) {
+        key = `rId_tpl_${nextTemplateImageSeq()}`;
+      }
+      const safe = sanitizeTemplateImageFileName(image.fileName);
+      let fileName = safe;
+      for (let n = 2; usedFileNames.has(fileName); n++) {
+        const dot = safe.lastIndexOf(".");
+        fileName = dot > 0 ? `${safe.slice(0, dot)}_${n}${safe.slice(dot)}` : `${safe}_${n}`;
+      }
+      const { aliasRIds: _aliases, ...rest } = image;
+      const def: ImageDef = { ...rest, rId: key, fileName };
+      added.push(def);
+      owners.set(key, def);
+      usedFileNames.add(fileName);
+      placed.set(image, key);
+      return key;
+    }
+  };
 }
 
 /**

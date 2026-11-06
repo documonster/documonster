@@ -21,10 +21,12 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
   constructor() {
     super();
 
+    // Written back inside an `<autoFilter>` that carries the declarations it was read with.
+    const enclosing = () => this.model?.autoFilterNamespaceAttributes;
     this.map = {
-      filterColumn: new FilterColumnXform(),
-      sortState: new PreservedSubtreeXform(),
-      extLst: new PreservedSubtreeXform()
+      filterColumn: new FilterColumnXform(enclosing),
+      sortState: new PreservedSubtreeXform(enclosing),
+      extLst: new PreservedSubtreeXform(enclosing)
     };
     this.model = { autoFilterRef: "", columns: [] };
   }

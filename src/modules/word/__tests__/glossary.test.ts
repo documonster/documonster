@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Document, Build, Glossary, Io } from "../index";
+import { Build, Document, Glossary, Io, Package } from "../index";
 import type { DocxDocument } from "../types";
 
 const utf8 = new TextDecoder();
@@ -91,7 +91,7 @@ describe("Glossary / Building Blocks", () => {
       const b2 = Glossary.createBlock("B", "quickParts", [Build.textParagraph("b")]);
       const glossary = Glossary.createDocument([b1, b2]);
 
-      const entries = Glossary.autoTextEntries(glossary);
+      const entries = Glossary.listAutoTextEntries(glossary);
       expect(entries).toHaveLength(1);
       expect(entries[0]!.gallery).toBe("autoText");
     });
@@ -104,7 +104,7 @@ describe("Glossary / Building Blocks", () => {
       const b3 = Glossary.createBlock("C", "quickParts", [Build.textParagraph("c")]);
       const glossary = Glossary.createDocument([b1, b2, b3]);
 
-      const parts = Glossary.quickParts(glossary);
+      const parts = Glossary.listQuickParts(glossary);
       expect(parts).toHaveLength(2);
     });
   });
@@ -123,13 +123,13 @@ describe("Glossary / Building Blocks", () => {
           Build.paragraph([Build.text("Provided as-is.")])
         ])
       ]);
-      return { ...Document.build(d), glossary };
+      return { ...d, glossary };
     }
 
     it("emits word/glossary/document.xml with relationship and content type", async () => {
       const buf = await Io.toBuffer(docWithGlossary());
 
-      const glossaryXml = await Io.readDocxPart(buf, "word/glossary/document.xml");
+      const glossaryXml = await Package.readPart(buf, "word/glossary/document.xml");
       expect(glossaryXml).toBeDefined();
       const xml = utf8.decode(glossaryXml!);
       expect(xml).toContain("<w:glossaryDocument");
@@ -138,11 +138,11 @@ describe("Glossary / Building Blocks", () => {
       expect(xml).toContain("Dear Sir/Madam,");
       expect(xml).toContain("Provided as-is.");
 
-      const rels = utf8.decode((await Io.readDocxPart(buf, "word/_rels/document.xml.rels"))!);
+      const rels = utf8.decode((await Package.readPart(buf, "word/_rels/document.xml.rels"))!);
       expect(rels).toContain("glossaryDocument");
       expect(rels).toContain("glossary/document.xml");
 
-      const ct = utf8.decode((await Io.readDocxPart(buf, "[Content_Types].xml"))!);
+      const ct = utf8.decode((await Package.readPart(buf, "[Content_Types].xml"))!);
       expect(ct).toContain("/word/glossary/document.xml");
       expect(ct).toContain("document.glossary+xml");
     });
@@ -159,17 +159,17 @@ describe("Glossary / Building Blocks", () => {
         "word/glossary/fontTable.xml",
         "word/glossary/_rels/document.xml.rels"
       ]) {
-        expect(await Io.readDocxPart(buf, p), p).toBeDefined();
+        expect(await Package.readPart(buf, p), p).toBeDefined();
       }
       const grels = utf8.decode(
-        (await Io.readDocxPart(buf, "word/glossary/_rels/document.xml.rels"))!
+        (await Package.readPart(buf, "word/glossary/_rels/document.xml.rels"))!
       );
       expect(grels).toContain("styles.xml");
       expect(grels).toContain("settings.xml");
       expect(grels).toContain("webSettings.xml");
       expect(grels).toContain("fontTable.xml");
 
-      const ct = utf8.decode((await Io.readDocxPart(buf, "[Content_Types].xml"))!);
+      const ct = utf8.decode((await Package.readPart(buf, "[Content_Types].xml"))!);
       expect(ct).toContain("/word/glossary/styles.xml");
       expect(ct).toContain("/word/glossary/settings.xml");
       expect(ct).toContain("/word/glossary/webSettings.xml");
@@ -181,7 +181,7 @@ describe("Glossary / Building Blocks", () => {
       // types → behaviors → description → guid. Word rejects the package if
       // these are out of order (e.g. description after guid).
       const buf = await Io.toBuffer(docWithGlossary());
-      const xml = utf8.decode((await Io.readDocxPart(buf, "word/glossary/document.xml"))!);
+      const xml = utf8.decode((await Package.readPart(buf, "word/glossary/document.xml"))!);
       // Inspect the FormalGreeting docPart, which has both description + guid.
       const pr = /<w:docPartPr>(.*?)<\/w:docPartPr>/s.exec(xml)![1];
       // Strip the nested <w:category> so only direct children remain.
@@ -270,8 +270,8 @@ describe("Glossary / Building Blocks", () => {
       const d = Document.create();
       Document.useDefaultStyles(d);
       Document.addParagraph(d, "Body.");
-      const buf = await Io.toBuffer({ ...Document.build(d), glossary });
-      const xml = utf8.decode((await Io.readDocxPart(buf, "word/glossary/document.xml"))!);
+      const buf = await Io.toBuffer({ ...d, glossary });
+      const xml = utf8.decode((await Package.readPart(buf, "word/glossary/document.xml"))!);
       const vals = [...xml.matchAll(/<w:gallery w:val="([^"]+)"/g)].map(m => m[1]);
       expect(vals.length).toBe(allGalleries.length);
       for (const v of vals) {
@@ -292,12 +292,83 @@ describe("Glossary / Building Blocks", () => {
 
       // Re-write must still contain the part + relationship (not dropped).
       const buf2 = await Io.toBuffer(reread);
-      const glossaryXml2 = await Io.readDocxPart(buf2, "word/glossary/document.xml");
+      const glossaryXml2 = await Package.readPart(buf2, "word/glossary/document.xml");
       expect(glossaryXml2).toBeDefined();
-      const rels2 = utf8.decode((await Io.readDocxPart(buf2, "word/_rels/document.xml.rels"))!);
+      const rels2 = utf8.decode((await Package.readPart(buf2, "word/_rels/document.xml.rels"))!);
       expect(rels2).toContain("glossaryDocument");
       // Companion parts survive the round-trip too.
-      expect(await Io.readDocxPart(buf2, "word/glossary/styles.xml")).toBeDefined();
+      expect(await Package.readPart(buf2, "word/glossary/styles.xml")).toBeDefined();
+    });
+
+    it("reads the entries back as blocks a reader can list and find", async () => {
+      const reread = await Io.read(await Io.toBuffer(docWithGlossary()));
+      const glossary = reread.glossary!;
+      expect(Glossary.listAutoTextEntries(glossary).map(b => b.name)).toEqual(["Greeting"]);
+      expect(Glossary.listQuickParts(glossary).map(b => b.name)).toEqual(["Disclaimer"]);
+      const greeting = Glossary.findBlock(glossary, "Greeting", "autoText")!;
+      expect(greeting).toMatchObject({ category: "Letters", description: "Opening" });
+      expect(greeting.guid).toMatch(/^\{[0-9A-Fa-f-]{36}\}$/);
+      const text = JSON.stringify(greeting.content);
+      expect(text).toContain("Dear Sir/Madam,");
+
+      // Unchanged blocks still write the part as it was read.
+      const again = await Io.toBuffer(reread);
+      expect(utf8.decode((await Package.readPart(again, "word/glossary/document.xml"))!)).toBe(
+        glossary.rawXml
+      );
+    });
+
+    it("writes edited blocks of a read glossary, keeping entries it does not list", async () => {
+      const original = await Io.toBuffer(docWithGlossary());
+      // An entry in a gallery the model does not name (Word's content-control
+      // placeholder text lives in `placeholder`) is kept as it was.
+      const glossaryXml = utf8.decode(
+        (await Package.readPart(original, "word/glossary/document.xml"))!
+      );
+      const withPlaceholder = glossaryXml.replace(
+        "</w:docParts>",
+        '<w:docPart><w:docPartPr><w:name w:val="PH"/><w:category><w:name w:val="General"/>' +
+          '<w:gallery w:val="placeholder"/></w:category><w:guid w:val="{11111111-2222-3333-4444-555555555555}"/>' +
+          "</w:docPartPr><w:docPartBody><w:p><w:r><w:t>Click here</w:t></w:r></w:p></w:docPartBody></w:docPart></w:docParts>"
+      );
+      const bytes = await Package.edit(original, [
+        { type: "replacePartText", path: "word/glossary/document.xml", text: withPlaceholder }
+      ]);
+      const reread = await Io.read(bytes);
+      expect(reread.glossary!.blocks.map(b => b.name)).toEqual(["Greeting", "Disclaimer"]);
+
+      const edited: DocxDocument = {
+        ...reread,
+        glossary: {
+          ...reread.glossary!,
+          blocks: [
+            ...reread.glossary!.blocks.filter(b => b.name !== "Disclaimer"),
+            Glossary.createBlock("Added", "autoText", [Build.textParagraph("New entry")])
+          ]
+        }
+      };
+      const written = await Io.toBuffer(edited);
+      const xml = utf8.decode((await Package.readPart(written, "word/glossary/document.xml"))!);
+      expect(xml).toContain('w:val="Added"');
+      expect(xml).toContain("New entry");
+      expect(xml).not.toContain('w:val="Disclaimer"');
+      expect(xml).toContain("Click here");
+      // Its companion parts are still those it was read with.
+      expect(await Package.readPart(written, "word/glossary/styles.xml")).toEqual(
+        await Package.readPart(bytes, "word/glossary/styles.xml")
+      );
+      const again = await Io.read(written);
+      expect(Glossary.listAutoTextEntries(again.glossary!).map(b => b.name)).toEqual([
+        "Greeting",
+        "Added"
+      ]);
+      // A clone is not an edit.
+      const cloned = Document.clone(reread);
+      expect(
+        utf8.decode(
+          (await Package.readPart(await Io.toBuffer(cloned), "word/glossary/document.xml"))!
+        )
+      ).toBe(withPlaceholder);
     });
 
     it("omits the glossary part when there are no blocks", async () => {
@@ -305,10 +376,10 @@ describe("Glossary / Building Blocks", () => {
       Document.useDefaultStyles(d);
       Document.addParagraph(d, "Body.");
       const buf = await Io.toBuffer({
-        ...Document.build(d),
+        ...d,
         glossary: Glossary.createDocument([])
       });
-      expect(await Io.readDocxPart(buf, "word/glossary/document.xml")).toBeUndefined();
+      expect(await Package.readPart(buf, "word/glossary/document.xml")).toBeUndefined();
     });
   });
 });

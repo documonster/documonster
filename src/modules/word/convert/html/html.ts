@@ -6,7 +6,7 @@
  *
  * @example
  * ```ts
- * import { renderToHtml, htmlToDocxBody } from "documonster/word/html";
+ * import { WordHtml } from "documonster/word/html";
  * ```
  */
 

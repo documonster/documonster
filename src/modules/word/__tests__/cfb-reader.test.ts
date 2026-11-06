@@ -141,12 +141,19 @@ describe("writeCfb / readCfb roundtrip", () => {
     expect(Array.from(pkg.data)).toEqual(Array.from(big));
   });
 
-  it("throws rather than emit a corrupt container when the input needs a DIFAT chain", () => {
-    // The minimal writer only fills the 109 inline DIFAT slots. A stream large
-    // enough to require >109 FAT sectors (~7 MB) must fail loudly instead of
-    // silently producing a file no reader can parse.
+  it("writes a DIFAT sector chain when the FAT outgrows the header's 109 entries", () => {
+    // 109 FAT sectors index ~7 MB. The writer used to refuse anything larger, which capped an encrypted
+    // package at that size; it now chains DIFAT sectors as MS-CFB §2.5 describes.
     const huge = new Uint8Array(8 * 1024 * 1024);
-    expect(() => writeCfb([{ name: "EncryptedPackage", data: huge }])).toThrow(/DIFAT/);
+    for (let i = 0; i < huge.length; i += 997) {
+      huge[i] = i & 0xff;
+    }
+    const buffer = writeCfb([{ name: "EncryptedPackage", data: huge }]);
+    const view = new DataView(buffer.buffer, buffer.byteOffset);
+    expect(view.getUint32(72, true)).toBeGreaterThan(0); // DIFAT sector count
+    const pkg = readCfb(buffer).find(e => e.name === "EncryptedPackage")!;
+    expect(pkg.data.length).toBe(huge.length);
+    expect(pkg.data.every((byte, i) => byte === huge[i])).toBe(true);
   });
 });
 

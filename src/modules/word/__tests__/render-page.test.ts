@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from "vitest";
 
+import { DocxArgumentError } from "../errors";
+import { Layout } from "../index";
 import { renderPageToSvg, renderDocumentToSvg } from "../layout/render-page";
 import type { DocxDocument, Paragraph, Run, Table } from "../types";
 
@@ -158,6 +160,8 @@ describe("renderPageToSvg", () => {
       },
       {
         type: "table",
+        // Fixed, so the one column spans the measure; auto-fit sizes it by its text.
+        properties: { layout: "fixed" },
         rows: [
           {
             properties: { height: { value: 200, rule: "exact" } },
@@ -248,11 +252,32 @@ describe("renderPageToSvg", () => {
     expect(renderPageToSvg(makeDoc([named("  ")]), 1)).toContain(`font-family="sans-serif"`);
   });
 
-  it("throws RangeError for page number out of range", () => {
+  it("refuses a page number out of range as an argument error naming pageNumber", () => {
     const doc = makeDoc([makeParagraph("Single page")]);
 
-    expect(() => renderPageToSvg(doc, 0)).toThrow(RangeError);
-    expect(() => renderPageToSvg(doc, 999)).toThrow(RangeError);
+    for (const page of [0, 999]) {
+      expect(() => renderPageToSvg(doc, page)).toThrow(DocxArgumentError);
+      expect(() => renderPageToSvg(doc, page)).toThrow(
+        /^Layout\.pageToSvg: pageNumber must be a page number 1–1 \(the document has 1 page\(s\)\)/
+      );
+    }
+    const layout = Layout.compute(doc);
+    expect(() => Layout.computedPageToSvg(layout, 2)).toThrow(
+      expect.objectContaining({ name: "DocxArgumentError", field: "pageNumber" })
+    );
+    expect(() => Layout.computedPageToSvg(layout, 2)).toThrow(/^Layout\.computedPageToSvg: /);
+  });
+
+  it("checks the layout Layout.computedPageToSvg is given", () => {
+    expect(() => Layout.computedPageToSvg(null as never, 1)).toThrow(
+      expect.objectContaining({ name: "DocxArgumentError", field: "layout" })
+    );
+    expect(() => Layout.computedPageToSvg({ totalPages: 1 } as never, 1)).toThrow(
+      expect.objectContaining({ field: "layout.pages" })
+    );
+    expect(() => Layout.computedPageToSvg({ pages: [], totalPages: 3 } as never, 1)).toThrow(
+      expect.objectContaining({ field: "layout.totalPages" })
+    );
   });
 
   it("applies custom background color", () => {

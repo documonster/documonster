@@ -12,9 +12,18 @@
  * change a report's usefulness; the deep option trees stay in `documonster_help`.
  */
 
-import { Cell, ExcelNotSupportedError, Workbook, Worksheet } from "documonster/excel";
-import { readCsvFile } from "documonster/excel/csv";
-import { calculateFormulas } from "documonster/excel/formula";
+import { createReadStream } from "node:fs";
+
+import {
+  Cell,
+  Column,
+  ExcelUnsupportedFeatureError,
+  Row,
+  Workbook,
+  Worksheet
+} from "documonster/excel";
+import { ExcelCsv } from "documonster/excel/csv";
+import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -194,7 +203,7 @@ export const sheetWriteTool = defineTool({
     let formulaNote = "formulas not evaluated (recalculate: false)";
     if (recalculate) {
       try {
-        calculateFormulas(wb);
+        ExcelFormula.calculate(wb);
         formulaNote = "formulas evaluated";
       } catch (cause) {
         // A bad formula must not lose the whole document — save it and say so,
@@ -217,7 +226,7 @@ export const sheetWriteTool = defineTool({
         ? await Workbook.toBuffer(wb, { format }).then(
             () => [],
             (cause: unknown): string[] =>
-              cause instanceof ExcelNotSupportedError ? [...cause.items] : []
+              cause instanceof ExcelUnsupportedFeatureError ? [...cause.items] : []
           )
         : [];
     await writeWithPolicy(target, args.overwrite === true, temporary =>
@@ -255,16 +264,16 @@ async function buildSheet(
 
   if (spec.fromCsv !== undefined) {
     const source = await resolveInRoot(config, spec.fromCsv, { mustExist: true });
-    // readCsvFile appends a new sheet named after the file, so rename it to the
+    // addWorksheet appends a new sheet with a default name, so rename it to the
     // requested name afterwards rather than creating a second, empty sheet.
-    ws = await readCsvFile(
+    ws = await ExcelCsv.addWorksheet(
       wb,
-      source,
+      createReadStream(source, "utf8"),
       spec.csvDelimiter === undefined ? undefined : { delimiter: spec.csvDelimiter }
     );
-    Worksheet.setModel(ws, { ...Worksheet.getModel(ws), name: spec.name });
+    Worksheet.setName(ws, spec.name);
     report.push(
-      `- sheet ${JSON.stringify(spec.name)}: loaded ${Worksheet.actualRowCount(ws)} row(s) from ${spec.fromCsv} server-side`
+      `- sheet ${JSON.stringify(spec.name)}: loaded ${Row.getActualCount(ws)} row(s) from ${spec.fromCsv} server-side`
     );
   } else {
     ws = Workbook.addWorksheet(wb, spec.name);
@@ -281,7 +290,7 @@ async function buildSheet(
     // previous value.
     for (const [rowOffset, row] of spec.rows.entries()) {
       for (const [columnOffset, value] of row.entries()) {
-        Cell.setValue(ws, rowOffset + 1, columnOffset + 1, value);
+        Cell.setValue(ws, { row: rowOffset + 1, col: columnOffset + 1 }, value);
       }
     }
   }
@@ -330,7 +339,7 @@ function applyLayout(
   report: string[]
 ): void {
   if (spec.columnWidths !== undefined && spec.columnWidths.length > 0) {
-    Worksheet.setColumns(
+    Column.setDefinitions(
       ws,
       spec.columnWidths.map(width => ({ width }))
     );
@@ -342,7 +351,7 @@ function applyLayout(
     // the literal was not as broken as it looked. What it was, is a reach into a model field
     // that has a public setter, which then has to be kept in step with it by hand: the setter
     // also takes a column count, and writing the literal is what quietly limited this to rows.
-    Worksheet.freeze(ws, 0, spec.freezeRows);
+    Worksheet.freeze(ws, { rows: spec.freezeRows });
   }
 
   for (const range of spec.merges ?? []) {
@@ -398,22 +407,30 @@ function applyStyle(ws: SheetHandle, range: string, style: z.infer<typeof styleS
   for (let row = window.top; row <= window.bottom; row += 1) {
     for (let column = window.left; column <= window.right; column += 1) {
       if (style.bold !== undefined || style.italic !== undefined || style.fontColor !== undefined) {
-        Cell.setFont(ws, row, column, {
-          ...(Cell.getFont(ws, row, column) ?? {}),
-          ...(style.bold === undefined ? {} : { bold: style.bold }),
-          ...(style.italic === undefined ? {} : { italic: style.italic }),
-          ...(style.fontColor === undefined ? {} : { color: { argb: toArgb(style.fontColor) } })
-        });
+        Cell.setFont(
+          ws,
+          { row, col: column },
+          {
+            ...(Cell.getFont(ws, { row, col: column }) ?? {}),
+            ...(style.bold === undefined ? {} : { bold: style.bold }),
+            ...(style.italic === undefined ? {} : { italic: style.italic }),
+            ...(style.fontColor === undefined ? {} : { color: { argb: toArgb(style.fontColor) } })
+          }
+        );
       }
       if (style.fillColor !== undefined) {
-        Cell.setFill(ws, row, column, {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: toArgb(style.fillColor) }
-        });
+        Cell.setFill(
+          ws,
+          { row, col: column },
+          {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: toArgb(style.fillColor) }
+          }
+        );
       }
       if (style.numFmt !== undefined) {
-        Cell.setNumFmt(ws, row, column, style.numFmt);
+        Cell.setNumFmt(ws, { row, col: column }, style.numFmt);
       }
     }
   }

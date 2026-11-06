@@ -84,21 +84,29 @@ export function md5(input: Uint8Array): Uint8Array {
 // =============================================================================
 
 /**
+ * The OpenSSL cipher name for an AES key: AES-128, AES-192 or AES-256 by its length, as the browser variant's key
+ * schedule takes all three. A 24-byte key used to be named AES-256 and refused.
+ */
+function aesName(key: Uint8Array, mode: "cbc" | "ecb"): string {
+  return `aes-${key.length * 8}-${mode}`;
+}
+
+/**
  * AES-CBC encryption with PKCS#7 padding.
- * Supports AES-128 (16-byte key) and AES-256 (32-byte key).
+ * Supports AES-128, AES-192 and AES-256 (16-, 24- and 32-byte keys).
  */
 export function aesCbcEncrypt(plaintext: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
-  const algo = key.length === 16 ? "aes-128-cbc" : "aes-256-cbc";
+  const algo = aesName(key, "cbc");
   const cipher = crypto.createCipheriv(algo, key, iv);
   return new Uint8Array(Buffer.concat([cipher.update(plaintext), cipher.final()]));
 }
 
 /**
  * AES-CBC decryption with PKCS#7 padding removal.
- * Supports AES-128 (16-byte key) and AES-256 (32-byte key).
+ * Supports AES-128, AES-192 and AES-256 (16-, 24- and 32-byte keys).
  */
 export function aesCbcDecrypt(ciphertext: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
-  const algo = key.length === 16 ? "aes-128-cbc" : "aes-256-cbc";
+  const algo = aesName(key, "cbc");
   const decipher = crypto.createDecipheriv(algo, key, iv);
   try {
     return new Uint8Array(Buffer.concat([decipher.update(ciphertext), decipher.final()]));
@@ -120,7 +128,7 @@ export function aesCbcDecryptRaw(
   key: Uint8Array,
   iv: Uint8Array
 ): Uint8Array {
-  const algo = key.length === 16 ? "aes-128-cbc" : "aes-256-cbc";
+  const algo = aesName(key, "cbc");
   const decipher = crypto.createDecipheriv(algo, key, iv);
   decipher.setAutoPadding(false);
   return new Uint8Array(Buffer.concat([decipher.update(ciphertext), decipher.final()]));
@@ -140,7 +148,7 @@ export function aesCbcEncryptRaw(
   if (plaintext.length % 16 !== 0) {
     throw new Error("aesCbcEncryptRaw: plaintext length must be a multiple of 16");
   }
-  const algo = key.length === 16 ? "aes-128-cbc" : "aes-256-cbc";
+  const algo = aesName(key, "cbc");
   const cipher = crypto.createCipheriv(algo, key, iv);
   cipher.setAutoPadding(false);
   return new Uint8Array(Buffer.concat([cipher.update(plaintext), cipher.final()]));
@@ -150,7 +158,7 @@ export function aesCbcEncryptRaw(
  * AES-ECB encryption of a single 16-byte block (no padding, no IV).
  */
 export function aesEcbEncrypt(block: Uint8Array, key: Uint8Array): Uint8Array {
-  const algo = key.length === 16 ? "aes-128-ecb" : "aes-256-ecb";
+  const algo = aesName(key, "ecb");
   const cipher = crypto.createCipheriv(algo, key, null);
   cipher.setAutoPadding(false);
   return new Uint8Array(Buffer.concat([cipher.update(block), cipher.final()]));
@@ -195,12 +203,7 @@ export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
 // Random bytes
 // =============================================================================
 
-/**
- * Generate cryptographically secure random bytes.
- */
-export function randomBytes(length: number): Uint8Array {
-  return new Uint8Array(crypto.randomBytes(length));
-}
+export { randomBytes } from "./random-bytes";
 
 // =============================================================================
 // Generic hash

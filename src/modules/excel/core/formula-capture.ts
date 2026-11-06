@@ -22,6 +22,8 @@ import type { WorkbookData } from "@excel/core/workbook-core";
 import { getWorksheets } from "@excel/core/workbook.browser";
 import type { WorksheetData } from "@excel/core/worksheet";
 import { getSheetDimensions, getTables } from "@excel/core/worksheet";
+import { formulaEvaluation } from "@excel/utils/array-evaluation";
+import { isStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import type {
   CalcPropertiesSnapshot,
   CellSnapshot,
@@ -37,6 +39,8 @@ import type {
   WorksheetSnapshot
 } from "@formula/integration/workbook-snapshot";
 import { snapshotCellKey, scopedNameKey } from "@formula/integration/workbook-snapshot";
+import type { RegisteredFunctions } from "@formula/syntax/array-result";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
 import { dateToExcel } from "@utils/utils.base";
 
 // ============================================================================
@@ -59,9 +63,9 @@ export function captureFormulaSnapshot(workbook: WorkbookData): WorkbookSnapshot
   const hostWorksheets = getWorksheets(workbook);
 
   for (const ws of hostWorksheets) {
-    const wsSnapshot = buildWorksheetSnapshot(ws, date1904);
+    const wsSnapshot = buildWorksheetSnapshot(ws, date1904, workbook.userFunctions);
     worksheets.push(wsSnapshot);
-    worksheetsByName.set(ws._name.toLowerCase(), wsSnapshot);
+    worksheetsByName.set(sheetNameKey(ws._name), wsSnapshot);
     worksheetsById.set(ws.id, wsSnapshot);
   }
 
@@ -72,7 +76,7 @@ export function captureFormulaSnapshot(workbook: WorkbookData): WorkbookSnapshot
   for (const wsSnapshot of worksheets) {
     for (const table of wsSnapshot.tables) {
       if (table.name) {
-        tablesByName.set(table.name.toLowerCase(), {
+        tablesByName.set(excelNameKey(table.name), {
           table,
           sheetName: wsSnapshot.name
         });
@@ -106,7 +110,11 @@ export function captureFormulaSnapshot(workbook: WorkbookData): WorkbookSnapshot
 // Build Worksheet Snapshot
 // ============================================================================
 
-function buildWorksheetSnapshot(ws: WorksheetData, date1904: boolean): WorksheetSnapshot {
+function buildWorksheetSnapshot(
+  ws: WorksheetData,
+  date1904: boolean,
+  functions: RegisteredFunctions | undefined
+): WorksheetSnapshot {
   const cells = new Map<string, CellSnapshot>();
   const hiddenRows = new Set<number>();
 
@@ -129,7 +137,7 @@ function buildWorksheetSnapshot(ws: WorksheetData, date1904: boolean): Worksheet
         return;
       }
       const colNumber = index + 1;
-      const cellSnapshot = buildCellSnapshot(cell, rowNumber, colNumber, date1904);
+      const cellSnapshot = buildCellSnapshot(cell, rowNumber, colNumber, date1904, functions);
       if (cellSnapshot) {
         cells.set(snapshotCellKey(rowNumber, colNumber), cellSnapshot);
       }
@@ -171,7 +179,8 @@ function buildCellSnapshot(
   cell: CellData,
   row: number,
   col: number,
-  date1904: boolean
+  date1904: boolean,
+  functions: RegisteredFunctions | undefined
 ): CellSnapshot | null {
   const type = cellType(cell);
 
@@ -191,7 +200,7 @@ function buildCellSnapshot(
 
   // ── Formula cells ──
   if (type === Enums.ValueType.Formula) {
-    return buildFormulaCellSnapshot(cell, row, col, date1904);
+    return buildFormulaCellSnapshot(cell, row, col, date1904, functions);
   }
 
   // ── Non-formula cells ──
@@ -210,7 +219,8 @@ function buildFormulaCellSnapshot(
   cell: CellData,
   row: number,
   col: number,
-  date1904: boolean
+  date1904: boolean,
+  functions: RegisteredFunctions | undefined
 ): CellSnapshot | null {
   const model = cell._value.model;
   const formula = cellFormula(cell); // triggers shared formula translation for slaves
@@ -228,6 +238,14 @@ function buildFormulaCellSnapshot(
 
   // Determine formula kind
   const kind = classifyFormulaKind(model);
+  // An ordinary formula is computed as Excel computes it, implicit intersection included — one a file stored that way,
+  // and one set through the API that the writers will store that way (see `ordinaryEvaluationFormula`). One the writers
+  // store as a dynamic array instead (`needsArrayEvaluation`) is evaluated as one, and spills: `=A1#*2`.
+  const evaluation =
+    kind === "normal" || kind === "shared-master" || kind === "shared-slave"
+      ? formulaEvaluation(formula, isStoredOrdinaryFormula(model), functions)
+      : undefined;
+  const evaluated = evaluation?.formula ?? formula;
 
   // Capture the cached result from the XLSX
   const cachedResult = convertFormulaResult(cellResult(cell), date1904);
@@ -237,9 +255,11 @@ function buildFormulaCellSnapshot(
     col,
     value: cachedResult,
     formulaKind: kind,
-    formula,
+    formula: evaluated,
     ref: model.ref,
-    isDynamicArray: model.isDynamicArray ?? undefined
+    // Always decided here for an ordinary formula, `false` included: the engine's own inference would spill a
+    // `SEQUENCE(3)` a file stored as an ordinary formula, which Excel intersects.
+    isDynamicArray: evaluation?.dynamicArray ?? model.isDynamicArray ?? undefined
   };
 }
 
@@ -430,11 +450,12 @@ function buildDefinedNames(
 
     const snapshot: DefinedNameSnapshot = {
       name: entry.name,
-      ranges: [...entry.ranges],
+      // A name's formula may be given as typed, `=S!$A$1:$A$5`; the `=` is not part of it, as for a cell's formula.
+      ranges: entry.ranges.map(range => (range.startsWith("=") ? range.slice(1) : range)),
       ...(scope ? { scope } : {})
     };
 
-    const key = scope ? scopedNameKey(scope, entry.name) : entry.name.toUpperCase();
+    const key = scope ? scopedNameKey(scope, entry.name) : excelNameKey(entry.name);
     if (!map.has(key)) {
       map.set(key, snapshot);
     }

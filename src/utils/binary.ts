@@ -62,10 +62,16 @@ export function getTextDecoder(encoding?: string): TextDecoder {
  * Create a new TextDecoder instance.
  *
  * Use this for streaming decode (`decode(..., { stream: true })`) to avoid
- * sharing mutable decoder state across concurrent operations.
+ * sharing mutable decoder state across concurrent operations. A leading BOM is kept unless
+ * `options.ignoreBOM` is `false`, which strips it as `TextDecoder`'s own default does.
  */
-export function createTextDecoder(encoding?: string): TextDecoder {
-  return createTextDecoderOrTypeError(normalizeEncodingLabel(encoding), { ignoreBOM: true });
+export function createTextDecoder(
+  encoding?: string,
+  options: { ignoreBOM?: boolean } = {}
+): TextDecoder {
+  return createTextDecoderOrTypeError(normalizeEncodingLabel(encoding), {
+    ignoreBOM: options.ignoreBOM ?? true
+  });
 }
 
 function createTextDecoderOrTypeError(encoding: string, options?: TextDecoderOptions): TextDecoder {
@@ -326,20 +332,68 @@ export function uint8ArrayToString(arr: Uint8Array, encoding?: string): string {
 }
 
 /**
+ * The bytes as a plain `Uint8Array` over an ordinary `ArrayBuffer`, which is what every byte result this library
+ * hands out is declared as (`Uint8Array<ArrayBuffer>`), so a caller can pass it to `new Blob([…])`, `crypto.subtle`
+ * or anything else typed for `BufferSource` without a cast.
+ *
+ * Shares the memory when it can: a `Uint8Array` subclass (a Node `Buffer`) becomes a plain view of the same bytes.
+ * Only bytes in a `SharedArrayBuffer` — which a caller's own input can be — are copied, because a result typed as
+ * owning an `ArrayBuffer` must not alias memory another thread can change.
+ */
+export function asPlainBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const buffer = bytes.buffer;
+  if (
+    !(buffer instanceof ArrayBuffer) &&
+    Object.prototype.toString.call(buffer) !== "[object ArrayBuffer]"
+  ) {
+    return new Uint8Array(bytes);
+  }
+  if (bytes.constructor === Uint8Array) {
+    return bytes as Uint8Array<ArrayBuffer>;
+  }
+  return new Uint8Array(buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength);
+}
+
+/**
+ * The chunks of `chunks`, each as {@link asPlainBytes} gives it — for an async iterable of output chunks that is
+ * declared as `AsyncIterable<Uint8Array<ArrayBuffer>>`. Early exit and errors pass through to `chunks`: breaking
+ * out of the loop calls its `return()`.
+ */
+export function plainChunks(
+  chunks: AsyncIterable<Uint8Array>
+): AsyncIterable<Uint8Array<ArrayBuffer>> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<Uint8Array<ArrayBuffer>> {
+      const inner = chunks[Symbol.asyncIterator]();
+      const map = (r: IteratorResult<Uint8Array>): IteratorResult<Uint8Array<ArrayBuffer>> =>
+        r.done ? { done: true, value: undefined } : { done: false, value: asPlainBytes(r.value) };
+      return {
+        next: () => inner.next().then(map),
+        return: () =>
+          inner.return
+            ? inner.return().then(map)
+            : Promise.resolve({ done: true, value: undefined }),
+        throw: (error?: unknown) =>
+          inner.throw ? inner.throw(error).then(map) : Promise.reject(error)
+      };
+    }
+  };
+}
+
+/**
  * Concatenate multiple Uint8Arrays efficiently
  */
-export function concatUint8Arrays(arrays: readonly Uint8Array[], totalLength?: number): Uint8Array {
+export function concatUint8Arrays(
+  arrays: readonly Uint8Array[],
+  totalLength?: number
+): Uint8Array<ArrayBuffer> {
   const len = arrays.length;
   if (len === 0) {
     return new Uint8Array(0);
   }
   if (len === 1) {
-    const single = arrays[0];
-    // Ensure we always return a plain Uint8Array, not a subclass (e.g. Buffer).
-    if (single.constructor === Uint8Array) {
-      return single;
-    }
-    return new Uint8Array(single.buffer, single.byteOffset, single.byteLength);
+    // Always a plain Uint8Array over an ArrayBuffer, never a subclass (e.g. Buffer).
+    return asPlainBytes(arrays[0]);
   }
 
   // Calculate total length with for loop for better performance
@@ -594,7 +648,7 @@ export function writeFloat64LE(value: number): Uint8Array {
 export class BinaryReader {
   private readonly view: DataView;
   private readonly data: Uint8Array;
-  private readonly label: string;
+  protected readonly label: string;
   private offset: number;
 
   /**
@@ -625,9 +679,7 @@ export class BinaryReader {
    */
   set position(value: number) {
     if (!Number.isInteger(value) || value < 0 || value > this.data.length) {
-      throw new RangeError(
-        `${this.label}: cannot seek to ${value} — length is ${this.data.length}`
-      );
+      throw this.outOfBounds(`cannot seek to ${value} — length is ${this.data.length}`);
     }
     this.offset = value;
   }
@@ -650,8 +702,8 @@ export class BinaryReader {
    */
   require(length: number): void {
     if (!Number.isInteger(length) || length < 0 || length > this.remaining) {
-      throw new RangeError(
-        `${this.label}: truncated at byte ${this.offset} — need ${length} byte(s), ${this.remaining} remain`
+      throw this.outOfBounds(
+        `truncated at byte ${this.offset} — need ${length} byte(s), ${this.remaining} remain`
       );
     }
   }
@@ -744,11 +796,20 @@ export class BinaryReader {
     // and returns the *first* uint32 in the stream as though it were the one
     // asked for.
     if (!Number.isInteger(offset) || offset < 0 || offset + 4 > this.data.length) {
-      throw new RangeError(
-        `${this.label}: cannot peek 4 byte(s) at ${offset} — length is ${this.data.length}`
-      );
+      throw this.outOfBounds(`cannot peek 4 byte(s) at ${offset} — length is ${this.data.length}`);
     }
     return this.view.getUint32(offset, true);
+  }
+
+  /**
+   * The error a read past the end, or a seek outside the data, throws.
+   *
+   * A `RangeError` here, because this layer knows bytes and not formats. A format reader overrides it: running out of
+   * bytes in a ZIP header or a BIFF12 record is malformed input, and the caller should receive that format's own
+   * error rather than a built-in one it cannot tell apart from a bug.
+   */
+  protected outOfBounds(detail: string): Error {
+    return new RangeError(`${this.label}: ${detail}`);
   }
 }
 

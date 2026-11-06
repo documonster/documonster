@@ -20,14 +20,14 @@
  * ```typescript
  * import { Pdf } from "documonster/pdf";
  *
- * const doc = await Pdf.read(pdfBytes);
+ * const doc = await Pdf.extract(pdfBytes);
  * console.log(doc.text);           // All text from all pages
  * console.log(doc.pages[0].text);  // Text from page 1
  * ```
  *
  * @example Image extraction:
  * ```typescript
- * const doc = await Pdf.read(pdfBytes);
+ * const doc = await Pdf.extract(pdfBytes);
  * for (const image of doc.pages[0].images) {
  *   console.log(image.format, image.width, image.height);
  *   fs.writeFileSync(`image.${image.format}`, image.data);
@@ -36,7 +36,7 @@
  *
  * @example Metadata:
  * ```typescript
- * const doc = await Pdf.read(pdfBytes);
+ * const doc = await Pdf.extract(pdfBytes);
  * console.log(doc.metadata.title);
  * console.log(doc.metadata.author);
  * console.log(doc.metadata.pageCount);
@@ -44,11 +44,12 @@
  *
  * @example Encrypted PDF:
  * ```typescript
- * const doc = await Pdf.read(pdfBytes, { password: "secret" });
+ * const doc = await Pdf.extract(pdfBytes, { password: "secret" });
  * ```
  */
 
-import { PdfStructureError } from "@pdf/errors";
+import { at, isBlob, pdfBytesOrBlob } from "@pdf/core/arguments";
+import { PdfPasswordError } from "@pdf/errors";
 import { extractAnnotationsFromPage } from "@pdf/reader/annotation-extractor";
 import type { PdfAnnotation } from "@pdf/reader/annotation-extractor";
 import { extractBookmarks } from "@pdf/reader/bookmark-extractor";
@@ -68,7 +69,9 @@ import { extractTables } from "@pdf/reader/table-extractor";
 import type { PdfTable } from "@pdf/reader/table-extractor";
 import { reconstructText, reconstructTextLines } from "@pdf/reader/text-reconstruction";
 import type { TextLine } from "@pdf/reader/text-reconstruction";
-import { yieldToEventLoop } from "@utils/utils.base";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+import { createYieldBudget } from "@utils/yield";
 
 // =============================================================================
 // Types
@@ -90,7 +93,7 @@ export interface ReadPdfOptions {
    * If omitted, all pages are extracted.
    * @example [1, 3, 5] — extract pages 1, 3, and 5
    */
-  pages?: number[];
+  pages?: readonly number[];
 
   /**
    * Whether to extract text.
@@ -105,7 +108,8 @@ export interface ReadPdfOptions {
   extractImages?: boolean;
 
   /**
-   * Whether to extract metadata.
+   * Whether to extract metadata. When `false`, `metadata` still reports `pageCount` and
+   * `encrypted`, which cost nothing to know; every other field is empty (`""`, `null`, `{}`).
    * @default true
    */
   extractMetadata?: boolean;
@@ -137,8 +141,9 @@ export interface ReadPdfOptions {
 
   /**
    * Largest output, in bytes, a single stream filter may produce before the
-   * read is aborted with a `PdfLimitExceededError`. Guards against decompression
-   * bombs.
+   * read is aborted with a `PdfLimitExceededError` (`limit: "maxDecodedBytes"`). Guards
+   * against decompression bombs. A number `>= 0`, or `Infinity` for no limit; anything else is
+   * refused with `PdfArgumentError` (field `options.maxDecodedBytes`).
    * @default 268435456 (256 MiB)
    */
   maxDecodedBytes?: number;
@@ -166,6 +171,12 @@ export interface ReadPdfPage {
   width: number;
   /** Page height in points */
   height: number;
+  /**
+   * The page's `/Rotate` — how a viewer turns it for display, clockwise, in degrees — inherited
+   * from the page tree as the format specifies. `width` and `height` are of the page as it is
+   * stored, before this rotation. A value that is not a multiple of 90 reads as 0.
+   */
+  rotation: 0 | 90 | 180 | 270;
   /** Warnings encountered during extraction (non-fatal errors) */
   warnings: string[];
 }
@@ -192,18 +203,34 @@ export interface ReadPdfResult {
 
 /**
  * Read a PDF file and extract text, images, and metadata.
- * Yields to the event loop between pages to avoid blocking.
+ * Yields to the event loop between pages, whenever about 10 ms of work have passed since the
+ * last yield, so a long document does not block it.
  *
- * @param data - Raw PDF file bytes
+ * Pages are named by 1-based number in `options.pages`; a number past the last page is
+ * skipped (so the result may hold fewer pages than were asked for — each page carries its
+ * `pageNumber`).
+ *
+ * @param data - Raw PDF file bytes — a `Uint8Array`, another `ArrayBufferView` (a `Buffer`, a
+ *   `DataView`) or an `ArrayBuffer`, viewed rather than copied — or a `Blob` (a browser
+ *   `File`), whose bytes are read first
  * @param options - Extraction options
  * @returns Promise of extracted content
+ * @throws {PdfArgumentError} `data` is none of these, or an option is malformed
  * @throws {PdfStructureError} If the PDF structure is invalid
  * @throws {PdfError} If decryption fails (wrong password)
  */
-export async function readPdf(data: Uint8Array, options?: ReadPdfOptions): Promise<ReadPdfResult> {
-  const { doc, opts, metadata, pagesInfo, pageIndicesToProcess } = prepareRead(data, options);
+export async function readPdf(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob,
+  options?: ReadPdfOptions
+): Promise<ReadPdfResult> {
+  // Both checked before a Blob is read, so a bad argument costs no read.
+  const source = pdfBytesOrBlob("Pdf.extract", "data", data);
+  checkReadPdfArguments(options);
+  const bytes = isBlob(source) ? new Uint8Array(await source.arrayBuffer()) : source;
+  const { doc, opts, metadata, pagesInfo, pageIndicesToProcess } = prepareRead(bytes, options);
 
   const pages: ReadPdfPage[] = [];
+  const yieldIfDue = createYieldBudget();
   for (let i = 0; i < pageIndicesToProcess.length; i++) {
     const pageIdx = pageIndicesToProcess[i];
     pages.push(processPage(pagesInfo[pageIdx].dict, pageIdx, doc, opts));
@@ -211,7 +238,7 @@ export async function readPdf(data: Uint8Array, options?: ReadPdfOptions): Promi
     // recorded rather than thrown; stop before starting the next page.
     doc.throwIfLimitExceeded();
     if (i < pageIndicesToProcess.length - 1) {
-      await yieldToEventLoop();
+      await yieldIfDue();
     }
   }
 
@@ -224,7 +251,7 @@ export async function readPdf(data: Uint8Array, options?: ReadPdfOptions): Promi
 
 interface ResolvedReadOptions {
   password: string;
-  pages: number[] | undefined;
+  pages: readonly number[] | undefined;
   extractText: boolean;
   extractImages: boolean;
   extractMetadata: boolean;
@@ -263,7 +290,7 @@ function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
   if (isEncrypted(doc)) {
     const success = initDecryption(doc, opts.password);
     if (!success) {
-      throw new PdfStructureError("Failed to decrypt PDF: incorrect password");
+      throw new PdfPasswordError("Failed to decrypt PDF: incorrect password");
     }
   }
 
@@ -275,6 +302,41 @@ function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
   doc.throwIfLimitExceeded();
 
   return { doc, opts, metadata, pagesInfo, pageIndicesToProcess };
+}
+
+/**
+ * Check the options `Pdf.extract` was given (its bytes are checked by `pdfBytesOrBlob`: a string
+ * used to be reported as a corrupt file, "no objects found"). A `pages` entry
+ * that is not a whole number crashed with a `TypeError`; and `pages: [0]`, the first page
+ * counted from 0, quietly extracted nothing.
+ * `maxDecodedBytes` threw a `RangeError` from `PdfDocument`, naming no field.
+ */
+const flag = () => s.boolean().optional();
+
+const readPdfOptionsSchema = s.object(
+  {
+    password: s.string().optional(),
+    pages: s
+      .readonlyArray(s.number({ integer: true, min: 1 }).orUndefined(), {
+        expected: "an array of 1-based page numbers"
+      })
+      .optional(),
+    extractText: flag(),
+    extractImages: flag(),
+    extractMetadata: flag(),
+    extractAnnotations: flag(),
+    extractFormFields: flag(),
+    extractBookmarks: flag(),
+    extractTables: flag(),
+    maxDecodedBytes: s.number({ min: 0, expected: "a number >= 0 or Infinity" }).optional()
+  },
+  { expected: "an options object" }
+);
+const _readPdfOptionsMatch: SchemaMatches<typeof readPdfOptionsSchema, ReadPdfOptions> = true;
+void _readPdfOptionsMatch;
+
+function checkReadPdfArguments(options: ReadPdfOptions | undefined): void {
+  check(readPdfOptionsSchema.optional(), options, at("Pdf.extract", "options"));
 }
 
 /**
@@ -346,8 +408,27 @@ function processPage(
     tables,
     width,
     height,
+    rotation: getPageRotation(pageDict, doc),
     warnings
   };
+}
+
+/** `/Rotate`, inherited from the page tree (ISO 32000-2 §7.7.3.4), normalised to 0–270. */
+function getPageRotation(pageDict: PdfDictValue, doc: PdfDocument): 0 | 90 | 180 | 270 {
+  const seen = new Set<PdfDictValue>();
+  let current: PdfDictValue | null = pageDict;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const raw = doc.deref(current.get("Rotate"));
+    if (typeof raw === "number") {
+      if (!Number.isInteger(raw) || raw % 90 !== 0) {
+        return 0;
+      }
+      return (((raw % 360) + 360) % 360) as 0 | 90 | 180 | 270;
+    }
+    current = doc.derefDict(current.get("Parent"));
+  }
+  return 0;
 }
 
 /**
@@ -362,8 +443,11 @@ function finalizeRead(
 ): ReadPdfResult {
   const allText = pages.map(p => p.text).join("\n\n");
 
-  if (opts.extractMetadata) {
-    metadata.pageCount = totalPageCount;
+  // The page count and the encryption are known whether or not the metadata was read: a
+  // record reporting a two-page file as `pageCount: 0` was a wrong answer, not an absent one.
+  metadata.pageCount = totalPageCount;
+  if (!opts.extractMetadata) {
+    metadata.encrypted = isEncrypted(doc);
   }
 
   let formFields: PdfFormField[] = [];
@@ -410,13 +494,9 @@ function createEmptyMetadata(): PdfMetadata {
     keywords: "",
     creator: "",
     producer: "",
-    creationDate: null,
-    modDate: null,
     pdfVersion: "",
     pageCount: 0,
     encrypted: false,
-    pageSize: null,
-    xmpXml: null,
     custom: {}
   };
 }

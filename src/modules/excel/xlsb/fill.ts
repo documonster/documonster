@@ -19,8 +19,9 @@
  * gradient fills degrade to their first stop rather than being invented here.
  */
 import type { Color, Fill, FillPatterns } from "@excel/types";
+import { XlsbReader } from "@excel/xlsb/binary";
 import { COLOR_SIZE, encodeColor, readColor } from "@excel/xlsb/color";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /**
  * `fls` — the pattern ordering.
@@ -60,7 +61,7 @@ export function readFill(payload: Uint8Array, part: string): Fill | undefined {
   if (payload.length < 4 + COLOR_SIZE * 2) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const pattern = PATTERNS[reader.readUint32()];
   if (pattern === undefined || pattern === "none") {
     // An unrecognised pattern index is reported as no fill rather than as a wrong pattern.

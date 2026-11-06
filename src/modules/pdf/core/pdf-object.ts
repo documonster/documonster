@@ -8,6 +8,8 @@
  * @see PDF Reference 1.7, Chapter 3 - Objects
  */
 
+import { textEncoder } from "@utils/binary";
+
 // =============================================================================
 // PDF Object Serialization
 // =============================================================================
@@ -41,34 +43,61 @@ export function pdfHexString(bytes: Uint8Array): string {
   return hex + ">";
 }
 
-/**
- * Format a PDF name object. Names are prefixed with /.
- * Characters outside the printable ASCII range are encoded as #XX.
- */
-export function pdfName(name: string): string {
+/** Whether a byte has to be written as `#xx` in a name (ISO 32000-1 §7.3.5). */
+function isNameEscapedByte(code: number): boolean {
+  return (
+    code < 0x21 ||
+    code > 0x7e ||
+    code === 0x23 || // #
+    code === 0x25 || // %
+    code === 0x28 || // (
+    code === 0x29 || // )
+    code === 0x2f || // /
+    code === 0x3c || // <
+    code === 0x3e || // >
+    code === 0x5b || // [
+    code === 0x5d || // ]
+    code === 0x7b || // {
+    code === 0x7d //    }
+  );
+}
+
+function nameFromByteCodes(codeAt: (i: number) => number, length: number): string {
   let result = "/";
-  for (let i = 0; i < name.length; i++) {
-    const code = name.charCodeAt(i);
-    if (
-      code < 0x21 ||
-      code > 0x7e ||
-      code === 0x23 || // #
-      code === 0x28 || // (
-      code === 0x29 || // )
-      code === 0x3c || // <
-      code === 0x3e || // >
-      code === 0x5b || // [
-      code === 0x5d || // ]
-      code === 0x7b || // {
-      code === 0x7d || // }
-      code === 0x2f // /
-    ) {
-      result += "#" + code.toString(16).padStart(2, "0");
-    } else {
-      result += name[i];
-    }
+  for (let i = 0; i < length; i++) {
+    const code = codeAt(i);
+    result += isNameEscapedByte(code)
+      ? "#" + code.toString(16).padStart(2, "0")
+      : String.fromCharCode(code);
   }
   return result;
+}
+
+/**
+ * Format a PDF name object from text. A name is a sequence of bytes, and text is written as
+ * its UTF-8 bytes (ISO 32000-1 §7.3.5); every byte outside `!`–`~`, `#` and the delimiters
+ * are escaped as `#xx`.
+ *
+ * For a name read from a file — which the reader decodes to one character per byte — use
+ * {@link pdfNameBytes}, or every byte from 0x80 up would be encoded twice.
+ */
+export function pdfName(name: string): string {
+  // Dictionary keys are written constantly and are almost always ASCII, whose UTF-8 bytes
+  // are its char codes: skip the encoder for them.
+  // oxlint-disable-next-line no-control-regex
+  if (/^[\x00-\x7f]*$/.test(name)) {
+    return pdfNameBytes(name);
+  }
+  const bytes = textEncoder.encode(name);
+  return nameFromByteCodes(i => bytes[i]!, bytes.length);
+}
+
+/**
+ * Format a PDF name whose characters are bytes (char codes 0–255), as `PdfTokenizer`
+ * returns a name it read: the same bytes are written back.
+ */
+export function pdfNameBytes(name: string): string {
+  return nameFromByteCodes(i => name.charCodeAt(i) & 0xff, name.length);
 }
 
 /**

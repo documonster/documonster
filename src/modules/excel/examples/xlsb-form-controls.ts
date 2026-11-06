@@ -30,7 +30,7 @@ report("the parts a checkbox needs", results, (_reloaded, written) => {
 
 report("checkboxes the model reports", results, reloaded => {
   const sheet = Workbook.getWorksheet(reloaded, "Data");
-  const found = Form.listCheckboxes(sheet!).length;
+  const found = Form.list(sheet!).length;
   // **Zero in both containers, and that is the honest answer.** The parts survive as preserved bytes and neither
   // reader puts the control back into the model, so a caller cannot inspect or toggle it after a round trip.
   // This is not an XLSB limitation — it is the same in XLSX, which is why the two columns agree.

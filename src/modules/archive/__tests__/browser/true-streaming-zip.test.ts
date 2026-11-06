@@ -8,7 +8,7 @@
  * API is 100% compatible with Node.js version - uses Transform stream API.
  */
 
-import { createDeflateStream, createInflateStream, hasDeflateRaw } from "@archive";
+import { Compression } from "@archive";
 import { Zip as _Zip, ZipDeflate as _ZipDeflate } from "@archive/zip/stream";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, it, expect } from "vitest";
@@ -33,7 +33,7 @@ function hasNativeDeflateRawWebStreams(): boolean {
 describe("True Streaming Verification - Browser", () => {
   describe("CompressionStream availability", () => {
     it("should detect CompressionStream support correctly", () => {
-      const hasLibrarySupport = hasDeflateRaw();
+      const hasLibrarySupport = Compression.hasDeflateRaw();
       const hasNativeSupport = hasNativeDeflateRawWebStreams();
 
       expect(typeof hasLibrarySupport).toBe("boolean");
@@ -46,7 +46,7 @@ describe("True Streaming Verification - Browser", () => {
 
   describe("createDeflateStream", () => {
     it("should return a stream with write/end/on methods", () => {
-      const deflate = createDeflateStream({ level: 6 });
+      const deflate = Compression.createDeflateStream({ level: 6 });
 
       // Verify it has required stream API methods
       expect(typeof deflate.write).toBe("function");
@@ -69,7 +69,7 @@ describe("True Streaming Verification - Browser", () => {
      * This is a browser API limitation, not our code's fault.
      */
     it("should emit data progressively, not all at once at the end", async () => {
-      const deflate = createDeflateStream({ level: 6 });
+      const deflate = Compression.createDeflateStream({ level: 6 });
       const results: { phase: "write" | "end"; size: number }[] = [];
       let phase: "write" | "end" = "write";
 
@@ -122,8 +122,8 @@ describe("True Streaming Verification - Browser", () => {
     });
 
     it("should produce valid compressed output that can be decompressed", async () => {
-      const deflate = createDeflateStream({ level: 6 });
-      const inflate = createInflateStream();
+      const deflate = Compression.createDeflateStream({ level: 6 });
+      const inflate = Compression.createInflateStream();
 
       const compressedChunks: Uint8Array[] = [];
       const decompressedChunks: Uint8Array[] = [];
@@ -158,7 +158,7 @@ describe("True Streaming Verification - Browser", () => {
       // Concatenate compressed chunks
       const compressed = concatUint8Arrays(compressedChunks);
 
-      // Decompress using our createInflateStream
+      // Decompress using our Compression.createInflateStream
       inflate.write(compressed);
       inflate.end();
       await inflateEndPromise;

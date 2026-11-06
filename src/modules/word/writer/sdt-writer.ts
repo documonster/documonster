@@ -8,8 +8,10 @@
  * own render functions, which keeps the writer module graph acyclic.
  */
 
-import type { StructuredDocumentTag } from "@word/types";
-import type { WordRenderContext } from "@word/writer/render-context";
+import type { SdtProperties, StructuredDocumentTag } from "@word/types";
+import { normaliseCheckState } from "@word/writer/checkbox-writer";
+import type { DocxRenderContext } from "@word/writer/render-context";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /**
@@ -27,21 +29,29 @@ import type { XmlSink } from "@xml/types";
 export function renderSdtPr(
   xml: XmlSink,
   sdt: StructuredDocumentTag,
-  ctx?: WordRenderContext
+  ctx?: DocxRenderContext
 ): void {
-  if (!sdt.properties) {
+  renderSdtProperties(xml, sdt.properties, ctx);
+}
+
+/** {@link renderSdtPr} for a control's properties alone (a block-level control in a table cell). */
+export function renderSdtProperties(
+  xml: XmlSink,
+  p: SdtProperties | undefined,
+  ctx?: DocxRenderContext
+): void {
+  if (!p) {
     return;
   }
 
   xml.openNode("w:sdtPr");
-  const p = sdt.properties;
 
   // Auto-assign ID if not provided (Word strongly expects unique IDs).
   // When invoked without a ctx we skip the w:id when the model didn't
   // supply one — emitting nothing is safer than reusing a colliding id.
   const sdtId = p.id ?? ctx?.ids.nextSdtId();
   if (sdtId !== undefined) {
-    xml.leafNode("w:id", { "w:val": String(sdtId) });
+    xml.leafNode("w:id", { "w:val": xmlValue(sdtId, "w:val") });
   }
   if (p.tag) {
     xml.leafNode("w:tag", { "w:val": p.tag });
@@ -105,6 +115,19 @@ export function renderSdtPr(
   if (p.bibliography) {
     xml.leafNode("w:bibliography");
   }
+  if (p.docPart) {
+    xml.openNode(p.docPart.list ? "w:docPartList" : "w:docPartObj");
+    if (p.docPart.gallery !== undefined) {
+      xml.leafNode("w:docPartGallery", { "w:val": p.docPart.gallery });
+    }
+    if (p.docPart.category !== undefined) {
+      xml.leafNode("w:docPartCategory", { "w:val": p.docPart.category });
+    }
+    if (p.docPart.unique) {
+      xml.leafNode("w:docPartUnique");
+    }
+    xml.closeNode();
+  }
   if (p.repeatingSectionItem) {
     xml.leafNode("w15:repeatingSectionItem");
   }
@@ -132,7 +155,7 @@ export function renderSdtPr(
     if (p.checkbox.checkedChar || p.checkbox.checkedFont) {
       const cAttrs: Record<string, string> = {};
       if (p.checkbox.checkedChar) {
-        cAttrs["w14:val"] = p.checkbox.checkedChar;
+        cAttrs["w14:val"] = checkStateHex(p.checkbox.checkedChar);
       }
       if (p.checkbox.checkedFont) {
         cAttrs["w14:font"] = p.checkbox.checkedFont;
@@ -142,7 +165,7 @@ export function renderSdtPr(
     if (p.checkbox.uncheckedChar || p.checkbox.uncheckedFont) {
       const uAttrs: Record<string, string> = {};
       if (p.checkbox.uncheckedChar) {
-        uAttrs["w14:val"] = p.checkbox.uncheckedChar;
+        uAttrs["w14:val"] = checkStateHex(p.checkbox.uncheckedChar);
       }
       if (p.checkbox.uncheckedFont) {
         uAttrs["w14:font"] = p.checkbox.uncheckedFont;
@@ -195,4 +218,14 @@ export function renderSdtPr(
   }
 
   xml.closeNode(); // w:sdtPr
+}
+
+/**
+ * `w14:val` of a check state is a hex code point (`ST_ShortHexNumber`). One
+ * already in that form is written as it is; a glyph (`"☒"`) — which the
+ * checkbox builder accepts too — is written as its code point rather than
+ * verbatim, which Word refused.
+ */
+function checkStateHex(value: string): string {
+  return /^[0-9A-Fa-f]{4}$/.test(value) ? value : normaliseCheckState(value, value).hex;
 }

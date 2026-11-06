@@ -7,7 +7,7 @@ import {
 } from "@excel/core/form-control";
 import { addFormCheckbox, getFormCheckboxes, getSheetModel } from "@excel/core/worksheet";
 import { setSheetModel } from "@excel/core/worksheet-load";
-import { Cell, Workbook } from "@excel/index";
+import { Cell, Form, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Form Control Checkbox", () => {
@@ -256,10 +256,10 @@ describe("Form Control Checkbox", () => {
       expect(vmlContent).toContain("v:shape");
       expect(vmlContent).toContain("x:ClientData");
       expect(vmlContent).toContain('ObjectType="Checkbox"');
-      // These fields are important to prevent Excel from repairing the sheet
-      // by dropping legacy control parts.
-      expect(vmlContent).toContain("x:MoveWithCells");
-      expect(vmlContent).toContain("x:SizeWithCells");
+      // Excel's default positioning, "move but don't size with cells": `x:SizeWithCells` alone, since
+      // each element says the control does *not* follow the cells.
+      expect(vmlContent).not.toContain("x:MoveWithCells");
+      expect(vmlContent).toContain("<x:SizeWithCells/>");
       expect(vmlContent).toContain("x:LockText");
       expect(vmlContent).toContain("x:Row");
       expect(vmlContent).toContain("x:Column");
@@ -414,6 +414,60 @@ describe("Form Control Checkbox", () => {
     });
   });
 
+  describe("Object positioning (editAs)", () => {
+    const text = (entries: Map<string, { data: Uint8Array }>, name: string) =>
+      new TextDecoder().decode(entries.get(name)!.data);
+
+    it.each([
+      // [editAs, VML elements, <anchor> attributes, bridge editAs]
+      ["oneCell", "<x:SizeWithCells/>", '<anchor moveWithCells="1">', 'editAs="oneCell"'],
+      // A two-cell anchor's `editAs` is `twoCell` by default, so it is not written.
+      ["twoCell", "", '<anchor moveWithCells="1" sizeWithCells="1">', "<xdr:twoCellAnchor>"],
+      ["absolute", "<x:MoveWithCells/><x:SizeWithCells/>", "<anchor>", 'editAs="absolute"'],
+      [undefined, "<x:SizeWithCells/>", '<anchor moveWithCells="1">', 'editAs="oneCell"']
+    ] as const)(
+      "%s is written in all three places Excel reads it, and read back",
+      async (editAs, vml, anchor, bridge) => {
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        addFormCheckbox(ws, "B2:C3", { link: "D2", ...(editAs ? { editAs } : {}) });
+        const bytes = await Workbook.toBuffer(wb);
+        await expectValidXlsx(bytes);
+        const entries = await extractAll(bytes);
+        const data = text(entries, "xl/drawings/vmlDrawing1.vml").match(
+          /<x:ClientData ObjectType="Checkbox">(.*?)<x:Anchor>/s
+        )![1];
+        expect(data).toBe(vml);
+        expect(text(entries, "xl/worksheets/sheet1.xml")).toContain(anchor);
+        expect(text(entries, "xl/drawings/drawing1.xml")).toContain(bridge);
+
+        const read = await Workbook.read(bytes);
+        const [box] = getFormCheckboxes(Workbook.getWorksheet(read, "Sheet1")!);
+        expect(box!.model.editAs).toBe(editAs ?? "oneCell");
+      }
+    );
+
+    it("an XLSB, which has no <controls> entry, reads it from the VML", async () => {
+      for (const editAs of ["oneCell", "twoCell", "absolute"] as const) {
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        addFormCheckbox(ws, "B2:C3", { editAs });
+        const read = await Workbook.read(await Workbook.toBuffer(wb, { format: "xlsb" }));
+        expect(getFormCheckboxes(Workbook.getWorksheet(read, "Sheet1")!)[0]!.model.editAs).toBe(
+          editAs
+        );
+      }
+    });
+
+    it("an unknown editAs is refused at the call", () => {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      expect(() => Form.addCheckbox(ws, "B2", { editAs: "floating" as never })).toThrow(
+        /options\.editAs/
+      );
+    });
+  });
+
   describe("Edge cases", () => {
     it("should handle large range", () => {
       const wb = Workbook.create();
@@ -503,7 +557,7 @@ describe("Form Control Checkbox", () => {
       const ws = Workbook.addWorksheet(wb, "Source");
       addFormCheckbox(ws, "D4:E5", { text: "Imported", checked: false });
 
-      const imported = Workbook.importSheet(wb, ws, "ImportedSheet");
+      const imported = Workbook.importWorksheet(wb, ws, "ImportedSheet");
       expect(imported.formControls.length).toBe(1);
       expect(imported.formControls[0].model.text).toBe("Imported");
       expect(isFormCheckbox(imported.formControls[0])).toBe(true);

@@ -6,6 +6,7 @@ import type {
   TableStyleProperties
 } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/table/auto-filter-xform";
@@ -82,6 +83,10 @@ interface TableXformOptions {
 }
 
 class TableXform extends BaseXform<TableModel> {
+  get writerNamespaces(): WriterNamespaces {
+    return TABLE_WRITER_NAMESPACES;
+  }
+
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
 
@@ -133,10 +138,16 @@ class TableXform extends BaseXform<TableModel> {
       headerRowCount: model.headerRow ? undefined : "0"
     });
 
-    this.map.autoFilter.render(xmlStream, model);
+    if (model.autoFilterRef) {
+      this.map.autoFilter.render(xmlStream, model);
+    }
     if (model.sortStateXml && model.sortStateAutoFilterRef === model.autoFilterRef) {
       xmlStream.writeRaw(model.sortStateXml);
     }
+    // A calculated column or totals row formula sits in this table, so an unnamed this-row reference in it means
+    // this table — see `TableColumnXform.tableName`.
+    (this.map.tableColumns as unknown as { childXform: TableColumnXform }).childXform.tableName =
+      model.name;
     this.map.tableColumns.render(xmlStream, model.columns);
     this.map.tableStyleInfo.render(xmlStream, model.style);
     if (model.extLstXml) {
@@ -280,5 +291,11 @@ class TableXform extends BaseXform<TableModel> {
     xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   };
 }
+
+/** The table writer declares the main namespace, and writes back the root's other declarations. */
+const TABLE_WRITER_NAMESPACES: WriterNamespaces = {
+  fixed: TableXform.TABLE_ATTRIBUTES,
+  preservesDocumentPrefixes: true
+};
 
 export { TableXform };

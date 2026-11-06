@@ -2,10 +2,10 @@
  * `form_fill` and `pdf_edit` tests.
  *
  * The single most important assertion in this file is that a filled PDF still
- * contains the values after being written and re-read. The obvious
- * implementation — `editor.save()` — silently discards them, producing a form
- * that looks correct and answers nothing; only `saveIncremental()` persists
- * them. That was found empirically, so it is pinned here.
+ * contains the values after being written and re-read. A full `editor.toBuffer()` once
+ * silently discarded them (fixed in the editor, and pinned there by
+ * `editor-form-fields.test.ts`); the tool saves incrementally so the original bytes
+ * survive, and it re-reads its own output either way.
  */
 
 import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
@@ -13,13 +13,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Pdf } from "documonster/pdf";
-import { Build, Document, Io, Query } from "documonster/word";
-import { markdownToDocx } from "documonster/word/markdown";
+import { Build, Document, Query } from "documonster/word";
+import { WordMarkdown } from "documonster/word/markdown";
+import { vi } from "vitest";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
+import { saveKind } from "../tools/document.js";
 import { formFillTool } from "../tools/form-fill.js";
 import { pdfEditTool } from "../tools/pdf-edit.js";
+import { signedXrefStreamPdf, xrefStreamForm, xrefStreamPages } from "./helpers/xref-stream-pdf.js";
 
 interface Fixture {
   readonly config: ServerConfig;
@@ -72,7 +75,7 @@ async function makeWordForm(fx: Fixture, name = "form.docx"): Promise<string> {
       Build.formCheckboxField({ name: "agreeTerms", default: false })
     ]
   });
-  await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+  await Document.writeFile(doc, path.join(fx.root, name));
   return name;
 }
 
@@ -83,7 +86,13 @@ async function makePdfForm(fx: Fixture, name = "form.pdf"): Promise<string> {
   page.drawText("Application", { x: 60, y: 740, fontSize: 18 });
   page.addFormField({ type: "text", name: "fullName", rect: [60, 690, 300, 712] });
   page.addFormField({ type: "checkbox", name: "agree", rect: [60, 650, 76, 666] });
-  await writeFile(path.join(fx.root, name), await builder.build());
+  await writeFile(path.join(fx.root, name), await builder.toBuffer());
+  return name;
+}
+
+/** A one-page form whose only cross-reference data is a stream — see `helpers/xref-stream-pdf`. */
+async function makeXrefStreamPdfForm(fx: Fixture, name = "xref-stream.pdf"): Promise<string> {
+  await writeFile(path.join(fx.root, name), xrefStreamForm());
   return name;
 }
 
@@ -99,12 +108,15 @@ async function makeMultiPagePdf(fx: Fixture, name = "multi.pdf"): Promise<string
           `Paragraph ${index + 1} of section ${section + 1} with enough text to fill a line.`
       ).join("\n\n")
   ).join("\n\n");
-  await writeFile(path.join(fx.root, name), await Pdf.fromDocx(await markdownToDocx(markdown)));
+  await writeFile(
+    path.join(fx.root, name),
+    await Pdf.fromDocx(await WordMarkdown.toDocx(markdown))
+  );
   return name;
 }
 
 async function pdfFields(fx: Fixture, name: string): Promise<Record<string, unknown>> {
-  const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, name))), {
+  const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, name))), {
     extractFormFields: true,
     extractText: false
   });
@@ -112,7 +124,7 @@ async function pdfFields(fx: Fixture, name: string): Promise<Record<string, unkn
 }
 
 async function pageCount(fx: Fixture, name: string): Promise<number> {
-  const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, name))), {
+  const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, name))), {
     extractText: false
   });
   return result.metadata?.pageCount ?? 0;
@@ -138,7 +150,7 @@ describe("form_fill — Word", () => {
       JSON.stringify({ applicantName: "From File", company: "Acme", agreeTerms: true })
     );
     await run(formFillTool, fx, { path: file, valuesFrom: "values.json" });
-    const fields = Query.extractFormFields(await Io.readFile(path.join(fx.root, file)));
+    const fields = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(Object.fromEntries(fields.map(f => [f.name, f.value]))).toEqual({
       applicantName: "From File",
       company: "Acme",
@@ -154,7 +166,7 @@ describe("form_fill — Word", () => {
       values: { applicantName: "Jane Doe", company: "Acme Pty Ltd", agreeTerms: true }
     });
 
-    const fields = Query.extractFormFields(await Io.readFile(path.join(fx.root, file)));
+    const fields = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(Object.fromEntries(fields.map(f => [f.name, f.value]))).toEqual({
       applicantName: "Jane Doe",
       company: "Acme Pty Ltd",
@@ -167,7 +179,7 @@ describe("form_fill — Word", () => {
     const file = await makeWordForm(fx);
     await run(formFillTool, fx, { path: file, values: { applicantName: "Only me" } });
 
-    const fields = Query.extractFormFields(await Io.readFile(path.join(fx.root, file)));
+    const fields = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(fields.find(f => f.name === "applicantName")?.value).toBe("Only me");
     expect(fields.find(f => f.name === "company")?.value).toBe("");
   });
@@ -200,10 +212,10 @@ describe("form_fill — Word", () => {
       out: "out/filled.docx"
     });
 
-    const original = Query.extractFormFields(await Io.readFile(path.join(fx.root, file)));
+    const original = Query.listFormFields(await Document.readFile(path.join(fx.root, file)));
     expect(original.find(f => f.name === "applicantName")?.value).toBe("");
-    const filled = Query.extractFormFields(
-      await Io.readFile(path.join(fx.root, "out/filled.docx"))
+    const filled = Query.listFormFields(
+      await Document.readFile(path.join(fx.root, "out/filled.docx"))
     );
     expect(filled.find(f => f.name === "applicantName")?.value).toBe("Jane");
   });
@@ -219,7 +231,7 @@ describe("form_fill — Word", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "No fields here.");
-    await Io.writeFile(Document.build(doc), path.join(fx.root, "plain.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "plain.docx"));
 
     const text = await run(formFillTool, fx, { path: "plain.docx" });
     expect(text).toContain("no legacy form fields");
@@ -239,8 +251,7 @@ describe("form_fill — PDF", () => {
   });
 
   it("fills fields so the values survive being written and re-read", async () => {
-    // The assertion that matters: editor.save() silently discards AcroForm
-    // values, so this fails unless the implementation uses saveIncremental().
+    // The assertion that matters: the values are in the file that was written.
     const fx = await fixture();
     const file = await makePdfForm(fx);
 
@@ -251,6 +262,52 @@ describe("form_fill — PDF", () => {
 
     expect(report).toContain("Verified by re-reading");
     expect(await pdfFields(fx, file)).toEqual({ fullName: "Jane Doe", agree: "Yes" });
+  });
+
+  it("appends the values as an incremental update, leaving the original bytes intact", async () => {
+    const fx = await fixture();
+    const file = await makePdfForm(fx);
+    const before = new Uint8Array(await readFile(path.join(fx.root, file)));
+
+    const report = await run(formFillTool, fx, { path: file, values: { fullName: "Ada" } });
+
+    expect(report).toContain("incremental update");
+    const after = new Uint8Array(await readFile(path.join(fx.root, file)));
+    expect(after.length).toBeGreaterThan(before.length);
+    expect(after.subarray(0, before.length)).toEqual(before);
+  });
+
+  it("reports a save failure for what it is, not as a signature problem", async () => {
+    const fx = await fixture();
+    const file = await makePdfForm(fx);
+    const spy = vi
+      .spyOn(Pdf.Editor.prototype, "toBuffer")
+      .mockRejectedValueOnce(new Error("disk on fire"));
+    try {
+      const error = await formFillTool
+        .handler({ path: file, values: { fullName: "Ada" } }, { config: fx.config })
+        .catch((cause: unknown) => cause);
+      expect(String((error as Error).message)).toContain("disk on fire");
+      expect(JSON.stringify(error)).not.toMatch(/signature/i);
+      expect(String((error as McpToolError).hint ?? "")).not.toMatch(/signature/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fills a form whose cross-reference data is a stream", async () => {
+    const fx = await fixture();
+    const file = await makeXrefStreamPdfForm(fx);
+    const before = new Uint8Array(await readFile(path.join(fx.root, file)));
+    expect(Buffer.from(before).toString("latin1")).not.toContain("trailer");
+
+    const report = await run(formFillTool, fx, { path: file, values: { fullName: "Grace" } });
+
+    expect(report).toContain("Verified by re-reading");
+    expect(report).toContain("incremental update");
+    expect(await pdfFields(fx, file)).toEqual({ fullName: "Grace" });
+    const after = new Uint8Array(await readFile(path.join(fx.root, file)));
+    expect(after.subarray(0, before.length)).toEqual(before);
   });
 
   it("maps a boolean to a checkbox's on and off states", async () => {
@@ -339,7 +396,7 @@ describe("pdf_edit — overlays", () => {
       ops: [{ op: "watermark", text: "CONFIDENTIAL" }]
     });
 
-    const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, file))), {
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, file))), {
       extractText: true
     });
     expect(result.pages[0]?.text).toContain("CONFIDENTIAL");
@@ -355,7 +412,7 @@ describe("pdf_edit — overlays", () => {
       ops: [{ op: "watermark", text: "DRAFT", pages: [1] }]
     });
 
-    const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, file))), {
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, file))), {
       extractText: true
     });
     expect(result.pages[0]?.text).toContain("DRAFT");
@@ -371,7 +428,7 @@ describe("pdf_edit — overlays", () => {
       ops: [{ op: "page_numbers", format: "{page} / {total}" }]
     });
 
-    const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, file))), {
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, file))), {
       extractText: true
     });
     expect(result.pages[0]?.text).toContain(`1 / ${total}`);
@@ -386,7 +443,7 @@ describe("pdf_edit — overlays", () => {
       ops: [{ op: "stamp", text: "APPROVED", x: 400, y: 60, pages: [1] }]
     });
 
-    const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, file))), {
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, file))), {
       extractText: true
     });
     expect(result.pages[0]?.text).toContain("APPROVED");
@@ -456,6 +513,107 @@ describe("pdf_edit — structure", () => {
     expect(await pageCount(fx, first)).toBe(before + 1);
   });
 
+  it("removes a page appended earlier in the same call", async () => {
+    const fx = await fixture();
+    const first = await makeMultiPagePdf(fx, "a.pdf");
+    const second = await makeMultiPagePdf(fx, "b.pdf");
+    const before = await pageCount(fx, first);
+
+    const report = await run(pdfEditTool, fx, {
+      path: first,
+      ops: [
+        { op: "append", path: second, pages: [1, 2] },
+        { op: "delete_pages", pages: [before + 1] }
+      ]
+    });
+    expect(report).toContain(`deleted page(s) ${before + 1}`);
+    expect(report).toContain(`pages: ${before} → ${before + 1}`);
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, first))), {
+      extractText: true
+    });
+    expect(result.pages).toHaveLength(before + 1);
+    expect(result.pages[before]?.text).toContain("Section 2");
+  });
+
+  it("rotates a page appended earlier in the same call", async () => {
+    const fx = await fixture();
+    const first = await makeMultiPagePdf(fx, "a.pdf");
+    const second = await makeMultiPagePdf(fx, "b.pdf");
+    const before = await pageCount(fx, first);
+
+    await run(pdfEditTool, fx, {
+      path: first,
+      ops: [
+        { op: "append", path: second, pages: [1] },
+        { op: "rotate", degrees: 90, pages: [before + 1] }
+      ]
+    });
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, first))));
+    expect(result.pages).toHaveLength(before + 1);
+    expect(result.pages[before]?.rotation).toBe(90);
+    expect(result.pages[0]?.rotation).toBe(0);
+  });
+
+  it("stamps text on a page appended earlier in the same call", async () => {
+    const fx = await fixture();
+    const first = await makeMultiPagePdf(fx, "a.pdf");
+    const second = await makeMultiPagePdf(fx, "b.pdf");
+    const before = await pageCount(fx, first);
+
+    await run(pdfEditTool, fx, {
+      path: first,
+      ops: [
+        { op: "append", path: second, pages: [1] },
+        { op: "stamp", text: "APPENDIX", x: 400, y: 60, pages: [before + 1] },
+        { op: "page_numbers" }
+      ]
+    });
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, first))), {
+      extractText: true
+    });
+    expect(result.pages[before]?.text).toContain("APPENDIX");
+    expect(result.pages[before]?.text).toContain("Section 1");
+    expect(result.pages[before]?.text).toContain(`Page ${before + 1} of ${before + 1}`);
+    expect(result.pages[0]?.text).not.toContain("APPENDIX");
+  });
+
+  it("appends a form with its fields, and refuses a field name the PDF already has", async () => {
+    const fx = await fixture();
+    const host = await makeMultiPagePdf(fx, "host.pdf");
+    const form = await makePdfForm(fx, "form.pdf");
+    const before = await pageCount(fx, host);
+
+    await run(pdfEditTool, fx, { path: host, ops: [{ op: "append", path: form }] });
+    const merged = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, host))));
+    expect(merged.pages).toHaveLength(before + 1);
+    expect(merged.formFields.map(field => field.name).sort()).toEqual(["agree", "fullName"]);
+
+    // The same form again clashes, by name, and the error says how to proceed.
+    await expect(
+      pdfEditTool.handler(
+        { path: host, ops: [{ op: "append", path: form }] },
+        { config: fx.config }
+      )
+    ).rejects.toThrow(/formFields: "drop"/);
+    expect(await pageCount(fx, host)).toBe(before + 1);
+  });
+
+  it('appends the same form twice with formFields: "drop"', async () => {
+    const fx = await fixture();
+    const form = await makePdfForm(fx, "form.pdf");
+    const report = await run(pdfEditTool, fx, {
+      path: form,
+      ops: [{ op: "append", path: form, formFields: "drop" }]
+    });
+    expect(report).toContain("without their form fields");
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, form))));
+    expect(result.pages).toHaveLength(2);
+    expect(result.pages[1]?.text).toContain("Application");
+    // Only the original's fields: the appended copy brought none.
+    expect(result.formFields.map(field => field.name).sort()).toEqual(["agree", "fullName"]);
+    expect(result.pages[1]?.annotations ?? []).toHaveLength(0);
+  });
+
   it("applies several ops in order", async () => {
     const fx = await fixture();
     const file = await makeMultiPagePdf(fx);
@@ -470,7 +628,7 @@ describe("pdf_edit — structure", () => {
 
     expect(report).toContain("3 operation(s) applied");
     expect(await pageCount(fx, file)).toBe(2);
-    const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, file))), {
+    const result = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, file))), {
       extractText: true
     });
     // Page numbering must see the post-deletion count, not the original.
@@ -486,6 +644,81 @@ describe("pdf_edit — structure", () => {
         { config: fx.config }
       )
     ).rejects.toThrow(/do not exist/);
+  });
+});
+
+describe("pdf_edit — cross-reference-stream files", () => {
+  async function place(fx: Fixture, name: string, bytes: Uint8Array): Promise<Uint8Array> {
+    await writeFile(path.join(fx.root, name), bytes);
+    expect(Buffer.from(bytes).toString("latin1")).not.toContain("trailer");
+    return bytes;
+  }
+  const readBack = async (fx: Fixture, name: string): Promise<Uint8Array> =>
+    new Uint8Array(await readFile(path.join(fx.root, name)));
+
+  it("unsigned, overlay: reports and performs an incremental update", async () => {
+    const fx = await fixture();
+    const before = await place(fx, "x.pdf", xrefStreamPages(2));
+    const report = await run(pdfEditTool, fx, {
+      path: "x.pdf",
+      ops: [{ op: "stamp", text: "APPROVED", x: 72, y: 72 }]
+    });
+    expect(report).toContain("saved as an incremental update");
+    expect(report).not.toContain("rebuilt");
+    const after = await readBack(fx, "x.pdf");
+    expect(after.subarray(0, before.length)).toEqual(before);
+  });
+
+  it("unsigned, structural: reports a rebuild, and makes no signature claim it cannot back", async () => {
+    const fx = await fixture();
+    const before = await place(fx, "x.pdf", xrefStreamPages(2));
+    const report = await run(pdfEditTool, fx, {
+      path: "x.pdf",
+      ops: [{ op: "delete_pages", pages: [2] }]
+    });
+    expect(report).toContain("structural change, so the file was rebuilt");
+    expect(report).not.toContain("signature is now invalid");
+    const after = await readBack(fx, "x.pdf");
+    expect(after.subarray(0, before.length)).not.toEqual(before);
+    expect(await pageCount(fx, "x.pdf")).toBe(1);
+  });
+
+  it("signed, overlay: appends, and the signature still verifies", async () => {
+    const fx = await fixture();
+    const before = await place(fx, "s.pdf", await signedXrefStreamPdf());
+    const [original] = await Pdf.verifySignatures(before);
+    expect(original?.intact).toBe(true);
+    expect(original?.coversWholeFile).toBe(true);
+
+    const report = await run(pdfEditTool, fx, {
+      path: "s.pdf",
+      ops: [{ op: "watermark", text: "COPY" }]
+    });
+    expect(report).toContain("original signature bytes are preserved");
+
+    const after = await readBack(fx, "s.pdf");
+    const reports = await Pdf.verifySignatures(after);
+    expect(reports).toHaveLength(1);
+    // What the report claims is what verification finds: the signed revision is
+    // intact, and the watermark is an unsigned update after it.
+    expect(reports[0]?.intact).toBe(true);
+    expect(reports[0]?.byteRangeValid).toBe(true);
+    expect(reports[0]?.coversWholeFile).toBe(false);
+  });
+
+  it("signed, structural: refuses, writes nothing, leaves no backup", async () => {
+    const fx = await fixture();
+    const before = await place(fx, "s.pdf", await signedXrefStreamPdf());
+    await expect(
+      pdfEditTool.handler(
+        { path: "s.pdf", ops: [{ op: "delete_pages", pages: [2] }] },
+        { config: fx.config }
+      )
+    ).rejects.toThrow(/digitally signed/);
+    const after = await readBack(fx, "s.pdf");
+    expect(after).toEqual(before);
+    expect((await Pdf.verifySignatures(after))[0]?.intact).toBe(true);
+    await expect(stat(path.join(fx.root, "s.pdf.bak"))).rejects.toThrow();
   });
 });
 
@@ -562,5 +795,15 @@ describe("pdf_edit — safety", () => {
         { config: fx.config }
       )
     ).rejects.toThrow(/outside (?:the server root|--output-root)/);
+  });
+});
+
+describe("saveKind", () => {
+  const original = Uint8Array.from([1, 2, 3]);
+  it("tells an unchanged file from an appended and a rewritten one", () => {
+    expect(saveKind(original, Uint8Array.from([1, 2, 3]))).toBe("unchanged");
+    expect(saveKind(original, Uint8Array.from([1, 2, 3, 4]))).toBe("appended");
+    expect(saveKind(original, Uint8Array.from([1, 9, 3, 4]))).toBe("rewritten");
+    expect(saveKind(original, Uint8Array.from([1, 2]))).toBe("rewritten");
   });
 });

@@ -35,6 +35,9 @@ export const TAR_TYPE = {
 
 export type TarType = (typeof TAR_TYPE)[keyof typeof TAR_TYPE];
 
+/** The TAR entry type flags by name — the public spelling of {@link TAR_TYPE}, and a type of the same name. */
+export const TarType = TAR_TYPE;
+
 // Header field offsets and sizes (POSIX ustar format)
 export const TAR_HEADER = {
   name: { offset: 0, size: 100 }, // File name

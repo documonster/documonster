@@ -2,7 +2,10 @@
 // emitted these rules with no formula at all while this one had them, which is a rule that never fires.
 import {
   textRuleFormula as getTextFormula,
-  timePeriodRuleFormula as getTimePeriodFormula
+  textRuleHasSearchString,
+  textRuleKind,
+  timePeriodRuleFormula as getTimePeriodFormula,
+  type TextRuleKind
 } from "@excel/core/conditional-formula";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
@@ -33,9 +36,19 @@ function opType(attributes) {
       };
 
     default:
+      // `notContainsText`, `beginsWith` and `endsWith` keep the XLSX spelling — type and operator attribute —
+      // which is the shape readers have always returned for them (see `ContainsTextRuleType`).
       return { type, operator };
   }
 }
+
+/** CT_CfRule's `operator` attribute for a text condition: only the four with a search string have one. */
+const TEXT_OPERATOR_ATTRIBUTE: Partial<Record<TextRuleKind, string>> = {
+  containsText: "containsText",
+  notContainsText: "notContains",
+  beginsWith: "beginsWith",
+  endsWith: "endsWith"
+};
 
 class CfRuleXform extends CompositeXform {
   databarXform: DatabarXform;
@@ -71,6 +84,12 @@ class CfRuleXform extends CompositeXform {
   }
 
   render(xmlStream, model) {
+    // The text family in either spelling — `{ type: "beginsWith" }` or `{ type: "containsText", operator:
+    // "beginsWith" }`. Only the second was rendered; the first wrote nothing at all.
+    if (textRuleKind(model) !== undefined) {
+      this.renderText(xmlStream, model);
+      return;
+    }
     switch (model.type) {
       case "expression":
         this.renderExpression(xmlStream, model);
@@ -93,8 +112,15 @@ class CfRuleXform extends CompositeXform {
       case "iconSet":
         this.renderIconSet(xmlStream, model);
         break;
-      case "containsText":
-        this.renderText(xmlStream, model);
+      case "uniqueValues":
+      case "duplicateValues":
+        // No formula and no attributes beyond the formatting: the condition is the type. Neither was rendered, so
+        // both vanished from every XLSX written here.
+        xmlStream.leafNode(this.tag, {
+          type: model.type,
+          dxfId: model.dxfId,
+          priority: model.priority
+        });
         break;
       case "timePeriod":
         this.renderTimePeriod(xmlStream, model);
@@ -109,7 +135,7 @@ class CfRuleXform extends CompositeXform {
       priority: model.priority
     });
 
-    this.formulaXform.render(xmlStream, model.formulae[0]);
+    this.formulaXform.render(xmlStream, model.formulae?.[0]);
 
     xmlStream.closeNode();
   }
@@ -122,7 +148,7 @@ class CfRuleXform extends CompositeXform {
       operator: model.operator
     });
 
-    model.formulae.forEach(formula => {
+    (model.formulae ?? []).forEach(formula => {
       this.formulaXform.render(xmlStream, formula);
     });
 
@@ -145,7 +171,11 @@ class CfRuleXform extends CompositeXform {
       type: "aboveAverage",
       dxfId: model.dxfId,
       priority: model.priority,
-      aboveAverage: BaseXform.toBoolAttribute(model.aboveAverage, true)
+      // Written whenever the model states it, `true` included: CT_CfRule defaults the attribute to true, but a
+      // model that says so explicitly reads back the same way rather than as `undefined`.
+      aboveAverage: BaseXform.toBoolAttribute(model.aboveAverage),
+      equalAverage: BaseXform.toBoolAttribute(model.equalAverage, false),
+      stdDev: model.stdDev
     });
   }
 
@@ -189,31 +219,22 @@ class CfRuleXform extends CompositeXform {
   }
 
   renderText(xmlStream, model) {
-    // Per ECMA-376 (CT_CfRule / ST_ConditionalFormattingOperator), only the
-    // genuine `type="containsText"` rule carries an `operator` attribute, and
-    // its sole valid value there is "containsText". The four sibling rule
-    // types this xform collapses onto the same `renderText` path —
-    // containsBlanks / notContainsBlanks / containsErrors / notContainsErrors
-    // (see `opType()`) — never take an operator. Emitting one unconditionally
-    // produced invalid markup like `type="containsBlanks" operator="containsBlanks"`,
-    // where "containsBlanks" is not a member of the operator enum, which made
-    // strict readers reject the whole worksheet.
-    const ruleType = model.operator;
-    const carriesText = ruleType === "containsText" || ruleType === "notContainsText";
+    // Per ECMA-376 (CT_CfRule / ST_ConditionalFormattingOperator), only the four conditions with a search string
+    // carry an `operator` attribute, and each has its own value — `notContainsText` is `notContains`. The blank and
+    // error tests never take one: `type="containsBlanks" operator="containsBlanks"` names an operator that is not
+    // in the enumeration, and strict readers reject the whole worksheet for it.
+    const kind = textRuleKind(model)!;
     xmlStream.openNode(this.tag, {
-      type: ruleType,
+      type: kind,
       dxfId: model.dxfId,
       priority: model.priority,
-      operator: ruleType === "containsText" ? "containsText" : undefined,
+      operator: TEXT_OPERATOR_ATTRIBUTE[kind],
       // **The search string itself.** CT_CfRule carries it on `text`; the `<formula>` written below is the
       // *evaluation* of the rule, not its statement, and Excel reads the attribute rather than the formula.
       // Omitting it made Excel discard the rule outright — converting a workbook written here to XLSB kept
       // four of five rules and dropped this one — so the rule looked fine in this library and did not exist
       // once Excel had seen it.
-      //
-      // Only the two "contains text" spellings have a string; the blanks and errors variants share this path
-      // (see `opType`) and have none.
-      text: carriesText ? model.text : undefined
+      text: textRuleHasSearchString(kind) ? model.text : undefined
     });
 
     const formula = getTextFormula(model);
@@ -249,7 +270,17 @@ class CfRuleXform extends CompositeXform {
       percent: BaseXform.toBoolValue(attributes.percent),
       bottom: BaseXform.toBoolValue(attributes.bottom),
       rank: BaseXform.toIntValue(attributes.rank),
-      aboveAverage: BaseXform.toBoolValue(attributes.aboveAverage)
+      aboveAverage: BaseXform.toBoolValue(attributes.aboveAverage),
+      // Three attributes this did not read, so a text rule came back without its search string and an average
+      // rule without `equalAverage` or `stdDev`. Added only when the markup has them, so a rule without them has
+      // exactly the fields it always had.
+      ...(attributes.text === undefined ? {} : { text: attributes.text }),
+      ...(attributes.equalAverage === undefined
+        ? {}
+        : { equalAverage: BaseXform.toBoolValue(attributes.equalAverage) }),
+      ...(attributes.stdDev === undefined
+        ? {}
+        : { stdDev: BaseXform.toIntValue(attributes.stdDev) })
     };
   }
 

@@ -72,6 +72,7 @@ import {
   Cell,
   Chart,
   Column,
+  ConditionalFormatting,
   DefinedNames,
   Image,
   Pivot,
@@ -240,7 +241,7 @@ const CASES: Case[] = [
         { ref: "B2:B4", rules: [{ type: "top10", rank: 1, priority: 6 }] }
       ];
       for (const rule of rules) {
-        Worksheet.addConditionalFormatting(sheet, rule as never);
+        ConditionalFormatting.add(sheet, rule as never);
       }
       return workbook;
     }
@@ -447,7 +448,7 @@ const CASES: Case[] = [
       const sheet = sheetWithData(workbook, "Pictured");
       const id = Image.add(workbook, { buffer: PNG, extension: "png" } as never);
       Image.place(sheet as never, id, { tl: { col: 4, row: 1 }, br: { col: 7, row: 6 } } as never);
-      Watermark.add(sheet, { imageId: id, mode: "header" } as never);
+      Watermark.set(sheet, { imageId: id, mode: "header" } as never);
       return workbook;
     }
   },
@@ -458,14 +459,14 @@ const CASES: Case[] = [
       const workbook = Workbook.create();
       const sheet = sheetWithData(workbook, "Charted");
       // Options and anchor are separate arguments; the anchor is the third.
-      Chart.addColumn(
-        sheet as never,
-        {
+      Chart.place(sheet as never, { tl: { col: 4, row: 1 }, br: { col: 11, row: 12 } } as never, {
+        ...({
           title: "Units by region",
           series: [{ name: "Units", categories: "Charted!$A$2:$A$4", values: "Charted!$B$2:$B$4" }]
-        } as never,
-        { tl: { col: 4, row: 1 }, br: { col: 11, row: 12 } } as never
-      );
+        } as never),
+        type: "bar",
+        barDir: "col"
+      });
       return workbook;
     }
   },

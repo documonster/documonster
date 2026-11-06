@@ -2,85 +2,95 @@
  * Example: consume helpers (collect / json / bytes / streamTo* / drain / copy)
  *
  * Demonstrates the full family of consumption utilities:
- * - collect()        — gather every chunk of an async-iterable stream into an array
- * - json() / fromJSON()   — round-trip a JS value through a byte stream
- * - bytes() / fromBytes() — round-trip raw bytes through a stream
- * - streamToString / streamToBuffer / streamToUint8Array — drain to string/bytes
- * - drainStream()    — consume and discard everything (run side effects to end)
- * - copyStream()     — pipe a readable into a writable (alias of pipeline)
+ * - Streams.collect()        — gather every chunk of an async-iterable stream into an array
+ * - Streams.json() / Streams.fromJson()   — round-trip a JS value through a byte stream
+ * - Streams.bytes() / Streams.fromBytes() — round-trip raw bytes through a stream
+ * - Streams.text() / Streams.bytes() — drain to a string or a Uint8Array
+ *   (`Streams.text(s, { encoding })` for non-UTF-8 text)
+ * - Streams.discard()    — consume and discard everything (run side effects to end)
+ * - pipeline()     — pipe a readable into a writable
+ * - Streams.LowLevel.eventsToAsyncIterableNoDestroy() / new Streams.LowLevel.SinkAdapter() — adapt emitters and sinks
  *
  * Usage: pnpm example --filter 05-consume-helpers
  */
 
-import {
-  bytes,
-  collect,
-  copyStream,
-  createCollector,
-  createReadableFromArray,
-  drainStream,
-  fromBytes,
-  fromJSON,
-  json,
-  streamToBuffer,
-  streamToString,
-  streamToUint8Array
-} from "@stream";
+import { pipeline, Streams } from "@stream";
 
 const decoder = new TextDecoder();
 
-/** collect(): gather all object-mode chunks into a plain array. */
+/** Streams.collect(): gather all object-mode chunks into a plain array. */
 export async function exampleCollect(): Promise<void> {
-  const source = createReadableFromArray([1, 2, 3, 4], { objectMode: true });
-  const values = await collect<number>(source);
+  const source = Streams.createReadableFromArray([1, 2, 3, 4], { objectMode: true });
+  const values = await Streams.collect<number>(source);
   console.log("collect:", values);
 }
 
-/** json()/fromJSON(): serialize a value to a byte stream and read it back. */
+/** Streams.json()/Streams.fromJson(): serialize a value to a byte stream and read it back. */
 export async function exampleJson(): Promise<void> {
   const payload = { name: "stream", count: 42, tags: ["a", "b"] };
-  const stream = fromJSON(payload);
-  const parsed = await json<typeof payload>(stream);
+  const stream = Streams.fromJson(payload);
+  const parsed = await Streams.json<typeof payload>(stream);
   console.log("json round-trip:", parsed);
 }
 
-/** bytes()/fromBytes(): round-trip raw bytes. */
+/** Streams.bytes()/fromBytes(): round-trip raw bytes. */
 export async function exampleBytes(): Promise<void> {
   const original = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
-  const collected = await bytes(fromBytes(original));
+  const collected = await Streams.bytes(Streams.fromBytes(original));
   console.log("bytes round-trip:", Array.from(collected));
 }
 
-/** streamToString / streamToBuffer / streamToUint8Array: drain a readable. */
+/** Streams.text / Streams.bytes: drain a readable. */
 export async function exampleStreamTo(): Promise<void> {
   const text = "The quick brown fox";
 
   // Each helper consumes a fresh stream (streams are one-shot).
-  const asString = await streamToString(fromBytes(new TextEncoder().encode(text)));
-  console.log("streamToString:", asString);
+  const asString = await Streams.text(Streams.fromBytes(new TextEncoder().encode(text)));
+  console.log("text:", asString);
 
-  const asBuffer = await streamToBuffer(fromBytes(new TextEncoder().encode(text)));
-  console.log("streamToBuffer length:", asBuffer.length);
+  const asU8 = await Streams.bytes(Streams.fromBytes(new TextEncoder().encode(text)));
+  console.log("bytes length:", asU8.length, "head:", decoder.decode(asU8.subarray(0, 3)));
 
-  const asU8 = await streamToUint8Array(fromBytes(new TextEncoder().encode(text)));
-  console.log("streamToUint8Array head:", decoder.decode(asU8.subarray(0, 3)));
+  const latin1 = await Streams.text(Streams.fromBytes(new Uint8Array([0x63, 0x61, 0x66, 0xe9])), {
+    encoding: "latin1"
+  });
+  console.log("latin1 text:", latin1);
 }
 
-/** drainStream(): consume every chunk without keeping it. */
+/** Streams.discard(): consume every chunk without keeping it. */
 export async function exampleDrain(): Promise<void> {
   let count = 0;
-  const source = createReadableFromArray(["a", "b", "c"], { objectMode: true });
+  const source = Streams.createReadableFromArray(["a", "b", "c"], { objectMode: true });
   source.on("data", () => count++);
-  await drainStream(source);
-  console.log("drainStream consumed chunks:", count);
+  await Streams.discard(source);
+  console.log("drain consumed chunks:", count);
 }
 
-/** copyStream(): pipe a readable into a writable (pipeline alias). */
+/** pipeline(): pipe a readable into a writable. */
 export async function exampleCopy(): Promise<void> {
-  const source = createReadableFromArray(["x", "y", "z"], { objectMode: true });
-  const sink = createCollector<string>();
-  await copyStream(source, sink);
-  console.log("copyStream collected:", sink.chunks);
+  const source = Streams.createReadableFromArray(["x", "y", "z"], { objectMode: true });
+  const sink = new Streams.Collector<string>();
+  await pipeline(source, sink);
+  console.log("pipeline collected:", sink.chunks);
+}
+
+/**
+ * Streams.LowLevel.eventsToAsyncIterableNoDestroy(): iterate an evented readable and stop early without
+ * destroying it; new Streams.LowLevel.SinkAdapter(): one awaited `write`/`end` over any sink.
+ */
+export async function exampleEventsAndSinks(): Promise<void> {
+  const source = Streams.createReadableFromArray(["first", "second"], { objectMode: true });
+  for await (const chunk of Streams.LowLevel.eventsToAsyncIterableNoDestroy<string>(source)) {
+    console.log("first chunk:", chunk);
+    break;
+  }
+  console.log("source destroyed after break:", source.destroyed);
+
+  const collector = new Streams.Collector();
+  const sink = new Streams.LowLevel.SinkAdapter(collector);
+  await sink.write(new TextEncoder().encode("via SinkAdapter"));
+  await sink.end();
+  console.log("sink received:", decoder.decode(collector.toUint8Array()));
 }
 
 export async function exampleConsumeHelpers(): Promise<void> {
@@ -90,6 +100,7 @@ export async function exampleConsumeHelpers(): Promise<void> {
   await exampleStreamTo();
   await exampleDrain();
   await exampleCopy();
+  await exampleEventsAndSinks();
 }
 
 await exampleConsumeHelpers();

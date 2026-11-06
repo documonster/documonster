@@ -10,6 +10,8 @@ interface ColModel {
   styleId?: number;
   hidden?: boolean;
   bestFit?: boolean;
+  /** `customWidth` as read; absent for a column a caller made, where a width implies it. */
+  customWidth?: boolean;
   outlineLevel?: number;
   collapsed?: boolean;
   style?: Partial<Style>;
@@ -39,7 +41,8 @@ class ColXform extends BaseXform {
     xmlStream.openNode("col");
     xmlStream.addAttribute("min", model.min);
     xmlStream.addAttribute("max", model.max);
-    if (model.width) {
+    // Zero is a width — Excel hides a column by giving it one — so only an absent width goes unwritten.
+    if (model.width !== undefined) {
       xmlStream.addAttribute("width", model.width);
     }
     if (model.styleId) {
@@ -57,7 +60,11 @@ class ColXform extends BaseXform {
     if (model.collapsed) {
       xmlStream.addAttribute("collapsed", "1");
     }
-    xmlStream.addAttribute("customWidth", "1");
+    // Only where the file said so, or where a caller set the width: written on every column, it turned a width Excel
+    // had sized to the default font into one the author chose.
+    if (model.customWidth ?? model.width !== undefined) {
+      xmlStream.addAttribute("customWidth", "1");
+    }
     xmlStream.closeNode();
   }
 
@@ -77,6 +84,11 @@ class ColXform extends BaseXform {
       }
       if (parseBoolean(node.attributes.bestFit)) {
         model.bestFit = true;
+      }
+      // Recorded only where it differs from what the width implies, which is what the writer assumes without it.
+      const customWidth = parseBoolean(node.attributes.customWidth);
+      if (customWidth !== (model.width !== undefined)) {
+        model.customWidth = customWidth;
       }
       if (node.attributes.outlineLevel) {
         model.outlineLevel = parseInt(node.attributes.outlineLevel, 10);

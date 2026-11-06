@@ -2,14 +2,14 @@
  * Word Example 18 — Read, query, modify
  *
  * Covers:
- *   - readDocx → introspect / mutate / write back
- *   - extractText (whole document) and paragraph-by-paragraph access
+ *   - Document.read → introspect / mutate / write back
+ *   - Query.getText (whole document) and paragraph-by-paragraph access
  *   - searchText with string and regex queries
  *   - replaceText (string / regex with $1 backrefs)
  *   - mailMerge (MERGEFIELD substitution)
- *   - paragraphCount, countWords, getHeadings, listImages, listHyperlinks,
- *     listTables, listSections, tableCount
- *   - searchByFormat / countByFormat / getUsedFormats
+ *   - Query.getParagraphCount, countWords, Query.listHeadings, listImages, listHyperlinks,
+ *     listTables, listSections, Query.getTableCount
+ *   - searchByFormat / countByFormat / Query.listUsedFormats
  *   - Edge case: replace across runs, replace inside a hyperlink, replace
  *     inside a footnote.
  *
@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query, Units } from "../index";
+import { Document, Build, Query, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -35,7 +35,7 @@ Document.useDefaultStyles(src);
 Document.addHeading(src, "Source document", 1);
 Document.addHeading(src, "Section A", 2);
 Document.addParagraph(src, "Lorem ipsum dolor sit amet, consectetur adipiscing elit.");
-Document.addParagraphElement(
+Document.addParagraph(
   src,
   Build.paragraph([
     Build.text("Mixed run: "),
@@ -57,13 +57,13 @@ Document.addTable(
 );
 
 // MERGEFIELD instruction — two flavours: quoted name and bare name
-Document.addParagraphElement(
+Document.addParagraph(
   src,
   Build.paragraph([
     Build.text("Hello "),
-    Build.field(' MERGEFIELD "FullName" ', "Name"),
+    Build.field(' MERGEFIELD "FullName" ', { cachedValue: "Name" }),
     Build.text(", balance: "),
-    Build.field(" MERGEFIELD AccountBalance ", "$0.00"),
+    Build.field(" MERGEFIELD AccountBalance ", { cachedValue: "$0.00" }),
     Build.text(".")
   ])
 );
@@ -76,13 +76,16 @@ const tinyPng = Uint8Array.from([
   0x00, 0x00, 0x03, 0x00, 0x01, 0x5b, 0x6e, 0x5e, 0x49, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
   0x44, 0xae, 0x42, 0x60, 0x82
 ]);
-Document.addImage(src, tinyPng, "png", Units.cmToEmu(1), Units.cmToEmu(1), {
+Document.addImage(src, tinyPng, {
+  type: "png",
+  width: Units.cmToEmu(1),
+  height: Units.cmToEmu(1),
   altText: "test pixel"
 });
 
 // Footnote so we can demonstrate replaceText reaching into footnotes
 const fnId = Document.addFootnote(src, "Footnote with PLACEHOLDER token to replace.");
-Document.addParagraphElement(
+Document.addParagraph(
   src,
   Build.paragraph([
     Build.text("This sentence has a footnote ref."),
@@ -93,29 +96,29 @@ Document.addParagraphElement(
   ])
 );
 
-const sourceBytes = await Io.toBuffer(Document.build(src));
+const sourceBytes = await Document.toBuffer(src);
 fs.writeFileSync(path.join(outDir, "00-source.docx"), sourceBytes);
 console.log(`  → 00-source.docx (${sourceBytes.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // Step 2: read it back
 // ---------------------------------------------------------------------------
-const doc = await Io.read(sourceBytes);
+const doc = await Document.read(sourceBytes);
 
 // Whole-document plain text
-const fullText = Query.extractText(doc);
+const fullText = Query.getText(doc);
 console.log("  Full text (first 120 chars):", JSON.stringify(fullText.slice(0, 120)));
 
 // Stats
-console.log(`  paragraphCount: ${Query.paragraphCount(doc)}`);
-console.log(`  wordCount:      ${Query.countWords(doc)}`);
-console.log(`  tableCount:     ${Query.tableCount(doc)}`);
+console.log(`  paragraphCount: ${Query.getParagraphCount(doc)}`);
+console.log(`  wordCount:      ${Query.getWordCount(doc)}`);
+console.log(`  tableCount:     ${Query.getTableCount(doc)}`);
 console.log(`  imageCount:     ${Query.listImages(doc).length}`);
 console.log(`  hyperlinkCount: ${Query.listHyperlinks(doc).length}`);
 console.log(`  sectionCount:   ${Query.listSections(doc).length}`);
 
 // Headings outline
-const headings = Query.getHeadings(doc);
+const headings = Query.listHeadings(doc);
 console.log(`  ${headings.length} headings:`);
 for (const h of headings) {
   console.log(`    - L${h.level}: "${h.text}"`);
@@ -139,49 +142,49 @@ console.log(`  searchText(/\\b[A-Z]\\w+\\b/g): ${regexHits.length} hit(s)`);
 // ---------------------------------------------------------------------------
 // Step 4: replaceText — both across runs and inside hyperlinks/footnotes
 // ---------------------------------------------------------------------------
-const replaced1 = await Io.read(sourceBytes);
-const c1 = Query.replaceText(replaced1, "brown", "RED"); // simple
-const c2 = Query.replaceText(replaced1, /lazy (dog)/, "vigilant $1"); // regex with backref
-const c3 = Query.replaceText(replaced1, "PLACEHOLDER", "REPLACED"); // inside footnote
+const replaced1 = await Document.read(sourceBytes);
+const c1 = Document.replaceText(replaced1, "brown", "RED"); // simple
+const c2 = Document.replaceText(replaced1, /lazy (dog)/, "vigilant $1"); // regex with backref
+const c3 = Document.replaceText(replaced1, "PLACEHOLDER", "REPLACED"); // inside footnote
 console.log(`  replaceText counts: brown→RED:${c1}, regex:${c2}, footnote:${c3}`);
-const buf1 = await Io.toBuffer(replaced1);
+const buf1 = await Document.toBuffer(replaced1);
 fs.writeFileSync(path.join(outDir, "01-replaced.docx"), buf1);
 console.log(`  → 01-replaced.docx (${buf1.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // Step 5: mailMerge — MERGEFIELDs become real values
 // ---------------------------------------------------------------------------
-const merged = await Io.read(sourceBytes);
-const mergedCount = Query.mailMerge(merged, {
+const merged = await Document.read(sourceBytes);
+const mergedCount = Document.mailMerge(merged, {
   FullName: "Jane Doe",
   AccountBalance: "$2,345.67"
 });
 console.log(`  mailMerge replaced ${mergedCount} fields`);
-const buf2 = await Io.toBuffer(merged);
+const buf2 = await Document.toBuffer(merged);
 fs.writeFileSync(path.join(outDir, "02-merged.docx"), buf2);
 console.log(`  → 02-merged.docx (${buf2.length} bytes)`);
 
 // mailMerge with removeUnmatched: missing keys → field is cleared instead of
 // keeping its placeholder text.
-const partial = await Io.read(sourceBytes);
-const partialCount = Query.mailMerge(
+const partial = await Document.read(sourceBytes);
+const partialCount = Document.mailMerge(
   partial,
   { FullName: "Solo" /* no AccountBalance */ },
   { removeUnmatched: true }
 );
 console.log(`  mailMerge({removeUnmatched:true}) replaced ${partialCount}`);
-fs.writeFileSync(path.join(outDir, "02b-merged-partial.docx"), await Io.toBuffer(partial));
+fs.writeFileSync(path.join(outDir, "02b-merged-partial.docx"), await Document.toBuffer(partial));
 
 // ---------------------------------------------------------------------------
 // Step 6: format-search — find every bold or italic run
 // ---------------------------------------------------------------------------
-const usedFormats = Query.getUsedFormats(doc);
+const usedFormats = Query.listUsedFormats(doc);
 console.log(`  ${usedFormats.length} distinct formats in use (sample):`);
 for (const f of usedFormats.slice(0, 4)) {
   console.log(`    · ${JSON.stringify(f)}`);
 }
 const boldHits = Query.searchByFormat(doc, { bold: true });
-const italicCount = Query.countByFormat(doc, { italic: true });
+const italicCount = Query.getCountByFormat(doc, { italic: true });
 console.log(`  searchByFormat({ bold:true }): ${boldHits.length} hits`);
 console.log(`  countByFormat({ italic:true }): ${italicCount}`);
 
@@ -189,12 +192,12 @@ console.log(`  countByFormat({ italic:true }): ${italicCount}`);
 // Edge cases — replace across runs (search string straddles formatting
 // boundaries) and replace nothing
 // ---------------------------------------------------------------------------
-const edge = await Io.read(sourceBytes);
+const edge = await Document.read(sourceBytes);
 // "the brown fox" sits across normal + bold runs — replaceText must stitch
-const acrossCount = Query.replaceText(edge, "the brown fox", "BIG_RED_FOX");
-const noopCount = Query.replaceText(edge, "this string is not in the doc", "x");
+const acrossCount = Document.replaceText(edge, "the brown fox", "BIG_RED_FOX");
+const noopCount = Document.replaceText(edge, "this string is not in the doc", "x");
 console.log(`  edge: across-run replace=${acrossCount}, noop=${noopCount}`);
-const buf3 = await Io.toBuffer(edge);
+const buf3 = await Document.toBuffer(edge);
 fs.writeFileSync(path.join(outDir, "03-edge.docx"), buf3);
 
 // ---------------------------------------------------------------------------
@@ -208,7 +211,7 @@ fs.writeFileSync(path.join(outDir, "03-edge.docx"), buf3);
   const richDoc = Document.create();
   Document.useDefaultStyles(richDoc);
   Document.addParagraph(richDoc, "Body PLACEHOLDER once.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     richDoc,
     Build.paragraph([
       Build.text("Inside hyperlink: "),
@@ -238,7 +241,7 @@ fs.writeFileSync(path.join(outDir, "03-edge.docx"), buf3);
   // we must also place a reference mark in the body, otherwise Word has
   // nothing to anchor the note to and will not render it.
   const fnId = Document.addFootnote(richDoc, "Footnote with PLACEHOLDER inside.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     richDoc,
     Build.paragraph([
       Build.text("Sentence with a footnote ref."),
@@ -249,7 +252,7 @@ fs.writeFileSync(path.join(outDir, "03-edge.docx"), buf3);
     ])
   );
   const enId = Document.addEndnote(richDoc, "Endnote PLACEHOLDER.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     richDoc,
     Build.paragraph([
       Build.text("Sentence with an endnote ref."),
@@ -262,13 +265,13 @@ fs.writeFileSync(path.join(outDir, "03-edge.docx"), buf3);
 
   // Comment
   const cId = Document.addComment(richDoc, "Reviewer", "Comment body has PLACEHOLDER somewhere.");
-  Document.addParagraphElement(richDoc, Build.paragraph([{ type: "commentReference", id: cId }]));
+  Document.addParagraph(richDoc, Build.paragraph([{ type: "commentReference", id: cId }]));
 
-  const richBytes = await Io.toBuffer(Document.build(richDoc));
-  const richModel = await Io.read(richBytes);
-  const total = Query.replaceText(richModel, "PLACEHOLDER", "FILLED");
+  const richBytes = await Document.toBuffer(richDoc);
+  const richModel = await Document.read(richBytes);
+  const total = Document.replaceText(richModel, "PLACEHOLDER", "FILLED");
   console.log(`  multi-container replace replaced ${total} occurrence(s)`);
-  const richOut = await Io.toBuffer(richModel);
+  const richOut = await Document.toBuffer(richModel);
   fs.writeFileSync(path.join(outDir, "04-multi-container.docx"), richOut);
   console.log(`  → 04-multi-container.docx (${richOut.length} bytes)`);
 }

@@ -487,31 +487,31 @@ export function ensureDirSync(dirPath: string): void {
 }
 
 /**
- * Get file stats, or null if file doesn't exist.
+ * Get file stats, or `undefined` if the file doesn't exist.
  */
-export async function safeStats(filePath: string): Promise<nodeFs.Stats | null> {
+export async function safeStats(filePath: string): Promise<nodeFs.Stats | undefined> {
   try {
     return await _fsp.stat(filePath);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
 /**
- * Synchronously get file stats, or null if file doesn't exist.
+ * Synchronously get file stats, or `undefined` if the file doesn't exist.
  */
-export function safeStatsSync(filePath: string): nodeFs.Stats | null {
+export function safeStatsSync(filePath: string): nodeFs.Stats | undefined {
   try {
     return _fs.statSync(filePath);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
 /**
  * Read a file as Uint8Array.
  */
-export async function readFileBytes(filePath: string): Promise<Uint8Array> {
+export async function readFileBytes(filePath: string): Promise<Uint8Array<ArrayBuffer>> {
   const buffer = await _fsp.readFile(filePath);
   return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }
@@ -519,7 +519,7 @@ export async function readFileBytes(filePath: string): Promise<Uint8Array> {
 /**
  * Synchronously read a file as Uint8Array.
  */
-export function readFileBytesSync(filePath: string): Uint8Array {
+export function readFileBytesSync(filePath: string): Uint8Array<ArrayBuffer> {
   const buffer = _fs.readFileSync(filePath);
   return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }

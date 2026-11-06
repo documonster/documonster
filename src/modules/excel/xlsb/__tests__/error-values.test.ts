@@ -74,7 +74,7 @@ describe("an error-valued cell", () => {
       back,
       await Workbook.toBuffer(handle, { format: "xlsb", unsupported: "ignore" })
     );
-    return Cell.getValue(Workbook.getWorksheets(back)[0]!, "A1");
+    return Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1");
   }
 
   it.each([...OBSERVED, ...FROM_SPEC])(
@@ -108,7 +108,7 @@ describe("an error-valued cell", () => {
     const read = async (format: "xlsx" | "xlsb") => {
       const back = Workbook.create();
       await Workbook.read(back, await Workbook.toBuffer(handle, { format }));
-      return Cell.getValue(Workbook.getWorksheets(back)[0]!, "A1");
+      return Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1");
     };
     expect(await read("xlsb")).toEqual(await read("xlsx"));
   });

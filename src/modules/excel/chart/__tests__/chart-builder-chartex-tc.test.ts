@@ -16,14 +16,7 @@ import type {
   ValueAxis,
   AddChartExOptions
 } from "@excel/chart";
-import {
-  buildComboChartModel,
-  fillChartExCaches,
-  parseChartEx,
-  buildChartExModel,
-  renderChartEx,
-  renderChartExSvg
-} from "@excel/chart";
+import { ChartEx, ChartClassic } from "@excel/chart";
 import {
   chartsheetChart,
   chartsheetChartExModel,
@@ -58,7 +51,7 @@ import {
   getCharts,
   removeChart
 } from "@excel/core/worksheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Table, Workbook } from "@excel/index";
 import { describeSvgGeometry, extractSvgGeometry } from "@test/svg-geometry";
 import { describe, it, expect } from "vitest";
 
@@ -80,7 +73,7 @@ describe("ChartEx modern chart types", () => {
   }
 
   it("buildChartExModel for sunburst", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "sunburst",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Data", values: "Sheet1!$B$1:$B$5" }]
@@ -91,7 +84,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel for treemap with hierarchy", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "treemap",
       categories: "Sheet1!$A$1:$A$5",
       series: [
@@ -108,7 +101,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel for waterfall with subtotals", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "waterfall",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Flow", values: "Sheet1!$B$1:$B$5", subtotals: [2, 4] }]
@@ -119,7 +112,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel for funnel", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Funnel", values: "Sheet1!$B$1:$B$5" }]
@@ -129,7 +122,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel for histogram", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "histogram",
       series: [
         {
@@ -153,7 +146,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel defaults histogram binning to auto", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "histogram",
       series: [{ name: "Histogram", values: "Sheet1!$B$1:$B$5" }]
     });
@@ -165,7 +158,7 @@ describe("ChartEx modern chart types", () => {
     // `<cx:auto/>` child element. Earlier revisions shipped the
     // invalid `<cx:auto/>` tag, which made Excel 2016+ drop the
     // whole ChartEx part on load.
-    const xml = renderChartEx(m);
+    const xml = ChartEx.toXml(m);
     expect(xml).not.toContain("<cx:auto/>");
     expect(xml).toContain("<cx:binning");
     // No binSize / binCount text content for pure auto binning.
@@ -174,7 +167,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel for boxWhisker", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "boxWhisker",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Box", values: "Sheet1!$B$1:$B$5" }],
@@ -191,7 +184,7 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("buildChartExModel for regionMap", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "regionMap",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Map", values: "Sheet1!$B$1:$B$5" }],
@@ -207,13 +200,13 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("renderChartEx produces valid cx: XML", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "sunburst",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Data", values: "Sheet1!$B$1:$B$5" }],
       title: "My Sunburst"
     });
-    const xml = renderChartEx(m);
+    const xml = ChartEx.toXml(m);
     expect(xml).toContain("<cx:chartSpace");
     expect(xml).toContain('xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"');
     expect(xml).toContain("<cx:chartData>");
@@ -225,19 +218,19 @@ describe("ChartEx modern chart types", () => {
   });
 
   it("renderChartEx writes chart frame shape properties", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Data", values: "Sheet1!$B$1:$B$5" }],
       spPr: { fill: { solid: { srgb: "FF0000" } } }
     });
-    const xml = renderChartEx(m);
+    const xml = ChartEx.toXml(m);
     expect(xml).toContain("<cx:spPr>");
     expect(xml).toContain('<a:srgbClr val="FF0000"/>');
   });
 
   it("buildChartExModel retains style and colors metadata", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "sunburst",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Data", values: "Sheet1!$B$1:$B$5" }],
@@ -262,7 +255,7 @@ describe("ChartEx modern chart types", () => {
     );
     expect(num).toBe(1);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(Chart.isChartEx(getCharts(ws)[0])).toBe(true);
+    expect(Chart.isEx(getCharts(ws)[0])).toBe(true);
 
     // Write and verify the XML is in the zip
     const buf = await Workbook.toBuffer(wb);
@@ -271,7 +264,7 @@ describe("ChartEx modern chart types", () => {
     await Workbook.read(wb2, buf);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(getCharts(ws2)).toHaveLength(1);
-    expect(Chart.isChartEx(getCharts(ws2)[0])).toBe(true);
+    expect(Chart.isEx(getCharts(ws2)[0])).toBe(true);
   });
 
   it("loads chartEx into a structured model while preserving clean raw XML", async () => {
@@ -291,10 +284,10 @@ describe("ChartEx modern chart types", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    expect(Chart.chartExModel(chart)).toBeDefined();
-    expect(Chart.title(chart)).toBe("Programmatic ChartEx");
+    expect(Chart.getExModel(chart)).toBeDefined();
+    expect(Chart.getTitle(chart)).toBe("Programmatic ChartEx");
     expect(
-      Chart.chartExModel(chart)!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId
+      Chart.getExModel(chart)!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId
     ).toBe("sunburst");
 
     const inputEntries = await extractAll(new Uint8Array(buf));
@@ -403,7 +396,7 @@ describe("ChartEx modern chart types", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    Chart.mutateChartEx(chart, model => {
+    Chart.mutateEx(chart, model => {
       model.chartSpace.chart.autoTitleDeleted = true;
     });
 
@@ -450,7 +443,7 @@ describe("ChartEx modern chart types", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    Chart.mutateChartEx(chart, model => {
+    Chart.mutateEx(chart, model => {
       model.chartSpace.chart.title = {
         text: { paragraphs: [{ runs: [{ text: "Updated" }] }] },
         overlay: false
@@ -497,7 +490,7 @@ describe("ChartEx modern chart types", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    Chart.mutateChartEx(
+    Chart.mutateEx(
       chart,
       model => {
         const data = model.chartSpace.chartData.data;
@@ -591,7 +584,7 @@ describe("ChartEx modern chart types", () => {
 
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
-    Chart.chartExModel(
+    Chart.getExModel(
       getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0]
     )!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
 
@@ -633,7 +626,7 @@ describe("ChartEx modern chart types", () => {
     }
 
     expect(getCharts(ws)).toHaveLength(8);
-    expect(getCharts(ws).every(c => Chart.isChartEx(c))).toBe(true);
+    expect(getCharts(ws).every(c => Chart.isEx(c))).toBe(true);
 
     // Round-trip
     const buf = await Workbook.toBuffer(wb);
@@ -651,7 +644,7 @@ describe("ChartEx modern chart types", () => {
   // required `values` unconditionally, breaking every Word ChartEx render.
   // -------------------------------------------------------------------------
   it("buildChartExModel accepts headless series with only literalValues", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "sunburst",
       title: "headless",
       series: [
@@ -668,7 +661,7 @@ describe("ChartEx modern chart types", () => {
 
   it("buildChartExModel still rejects series with neither values nor literalValues", () => {
     expect(() =>
-      buildChartExModel({
+      ChartEx.createModel({
         type: "sunburst",
         series: [{ name: "x", values: "" }]
       })
@@ -727,7 +720,7 @@ describe("TC2: ChartEx round-trip preserves isChartEx", () => {
       },
       "D1:K10"
     );
-    expect(Chart.isChartEx(getCharts(ws)[0])).toBe(true);
+    expect(Chart.isEx(getCharts(ws)[0])).toBe(true);
     expect(getCharts(ws)[0].chartNumber).toBe(0);
     expect(getCharts(ws)[0].chartExNumber).toBeGreaterThan(0);
 
@@ -736,7 +729,7 @@ describe("TC2: ChartEx round-trip preserves isChartEx", () => {
     await Workbook.read(wb2, buf);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     const chart2 = getCharts(ws2)[0];
-    expect(Chart.isChartEx(chart2)).toBe(true);
+    expect(Chart.isEx(chart2)).toBe(true);
     expect(chart2.chartNumber).toBe(0);
     expect(chart2.chartExNumber).toBeGreaterThan(0);
   });
@@ -814,7 +807,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     const wb = Workbook.create();
     await Workbook.read(wb, input);
     const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
-    Chart.chartModel(chart)!.chart.legend = undefined;
+    Chart.getModel(chart)!.chart.legend = undefined;
 
     const output = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
@@ -1090,8 +1083,8 @@ describe("TC2b: classic chart raw passthrough", () => {
     // swap a bar chart into a line chart. That is a structural change —
     // the whole `<c:barChart>` block becomes `<c:lineChart>` — so
     // strict mode must refuse rather than silently rebuild.
-    const group = Chart.chartModel(getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0])!.chart
-      .plotArea.chartTypes[0];
+    const group = Chart.getModel(getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0])!.chart.plotArea
+      .chartTypes[0];
     (group as unknown as { type: string }).type = "line";
 
     await expect(Workbook.toBuffer(wb, { templateMode: "strict" })).rejects.toThrow(
@@ -1106,7 +1099,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     // (c) a subsequent round-trip preserves it on the model.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1132,7 +1125,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     // Round-trip.
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
-    expect(Chart.chartModel(getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0])!.style).toBe(42);
+    expect(Chart.getModel(getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0])!.style).toBe(42);
 
     // Invalid ranges throw.
     expect(() => Chart.setStyle(chart, 0)).toThrow(/1..48/);
@@ -1206,24 +1199,24 @@ describe("TC2b: classic chart raw passthrough", () => {
     const wb = Workbook.create();
     await Workbook.read(wb, input);
     const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
-    const unknown = Chart.chartModel(chart)!.unknownElements;
+    const unknown = Chart.getModel(chart)!.unknownElements;
     expect(unknown).toBeDefined();
     expect(unknown!.some(e => e.name === "c15:customChartMeta")).toBe(true);
 
-    // Chart.unknownElements convenience getter proxies the same list so
+    // Chart.getUnknownElements convenience getter proxies the same list so
     // authors can decide about strictTemplateMode without reaching into
     // the structured model. Returns a copy (mutations don't leak back).
-    const convenience = Chart.unknownElements(chart);
+    const convenience = Chart.getUnknownElements(chart);
     expect(convenience).toBeDefined();
     expect(convenience).toEqual(unknown);
     convenience!.pop();
-    expect(Chart.unknownElements(chart)?.length).toBe(unknown!.length);
+    expect(Chart.getUnknownElements(chart)?.length).toBe(unknown!.length);
   });
 
-  it("Chart.unknownElements returns undefined for freshly-built charts", () => {
+  it("Chart.getUnknownElements returns undefined for freshly-built charts", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 2]
     ]);
@@ -1237,7 +1230,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     );
     const chart = getCharts(ws)[0];
     // Freshly built — no raw XML was ever parsed.
-    expect(Chart.unknownElements(chart)).toBeUndefined();
+    expect(Chart.getUnknownElements(chart)).toBeUndefined();
   });
 
   it("raw-patches chartTypeGroup simple fields (overlap / gapWidth / varyColors) without rebuilding", async () => {
@@ -1283,7 +1276,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     const vendorMarker = "<!--pie-vendor-keep-->";
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1327,7 +1320,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   it("raw-patches doughnut holeSize and removes the leaf when set to undefined", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1379,8 +1372,8 @@ describe("TC2b: classic chart raw passthrough", () => {
     // (bar → line rewrites the enclosing `<c:barChart>` tag itself),
     // outside the RawPatchPlan whitelist, so strict mode must surface
     // the unknownElements hint.
-    const group = Chart.chartModel(getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0])!.chart
-      .plotArea.chartTypes[0];
+    const group = Chart.getModel(getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0])!.chart.plotArea
+      .chartTypes[0];
     (group as unknown as { type: string }).type = "line";
 
     await expect(Workbook.toBuffer(wb, { templateMode: "strict" })).rejects.toThrow(
@@ -1416,7 +1409,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   it("fails instead of re-rendering ChartEx when requireRawPatch cannot safely preserve template XML", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1444,7 +1437,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    Chart.mutateChartEx(
+    Chart.mutateEx(
       chart,
       model => {
         model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
@@ -1477,7 +1470,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       "</cx:chartSpace>"
     ].join("\n");
 
-    const model = parseChartEx(xml);
+    const model = ChartEx.fromXml(xml);
 
     const paths = (model.unknownElements ?? []).map(entry => entry.path).sort();
     expect(paths).toEqual(
@@ -1501,7 +1494,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     // structured children — regression guard against false positives.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1517,7 +1510,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     const zipData = await extractAll(new Uint8Array(await Workbook.toBuffer(wb)));
     const chartExXml = textDecoder.decode(zipData.get("xl/charts/chartEx1.xml")!.data);
 
-    const model = parseChartEx(chartExXml);
+    const model = ChartEx.fromXml(chartExXml);
     expect(model.unknownElements).toBeUndefined();
   });
 
@@ -1530,7 +1523,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     // regenerate series markup and drop any sibling template XML).
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 30],
       ["B", 20, 40]
     ]);
@@ -1561,8 +1554,8 @@ describe("TC2b: classic chart raw passthrough", () => {
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     const beforeOwner =
-      Chart.chartExModel(chart)!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].ownerIdx;
-    Chart.mutateChartEx(
+      Chart.getExModel(chart)!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].ownerIdx;
+    Chart.mutateEx(
       chart,
       model => {
         // Flip ownerIdx to something distinct; this is the only mutation.
@@ -1587,7 +1580,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     // raw-patched to force the strict-mode failure path.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1620,7 +1613,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     // Changing layoutId requires a rebuild; the raw-patch white-list cannot
     // mutate the opening tag's layoutId attribute alone.
-    Chart.mutateChartEx(chart, model => {
+    Chart.mutateEx(chart, model => {
       model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
     });
 
@@ -1727,7 +1720,7 @@ describe("TC2c: chartsheet API", () => {
   it("exposes chartsheet chart models and supports replacement/removal", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1744,7 +1737,7 @@ describe("TC2c: chartsheet API", () => {
     expect(chartsheetPageMargins(chartsheet)?.l).toBe(0.7);
     chartsheetSetZoomScale(chartsheet, 120);
     expect(chartsheetZoomScale(Workbook.getChartsheet(wb, "Chart Sheet")!)).toBe(120);
-    expect(Chart.title(chartsheetChart(chartsheet)!)).toBe("Original");
+    expect(Chart.getTitle(chartsheetChart(chartsheet)!)).toBe("Original");
     chartsheetSetPageSetup(chartsheet, { orientation: "landscape", paperSize: 9 });
 
     expect(
@@ -1763,7 +1756,7 @@ describe("TC2c: chartsheet API", () => {
   it("supports chartsheet rename, copy, wrapper replacement, and print settings round-trip", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1778,7 +1771,7 @@ describe("TC2c: chartsheet API", () => {
     expect(renameChartsheet(wb, chartsheetName(chartsheet), "Renamed Chart")).toBe(true);
     const copy = copyChartsheet(wb, chartsheetName(chartsheet), "Copied Chart")!;
     expect(chartsheetChartNumber(copy)).not.toBe(chartsheetChartNumber(chartsheet));
-    expect(Chart.title(chartsheetChart(copy)!)).toBe("Original");
+    expect(Chart.getTitle(chartsheetChart(copy)!)).toBe("Original");
     expect(
       replaceChartsheetChart(wb, chartsheetName(copy), {
         type: "pie",
@@ -1786,7 +1779,7 @@ describe("TC2c: chartsheet API", () => {
         title: "Pie"
       })
     ).toBe(true);
-    expect(Chart.title(chartsheetChart(copy)!)).toBe("Pie");
+    expect(Chart.getTitle(chartsheetChart(copy)!)).toBe("Pie");
 
     const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
@@ -1808,13 +1801,15 @@ describe("TC2c: chartsheet API", () => {
     expect(chartsheetPageSetup(Workbook.getChartsheet(wb2, "Renamed Chart")!)?.orientation).toBe(
       "landscape"
     );
-    expect(Chart.title(chartsheetChart(Workbook.getChartsheet(wb2, "Copied Chart")!)!)).toBe("Pie");
+    expect(Chart.getTitle(chartsheetChart(Workbook.getChartsheet(wb2, "Copied Chart")!)!)).toBe(
+      "Pie"
+    );
   });
 
   it("cleans up chartsheet chart parts after replacement and removal", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1862,7 +1857,7 @@ describe("TC2d: high-level chart series editing API", () => {
 
     addChartEx(ws, { type: "funnel", series: [{ values: VALUES_A }] }, "L1:R10");
     const chartEx = getCharts(ws)[1];
-    Chart.mutateChartEx(chartEx, model => {
+    Chart.mutateEx(chartEx, model => {
       model.chartSpace.chart.autoTitleDeleted = true;
     });
     expect(getChartExStructuredEntry(wb, chartEx.chartExNumber)!.dirty).toBe(true);
@@ -1944,7 +1939,7 @@ describe("TC2d: high-level chart series editing API", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    const valueAxis = Chart.valueAxis(chart)!;
+    const valueAxis = Chart.getValueAxis(chart)!;
     valueAxis.scaling = { min: 0, max: 100 };
     valueAxis.title = { text: { paragraphs: [{ runs: [{ text: "Updated Axis" }] }] } };
     getChartEntry(wb2, chart.chartNumber)!.dirty = true;
@@ -1970,7 +1965,7 @@ describe("TC2e: pivot chart creation", () => {
   function makePivotWorkbook() {
     const wb = Workbook.create();
     const data = Workbook.addWorksheet(wb, "Sales Data");
-    Worksheet.addRows(data, [
+    Row.addMany(data, [
       ["Region", "Product", "Revenue", "Units"],
       ["West", "A", 10, 1],
       ["West", "B", 20, 2],
@@ -2029,7 +2024,7 @@ describe("TC2e: pivot chart creation", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Pivot Sheet")!)[0];
-    expect(Chart.chartModel(chart)!.pivotSource).toContain("'Pivot Sheet'!PivotTable1");
+    expect(Chart.getModel(chart)!.pivotSource).toContain("'Pivot Sheet'!PivotTable1");
   });
 
   // Regression — before fix, two `addPivotChart(pivotTable, …)` calls
@@ -2261,7 +2256,7 @@ describe("TC2e: pivot chart creation", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     const chart2 = getCharts(getWorksheets(wb2)[1])[0];
-    const m2 = Chart.chartModel(chart2)!;
+    const m2 = Chart.getModel(chart2)!;
     expect(m2.pivotOptions).toEqual({
       dropZonesVisible: true,
       dropZoneFilter: false,
@@ -2286,7 +2281,7 @@ describe("TC2e: pivot chart creation", () => {
 
 describe("TC4: combo chart with categoryAxis/valueAxis options on primary group", () => {
   it("applies axis options to the primary axes", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         {
           type: "bar",
@@ -2319,7 +2314,7 @@ describe("TC4: combo chart with categoryAxis/valueAxis options on primary group"
   });
 });
 
-describe("TC5: Chart.clone/copyTo round-trip", () => {
+describe("TC5: Chart.copyTo round-trip", () => {
   it("cloned chart survives write/read as independent copy", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
@@ -2327,7 +2322,7 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
     Cell.setValue(ws, "B1", 100);
     addChart(ws, { type: "bar", series: [baseSeries("Original")], title: "Source" }, "C1:J10");
     const original = getCharts(ws)[0];
-    Chart.clone(original);
+    Chart.copyTo(original, ws);
     expect(getCharts(ws)).toHaveLength(2);
 
     const buf = await Workbook.toBuffer(wb);
@@ -2336,8 +2331,8 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(getCharts(ws2)).toHaveLength(2);
     // Both charts should be independent
-    expect(Chart.title(getCharts(ws2)[0])).toBe("Source");
-    expect(Chart.title(getCharts(ws2)[1])).toBe("Source");
+    expect(Chart.getTitle(getCharts(ws2)[0])).toBe("Source");
+    expect(Chart.getTitle(getCharts(ws2)[1])).toBe("Source");
   });
 
   it("copyTo another worksheet creates independent chart", async () => {
@@ -2354,7 +2349,7 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
     await Workbook.read(wb2, buf);
     expect(getCharts(Workbook.getWorksheet(wb2, "Src")!)).toHaveLength(1);
     expect(getCharts(Workbook.getWorksheet(wb2, "Dst")!)).toHaveLength(1);
-    expect(Chart.title(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0])).toBe("Pie");
+    expect(Chart.getTitle(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0])).toBe("Pie");
   });
 
   it("copyTo supports chartEx charts", async () => {
@@ -2376,9 +2371,10 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
       "C1:J10"
     );
 
-    const copiedNumber = Chart.copyTo(getCharts(src)[0], dst, "A1:H10");
-    expect(copiedNumber).toBe(2);
-    expect(Chart.isChartEx(getCharts(dst)[0])).toBe(true);
+    const copied = Chart.copyTo(getCharts(src)[0], dst, "A1:H10");
+    expect(copied).toBe(getCharts(dst)[0]);
+    expect(copied.chartExNumber).toBe(2);
+    expect(Chart.isEx(copied)).toBe(true);
 
     const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
@@ -2387,8 +2383,8 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
 
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
-    expect(Chart.isChartEx(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0])).toBe(true);
-    expect(Chart.title(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0])).toBe("Modern");
+    expect(Chart.isEx(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0])).toBe(true);
+    expect(Chart.getTitle(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0])).toBe("Modern");
   });
 });
 
@@ -2408,7 +2404,7 @@ describe("TC6: Date values in chart cache population", () => {
       "C1:J10"
     );
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     const points = series.val.numRef.cache.points;
     expect(points).toHaveLength(1);
     // Excel serial for 2024-01-01 (1900-based, non-1904) should be ~45292
@@ -2419,7 +2415,7 @@ describe("TC6: Date values in chart cache population", () => {
   it("fills multi-level category caches", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["North", "Q1", 10],
       ["North", "Q2", 20],
       ["South", "Q1", 30]
@@ -2439,8 +2435,7 @@ describe("TC6: Date values in chart cache population", () => {
       "E1:K10"
     );
 
-    const series = Chart.chartModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0]
-      .series[0] as any;
+    const series = Chart.getModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.cat.multiLvlStrRef.cache.pointCount).toBe(3);
     expect(series.cat.multiLvlStrRef.cache.levels).toHaveLength(2);
     expect(series.cat.multiLvlStrRef.cache.levels[0].points[0]).toEqual({
@@ -2464,7 +2459,7 @@ describe("TC6: Date values in chart cache population", () => {
 
 describe("TC7: pareto chart type in ChartEx builder", () => {
   it("pareto type uses clusteredColumn layoutId with x values and pareto line", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "pareto",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Data", values: "Sheet1!$B$1:$B$5" }]
@@ -2479,13 +2474,13 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("pareto chart renders valid XML", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "pareto",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "Pareto", values: "Sheet1!$B$1:$B$5" }],
       title: "Pareto Analysis"
     });
-    const xml = renderChartEx(m);
+    const xml = ChartEx.toXml(m);
     expect(xml).toContain("<cx:chartSpace");
     expect(xml).toContain('layoutId="clusteredColumn"');
     // `<cx:paretoLine>` is NOT part of the official CT_Binning /
@@ -2501,7 +2496,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("ChartEx histogram honors explicit binning fields and validates bad binning", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "histogram",
       series: [{ name: "H", values: "Sheet1!$B$1:$B$10" }],
       binning: { binType: "binSize", binSize: 5, underflow: 0, overflow: 100, intervalClosed: "r" }
@@ -2511,21 +2506,21 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     expect(binning.underflow).toBe(0);
     expect(binning.overflow).toBe(100);
     expect(() =>
-      buildChartExModel({
+      ChartEx.createModel({
         type: "histogram",
         series: [{ values: "Sheet1!$B$1:$B$10" }],
         binning: { binSize: 0 }
       })
     ).toThrow(/binSize/);
     expect(() =>
-      buildChartExModel({
+      ChartEx.createModel({
         type: "funnel",
         series: [{ values: "Sheet1!$B$1:$B$10" }],
         layout: { binning: { binType: "auto" } }
       })
     ).toThrow(/binning/);
     expect(() =>
-      buildChartExModel({
+      ChartEx.createModel({
         type: "histogram",
         series: [
           {
@@ -2537,7 +2532,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       })
     ).toThrow(/literalCategories length/);
     expect(() =>
-      buildChartExModel({
+      ChartEx.createModel({
         type: "waterfall",
         series: [{ values: "Sheet1!$B$1:$B$10", subtotals: [-1] }]
       })
@@ -2545,12 +2540,12 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("ChartEx literal histogram bins render underflow, closed intervals, and overflow deterministically", () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "histogram",
       series: [{ values: "Sheet1!$B$1:$B$6", literalValues: [-1, 0, 5, 10, 11, 21] }],
       binning: { binType: "binSize", binSize: 10, underflow: 0, overflow: 20, intervalClosed: "r" }
     });
-    const svg = renderChartExSvg(model, { width: 420, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 420, height: 240 });
 
     expect(svg).toContain("&lt;=0");
     expect(svg).toContain("0-10");
@@ -2591,7 +2586,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         .filter(shape => shape.kind === "text")
         .map(shape => shape.text)
     ).toEqual(["1.6", "1.2", "0.8", "0.4", "2", "0", "<=0", "0-10", "10-20", ">20"]);
-    expect(stableHash(describeSvgGeometry(svg))).toBe("e1207e7f");
+    expect(stableHash(describeSvgGeometry(svg))).toBe("4df2449f");
   });
 
   it("buildHistogramBins covers [start, end] with no extra empty bin and catches the axis minimum", () => {
@@ -2603,12 +2598,12 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // trailing sentinel. The fix: stop at `low < end` and treat the
     // first normal bin as left-closed-at-the-minimum so the min value
     // lands in its natural bin.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "histogram",
       series: [{ values: "Sheet1!$B$1:$B$10", literalValues: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }],
       binning: { binType: "binCount", binCount: 5 }
     });
-    const svg = renderChartExSvg(model, { width: 320, height: 200 });
+    const svg = ChartEx.toSvg(model, { width: 320, height: 200 });
     // Exactly five bar labels should render — not six. The trailing
     // sentinel bin `10-11.8` used to appear next to the genuine
     // `8.2-10` bin.
@@ -2628,12 +2623,12 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // quintile markers land at 0.6 / 1.2 / 1.8 / 2.4 — each matches
     // an exact numeric string we can assert without fighting float
     // formatting.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "histogram",
       series: [{ values: "Sheet1!$B$1:$B$5", literalValues: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }],
       binning: { binType: "binCount", binCount: 5 }
     });
-    const svg = renderChartExSvg(model, { width: 320, height: 200 });
+    const svg = ChartEx.toSvg(model, { width: 320, height: 200 });
     // Interior quintile tick labels must all appear between
     // min=0 and max=3. Before this change renderAxes only emitted
     // the min/max pair.
@@ -2653,12 +2648,12 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // carries both values still writes only one (preferring
     // binCount when `binType === "binCount"`, else binSize), so we
     // verify round-trip of each form in isolation.
-    const sizeModel = buildChartExModel({
+    const sizeModel = ChartEx.createModel({
       type: "histogram",
       series: [{ values: "Sheet1!$B$1:$B$6" }],
       binning: { binType: "binSize", binSize: 2, underflow: 1, overflow: 9 }
     });
-    const sizeParsed = parseChartEx(renderChartEx(sizeModel));
+    const sizeParsed = ChartEx.fromXml(ChartEx.toXml(sizeModel));
     const sizeBin =
       sizeParsed.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr!.binning!;
     expect(sizeBin.binType).toBe("binSize");
@@ -2666,12 +2661,12 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     expect(sizeBin.underflow).toBe(1);
     expect(sizeBin.overflow).toBe(9);
 
-    const countModel = buildChartExModel({
+    const countModel = ChartEx.createModel({
       type: "histogram",
       series: [{ values: "Sheet1!$B$1:$B$6" }],
       binning: { binType: "binCount", binCount: 4 }
     });
-    const countParsed = parseChartEx(renderChartEx(countModel));
+    const countParsed = ChartEx.fromXml(ChartEx.toXml(countModel));
     const countBin =
       countParsed.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr!.binning!;
     expect(countBin.binType).toBe("binCount");
@@ -2704,7 +2699,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   <cx:extLst><cx:ext uri="{space-ext}"/></cx:extLst>
 </cx:chartSpace>`;
 
-    const parsed = parseChartEx(rawXml);
+    const parsed = ChartEx.fromXml(rawXml);
     const series = parsed.chartSpace.chart.plotArea.plotAreaRegion!.series[0];
     const axis = parsed.chartSpace.chart.plotArea.axis![0];
 
@@ -2723,7 +2718,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     expect(parsed.chartSpace.extLst).toContain("{space-ext}");
 
     const modelForRender = { ...parsed, rawXml: undefined };
-    const rendered = renderChartEx(modelForRender);
+    const rendered = ChartEx.toXml(modelForRender);
     expect(rendered).toContain("{axis-ext}");
     expect(rendered).toContain("{layout-ext}");
     expect(rendered).toContain("{series-ext}");
@@ -2732,7 +2727,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   it("ChartEx raw patch preserves template XML while updating hidden, series name, and axis bindings", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15],
@@ -2763,7 +2758,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, input);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    Chart.mutateChartEx(
+    Chart.mutateEx(
       chart,
       model => {
         const series = model.chartSpace.chart.plotArea.plotAreaRegion!.series[0];
@@ -2785,7 +2780,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("ChartEx regionMap preview uses geographic projection for known regions", () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -2797,7 +2792,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       layout: { projection: "mercator", regionLabels: "showAll", geoMappingLevel: "country" }
     });
 
-    const svg = renderChartExSvg(model, { width: 420, height: 260 });
+    const svg = ChartEx.toSvg(model, { width: 420, height: 260 });
     expect(svg).toContain('data-region-map-mode="geographic-preview"');
     expect(svg).toContain("USA");
     expect(svg).toContain("Canada");
@@ -2825,7 +2820,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         .join(" ")
     ).toBe("circle:4 polyline:5 rect:3 text:5");
     // Shifted by the legend margins now following `legendPos` — see the histogram note.
-    expect(stableHash(describeSvgGeometry(svg))).toBe("1b563892");
+    expect(stableHash(describeSvgGeometry(svg))).toBe("8195edaa");
   });
 
   it("ChartEx regionMap Albers and Robinson projections use real formulas, not linear fallbacks", () => {
@@ -2837,8 +2832,8 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // Mercator) for the same canvas. SVG hash is the most stable
     // assertion we can make here.
     const build = (projection: "albers" | "robinson" | "mercator" | "miller"): string =>
-      renderChartExSvg(
-        buildChartExModel({
+      ChartEx.toSvg(
+        ChartEx.createModel({
           type: "regionMap",
           series: [
             {
@@ -2902,7 +2897,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       }
     } as const;
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -2913,7 +2908,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       ],
       layout: { projection: "miller", regionLabels: "showAll", geoMappingLevel: "country" }
     });
-    const svg = renderChartExSvg(model, {
+    const svg = ChartEx.toSvg(model, {
       width: 420,
       height: 260,
       regionMap: {
@@ -2947,7 +2942,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       }
     } as const;
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -2958,7 +2953,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       ],
       layout: { projection: "miller", regionLabels: "showAll", geoMappingLevel: "country" }
     });
-    const svg = renderChartExSvg(model, {
+    const svg = ChartEx.toSvg(model, {
       width: 420,
       height: 260,
       regionMap: { topology, objectName: "countries", match: "id" }
@@ -2999,7 +2994,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       }
     } as const;
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -3010,7 +3005,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       ],
       layout: { projection: "miller", regionLabels: "showAll", geoMappingLevel: "country" }
     });
-    const svg = renderChartExSvg(model, {
+    const svg = ChartEx.toSvg(model, {
       width: 420,
       height: 260,
       regionMap: { topology, objectName: "countries", match: "property:name" }
@@ -3066,7 +3061,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       }
     } as const;
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -3077,7 +3072,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       ],
       layout: { projection: "miller", regionLabels: "showAll", geoMappingLevel: "country" }
     });
-    const svg = renderChartExSvg(model, {
+    const svg = ChartEx.toSvg(model, {
       width: 420,
       height: 260,
       regionMap: {
@@ -3116,11 +3111,11 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       }
     } as const;
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [{ values: "Data!$B$2", literalValues: [42], literalCategories: ["USA"] }]
     });
-    const svg = renderChartExSvg(model, {
+    const svg = ChartEx.toSvg(model, {
       width: 420,
       height: 260,
       regionMap: { topology, objectName: "countries", match: "id" }
@@ -3153,7 +3148,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       }
     } as const;
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -3164,7 +3159,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       ]
     });
-    const svg = renderChartExSvg(model, {
+    const svg = ChartEx.toSvg(model, {
       width: 420,
       height: 260,
       regionMap: {
@@ -3180,7 +3175,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("ChartEx literal multi-level hierarchy renders deterministically", () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "sunburst",
       series: [
         {
@@ -3194,7 +3189,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         }
       ]
     });
-    const svg = renderChartExSvg(model, { width: 360, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 360, height: 240 });
 
     expect(svg).toContain("<path");
     // Hashed over the normalised geometry rather than the markup, for the same
@@ -3220,7 +3215,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
         .join(" ")
     ).toBe("path:12 rect:2 text:1");
     // Shifted by the legend margins now following `legendPos` — see the histogram note.
-    expect(stableHash(describeSvgGeometry(svg))).toBe("658cc99d");
+    expect(stableHash(describeSvgGeometry(svg))).toBe("3af82113");
   });
 
   it("ChartEx sunburst handles 3-level hierarchy (continent/country/city)", () => {
@@ -3229,7 +3224,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // paths stay truthful for the common real-world case of
     // continent → country → city sunbursts. Before: only 2 levels had
     // explicit coverage.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "sunburst",
       series: [
         {
@@ -3259,7 +3254,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // parents at that depth. Total <path> count ≥ 6 (leaves) + 3
     // (countries USA/Canada/Brazil/China/Japan merged by rendering
     // policy) + continents — concretely ≥ 10.
-    const svg = renderChartExSvg(model, { width: 360, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 360, height: 240 });
     const pathCount = (svg.match(/<path/g) ?? []).length;
     expect(pathCount).toBeGreaterThanOrEqual(10);
   });
@@ -3280,7 +3275,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // → city — the three `literalHierarchy` arrays) plus one numDim.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["City", "Country", "Continent", "Revenue"],
       ["NYC", "USA", "Americas", 10],
       ["LA", "USA", "Americas", 20],
@@ -3308,7 +3303,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Data")!)[0];
-    const data = Chart.chartExModel(chart)!.chartSpace.chartData.data;
+    const data = Chart.getExModel(chart)!.chartSpace.chartData.data;
     // The category strDim carries every hierarchy level. Count
     // `<cx:lvl>` children across every `strDim` entry so the assertion
     // survives any future shape split (e.g. multi-strDim fallback for
@@ -3336,19 +3331,19 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   it("ChartEx SVG renders pareto, waterfall, funnel, hierarchy, and boxWhisker previews", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", "North", 10],
       ["B", "North", 20],
       ["C", "South", 5],
       ["D", "South", 15]
     ]);
     const models = [
-      buildChartExModel({
+      ChartEx.createModel({
         type: "pareto",
         categories: "Sheet1!$A$1:$A$4",
         series: [{ values: "Sheet1!$C$1:$C$4" }]
       }),
-      buildChartExModel({
+      ChartEx.createModel({
         type: "waterfall",
         categories: "Sheet1!$A$1:$A$4",
         series: [{ values: "Sheet1!$C$1:$C$4", subtotals: [3] }],
@@ -3359,22 +3354,22 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
           totalSpPr: { fill: { solid: { srgb: "0000AA" } } }
         }
       }),
-      buildChartExModel({
+      ChartEx.createModel({
         type: "funnel",
         categories: "Sheet1!$A$1:$A$4",
         series: [{ values: "Sheet1!$C$1:$C$4" }]
       }),
-      buildChartExModel({
+      ChartEx.createModel({
         type: "treemap",
         categories: "Sheet1!$A$1:$A$4",
         series: [{ values: "Sheet1!$C$1:$C$4", hierarchy: ["Sheet1!$B$1:$B$4"] }]
       }),
-      buildChartExModel({
+      ChartEx.createModel({
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$4",
         series: [{ values: "Sheet1!$C$1:$C$4", hierarchy: ["Sheet1!$B$1:$B$4"] }]
       }),
-      buildChartExModel({
+      ChartEx.createModel({
         type: "boxWhisker",
         categories: "Sheet1!$B$1:$B$4",
         series: [{ values: "Sheet1!$C$1:$C$4" }],
@@ -3382,16 +3377,30 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       })
     ];
     for (const model of models) {
-      fillChartExCaches(model, wb);
-      const svg = renderChartExSvg(model, { width: 360, height: 220 });
+      ChartEx.fillCaches(model, wb);
+      const svg = ChartEx.toSvg(model, { width: 360, height: 220 });
       expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
       expect(svg).toMatch(/<(rect|polygon|path|polyline|circle)/);
     }
-    const waterfallSvg = renderChartExSvg(models[1], { width: 360, height: 220 });
+    const waterfallSvg = ChartEx.toSvg(models[1], { width: 360, height: 220 });
     // Colour case is not semantic; the shared SVG surface normalises to lowercase.
     expect(waterfallSvg.toLowerCase()).toContain("#00aa00");
     expect(waterfallSvg).toContain("stroke-dasharray");
-    const boxSvg = renderChartExSvg(models[5], { width: 360, height: 220 });
+    const boxSvg = ChartEx.toSvg(models[5], { width: 360, height: 220 });
     expect(boxSvg).toContain('stroke-dasharray="3 2"');
+  });
+});
+
+describe("structured references in a chart's cache", () => {
+  it("find the table and column whatever their case", async () => {
+    // Tables and their columns are compared as Excel compares names; an exact match left the cache empty.
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Table.add(ws, { name: "Sales", ref: "A1", columns: [{ name: "Qty" }], rows: [[41], [42]] });
+    addChart(ws, { type: "bar", series: [{ name: "S", values: "sales[qty]" }] }, "C1:J10");
+    const entries = await extractAll(await Workbook.toBuffer(wb));
+    const xml = new TextDecoder().decode(entries.get("xl/charts/chart1.xml")!.data);
+    expect(xml).toContain("<c:v>41</c:v>");
+    expect(xml).toContain("<c:v>42</c:v>");
   });
 });

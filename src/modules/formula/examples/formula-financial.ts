@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -49,7 +49,7 @@ Cell.setValue(ws, "E1", { formula: "SLN(10000, 1000, 5)" }); // straight line
 Cell.setValue(ws, "E2", { formula: "DDB(10000, 1000, 5, 1)" }); // double declining
 Cell.setValue(ws, "E3", { formula: "SYD(10000, 1000, 5, 1)" }); // sum-of-years
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of ["B1", "B2", "B3", "B4", "B5", "D1", "D2", "D3", "D4", "E1", "E2", "E3"]) {
   console.log(

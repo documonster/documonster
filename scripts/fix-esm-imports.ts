@@ -37,8 +37,14 @@ function escapeRegExp(value: string): string {
 
 // Shared regex patterns for import/export statements
 // Use functions to create fresh regex instances (avoid lastIndex issues with /g flag)
+//
+// The clause between the keyword and `from` may carry comments — tsc keeps the ones
+// written between the names of an `export { … } from` list — and a comment is free text:
+// an apostrophe in one ("the option's documentation") used to end a `[^'"]*` clause early,
+// so the specifier after it was never rewritten and the emitted module imported a bare
+// `@excel/errors`. Comments are therefore consumed whole, and a clause stops at `;`.
 const createStaticImportRe = (): RegExp =>
-  /((?:import|export)\s*(?:[^'"]*\s+from\s+)?['"])([^'"]+)(['"])/g;
+  /((?:import|export)\s*(?:(?:\/\/[^\n]*\n|\/\*(?:[^*]|\*(?!\/))*\*\/|[^'"/;]|\/(?![/*]))*?\bfrom\s+)?['"])([^'"]+)(['"])/g;
 const createDynamicImportRe = (): RegExp => /(import\s*\(\s*['"])([^'"]+)(['"]\s*\))/g;
 const RELATIVE_PATH_RE = /^\.\.?\//;
 

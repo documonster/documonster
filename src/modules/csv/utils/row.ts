@@ -14,9 +14,10 @@
  * - processColumns(): Process column configuration
  */
 
-// Re-export types from central types.ts to avoid duplication
 import type { ColumnConfig, HeaderArray, RowHashArray } from "@csv/types";
-import { isSafeDynamicKey } from "@utils/object";
+// Re-export types from central types.ts to avoid duplication
+import { argumentError } from "@csv/utils/check-options";
+import { check, s } from "@utils/schema";
 export type { HeaderArray, RowHashArray } from "@csv/types";
 
 // =============================================================================
@@ -40,11 +41,10 @@ export function isRowHashArray(row: unknown): row is RowHashArray {
  * Note: Manual loop is ~4x faster than Object.fromEntries
  */
 export function rowHashArrayToMap<V = any>(row: RowHashArray<V>): Record<string, V> {
+  // No prototype, so every key — `constructor` and `__proto__` included — is an own property.
   const obj: Record<string, V> = Object.create(null) as Record<string, V>;
   for (const [key, value] of row) {
-    if (isSafeDynamicKey(key)) {
-      obj[key] = value;
-    }
+    obj[key] = value;
   }
   return obj;
 }
@@ -82,7 +82,7 @@ export function rowHashArrayGet<V = any>(row: RowHashArray<V>, key: string): V |
  */
 export function rowHashArrayMapByHeaders<V = any>(
   row: RowHashArray<V>,
-  headers: string[]
+  headers: readonly string[]
 ): (V | undefined)[] {
   // For small headers array, linear search per header is faster than building a map
   // For larger headers (>10), build a map once
@@ -102,7 +102,10 @@ export function rowHashArrayMapByHeaders<V = any>(
  * @param keys - Optional key order for object/RowHashArray rows
  * @returns Array of values in the specified key order (or natural order if no keys)
  */
-export function extractRowValues(row: unknown, keys: string[] | null | undefined): unknown[] {
+export function extractRowValues(
+  row: unknown,
+  keys: readonly string[] | null | undefined
+): unknown[] {
   if (isRowHashArray(row)) {
     return keys ? rowHashArrayMapByHeaders(row, keys) : rowHashArrayToValues(row);
   }
@@ -110,10 +113,33 @@ export function extractRowValues(row: unknown, keys: string[] | null | undefined
     return row;
   }
   if (row !== null && typeof row === "object") {
-    return keys ? keys.map(key => (row as Record<string, unknown>)[key]) : Object.values(row);
+    return keys ? keys.map(key => readField(row, key)) : Object.values(row);
   }
   // Primitive value: wrap in array
   return [row];
+}
+
+/**
+ * The value of `key` on a row object, or `undefined` when the row does not have it.
+ *
+ * Own properties are read, and so are properties of a class the row is an instance of (a
+ * getter), but nothing `Object.prototype` supplies: a missing `constructor` or `toString`
+ * field is empty, not `function Object() { [native code] }`.
+ */
+export function readField(row: object, key: string): unknown {
+  if (Object.hasOwn(row, key)) {
+    return (row as Record<string, unknown>)[key];
+  }
+  for (
+    let proto = Object.getPrototypeOf(row) as object | null;
+    proto !== null && proto !== Object.prototype;
+    proto = Object.getPrototypeOf(proto) as object | null
+  ) {
+    if (Object.hasOwn(proto, key)) {
+      return (row as Record<string, unknown>)[key];
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -158,7 +184,8 @@ export function deduplicateHeadersWithRenames(headers: HeaderArray): {
   // collides with a header that appears later in the row.
   const reservedHeaders = new Set<string>();
   const result: HeaderArray = [];
-  const renamedHeaders: Record<string, string> = {};
+  // No prototype, like the rows: `renamedHeaders["constructor"]` must not find `Object`.
+  const renamedHeaders: Record<string, string> = Object.create(null) as Record<string, string>;
 
   let hasRenames = false;
   let emptyHeaderCount = 0;
@@ -236,7 +263,7 @@ export function deduplicateHeadersWithRenames(headers: HeaderArray): {
  * ```
  */
 export function processColumns(
-  columns: (string | ColumnConfig)[] | undefined
+  columns: readonly (string | ColumnConfig)[] | undefined
 ): { keys: string[]; headers: string[] } | null {
   if (!columns || columns.length === 0) {
     return null;
@@ -292,4 +319,58 @@ export function isEmptyRow(row: string[], shouldSkipEmpty: boolean | "greedy"): 
  */
 export function hasAllEmptyValues(row: string[]): boolean {
   return isEmptyRow(row, true);
+}
+
+// =============================================================================
+// Checked public forms (`Csv.getRowValues`, …)
+// =============================================================================
+
+function checkArrayArgument(where: string, field: string, value: unknown): void {
+  check(s.array(s.unknown()), value, { where, field, error: argumentError });
+}
+
+/** `Csv.getRowValues`: the values of a `[key, value]` row, in order. */
+export function getRowValues<V = unknown>(row: RowHashArray<V>): V[] {
+  checkArrayArgument("Csv.getRowValues", "row", row);
+  return rowHashArrayToValues(row);
+}
+
+/** `Csv.getRowHeaders`: the keys of a `[key, value]` row, in order. */
+export function getRowHeaders(row: RowHashArray): string[] {
+  checkArrayArgument("Csv.getRowHeaders", "row", row);
+  return rowHashArrayToHeaders(row);
+}
+
+/** `Csv.getRowValuesByHeaders`: the values in `headers` order; `undefined` for a missing key. */
+export function getRowValuesByHeaders<V = unknown>(
+  row: RowHashArray<V>,
+  headers: readonly string[]
+): (V | undefined)[] {
+  checkArrayArgument("Csv.getRowValuesByHeaders", "row", row);
+  checkArrayArgument("Csv.getRowValuesByHeaders", "headers", headers);
+  return rowHashArrayMapByHeaders(row, headers);
+}
+
+/** `Csv.deduplicateHeaders`, refusing a value that is not an array. */
+export function deduplicateHeadersChecked(headers: HeaderArray): HeaderArray {
+  checkArrayArgument("Csv.deduplicateHeaders", "headers", headers);
+  return deduplicateHeaders(headers);
+}
+
+/** `Csv.deduplicateHeadersWithRenames`, refusing a value that is not an array. */
+export function deduplicateHeadersWithRenamesChecked(
+  headers: HeaderArray
+): ReturnType<typeof deduplicateHeadersWithRenames> {
+  checkArrayArgument("Csv.deduplicateHeadersWithRenames", "headers", headers);
+  return deduplicateHeadersWithRenames(headers);
+}
+
+/** `Csv.processColumns`, refusing a value that is neither an array nor `undefined`. */
+export function processColumnsChecked(
+  columns: readonly (string | ColumnConfig)[] | undefined
+): ReturnType<typeof processColumns> {
+  if (columns !== undefined) {
+    checkArrayArgument("Csv.processColumns", "columns", columns);
+  }
+  return processColumns(columns);
 }

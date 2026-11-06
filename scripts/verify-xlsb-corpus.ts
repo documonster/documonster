@@ -25,8 +25,11 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
-import { ExcelNotSupportedError, XlsbFormulaDecodeError } from "../src/modules/excel/errors.ts";
-import { Address, Cell, Row, Workbook, Worksheet } from "../src/modules/excel/index.ts";
+import {
+  ExcelUnsupportedFeatureError,
+  XlsbFormulaDecodeError
+} from "../src/modules/excel/errors.ts";
+import { Cell, Row, Workbook, Worksheet } from "../src/modules/excel/index.ts";
 import type { XlsbReadDiagnostics } from "../src/modules/excel/xlsb/read/package.ts";
 
 const CORPUS_DIR = "tmp/xlsb-corpus";
@@ -72,8 +75,10 @@ const PROBES: Readonly<Record<string, Probes>> = {
   },
   "cal-issue_182": {
     // A future function. The file stores it as `_xlfn.CONCAT`, reached through a defined name rather than an `Ftab`
-    // id — and the probe asserts the *unprefixed* spelling, because leaking `_xlfn.` to a caller would be the bug.
-    formulas: { "formula_vals!A2": 'CONCAT("A","b")', "formula_vals!A3": "ISERROR(1)" }
+    // id — and the probe asserts the *prefixed* spelling with the author's space (`PtgAttrSpace`), because that is
+    // the text Excel's XLSX holds for the same cell. The unprefixed `CONCAT(…)` this used to assert is a
+    // user-defined function to Excel: written to XLSX it opened as `#NAME?`.
+    formulas: { "formula_vals!A2": '_xlfn.CONCAT("A", "b")', "formula_vals!A3": "ISERROR(1)" }
   },
   "poi-comments": { comments: 4 },
   "poi-hyperlink": { hyperlinks: 1 },
@@ -115,7 +120,7 @@ function checkProbes(handle: Workbook.Handle, probes: Probes, label: string): st
     }
   }
   const sheetByName = new Map(
-    Workbook.getWorksheets(handle).map(sheet => [Worksheet.getName(sheet), sheet])
+    Workbook.listWorksheets(handle).map(sheet => [Worksheet.getName(sheet), sheet])
   );
   for (const [key, expected] of Object.entries(probes.values ?? {})) {
     const { sheet, address } = splitProbe(key);
@@ -180,9 +185,9 @@ function checkProbes(handle: Workbook.Handle, probes: Probes, label: string): st
  */
 function contentFingerprint(handle: Workbook.Handle): readonly string[] {
   const lines: string[] = [];
-  for (const sheet of Workbook.getWorksheets(handle)) {
+  for (const sheet of Workbook.listWorksheets(handle)) {
     lines.push(`sheet ${Worksheet.getName(sheet)}`);
-    // **`Worksheet.eachRow` + `Row.eachCell`, and the first version of this used neither.**
+    // **`Row.each` + `Row.eachAddress`, and the first version of this used neither.**
     //
     // It called `Worksheet.getRows(sheet)` with one argument. That function takes `(sheet, start, length)`, so `length`
     // was `undefined`, `start + length` was `NaN`, the loop body never ran and it returned `[]` — for every fixture, in
@@ -194,12 +199,8 @@ function contentFingerprint(handle: Workbook.Handle): readonly string[] {
     // empty strings and passed; the edited round trip compared an empty string against an empty string with `includes`
     // and passed. Measured after the fix: 7 cells for `cal-any_sheets`, 29 for `poi-sample`, 26 for `cal-issues` — all
     // of it previously invisible.
-    //
-    // The address is rebuilt from the column ordinal because that is what `Row.eachCell` hands over — its `cell`
-    // argument is the internal row-cell record, not something `Cell.getValue` accepts.
-    Worksheet.eachRow(sheet, row => {
-      Row.eachCell(sheet, row.number, (_cell, column) => {
-        const address = `${Address.encodeCol(column - 1)}${row.number}`;
+    Row.each(sheet, rowNumber => {
+      Row.eachAddress(sheet, rowNumber, address => {
         const value = Cell.getValue(sheet, address);
         if (value === undefined || value === null || value === "") {
           return;
@@ -223,7 +224,10 @@ function contentFingerprint(handle: Workbook.Handle): readonly string[] {
 /**
  * Differences an edited round trip is *expected* to show, by fixture, with the reason.
  *
- * **One entry, and it earned the shape by being the only thing left after four real defects were fixed.** The rebuild
+ * **One entry, and it earned the shape by being the only thing left after five real defects were fixed** — the fifth
+ * being `poi-bug66682`'s user-defined `unknownFunction()`, which used to come back as a future function
+ * (`UNKNOWNFUNCTION()`) and now reads and rebuilds as `_xludf.unknownFunction()`, the spelling Excel's XLSX gives a
+ * call through an empty defined name. The rebuild
  * check is otherwise exact in both directions, which is what makes an allowance affordable: anything not named here
  * still fails, including any other line of the same fixture.
  *
@@ -236,19 +240,6 @@ const EXPECTED_REBUILD_DIFFERENCES: Readonly<
     readonly { readonly was: string; readonly becomes: string; readonly why: string }[]
   >
 > = {
-  "poi-bug66682": [
-    {
-      was: '  test2!C9 {"formula":"unknownFunction()","result":{"error":"#NAME?"}} =unknownFunction()',
-      becomes:
-        '  test2!C9 {"formula":"UNKNOWNFUNCTION()","result":{"error":"#NAME?"}} =UNKNOWNFUNCTION()',
-      why:
-        "`unknownFunction` is a user-defined function, and this writer cannot tell one from a future function — so it " +
-        "writes an `_xlfn.` stub, upper-cased the way Excel spells a function name. Preserving the author's case was " +
-        "tried and reverted: the prefix already mis-encodes a UDF whatever case it carries, while writing " +
-        "`_xlfn.xlookup` for a lower-case `xlookup(` is a spelling Excel has never been observed to produce. The " +
-        "reasoning, and why the 448-function registry cannot be the discriminator, is in `futureFunctionStubName`."
-    }
-  ],
   "poi-testVarious": [
     {
       was: '  mySheet1!B14 {"formula":"COS(NA)","result":{"error":"#NAME?"}} =COS(NA)',
@@ -376,7 +367,7 @@ async function main(): Promise<void> {
     checks++;
     const edited = Workbook.create();
     await Workbook.read(edited, bytes);
-    const first = Workbook.getWorksheets(edited)[0];
+    const first = Workbook.listWorksheets(edited)[0];
     const editedSheet = first === undefined ? undefined : Worksheet.getName(first);
     if (first !== undefined) {
       Cell.setValue(first, PROBE_ADDRESS, PROBE_VALUE);
@@ -448,7 +439,7 @@ async function main(): Promise<void> {
     const xlsxLosses = await Workbook.toBuffer(handle, { format: "xlsx", validate: false }).then(
       () => [] as readonly string[],
       (cause: unknown) =>
-        cause instanceof ExcelNotSupportedError ? cause.items : Promise.reject(cause)
+        cause instanceof ExcelUnsupportedFeatureError ? cause.items : Promise.reject(cause)
     );
     const expectedXlsxLosses = EXPECTED_XLSX_LOSSES[key] ?? [];
     if (xlsxLosses.join("\n") !== expectedXlsxLosses.join("\n")) {
@@ -498,14 +489,14 @@ async function main(): Promise<void> {
       );
     }
     const leftovers: string[] = [];
-    for (const sheet of Workbook.getWorksheets(cachedHandle)) {
-      for (const row of Worksheet.getRows(sheet)) {
-        for (const cell of Row.getCells(row)) {
-          if (Cell.getFormula(cell) !== undefined) {
-            leftovers.push(Cell.getFullAddress(cell));
+    for (const sheet of Workbook.listWorksheets(cachedHandle)) {
+      Row.each(sheet, rowNumber => {
+        Row.eachAddress(sheet, rowNumber, address => {
+          if (Cell.getFormula(sheet, address) !== undefined) {
+            leftovers.push(`${Worksheet.getName(sheet)}!${address}`);
           }
-        }
-      }
+        });
+      });
     }
     if (leftovers.length > 0) {
       failures.push(

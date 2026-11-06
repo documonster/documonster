@@ -5,7 +5,7 @@
 Mermaid diagram text to SVG, pixels, or a PDF page. Twenty-one diagram types, zero dependencies.
 
 ```typescript
-import { mermaidToSvg, mermaidToDrawList, parseMermaid } from "documonster/mermaid";
+import { Mermaid } from "documonster/mermaid";
 ```
 
 ## Features
@@ -14,7 +14,7 @@ import { mermaidToSvg, mermaidToDrawList, parseMermaid } from "documonster/merma
 - **No browser, no headless Chrome** — Layout and rendering are pure TypeScript; there is nothing to install and nothing to launch
 - **Every backend for free** — The module produces a `DrawList` and implements no renderer, so markup, pixels and PDF pages all come from the same output
 - **Layered layout** — Rank, order to reduce crossings, straighten, route: the same algorithm family Mermaid itself uses
-- **Stop at any pass** — `parseMermaid` for the syntax tree, `layoutFlowchart` for coordinates, `mermaidToDrawList` for the picture
+- **Stop at any pass** — `Mermaid.parse` for the syntax tree, `Mermaid.layoutGraph` for coordinates, `Mermaid.toDrawList` for the picture
 - **Themeable** — Mermaid's own default palette, token for token, with per-token overrides
 - **Zero Dependencies** — Pure TypeScript, no external packages
 - **Cross-Platform** — Same API in Node.js and browsers
@@ -24,12 +24,15 @@ import { mermaidToSvg, mermaidToDrawList, parseMermaid } from "documonster/merma
 ## Quick Start
 
 ```typescript
-import { mermaidToSvg } from "documonster/mermaid";
+import { Mermaid } from "documonster/mermaid";
 
-const svg = mermaidToSvg(`flowchart TD
+const svg = Mermaid.toSvg(`flowchart TD
   A[Start] --> B{Ready?}
   B -->|yes| C[Ship it]
   B -->|no| A`);
+
+// A PNG file directly, with the code points no font could draw
+const { png, uncoveredCodePoints } = Mermaid.toPng("flowchart LR\n  A --> B", { scale: 2 });
 ```
 
 ### Any backend, from the same list
@@ -37,28 +40,28 @@ const svg = mermaidToSvg(`flowchart TD
 The module is a _producer_: it stops at the display list. Nothing in it knows what SVG or a PDF page is, which is exactly what lets one implementation serve every output.
 
 ```typescript
-import { mermaidToDrawList } from "documonster/mermaid";
-import { rasterizeToRgba, toSvg } from "documonster/draw";
+import { Mermaid } from "documonster/mermaid";
+import { Draw } from "documonster/draw";
 
-const list = mermaidToDrawList('pie title Split\n "A" : 60\n "B" : 40');
+const list = Mermaid.toDrawList('pie title Split\n "A" : 60\n "B" : 40');
 
-const svg = toSvg(list); // markup
-const pixels = rasterizeToRgba(list, { scale: 2 }); // RGBA
+const svg = Draw.toSvg(list); // markup
+const pixels = Draw.toRgba(list, { scale: 2 }); // RGBA
 ```
 
-A diagram whose labels are not Latin needs a font the rasteriser can find. `rasterizeToRgba` discovers one on Node and reports what it could not draw; in a browser you have to supply the bytes. See [the `draw` README](../draw/README.md#fonts-and-how-cjk-gets-drawn).
+A diagram whose labels are not Latin needs a font the rasteriser can find. `Draw.toRgba` discovers one on Node and reports what it could not draw; in a browser you have to supply the bytes. See [the `draw` README](../draw/README.md#fonts-and-how-cjk-gets-drawn).
 
 ```typescript
-import { renderDrawList } from "documonster/draw";
-import { Pdf, createPdfDrawSurface } from "documonster/pdf";
+import { Draw } from "documonster/draw";
+import { Pdf } from "documonster/pdf";
 
 const doc = new Pdf.Builder();
 const page = doc.addPage({ width: 595, height: 842 });
-renderDrawList(
+Draw.render(
   list,
-  createPdfDrawSurface(page, { x: 72, y: 500, width: list.width, height: list.height })
+  Pdf.createDrawSurface(page, { x: 72, y: 500, width: list.width, height: list.height })
 );
-const bytes = await doc.build();
+const bytes = await doc.toBuffer();
 ```
 
 ---
@@ -75,7 +78,7 @@ Twenty-one types, but far fewer layouts — because most of them are the same pi
 
 `sequenceDiagram` · `gantt` · `timeline` · `journey` · `kanban` · `mindmap` · `gitGraph` · `quadrantChart` · `xychart` · `radar` · `sankey` · `packet` · `block` · `pie`
 
-A box that sizes itself — a class compartment stack, a C4 element with its technology line — tells the layout its size through `LayoutOptions.measureNode`.
+A box that sizes itself — a class compartment stack, a C4 element with its technology line — tells the layout its size through `MermaidLayoutOptions.measureNode`.
 
 ---
 
@@ -84,19 +87,19 @@ A box that sizes itself — a class compartment stack, a C4 element with its tec
 The parser, the layout and the renderer are separate, and a caller can stop after any of them.
 
 ```typescript
-import { parseMermaid, layoutFlowchart, mermaidToDrawList } from "documonster/mermaid";
+import { Mermaid } from "documonster/mermaid";
 
 // 1. Text → syntax tree. Says nothing about geometry.
-const diagram = parseMermaid("flowchart LR\n  A --> B");
+const diagram = Mermaid.parse("flowchart LR\n  A --> B");
 
 // 2. Tree → coordinates, for the graph-shaped diagrams.
 if (diagram.kind === "flowchart") {
-  const layout = layoutFlowchart(diagram, { rankGap: 60 });
+  const layout = Mermaid.layoutGraph(diagram, { rankGap: 60 });
   console.log(layout.width, layout.height, layout.nodes, layout.edges);
 }
 
 // 3. Tree (or source) → display list.
-const list = mermaidToDrawList(diagram);
+const list = Mermaid.toDrawList(diagram);
 ```
 
 Inspecting the tree or re-using the positions are real things to want, which is why both earlier passes are public rather than internal steps.
@@ -105,11 +108,11 @@ Inspecting the tree or re-using the positions are real things to want, which is 
 
 ## Options
 
-`mermaidToSvg` and `mermaidToDrawList` take `MermaidRenderOptions`, which extends `LayoutOptions`:
+`Mermaid.toSvg` and `Mermaid.toDrawList` take `MermaidRenderOptions`, which extends `MermaidLayoutOptions`:
 
 | Option          | Type                          | Description                                                       |
 | --------------- | ----------------------------- | ----------------------------------------------------------------- |
-| `theme`         | `ThemeOptions`                | Colour overrides; anything omitted keeps the default              |
+| `theme`         | `MermaidThemeOptions`         | Colour overrides; anything omitted keeps the default              |
 | `background`    | `string`                      | Background fill. `"transparent"` (default) leaves no backdrop     |
 | `fontSize`      | `number`                      | Label size                                                        |
 | `fontFamily`    | `string`                      | Label family                                                      |
@@ -119,12 +122,14 @@ Inspecting the tree or re-using the positions are real things to want, which is 
 | `padding`       | `number`                      | Margin around the diagram                                         |
 | `measureNode`   | `(node) => size \| undefined` | Size a node yourself, for a box design this module cannot measure |
 
-The default background is transparent on purpose: a caller compositing the diagram onto something else gets what they asked for rather than an opaque rectangle.
+The backdrop is `background` (or `theme.background`, which `Mermaid.resolveTheme` takes; `background` wins when both are given). Its default is transparent on purpose: a caller compositing the diagram onto something else gets what they asked for rather than an opaque rectangle.
+
+Colours are CSS: `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `hsl()`, the named colours (`white`, `orange`, …) and `transparent`. A theme token this module does not have (Mermaid's own `primaryColor`, say) is refused with a `MermaidArgumentError` rather than ignored, and so is a colour none of those forms reads (`"zz"`, which used to be drawn black) and an option that has no reading — a `NaN` font size, a negative gap.
 
 ### Theming
 
 ```typescript
-const svg = mermaidToSvg(source, {
+const svg = Mermaid.toSvg(source, {
   theme: {
     nodeFill: "#eef2ff",
     nodeStroke: "#4f46e5",
@@ -143,18 +148,42 @@ Tokens omitted fall back to Mermaid's own `base` theme, taken from the values it
 ## Errors
 
 ```typescript
-import { mermaidToSvg, MermaidSyntaxError } from "documonster/mermaid";
+import { Mermaid, MermaidParseError } from "documonster/mermaid";
 
 try {
-  mermaidToSvg("nonsenseDiagram\n  A --> B");
+  Mermaid.toSvg("nonsenseDiagram\n  A --> B");
 } catch (error) {
-  if (error instanceof MermaidSyntaxError) {
-    console.log(error.message);
+  if (error instanceof MermaidParseError) {
+    console.log(error.message, error.line, error.column); // … 1 1
   }
 }
 ```
 
-`MermaidSyntaxError` is thrown when the source names no supported diagram type.
+`MermaidParseError` is thrown when the source names no supported diagram type; `line` and
+`column` (1-based) locate the statement that names it, and are `undefined` for an empty
+source. It is the `*ParseError` every module's parser throws (`XmlParseError`,
+`MarkdownParseError`, …). A wrong
+argument or option — source that is not text, a malformed options object, a theme colour that
+cannot be read, a value that is not a diagram — throws `MermaidArgumentError`. Its message
+starts with the call (`Mermaid.toSvg: …`), and its `field` is the path from that call's
+parameter name (`options.theme.nodeFill`, `options.fontSize`, `source`). Both extend `MermaidError`, the base class of every
+error this module throws (itself a `BaseError`), and `isMermaidError(err)` is the type guard
+for it.
+
+Inside a supported diagram the parser is lenient: a statement it cannot read is left out
+rather than refused. It is not left out silently — the parsed diagram lists it, with its
+position, in `skipped`:
+
+```typescript
+const diagram = Mermaid.parse("flowchart TD\n  A --> B\n  B -->");
+console.log(diagram.skipped); // [{ text: "B -->", line: 3, column: 3 }]
+const svg = Mermaid.toSvg(diagram);
+```
+
+`skipped` is absent when every statement was understood. Statements that are understood but
+not drawn (`style`, `click`, accessibility titles) are not listed; ones the renderer does not
+draw at all (a git `cherry-pick`) are. A Gantt task whose date does not exist (`2024-13-45`)
+is listed and not drawn, rather than placed somewhere else.
 
 ---
 

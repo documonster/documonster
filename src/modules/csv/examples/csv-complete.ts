@@ -276,7 +276,7 @@ Alice,30,New York
 Bob,25,London
 Carol,35,Tokyo`;
 
-const parserStream = Csv.createParserStream({ headers: true });
+const parserStream = new Csv.ParserStream({ headers: true });
 const rows15: Record<string, string>[] = [];
 
 parserStream.on("data", (row: Record<string, string>) => rows15.push(row));
@@ -296,7 +296,7 @@ console.log("First row:", rows15[0]);
 console.log("\n=== 16. Streaming Formatter ===");
 
 const outputPath = path.join(outDir, "streamed-output.csv");
-const formatterStream = Csv.createFormatterStream({
+const formatterStream = new Csv.FormatterStream({
   headers: true,
   columns: ["id", "name", "value"]
 });
@@ -358,15 +358,15 @@ console.log("Fields:", result18.meta.fields?.slice(0, 3));
 console.log("\n=== 19. Number Formatting ===");
 
 // European format (comma as decimal separator)
-const eurFormatted = Csv.formatNumber(1234.56, ",");
+const eurFormatted = Csv.formatNumber(1234.56, { decimalSeparator: "," });
 console.log("European:", eurFormatted); // "1234,56"
 
 // Parse back
-const eurParsed = Csv.parseNumber("1234,56", ",");
+const eurParsed = Csv.parseNumber("1234,56", { decimalSeparator: "," });
 console.log("Parsed:", eurParsed); // 1234.56
 
 // US format (period as decimal separator) — default
-const usFormatted = Csv.formatNumber(1234.56, ".");
+const usFormatted = Csv.formatNumber(1234.56);
 console.log("US:", usFormatted); // "1234.56"
 
 // =============================================================================

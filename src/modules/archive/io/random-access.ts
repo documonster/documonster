@@ -28,6 +28,9 @@ export interface RandomAccessReader {
    * @param start - Start offset (inclusive, 0-based)
    * @param end - End offset (exclusive)
    * @returns The requested bytes
+   * @throws {RangeError} The library's readers reject a `start` or `end` outside the source
+   *   with a `RangeError` naming it, and one that is not an integer with an
+   *   `ArchiveArgumentError`; a custom reader should do the same.
    */
   read(start: number, end: number): Promise<Uint8Array>;
 
@@ -95,8 +98,21 @@ export interface HttpRangeReaderStats {
 /**
  * Error thrown when the server doesn't support Range requests.
  */
-export { RangeNotSupportedError, HttpRangeError } from "@archive/core/errors";
-import { RangeNotSupportedError, HttpRangeError, ArchiveError } from "@archive/core/errors";
+export { ArchiveRangeNotSupportedError, ArchiveHttpRangeError } from "@archive/core/errors";
+import { checkArchiveArgument } from "@archive/core/arguments";
+import {
+  ArchiveArgumentError,
+  ArchiveRangeNotSupportedError,
+  ArchiveHttpRangeError,
+  ArchiveError
+} from "@archive/core/errors";
+import {
+  archiveBytesToUint8Array,
+  isArchiveBytes,
+  type ArchiveBytes
+} from "@archive/io/archive-source";
+import { asPlainBytes } from "@utils/binary";
+import { s } from "@utils/schema";
 
 /**
  * Parse total file size from Content-Range header.
@@ -177,10 +193,16 @@ export class HttpRangeReader implements RandomAccessReader {
    * @param options - Reader options
    * @returns A configured HttpRangeReader instance
    *
-   * @throws {RangeNotSupportedError} If the server doesn't support Range requests
-   * @throws {HttpRangeError} If the HTTP request fails
+   * @throws {ArchiveRangeNotSupportedError} If the server doesn't support Range requests
+   * @throws {ArchiveHttpRangeError} If the HTTP request fails
    */
   static async open(url: string, options: HttpRangeReaderOptions = {}): Promise<HttpRangeReader> {
+    checkArchiveArgument(
+      s.union([s.string(), s.builtin<URL>("URL")], { expected: "a string" }),
+      url,
+      "Archive.HttpRangeReader.open",
+      "url"
+    );
     const fetchFn = options.fetch ?? globalThis.fetch;
     const headers = options.headers ?? {};
     const credentials = options.credentials ?? "same-origin";
@@ -212,7 +234,7 @@ export class HttpRangeReader implements RandomAccessReader {
         // 206: Range supported
         // 200: server ignored Range but reader can still work (will cache on first read)
         if (response.status !== 206 && response.status !== 200) {
-          throw new RangeNotSupportedError(url);
+          throw new ArchiveRangeNotSupportedError(url);
         }
       }
       const instance = new HttpRangeReader(url, options.size, options);
@@ -230,7 +252,7 @@ export class HttpRangeReader implements RandomAccessReader {
     });
 
     if (!headResponse.ok) {
-      throw new HttpRangeError(url, headResponse.status, headResponse.statusText);
+      throw new ArchiveHttpRangeError(url, headResponse.status, headResponse.statusText);
     }
 
     // Check if server supports Range requests
@@ -249,7 +271,7 @@ export class HttpRangeReader implements RandomAccessReader {
       });
 
       if (testResponse.status !== 206 && testResponse.status !== 200) {
-        throw new RangeNotSupportedError(url);
+        throw new ArchiveRangeNotSupportedError(url);
       }
     }
 
@@ -300,7 +322,7 @@ export class HttpRangeReader implements RandomAccessReader {
           });
 
           if (!full.ok) {
-            throw new HttpRangeError(url, full.status, full.statusText);
+            throw new ArchiveHttpRangeError(url, full.status, full.statusText);
           }
 
           const data = new Uint8Array(await full.arrayBuffer());
@@ -335,15 +357,15 @@ export class HttpRangeReader implements RandomAccessReader {
    * @param end - End offset (exclusive)
    * @returns The requested bytes
    *
-   * @throws {HttpRangeError} If the HTTP request fails
+   * @throws {ArchiveArgumentError} If `start` or `end` is not an integer (`field` names it)
+   * @throws {RangeError} If `start` or `end` is outside the file (the message names it)
+   * @throws {ArchiveHttpRangeError} If the HTTP request fails
    */
-  async read(start: number, end: number): Promise<Uint8Array> {
-    if (start < 0 || end > this._size || start >= end) {
-      throw new RangeError(`Invalid range [${start}, ${end}) for file of size ${this._size}`);
-    }
+  async read(start: number, end: number): Promise<Uint8Array<ArrayBuffer>> {
+    checkRange("Archive.HttpRangeReader#read", start, end, this._size);
 
     if (this._fullData) {
-      return this._fullData.subarray(start, end);
+      return asPlainBytes(this._fullData.subarray(start, end));
     }
 
     // HTTP Range header uses inclusive end
@@ -374,7 +396,7 @@ export class HttpRangeReader implements RandomAccessReader {
     }
 
     if (response.status !== 206) {
-      throw new HttpRangeError(this.url, response.status, response.statusText);
+      throw new ArchiveHttpRangeError(this.url, response.status, response.statusText);
     }
 
     const data = new Uint8Array(await response.arrayBuffer());
@@ -408,20 +430,61 @@ export class HttpRangeReader implements RandomAccessReader {
 }
 
 /**
+ * A `[start, end)` byte range of a source of `size` bytes. An offset that is not one — not a
+ * number, `NaN`, a fraction, `Infinity` — is an `ArchiveArgumentError` naming it; an offset
+ * outside the source is a `RangeError` naming it, as Node's and the Web's checked byte APIs
+ * (`Buffer#readUInt8`, `DataView`, `TypedArray#set`) throw for one.
+ */
+function checkRange(where: string, start: number, end: number, size: number): void {
+  for (const [field, value] of [
+    ["start", start],
+    ["end", end]
+  ] as const) {
+    if (!Number.isInteger(value)) {
+      throw new ArchiveArgumentError(
+        field,
+        `${where}: ${field} must be an integer byte offset, got ${
+          typeof value === "number" ? String(value) : value === null ? "null" : typeof value
+        }`
+      );
+    }
+  }
+  if (start < 0 || start >= size) {
+    throw new RangeError(
+      `${where}: start ${start} is out of range: it must be >= 0 and < ${size} (the source size)`
+    );
+  }
+  if (end <= start || end > size) {
+    throw new RangeError(
+      `${where}: end ${end} is out of range: it must be > start (${start}) and <= ${size} (the source size)`
+    );
+  }
+}
+
+/**
  * In-memory random access reader.
  * Wraps a Uint8Array to provide the RandomAccessReader interface.
  * Useful for testing and as a fallback.
+ *
+ * Its `read(start, end)` rejects a `start` or `end` that is not an integer with an
+ * `ArchiveArgumentError` naming it, and one outside the data with a `RangeError` naming it.
+ *
+ * @throws {ArchiveArgumentError} If `data` is not an `ArrayBufferView` or `ArrayBuffer`
  */
-export function createBufferReader(data: Uint8Array | ArrayBuffer): RandomAccessReader {
-  const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+export function createBufferReader(data: ArchiveBytes): RandomAccessReader {
+  checkArchiveArgument(
+    s.custom(isArchiveBytes, "bytes (an ArrayBufferView or ArrayBuffer)"),
+    data,
+    "Archive.createBufferReader",
+    "data"
+  );
+  const bytes = archiveBytesToUint8Array(data);
   return {
     get size(): number {
       return bytes.length;
     },
     async read(start: number, end: number): Promise<Uint8Array> {
-      if (start < 0 || end > bytes.length || start >= end) {
-        throw new RangeError(`Invalid range [${start}, ${end}) for buffer of size ${bytes.length}`);
-      }
+      checkRange("createBufferReader().read", start, end, bytes.length);
       return bytes.subarray(start, end);
     },
     async close(): Promise<void> {

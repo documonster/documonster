@@ -17,82 +17,22 @@
  * @see ISO 32000-2:2020 §12.8 — Digital Signatures in PDF
  */
 
+import {
+  TAG_INTEGER,
+  TAG_NULL,
+  TAG_OCTET_STRING,
+  TAG_OID,
+  TAG_SEQUENCE,
+  TAG_SET,
+  asn1Decode,
+  asn1Parse
+} from "@pdf/core/asn1";
+import type { Asn1Node } from "@pdf/core/asn1";
+import { PdfSignaturePlaceholderMissingError } from "@pdf/errors";
 import { sha256, md5, hash, rsaVerify, rsaSign } from "@utils/crypto";
 
-// =============================================================================
-// ASN.1 DER — Types
-// =============================================================================
-
-/** ASN.1 tag classes. */
-const ASN1_CONSTRUCTED = 0x20;
-
-/** Common ASN.1 tags. */
-const TAG_INTEGER = 0x02;
-const TAG_OCTET_STRING = 0x04;
-const TAG_NULL = 0x05;
-const TAG_OID = 0x06;
-const TAG_SEQUENCE = 0x30;
-const TAG_SET = 0x31;
-
-/** Parsed ASN.1 node. */
-export interface Asn1Node {
-  tag: number;
-  /** Raw bytes of the value (for primitive types). */
-  bytes: Uint8Array;
-  /** Child nodes (for constructed types). */
-  children: Asn1Node[];
-}
-
-// =============================================================================
-// ASN.1 DER — Decode
-// =============================================================================
-
-/**
- * Decode a single ASN.1 DER element from `data` starting at `offset`.
- * Returns the parsed node and the offset after the element.
- */
-function asn1Decode(data: Uint8Array, offset: number): { node: Asn1Node; end: number } {
-  if (offset >= data.length) {
-    throw new Error("ASN.1: unexpected end of data");
-  }
-
-  const tag = data[offset++];
-  let length = data[offset++];
-
-  // Long-form length
-  if (length & 0x80) {
-    const numBytes = length & 0x7f;
-    length = 0;
-    for (let i = 0; i < numBytes; i++) {
-      length = (length << 8) | data[offset++];
-    }
-  }
-
-  const valueStart = offset;
-  const valueEnd = offset + length;
-  const bytes = data.subarray(valueStart, valueEnd);
-
-  const children: Asn1Node[] = [];
-  const isConstructed = (tag & ASN1_CONSTRUCTED) !== 0;
-
-  if (isConstructed) {
-    let childOffset = valueStart;
-    while (childOffset < valueEnd) {
-      const result = asn1Decode(data, childOffset);
-      children.push(result.node);
-      childOffset = result.end;
-    }
-  }
-
-  return { node: { tag, bytes, children }, end: valueEnd };
-}
-
-/**
- * Parse ASN.1 DER data from the root.
- */
-export function asn1Parse(data: Uint8Array): Asn1Node {
-  return asn1Decode(data, 0).node;
-}
+export { asn1Parse } from "@pdf/core/asn1";
+export type { Asn1Node } from "@pdf/core/asn1";
 
 /**
  * Parse all ASN.1 DER elements from a buffer (for SEQUENCE content with multiple children).
@@ -295,13 +235,200 @@ function extractSpkiFromCert(certDer: Uint8Array): Uint8Array {
   return asn1Encode(spki.tag, spki.bytes);
 }
 
+/** The TBSCertificate fields this module reads, by name. */
+interface TbsFields {
+  serial: Asn1Node;
+  issuer: Asn1Node;
+  validity: Asn1Node;
+  subject: Asn1Node;
+  extensions: Asn1Node | undefined;
+}
+
+/** Split a certificate's TBSCertificate into the fields this module reads. */
+function tbsFields(certDer: Uint8Array): TbsFields | undefined {
+  const tbs = asn1Parse(certDer).children[0];
+  if (!tbs) {
+    return undefined;
+  }
+  // [0] version?, serial, signature, issuer, validity, subject, spki, …, [3] extensions?
+  const at = tbs.children.length > 0 && (tbs.children[0].tag & 0xe0) === 0xa0 ? 1 : 0;
+  const [serial, , issuer, validity, subject] = tbs.children.slice(at);
+  if (!serial || !issuer || !validity || !subject) {
+    return undefined;
+  }
+  const extensions = tbs.children.find(child => child.tag === 0xa3);
+  return { serial, issuer, validity, subject, extensions };
+}
+
+/**
+ * Decode an X.520 `DirectoryString` (or one of the legacy string types a certificate may
+ * use instead) to text.
+ */
+function decodeDirectoryString(node: Asn1Node): string {
+  const bytes = node.bytes;
+  switch (node.tag) {
+    case 0x1e: {
+      // BMPString — UTF-16BE
+      let out = "";
+      for (let i = 0; i + 1 < bytes.length; i += 2) {
+        out += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+      }
+      return out;
+    }
+    case 0x1c: {
+      // UniversalString — UTF-32BE
+      let out = "";
+      for (let i = 0; i + 3 < bytes.length; i += 4) {
+        const cp =
+          ((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]) >>> 0;
+        out += cp <= 0x10ffff ? String.fromCodePoint(cp) : "\ufffd";
+      }
+      return out;
+    }
+    case 0x14: // TeletexString (T61) — in practice Latin-1
+      return new TextDecoder("latin1").decode(bytes);
+    default:
+      // UTF8String, PrintableString, IA5String, VisibleString
+      return new TextDecoder().decode(bytes);
+  }
+}
+
+/**
+ * The subject common name (`CN`, OID 2.5.4.3) of an X.509 certificate, or `undefined`
+ * when the certificate has none or cannot be read.
+ */
+export function certificateCommonName(certDer: Uint8Array): string | undefined {
+  try {
+    const subject = tbsFields(certDer)?.subject;
+    if (!subject || subject.tag !== TAG_SEQUENCE) {
+      return undefined;
+    }
+    for (const rdn of subject.children) {
+      for (const attribute of rdn.children) {
+        const [oid, value] = attribute.children;
+        if (oid && value && oid.tag === TAG_OID && decodeOid(oid.bytes) === "2.5.4.3") {
+          return decodeDirectoryString(value);
+        }
+      }
+    }
+  } catch {
+    // An unreadable certificate has no name to report.
+  }
+  return undefined;
+}
+
+/** Parse an ASN.1 `UTCTime` or `GeneralizedTime` (UTC forms only). */
+function decodeAsn1Time(node: Asn1Node): Date | undefined {
+  const text = new TextDecoder("latin1").decode(node.bytes);
+  const match =
+    node.tag === 0x17
+      ? /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?Z$/.exec(text)
+      : node.tag === 0x18
+        ? /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?(?:\.\d+)?Z$/.exec(text)
+        : null;
+  if (!match) {
+    return undefined;
+  }
+  let year = Number(match[1]);
+  if (node.tag === 0x17) {
+    // RFC 5280 §4.1.2.5.1: 50–99 → 19xx, 00–49 → 20xx
+    year += year >= 50 ? 1900 : 2000;
+  }
+  const date = new Date(
+    Date.UTC(
+      year,
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6] ?? 0)
+    )
+  );
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+/**
+ * The validity period (`notBefore`, `notAfter`) of an X.509 certificate, or `undefined`
+ * when it cannot be read.
+ */
+export function certificateValidity(
+  certDer: Uint8Array
+): { notBefore: Date; notAfter: Date } | undefined {
+  try {
+    const validity = tbsFields(certDer)?.validity;
+    const [from, to] = validity?.children ?? [];
+    const notBefore = from && decodeAsn1Time(from);
+    const notAfter = to && decodeAsn1Time(to);
+    return notBefore && notAfter ? { notBefore, notAfter } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The `subjectKeyIdentifier` extension (OID 2.5.29.14) of a certificate. */
+function subjectKeyIdentifier(fields: TbsFields): Uint8Array | undefined {
+  for (const extension of fields.extensions?.children[0]?.children ?? []) {
+    const [oid] = extension.children;
+    const value = extension.children[extension.children.length - 1];
+    if (oid?.tag === TAG_OID && decodeOid(oid.bytes) === "2.5.29.14" && value) {
+      const inner = asn1Parse(value.bytes);
+      return inner.tag === TAG_OCTET_STRING ? inner.bytes : undefined;
+    }
+  }
+  return undefined;
+}
+
+function sameNode(a: Asn1Node, b: Asn1Node): boolean {
+  return a.tag === b.tag && bytesEqual(a.bytes, b.bytes);
+}
+
+/**
+ * The certificate a SignerInfo's `sid` names: by issuer and serial number, or by
+ * subject key identifier (RFC 5652 §5.3). `undefined` when no embedded certificate
+ * matches — the signature then names a key the file does not carry.
+ */
+function findSignerCertificate(certificates: Uint8Array[], sid: Asn1Node): Uint8Array | undefined {
+  for (const certificate of certificates) {
+    let fields: TbsFields | undefined;
+    try {
+      fields = tbsFields(certificate);
+    } catch {
+      continue;
+    }
+    if (!fields) {
+      continue;
+    }
+    if (sid.tag === TAG_SEQUENCE) {
+      const [issuer, serial] = sid.children;
+      if (issuer && serial && sameNode(issuer, fields.issuer) && sameNode(serial, fields.serial)) {
+        return certificate;
+      }
+    } else if (sid.tag === 0x80) {
+      let ski: Uint8Array | undefined;
+      try {
+        ski = subjectKeyIdentifier(fields);
+      } catch {
+        ski = undefined;
+      }
+      if (ski && bytesEqual(ski, sid.bytes)) {
+        return certificate;
+      }
+    }
+  }
+  return undefined;
+}
+
 // =============================================================================
 // PKCS#7 / CMS SignedData — Parse
 // =============================================================================
 
 /** Parsed CMS SignedData info for verification. */
 export interface CmsSignedData {
-  /** The signer's certificate (DER). */
+  /**
+   * The signer's certificate (DER): the embedded certificate the first SignerInfo names
+   * by issuer and serial number or by subject key identifier — not merely the first
+   * certificate in the set, which may belong to an issuer.
+   */
   certificate: Uint8Array;
   /** The signature value. */
   signature: Uint8Array;
@@ -316,6 +443,8 @@ export interface CmsSignedData {
 /**
  * Parse a PKCS#7 / CMS SignedData structure from DER bytes.
  * Extracts the first signer's info for verification.
+ *
+ * @throws when no embedded certificate matches the signer's identifier.
  */
 export function parseCmsSignedData(derBytes: Uint8Array): CmsSignedData {
   const root = asn1Parse(derBytes);
@@ -342,18 +471,18 @@ export function parseCmsSignedData(derBytes: Uint8Array): CmsSignedData {
   const children = signedData.children;
 
   // Find certificates [0] IMPLICIT
-  let certificate: Uint8Array | null = null;
+  const certificates: Uint8Array[] = [];
   for (const child of children) {
     if ((child.tag & 0xf0) === 0xa0 && (child.tag & 0x0f) === 0) {
-      // [0] certificates — first certificate
-      if (child.children.length > 0) {
-        const certNode = child.children[0];
-        certificate = asn1Encode(certNode.tag, certNode.bytes);
+      for (const certNode of child.children) {
+        if (certNode.tag === TAG_SEQUENCE) {
+          certificates.push(asn1Encode(certNode.tag, certNode.bytes));
+        }
       }
       break;
     }
   }
-  if (!certificate) {
+  if (certificates.length === 0) {
     throw new Error("PKCS#7: no certificate found");
   }
 
@@ -372,6 +501,12 @@ export function parseCmsSignedData(derBytes: Uint8Array): CmsSignedData {
   const signerInfo = signerInfosSet.children[0];
   // SignerInfo: version, sid, digestAlgorithm, [0] signedAttrs, signatureAlgorithm, signature
   const siChildren = signerInfo.children;
+
+  const sid = siChildren[1];
+  const certificate = sid ? findSignerCertificate(certificates, sid) : undefined;
+  if (!certificate) {
+    throw new Error("PKCS#7: no embedded certificate matches the signer identifier");
+  }
 
   // digestAlgorithm
   const digestAlgSeq = siChildren[2];
@@ -517,6 +652,22 @@ export async function buildCmsSignedData(options: SignOptions): Promise<Uint8Arr
 // =============================================================================
 
 /** Result of verifying a PDF signature. */
+/**
+ * What `Pdf.Signature.verify` reports for one signature — the same field names as
+ * `PdfSignatureReport`.
+ */
+export interface PdfSignatureCheck {
+  /** Whether the signature is cryptographically intact over the given byte ranges. */
+  intact: boolean;
+  /** Whether the signed byte ranges cover the entire file (no unsigned gaps). */
+  coversWholeFile: boolean;
+  /** Digest algorithm OID the signature uses; empty when it could not be read. */
+  digestAlgorithm: string;
+  /** Why the signature is not {@link intact}, when it is not. */
+  failure?: string;
+}
+
+/** What the deprecated `Pdf.verifySignature` returns; see {@link PdfSignatureCheck}. */
 export interface SignatureVerificationResult {
   /** Whether the signature is cryptographically valid. */
   valid: boolean;
@@ -540,9 +691,27 @@ export async function verifyPdfSignature(
   signatureHex: string,
   byteRange: [number, number, number, number]
 ): Promise<SignatureVerificationResult> {
+  let sigBytes: Uint8Array;
   try {
-    // Decode PKCS#7 from hex
-    const sigBytes = hexToBytes(signatureHex);
+    sigBytes = hexToBytes(signatureHex);
+  } catch (err) {
+    return {
+      valid: false,
+      coversWholeFile: false,
+      digestAlgorithm: "",
+      reason: `Signature verification error: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  return verifyPdfSignatureBytes(pdfData, sigBytes, byteRange);
+}
+
+/** {@link verifyPdfSignature} for a signature already decoded from hex. */
+export async function verifyPdfSignatureBytes(
+  pdfData: Uint8Array,
+  sigBytes: Uint8Array,
+  byteRange: [number, number, number, number]
+): Promise<SignatureVerificationResult> {
+  try {
     const cms = parseCmsSignedData(sigBytes);
 
     // Extract the signed byte ranges from the PDF
@@ -636,6 +805,14 @@ export function buildSignatureDictPlaceholder(options?: {
   return { dictString: dict, placeholder };
 }
 
+/** Signing material for `Pdf.Signature.fillPlaceholder`. */
+export interface SignPdfOptions {
+  /** DER-encoded X.509 certificate. */
+  certificate: Uint8Array;
+  /** DER-encoded PKCS#8 private key. */
+  privateKey: Uint8Array;
+}
+
 /**
  * Patch a PDF with a real signature after the /ByteRange placeholder has been written.
  *
@@ -654,7 +831,9 @@ export async function signPdf(
   // Find /ByteRange first — this uniquely identifies the signature dictionary
   const byteRangePattern = findPattern(result, "/ByteRange [");
   if (byteRangePattern === -1) {
-    throw new Error("signPdf: /ByteRange placeholder not found");
+    throw new PdfSignaturePlaceholderMissingError(
+      "The PDF has no signature placeholder: no /ByteRange [...] was found."
+    );
   }
 
   // Search for /Contents <hex> near /ByteRange (within the same object, search backwards)
@@ -677,7 +856,9 @@ export async function signPdf(
     }
   }
   if (contentsPattern === -1) {
-    throw new Error("signPdf: /Contents placeholder not found near /ByteRange");
+    throw new PdfSignaturePlaceholderMissingError(
+      "The PDF has no signature placeholder: no /Contents <...> was found near its /ByteRange."
+    );
   }
 
   const hexStart = contentsPattern + "/Contents <".length;

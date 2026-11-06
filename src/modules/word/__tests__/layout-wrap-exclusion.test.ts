@@ -58,11 +58,12 @@ describe("layoutDocumentFull — square wrap exclusion", () => {
     const layout = layoutDocumentFull(doc);
     const items = layout.pages[0].content;
     expect(items[0].type).toBe("float");
-    const next = items[1];
+    // The empty paragraph holding the anchor takes its line, then the text.
+    const next = items[2];
     expect(next.type).toBe("paragraph");
     if (next.type === "paragraph") {
-      // Cursor still at top — paragraph y must be ≈ 0 (or just
-      // spaceBefore), NOT pushed past the float's 72pt height.
+      // Cursor near the top — below the anchor's own line, NOT pushed past
+      // the float's 72pt height.
       expect(next.rect.y).toBeLessThan(20);
     }
   });
@@ -80,14 +81,15 @@ describe("layoutDocumentFull — square wrap exclusion", () => {
     };
     const doc = baseDoc({ body: [fi, para(longBodyText)] });
     const layout = layoutDocumentFull(doc);
-    const paraItem = layout.pages[0].content[1];
+    // After the float comes the empty paragraph holding its anchor, then the text.
+    const paraItem = layout.pages[0].content[2];
     expect(paraItem.type).toBe("paragraph");
     if (paraItem.type === "paragraph") {
       // First several lines fall within the float's vertical band
       // (y in [0, 72]) so their last run's right edge must NOT pass
       // the float's left edge.
       const floatLeft = layout.pages[0].content[0].rect.x;
-      const earlyLines = paraItem.lines.filter(l => l.y < 72);
+      const earlyLines = paraItem.lines.filter(l => paraItem.rect.y + l.y < 72);
       expect(earlyLines.length).toBeGreaterThan(0);
       for (const line of earlyLines) {
         const lastRun = line.runs[line.runs.length - 1];
@@ -113,13 +115,14 @@ describe("layoutDocumentFull — square wrap exclusion", () => {
     };
     const doc = baseDoc({ body: [fi, para(longBodyText)] });
     const layout = layoutDocumentFull(doc);
-    const paraItem = layout.pages[0].content[1];
+    // After the float comes the empty paragraph holding its anchor, then the text.
+    const paraItem = layout.pages[0].content[2];
     expect(paraItem.type).toBe("paragraph");
     if (paraItem.type === "paragraph") {
       // Lines below the float (y > 72pt) must be allowed to extend
       // to the full page width again — find at least one such line
       // and prove it can use the full content width.
-      const lateLines = paraItem.lines.filter(l => l.y >= 72);
+      const lateLines = paraItem.lines.filter(l => paraItem.rect.y + l.y >= 72);
       expect(lateLines.length).toBeGreaterThan(0);
       const longestLate = Math.max(
         ...lateLines.map(l => {
@@ -133,7 +136,7 @@ describe("layoutDocumentFull — square wrap exclusion", () => {
       const longestEarly = Math.max(
         0,
         ...paraItem.lines
-          .filter(l => l.y < 72)
+          .filter(l => paraItem.rect.y + l.y < 72)
           .map(l => {
             if (l.runs.length === 0) {
               return 0;
@@ -160,11 +163,12 @@ describe("layoutDocumentFull — square wrap exclusion", () => {
     const doc = baseDoc({ body: [fi, para("after")] });
     const layout = layoutDocumentFull(doc);
     const items = layout.pages[0].content;
-    const next = items[1];
+    // The float, the empty paragraph holding its anchor, then "after".
+    const next = items[items.length - 1];
     expect(next.type).toBe("paragraph");
     if (next.type === "paragraph") {
-      // topAndBottom must still push the paragraph below the float.
-      expect(next.rect.y).toBeGreaterThanOrEqual(72);
+      // topAndBottom must still push the text below the float.
+      expect(next.rect.y + next.lines[0]!.y).toBeGreaterThanOrEqual(72);
     }
   });
 });

@@ -18,28 +18,18 @@ buildComments(sampleSheet(workbook));
 
 const { results, dropped } = await writeBoth(workbook, "xlsb-comments");
 
-/**
- * The text out of whatever `getComment`/`getNote` hand back.
- *
- * `Cell.getComment` returns `{ note: … }` and the `note` is either a plain string or a run list — reading
- * `.texts` off the *wrapper* yields nothing, which is how the first version of this reported an empty comment
- * for one that was intact. Both shapes are handled because both are produced.
- */
-function textOf(value: unknown): string | undefined {
-  const inner = (value as { readonly note?: unknown } | undefined)?.note ?? value;
-  if (inner === undefined || inner === null) {
-    return undefined;
+/** The text of what `Cell.getNote` hands back: a plain string, or a note configuration's run list. */
+function textOf(value: ReturnType<typeof Cell.getNote>): string | undefined {
+  if (value === undefined || typeof value === "string") {
+    return value;
   }
-  if (typeof inner === "string") {
-    return inner;
-  }
-  const runs = (inner as { readonly texts?: readonly { readonly text?: string }[] }).texts;
+  const runs = value.texts;
   return runs === undefined ? undefined : runs.map(run => run.text ?? "").join("");
 }
 
 report("comment text", results, reloaded => {
   const sheet = Workbook.getWorksheet(reloaded, "Data");
-  return textOf(Cell.getComment(sheet!, "B2")) ?? "no comment";
+  return textOf(Cell.getNote(sheet!, "B2")) ?? "no comment";
 });
 
 report("note text", results, reloaded => {

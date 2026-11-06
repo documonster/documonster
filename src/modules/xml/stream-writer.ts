@@ -1,7 +1,7 @@
 /**
  * XmlStreamWriter - True Streaming XML Writer
  *
- * Writes XML directly to a {@link WritableTarget} without buffering
+ * Writes XML directly to a {@link XmlWritableTarget} without buffering
  * the entire document in memory. This is the correct solution for
  * large XML output (e.g. worksheets with hundreds of thousands of rows).
  *
@@ -14,12 +14,15 @@ import {
   xmlEncodeAttr,
   validateXmlName,
   xmlValue,
-  encodeCData,
-  validateCommentText,
+  cdataMarkup,
+  rawMarkup,
+  commentMarkup,
+  serializeXmlAttributes,
+  checkNewAttributes,
   StdDocAttributes
 } from "@xml/encode";
-import { XmlWriteError } from "@xml/errors";
-import type { WritableTarget, XmlAttributes, XmlSink } from "@xml/types";
+import { XmlArgumentError, XmlWriteError } from "@xml/errors";
+import type { XmlWritableTarget, XmlAttributes, XmlSink } from "@xml/types";
 
 // =============================================================================
 // XmlStreamWriter
@@ -38,7 +41,7 @@ import type { WritableTarget, XmlAttributes, XmlSink } from "@xml/types";
  * ```ts
  * const chunks: string[] = [];
  * const target = { write(chunk: string) { chunks.push(chunk); } };
- * const sw = new XmlStreamWriter(target);
+ * const sw = new Xml.StreamWriter(target);
  * sw.openXml();
  * sw.openNode("root");
  * sw.leafNode("item", { id: "1" }, "hello");
@@ -47,14 +50,26 @@ import type { WritableTarget, XmlAttributes, XmlSink } from "@xml/types";
  * ```
  */
 class XmlStreamWriter implements XmlSink {
-  private _target: WritableTarget;
+  private _target: XmlWritableTarget;
   private _stack: string[] = [];
   private _leaf = false;
   private _open = false;
   // Pending start-tag buffer: accumulates tag name + attributes until flushed
   private _pending = "";
+  // Whether anything has been written or is pending — the XML declaration must come first
+  private _started = false;
 
-  constructor(target: WritableTarget) {
+  constructor(target: XmlWritableTarget) {
+    if (
+      typeof target !== "object" ||
+      target === null ||
+      typeof (target as { write?: unknown }).write !== "function"
+    ) {
+      throw new XmlArgumentError(
+        "target",
+        "Xml.StreamWriter: target must be an object with a write(chunk) method"
+      );
+    }
     this._target = target;
   }
 
@@ -76,9 +91,14 @@ class XmlStreamWriter implements XmlSink {
   // Internal: flush pending start tag
   // ===========================================================================
 
+  private _write(chunk: string): void {
+    this._started = true;
+    this._target.write(chunk);
+  }
+
   /** Flush the pending start-tag buffer with a closing character. */
   private _flushOpen(suffix: string): void {
-    this._target.write(this._pending + suffix);
+    this._write(this._pending + suffix);
     this._pending = "";
     this._open = false;
   }
@@ -87,35 +107,24 @@ class XmlStreamWriter implements XmlSink {
   // XmlSink Implementation
   // ===========================================================================
 
+  /**
+   * Write the XML declaration. XML allows it only at the very start of a document, so it is
+   * refused once anything has been written, including an earlier declaration.
+   */
   openXml(attributes?: XmlAttributes): void {
-    const merged = attributes ? { ...StdDocAttributes, ...attributes } : StdDocAttributes;
-    let s = "<?xml";
-    for (const key in merged) {
-      const value = merged[key];
-      if (value !== undefined) {
-        validateXmlName(key);
-        s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
-      }
+    if (this._started || this._open) {
+      throw new XmlWriteError("open xml", "the XML declaration must come first in the document");
     }
-    this._target.write(s + "?>\n");
+    const merged = attributes ? { ...StdDocAttributes, ...attributes } : StdDocAttributes;
+    this._write(`<?xml${serializeXmlAttributes(merged)}?>\n`);
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
     validateXmlName(name);
-    // Flush any pending open tag first
+    // Build the tag before flushing, so a refused attribute writes nothing.
+    const s = `<${name}${serializeXmlAttributes(attributes)}`;
     if (this._open) {
       this._flushOpen(">");
-    }
-    // Start building pending tag
-    let s = `<${name}`;
-    if (attributes) {
-      for (const key in attributes) {
-        const value = attributes[key];
-        if (value !== undefined) {
-          validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
-        }
-      }
     }
     this._pending = s;
     this._stack.push(name);
@@ -128,57 +137,53 @@ class XmlStreamWriter implements XmlSink {
       throw new XmlWriteError("add attribute", "no element is open");
     }
     validateXmlName(name);
+    checkNewAttributes(this.currentElement, this._pending, { [name]: value }, () => "name");
     // Append to pending buffer — no write call
-    this._pending += ` ${name}="${xmlEncodeAttr(xmlValue(value, name))}"`;
+    this._pending += ` ${name}="${xmlEncodeAttr(xmlValue(value, name, "value"))}"`;
   }
 
   addAttributes(attributes: XmlAttributes): void {
     if (!this._open) {
       throw new XmlWriteError("add attributes", "no element is open");
     }
-    if (!attributes) {
-      return;
-    }
-    for (const key in attributes) {
-      const value = attributes[key];
-      if (value !== undefined) {
-        validateXmlName(key);
-        this._pending += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
-      }
-    }
+    checkNewAttributes(this.currentElement, this._pending, attributes);
+    this._pending += serializeXmlAttributes(attributes);
   }
 
   writeText(text: string | number): void {
+    const encoded = xmlEncode(xmlValue(text, "#text"));
     if (this._open) {
       this._flushOpen(">");
     }
     this._leaf = false;
-    this._target.write(xmlEncode(xmlValue(text, "#text")));
+    this._write(encoded);
   }
 
   writeRaw(xml: string): void {
+    const markup = rawMarkup(xml);
     if (this._open) {
       this._flushOpen(">");
     }
     this._leaf = false;
-    this._target.write(xml);
+    this._write(markup);
   }
 
   writeCData(text: string): void {
+    const markup = cdataMarkup(text);
     if (this._open) {
       this._flushOpen(">");
     }
     this._leaf = false;
-    this._target.write(encodeCData(text));
+    this._write(markup);
   }
 
   writeComment(text: string): void {
+    const markup = commentMarkup(text);
     if (this._open) {
       this._flushOpen(">");
     }
     this._leaf = false;
-    validateCommentText(text);
-    this._target.write(`<!--${text}-->`);
+    this._write(markup);
   }
 
   closeNode(): void {
@@ -191,9 +196,9 @@ class XmlStreamWriter implements XmlSink {
       this._flushOpen("/>");
     } else if (this._open) {
       this._flushOpen(">");
-      this._target.write(`</${name}>`);
+      this._write(`</${name}>`);
     } else {
-      this._target.write(`</${name}>`);
+      this._write(`</${name}>`);
     }
     this._open = false;
     this._leaf = false;
@@ -201,28 +206,17 @@ class XmlStreamWriter implements XmlSink {
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
     validateXmlName(name);
-    // Flush any pending open tag
-    if (this._open) {
-      this._flushOpen(">");
-    }
-
-    // Build complete leaf element as a single string, single write call
-    let s = `<${name}`;
-    if (attributes) {
-      for (const key in attributes) {
-        const value = attributes[key];
-        if (value !== undefined) {
-          validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
-        }
-      }
-    }
+    // Build the complete leaf element as one string, before flushing anything.
+    let s = `<${name}${serializeXmlAttributes(attributes)}`;
     if (text !== undefined) {
       s += `>${xmlEncode(xmlValue(text, "#text"))}</${name}>`;
     } else {
       s += "/>";
     }
-    this._target.write(s);
+    if (this._open) {
+      this._flushOpen(">");
+    }
+    this._write(s);
     this._leaf = false;
   }
 

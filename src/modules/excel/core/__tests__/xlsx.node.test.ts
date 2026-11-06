@@ -2,7 +2,7 @@ import { ZipArchive } from "@archive/zip";
 import { cellFill, cellFont, cellGetValue, cellHyperlink, cellText } from "@excel/core/cell";
 import { getWorksheets } from "@excel/core/workbook";
 import { addConditionalFormatting, getCell, getSheetName, rowGetCell } from "@excel/core/worksheet";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { PassThrough } from "@stream";
 import { describe, it, expect } from "vitest";
@@ -57,7 +57,7 @@ async function buildDirtyXlsx(
   for (const [name, entry] of entries) {
     archive.add(name, entry.data);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 /** Build a feature-rich XLSX buffer for round-trip testing. */
@@ -67,14 +67,14 @@ async function buildRichXlsx(): Promise<Uint8Array> {
   wb.created = new Date(2024, 0, 1);
 
   const ws1 = Workbook.addWorksheet(wb, "Data");
-  Worksheet.setColumns(ws1, [
+  Column.setDefinitions(ws1, [
     { header: "ID", key: "id", width: 10 },
     { header: "Name", key: "name", width: 32 },
     { header: "Value", key: "val", width: 15 }
   ]);
-  Worksheet.addRow(ws1, { id: 1, name: "Alice", val: 100 });
-  Worksheet.addRow(ws1, { id: 2, name: "Bob", val: 200 });
-  Worksheet.addRow(ws1, { id: 3, name: "Charlie", val: 300 });
+  Row.add(ws1, { id: 1, name: "Alice", val: 100 });
+  Row.add(ws1, { id: 2, name: "Bob", val: 200 });
+  Row.add(ws1, { id: 3, name: "Charlie", val: 300 });
 
   Cell.setValue(ws1, "D1", new Date(2024, 5, 15));
   Cell.setStyle(ws1, "D1", { numFmt: "yyyy-mm-dd" });
@@ -305,9 +305,7 @@ describe("XLSX", () => {
       // the explicit opt-in so users are never silently corrupted.
       const wb = Workbook.create();
       await expect(Workbook.read(wb, "PK\u0003\u0004 not real binary" as string)).rejects.toThrow(
-        // Backwards-compatible prefix — existing callers that check
-        // err.message.includes("Can't read the data...") keep working.
-        /Can't read the data of 'the loaded zip file'/
+        "Workbook.read: data must be bytes (Uint8Array, ArrayBuffer, a typed-array view, a Blob) or a base64 string with { base64: true }, got a string without { base64: true }"
       );
     });
   });
@@ -561,7 +559,7 @@ describe("XLSX", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Big");
       for (let i = 1; i <= 10000; i++) {
-        Worksheet.addRow(ws, [i, `row-${i}`, i * 0.1]);
+        Row.add(ws, [i, `row-${i}`, i * 0.1]);
       }
 
       const buffer = await Workbook.toBuffer(wb);
@@ -1113,7 +1111,7 @@ describe("XLSX", () => {
         )
       );
 
-      const xlsxBuffer = await archive.bytes();
+      const xlsxBuffer = await archive.toBuffer();
 
       // ---- Test 1: Load and verify isDynamicArray ----
       const wb = Workbook.create();
@@ -1202,7 +1200,7 @@ describe("XLSX", () => {
       for (const [name, entry] of entries) {
         archive.add(name, entry.data);
       }
-      const tamperedBuf = await archive.bytes();
+      const tamperedBuf = await archive.toBuffer();
 
       // Load the tampered file
       const wb2 = Workbook.create();
@@ -1250,7 +1248,7 @@ describe("XLSX", () => {
       for (const [name, entry] of entries) {
         archive.add(name, entry.data);
       }
-      const templateBuffer = await archive.bytes();
+      const templateBuffer = await archive.toBuffer();
 
       const wb = Workbook.create();
       await Workbook.read(wb, templateBuffer);

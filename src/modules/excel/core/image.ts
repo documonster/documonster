@@ -1,7 +1,7 @@
 import type { AnchorData, AnchorModel } from "@excel/core/anchor";
 import { anchorClone, anchorCreate, anchorModel } from "@excel/core/anchor";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ImageError } from "@excel/errors";
+import { ExcelImageError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 
 export interface ImageHyperlinks {
@@ -57,6 +57,12 @@ export interface HeaderImageModel {
   applyTo?: "all" | "odd" | "even" | "first";
   /** Excel header/footer image section. */
   position?: "LH" | "CH" | "RH" | "LF" | "CF" | "RF";
+  /**
+   * The picture's VML shape as read — its title, washout, grayscale, bilevel and crop among the
+   * attributes. Round-trip-only (no public setter), like `rawSpPr`: a rewrite draws the picture with
+   * them instead of from defaults. Absent for a picture placed through the API.
+   */
+  vmlShape?: unknown;
 }
 
 export interface ImageRangeModel {
@@ -118,6 +124,8 @@ export interface ImageModelInput {
   xfrmExtCx?: number;
   xfrmExtCy?: number;
   rawSpPr?: unknown;
+  /** See `vmlShape` on {@link HeaderImageModel}. */
+  vmlShape?: unknown;
 }
 
 /**
@@ -147,6 +155,8 @@ export interface WorksheetImage {
   xfrmExtCx?: number;
   xfrmExtCy?: number;
   rawSpPr?: unknown;
+  /** See `vmlShape` on {@link HeaderImageModel}. */
+  vmlShape?: unknown;
 }
 
 /** Create an image record, optionally hydrating it from a model input. */
@@ -179,12 +189,13 @@ export function imageModel(img: WorksheetImage): ImageModel {
         headerWidth: img.headerWidth,
         headerHeight: img.headerHeight,
         applyTo: img.applyTo,
-        position: img.position
+        position: img.position,
+        ...(img.vmlShape === undefined ? {} : { vmlShape: img.vmlShape })
       };
     case "image": {
       const range = img.range;
       if (!range) {
-        throw new ImageError("Image has no range");
+        throw new ExcelImageError("Image has no range");
       }
       // Absolute positioning — no cell anchors
       if (range.pos) {
@@ -217,7 +228,7 @@ export function imageModel(img: WorksheetImage): ImageModel {
       };
     }
     default:
-      throw new ImageError("Invalid Image Type");
+      throw new ExcelImageError("Invalid Image Type");
   }
 }
 
@@ -238,7 +249,8 @@ export function applyImageModel(
     xfrmOffY,
     xfrmExtCx,
     xfrmExtCy,
-    rawSpPr
+    rawSpPr,
+    vmlShape
   }: ImageModelInput
 ): void {
   img.type = type;
@@ -253,10 +265,12 @@ export function applyImageModel(
   img.xfrmExtCx = xfrmExtCx;
   img.xfrmExtCy = xfrmExtCy;
   img.rawSpPr = rawSpPr;
+  img.vmlShape = vmlShape;
 
   if (type === "image") {
     if (typeof range === "string") {
-      const decoded = colCache.decode(range);
+      // Upper-cased: the decoder reads upper-case column letters only, and `b2:c3` is the range `B2:C3` to Excel.
+      const decoded = colCache.decode(range.toUpperCase());
       if ("top" in decoded) {
         // It's a Location (range like "A1:C3")
         img.range = {
@@ -305,11 +319,13 @@ export function imageClone(img: WorksheetImage, worksheet?: Worksheet): Workshee
   cloned.headerWidth = img.headerWidth;
   cloned.headerHeight = img.headerHeight;
   cloned.applyTo = img.applyTo;
+  cloned.position = img.position;
   cloned.xfrmOffX = img.xfrmOffX;
   cloned.xfrmOffY = img.xfrmOffY;
   cloned.xfrmExtCx = img.xfrmExtCx;
   cloned.xfrmExtCy = img.xfrmExtCy;
   cloned.rawSpPr = structuredClone(img.rawSpPr);
+  cloned.vmlShape = structuredClone(img.vmlShape);
 
   if (img.range) {
     cloned.range = {

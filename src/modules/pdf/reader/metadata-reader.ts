@@ -14,6 +14,7 @@
  * @see XMP Specification Part 1
  */
 
+import { decodeXmpPacket, readXmpProperties } from "@pdf/core/xmp";
 import type { PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfDictValue } from "@pdf/reader/pdf-parser";
 import { dictGetRef, decodePdfStringBytes } from "@pdf/reader/pdf-parser";
@@ -23,7 +24,10 @@ import { dictGetRef, decodePdfStringBytes } from "@pdf/reader/pdf-parser";
 // =============================================================================
 
 /**
- * PDF document metadata.
+ * PDF document metadata. The text fields hold `""` when the document does not give them — an
+ * Info entry and its XMP counterpart are merged, and either may be present but empty, so the text
+ * fields do not tell "absent" from "empty". A field with no text form is absent (`undefined`)
+ * when the document does not give it.
  */
 export interface PdfMetadata {
   /** Document title */
@@ -38,20 +42,20 @@ export interface PdfMetadata {
   creator: string;
   /** Application that produced the PDF */
   producer: string;
-  /** Date the document was created */
-  creationDate: Date | null;
-  /** Date the document was last modified */
-  modDate: Date | null;
+  /** Date the document was created; absent when the document does not say, or says something that is not a date */
+  creationDate?: Date;
+  /** Date the document was last modified; absent as {@link creationDate} is */
+  modDate?: Date;
   /** PDF version */
   pdfVersion: string;
   /** Number of pages */
   pageCount: number;
   /** Whether the document is encrypted */
   encrypted: boolean;
-  /** Page size of the first page (in points) */
-  pageSize: { width: number; height: number } | null;
-  /** Raw XMP metadata XML (if available) */
-  xmpXml: string | null;
+  /** Page size of the first page (in points); absent when the document has no page */
+  pageSize?: { width: number; height: number };
+  /** Raw XMP metadata XML; absent when the document has none */
+  xmpXml?: string;
   /** Additional custom metadata from Info dictionary */
   custom: Record<string, string>;
 }
@@ -71,13 +75,9 @@ export function extractMetadata(doc: PdfDocument): PdfMetadata {
     keywords: "",
     creator: "",
     producer: "",
-    creationDate: null,
-    modDate: null,
     pdfVersion: extractPdfVersion(doc),
     pageCount: 0,
     encrypted: doc.trailer.has("Encrypt"),
-    pageSize: null,
-    xmpXml: null,
     custom: {}
   };
 
@@ -92,7 +92,7 @@ export function extractMetadata(doc: PdfDocument): PdfMetadata {
     const pages = doc.getPages();
     metadata.pageCount = pages.length;
     if (pages.length > 0) {
-      metadata.pageSize = extractPageSize(pages[0], doc);
+      metadata.pageSize = extractPageSize(pages[0], doc) ?? undefined;
     }
   } catch {
     // Ignore page tree errors
@@ -190,10 +190,10 @@ function extractInfoDict(doc: PdfDocument, metadata: PdfMetadata): void {
         metadata.producer = strValue;
         break;
       case "CreationDate":
-        metadata.creationDate = parsePdfDate(strValue);
+        metadata.creationDate = parsePdfDate(strValue) ?? undefined;
         break;
       case "ModDate":
-        metadata.modDate = parsePdfDate(strValue);
+        metadata.modDate = parsePdfDate(strValue) ?? undefined;
         break;
       default:
         if (!knownKeys.has(key)) {
@@ -222,10 +222,34 @@ function extractXmpMetadata(doc: PdfDocument, metadata: PdfMetadata): void {
     }
 
     const data = doc.getStreamData(result.stream, result.objNum, result.gen);
-    const xml = new TextDecoder("utf-8").decode(data);
+    // Decoded by its byte-order mark (UTF-16 packets exist), UTF-8 otherwise.
+    const xml = decodeXmpPacket(data)?.text ?? new TextDecoder("utf-8").decode(data);
     metadata.xmpXml = xml;
 
-    // Parse key fields from XMP
+    // Read as XML: character references decoded, the attribute form of a property, the
+    // `x-default` entry of a language alternative, only the document's own descriptions.
+    const read = readXmpProperties(xml);
+    if (read !== undefined) {
+      const text = (field: keyof typeof read): string | undefined =>
+        read[field] === undefined || read[field] === "" ? undefined : read[field];
+      metadata.title ||= text("title") ?? "";
+      metadata.author ||= text("author") ?? "";
+      metadata.subject ||= text("subject") ?? "";
+      metadata.keywords ||= text("keywords") ?? "";
+      metadata.creator ||= text("creator") ?? "";
+      metadata.producer ||= text("producer") ?? "";
+      const created = text("creationDate");
+      if (!metadata.creationDate && created !== undefined) {
+        metadata.creationDate = validDate(created) ?? undefined;
+      }
+      const modified = text("modDate");
+      if (!metadata.modDate && modified !== undefined) {
+        metadata.modDate = validDate(modified) ?? undefined;
+      }
+      return;
+    }
+
+    // Not namespaced XML: the lenient scan this used before, for what it can find.
     if (!metadata.title) {
       metadata.title = extractXmpField(xml, "dc:title") ?? "";
     }
@@ -247,13 +271,13 @@ function extractXmpMetadata(doc: PdfDocument, metadata: PdfMetadata): void {
     if (!metadata.creationDate) {
       const dateStr = extractXmpField(xml, "xmp:CreateDate");
       if (dateStr) {
-        metadata.creationDate = new Date(dateStr);
+        metadata.creationDate = validDate(dateStr) ?? undefined;
       }
     }
     if (!metadata.modDate) {
       const dateStr = extractXmpField(xml, "xmp:ModifyDate");
       if (dateStr) {
-        metadata.modDate = new Date(dateStr);
+        metadata.modDate = validDate(dateStr) ?? undefined;
       }
     }
   } catch {
@@ -261,8 +285,15 @@ function extractXmpMetadata(doc: PdfDocument, metadata: PdfMetadata): void {
   }
 }
 
+/** A date, or `null` for text that is not one. */
+function validDate(text: string): Date | null {
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /**
- * Extract a field value from XMP XML using simple regex.
+ * Extract a field value from XMP XML using simple regex — the fallback for a packet that is
+ * not well-formed namespaced XML.
  * Handles both simple elements and rdf:Alt/rdf:Bag/rdf:Seq containers.
  */
 function extractXmpField(xml: string, field: string): string | null {
@@ -312,7 +343,7 @@ function extractPageSize(
  * Parse a PDF date string to a Date object.
  * Format: D:YYYYMMDDHHmmSSOHH'mm
  */
-function parsePdfDate(dateStr: string): Date | null {
+export function parsePdfDate(dateStr: string): Date | null {
   if (!dateStr) {
     return null;
   }

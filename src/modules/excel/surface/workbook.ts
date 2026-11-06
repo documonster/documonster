@@ -2,59 +2,115 @@
  * `Workbook` namespace surface — Node entry.
  *
  * `import { Workbook } from "documonster/excel"` → `Workbook.create()`,
- * `Workbook.addWorksheet(wb, name)`, `Workbook.toBuffer(wb)`, `Workbook.read(wb, bytes)`,
- * `Workbook.readFile(wb, path)`, `Workbook.writeFile(wb, path)`, …
+ * `Workbook.addWorksheet(wb, name)`, `Workbook.toBuffer(wb)`, `Workbook.read(bytes)`,
+ * `Workbook.readFile(path)`, `Workbook.writeFile(wb, path)`, …
  *
  * Re-exports the workbook management functions (de-prefixed) plus the
  * Node xlsx IO (includes file-path `readFile` / `writeFile`).
  */
+import {
+  createStreamWriter as createStreamWriterImpl,
+  createStreamReader as createStreamReaderImpl,
+  toBuffer as toBufferImpl,
+  toStream as toStreamImpl,
+  writeFile as writeFileImpl,
+  writeStream as writeStreamImpl
+} from "@excel/core/workbook";
+import type {
+  XlsxReadable as XlsxReadableType,
+  XlsxWritable as XlsxWritableType
+} from "@excel/core/xlsx-io-types";
+import type { XlsxStreamOptions as XlsxStreamOptionsType } from "@excel/core/xlsx-stream";
+import { workbookOnly } from "@excel/surface/stream-targets";
+
 export {
-  createWorkbook as create,
   addWorksheet,
+  protect,
+  unprotect,
+  verifyPassword,
+  addExternalLink,
+  registerPerson,
   getWorksheet,
-  getWorksheets,
+  listWorksheets,
+  eachWorksheet,
+  getDefinedNames,
+  addCellStyle,
+  getCellStyle,
+  listCellStyles,
+  removeCellStyle,
+  useBuiltInCellStyle,
   removeWorksheet,
   addChartsheet,
   addPivotChartsheet,
   getChartsheet,
-  getChartsheets,
+  listChartsheets,
   removeChartsheet,
-  renameChartsheet,
   copyChartsheet,
   replaceChartsheetChart,
-  getDefinedNames,
-  eachSheet,
-  importSheet,
-  protectWorkbook as protect,
-  unprotectWorkbook as unprotect,
-  addExternalLink,
+  renameChartsheet,
+  importWorksheet,
+  listUnrecognizedValues,
+  discardUnrecognizedValues,
   getExternalLink,
-  registerPerson,
+  listExternalLinks,
+  listPersons,
+  getDefaultFont,
+  setDefaultFont,
   registerFunction,
   unregisterFunction,
+  getModel,
+  setModel,
+  getWorksheets,
+  getChartsheets,
+  eachSheet,
+  importSheet,
   defineCellStyle,
-  getCellStyle,
-  listCellStyles,
-  removeCellStyle,
-  useBuiltinCellStyle,
-  getWorkbookModel as getModel
-} from "@excel/core/workbook.browser";
+  useBuiltinCellStyle
+} from "@excel/surface/workbook-edits";
 
-export {
-  toBuffer,
-  toStream,
-  read,
-  readWithDiagnostics,
-  readFile,
-  writeFile,
-  readStream,
-  writeStream,
-  createStreamWriter,
-  createStreamReader
-} from "@excel/core/workbook";
-export type { XlsxReadable, XlsxWritable, XlsxStreamOptions } from "@excel/core/workbook";
+export { createWorkbook as create } from "@excel/core/workbook.browser";
 
-export { loadWorkbookModel as setModel } from "@excel/core/model-load";
+export { read, readWithDiagnostics, readFile, readStream } from "@excel/core/workbook";
+// A streaming writer is not written by these: it has written most of its file already, in the format it was made
+// with, and the options they take could change neither. It finishes itself, with `commit()` or `toBuffer()`.
+const WRITER_FINISHES = "is finished with its own commit() or toBuffer()";
 
-/** A workbook handle (opaque to consumers). */
+export const toBuffer = /* @__PURE__ */ workbookOnly(
+  "Workbook.toBuffer",
+  WRITER_FINISHES,
+  toBufferImpl
+);
+export const toStream = /* @__PURE__ */ workbookOnly(
+  "Workbook.toStream",
+  WRITER_FINISHES,
+  toStreamImpl
+);
+export const writeFile = /* @__PURE__ */ workbookOnly(
+  "Workbook.writeFile",
+  WRITER_FINISHES,
+  writeFileImpl
+);
+export const writeStream = /* @__PURE__ */ workbookOnly(
+  "Workbook.writeStream",
+  WRITER_FINISHES,
+  writeStreamImpl
+);
+// Published flat from `documonster/excel`; the namespace copies were a second name for each.
+/** @deprecated Use the flat `XlsxReadable` type. Removed in 1.0. */
+export type XlsxReadable = XlsxReadableType;
+/** @deprecated Use the flat `XlsxWritable` type. Removed in 1.0. */
+export type XlsxWritable = XlsxWritableType;
+/** @deprecated Use the flat `XlsxStreamOptions` type. Removed in 1.0. */
+export type XlsxStreamOptions = XlsxStreamOptionsType;
+
+/** @deprecated Use `new Stream.WorkbookWriter(options)`. Removed in 1.0. */
+export const createStreamWriter = createStreamWriterImpl;
+/** @deprecated Use `new Stream.WorkbookReader(input, options)`. Removed in 1.0. */
+export const createStreamReader = createStreamReaderImpl;
+
+/**
+ * A workbook handle. Its document properties (`title`, `creator`, `created`, …), `properties`,
+ * `calcProperties` and `views` are plain fields to read and assign; everything else is reached through
+ * the namespace functions. Internal state is marked `@deprecated` and leaves the published type in 1.0.
+ */
 export type { WorkbookData as Handle } from "@excel/core/workbook-core";

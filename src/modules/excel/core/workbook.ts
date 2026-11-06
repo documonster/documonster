@@ -59,7 +59,12 @@ export function createStreamReader(
   return new WorkbookReader(input, options);
 }
 
-export type { CsvOptions, CsvInput } from "@excel/bridge/csv-bridge";
+export type {
+  ExcelCsvOptions,
+  ExcelCsvInput,
+  ExcelCsvReadOptions,
+  ExcelCsvWriteOptions
+} from "@excel/bridge/csv-bridge";
 export type {
   WorkbookModel,
   WorkbookMedia,

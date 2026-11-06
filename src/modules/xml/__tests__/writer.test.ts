@@ -1,4 +1,6 @@
 import { parseXml, textContent } from "@xml/dom";
+import { XmlError } from "@xml/errors";
+import { XmlStreamWriter } from "@xml/stream-writer";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
@@ -195,7 +197,7 @@ describe("XmlWriter", () => {
     it("should support save/commit", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.leafNode("child", undefined, "text");
       w.commit();
       w.closeNode();
@@ -205,7 +207,7 @@ describe("XmlWriter", () => {
     it("should support save/rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.leafNode("unwanted");
       w.rollback();
       w.leafNode("wanted");
@@ -216,9 +218,9 @@ describe("XmlWriter", () => {
     it("should support nested save/rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.openNode("outer");
-      w.save();
+      w.snapshot();
       w.leafNode("inner-bad");
       w.rollback();
       w.leafNode("inner-good");
@@ -325,7 +327,7 @@ describe("XmlWriter", () => {
     it("should restore _leaf and _open state after rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.writeText("text");
       w.rollback();
       // After rollback, _leaf should be true and _open should be true
@@ -337,9 +339,9 @@ describe("XmlWriter", () => {
     it("should handle double save/rollback", () => {
       const w = new XmlWriter();
       w.openNode("root");
-      w.save();
+      w.snapshot();
       w.leafNode("a");
-      w.save();
+      w.snapshot();
       w.leafNode("b");
       w.rollback(); // removes b
       w.rollback(); // removes a
@@ -375,5 +377,41 @@ describe("XmlWriter — complex Excel-like XML", () => {
     expect(w.xml).toContain('<row r="1">');
     expect(w.xml).toContain('<c r="A1" t="s"><v>0</v></c>');
     expect(w.xml).toContain("</sheetData></worksheet>");
+  });
+});
+
+describe("XmlWriter value checks", () => {
+  const bad: [string, unknown][] = [
+    ["null", null],
+    ["an object", { cx: 1 }],
+    ["an array", [1]],
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+    ["a function", () => 1]
+  ];
+
+  it.each(bad)("rejects %s as an attribute value through every attribute API", (_, value) => {
+    const attrs = { a: value } as never;
+    expect(() => new XmlWriter().openNode("x", attrs)).toThrow(XmlError);
+    expect(() => new XmlWriter().leafNode("x", attrs)).toThrow(XmlError);
+    const w = new XmlWriter();
+    w.openNode("x");
+    expect(() => w.addAttribute("a", value as never)).toThrow(XmlError);
+    expect(() => w.addAttributes(attrs)).toThrow(XmlError);
+  });
+
+  it.each(bad)("rejects %s as a text node", (_, value) => {
+    expect(() => new XmlWriter().leafNode("x", undefined, value as never)).toThrow(XmlError);
+  });
+
+  it.each(bad)("the stream writer rejects %s as an attribute value", (_, value) => {
+    const w = new XmlStreamWriter({ write: () => undefined });
+    expect(() => w.leafNode("x", { a: value } as never)).toThrow(XmlError);
+  });
+
+  it("still omits an undefined attribute and writes strings, numbers and booleans", () => {
+    const w = new XmlWriter();
+    w.leafNode("x", { a: undefined, b: "null", c: 0, d: false });
+    expect(w.xml).toBe('<x b="null" c="0" d="false"/>');
   });
 });

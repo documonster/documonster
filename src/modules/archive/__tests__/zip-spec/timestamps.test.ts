@@ -4,7 +4,7 @@
 
 import {
   dateToDos,
-  parseDosDateTimeUTC,
+  parseDosDateTime,
   dateToZipDos,
   buildZipTimestampExtraField,
   resolveZipLastModifiedDateFromUnixSeconds,
@@ -44,52 +44,59 @@ describe("timestamps", () => {
 
       expect(dosTime & 0x1f).toBe(10); // 21 >> 1 = 10
     });
+
+    it("clamps a date outside the DOS range to the nearest end instead of wrapping", () => {
+      expect(dateToDos(new Date(1970, 5, 1, 12))).toEqual(dateToDos(new Date(1980, 0, 1)));
+      expect(dateToDos(new Date(2300, 0, 1))).toEqual(
+        dateToDos(new Date(2107, 11, 31, 23, 59, 58))
+      );
+    });
   });
 
-  describe("parseDosDateTimeUTC", () => {
+  describe("parseDosDateTime", () => {
     it("should parse DOS date without time", () => {
       // DOS date for 2024-06-15
       const dosDate = (44 << 9) | (6 << 5) | 15;
-      const result = parseDosDateTimeUTC(dosDate);
+      const result = parseDosDateTime(dosDate);
 
-      expect(result.getUTCFullYear()).toBe(2024);
-      expect(result.getUTCMonth()).toBe(5); // June (0-indexed)
-      expect(result.getUTCDate()).toBe(15);
-      expect(result.getUTCHours()).toBe(0);
-      expect(result.getUTCMinutes()).toBe(0);
-      expect(result.getUTCSeconds()).toBe(0);
+      expect(result.getFullYear()).toBe(2024);
+      expect(result.getMonth()).toBe(5); // June (0-indexed)
+      expect(result.getDate()).toBe(15);
+      expect(result.getHours()).toBe(0);
+      expect(result.getMinutes()).toBe(0);
+      expect(result.getSeconds()).toBe(0);
     });
 
     it("should parse DOS date and time", () => {
       // DOS date for 2024-06-15, time for 14:30:20
       const dosDate = (44 << 9) | (6 << 5) | 15;
       const dosTime = (14 << 11) | (30 << 5) | 10;
-      const result = parseDosDateTimeUTC(dosDate, dosTime);
+      const result = parseDosDateTime(dosDate, dosTime);
 
-      expect(result.getUTCFullYear()).toBe(2024);
-      expect(result.getUTCMonth()).toBe(5);
-      expect(result.getUTCDate()).toBe(15);
-      expect(result.getUTCHours()).toBe(14);
-      expect(result.getUTCMinutes()).toBe(30);
-      expect(result.getUTCSeconds()).toBe(20); // 10 * 2 = 20
+      expect(result.getFullYear()).toBe(2024);
+      expect(result.getMonth()).toBe(5);
+      expect(result.getDate()).toBe(15);
+      expect(result.getHours()).toBe(14);
+      expect(result.getMinutes()).toBe(30);
+      expect(result.getSeconds()).toBe(20); // 10 * 2 = 20
     });
 
     it("should handle year 1980 (base year)", () => {
       const dosDate = (0 << 9) | (1 << 5) | 1; // 1980-01-01
-      const result = parseDosDateTimeUTC(dosDate);
+      const result = parseDosDateTime(dosDate);
 
-      expect(result.getUTCFullYear()).toBe(1980);
-      expect(result.getUTCMonth()).toBe(0);
-      expect(result.getUTCDate()).toBe(1);
+      expect(result.getFullYear()).toBe(1980);
+      expect(result.getMonth()).toBe(0);
+      expect(result.getDate()).toBe(1);
     });
 
     it("should handle year 2107 (maximum DOS year)", () => {
       const dosDate = (127 << 9) | (12 << 5) | 31; // 2107-12-31
-      const result = parseDosDateTimeUTC(dosDate);
+      const result = parseDosDateTime(dosDate);
 
-      expect(result.getUTCFullYear()).toBe(2107);
-      expect(result.getUTCMonth()).toBe(11);
-      expect(result.getUTCDate()).toBe(31);
+      expect(result.getFullYear()).toBe(2107);
+      expect(result.getMonth()).toBe(11);
+      expect(result.getDate()).toBe(31);
     });
   });
 
@@ -206,11 +213,11 @@ describe("timestamps", () => {
 
       const result = resolveZipLastModifiedDateFromUnixSeconds(dosDate, dosTime, undefined);
 
-      expect(result.getUTCFullYear()).toBe(2024);
-      expect(result.getUTCMonth()).toBe(5);
-      expect(result.getUTCDate()).toBe(15);
-      expect(result.getUTCHours()).toBe(12);
-      expect(result.getUTCMinutes()).toBe(30);
+      expect(result.getFullYear()).toBe(2024);
+      expect(result.getMonth()).toBe(5);
+      expect(result.getDate()).toBe(15);
+      expect(result.getHours()).toBe(12);
+      expect(result.getMinutes()).toBe(30);
     });
   });
 });

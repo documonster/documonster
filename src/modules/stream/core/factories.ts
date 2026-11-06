@@ -5,7 +5,9 @@
  * so each entry point builds them with its own.
  */
 
+import { byteArraySchema, checkStreamArgument } from "@stream/arguments";
 import { BufferedStream } from "@stream/buffered-stream";
+import { StreamArgumentError } from "@stream/errors";
 import { PullStream } from "@stream/pull-stream";
 import type {
   BufferedStreamOptions,
@@ -19,9 +21,11 @@ import type {
   PullStreamOptions,
   ReadableStreamOptions,
   TransformStreamOptions,
-  WritableStreamOptions
+  WritableStreamOptions,
+  WriteCallback
 } from "@stream/types";
 import { stringToUint8Array } from "@utils/binary";
+import { s } from "@utils/schema";
 
 type Ctor = new (options?: any) => any;
 
@@ -33,16 +37,14 @@ interface StreamClasses {
   PassThrough: Ctor;
 }
 
-type Callback = (error?: Error | null) => void;
-
 /** What a byte-mode stream accepts as a chunk; it reads back as `Uint8Array`. */
-type ByteChunk = string | ArrayBufferView;
+export type StreamByteChunk = string | ArrayBufferView;
 
 /** Options that leave the factory's default object mode on: chunks pass through as given. */
-type ObjectModeOptions = ReadableStreamOptions & { objectMode?: true };
+export type StreamObjectModeOptions = ReadableStreamOptions & { objectMode?: true };
 
 /** Options that switch to byte mode: every chunk reads back as a `Uint8Array`. */
-type ByteModeOptions = ReadableStreamOptions & { objectMode: false };
+export type StreamByteModeOptions = ReadableStreamOptions & { objectMode: false };
 
 /**
  * Options whose mode may be either — a `boolean`, or options held in a
@@ -52,7 +54,7 @@ type ByteModeOptions = ReadableStreamOptions & { objectMode: false };
 type EitherModeOptions = ReadableStreamOptions;
 
 /** A `destroy` hook, with the stream it destroys as `this`. */
-type DestroyHook<S> = (
+export type StreamDestroyHook<S> = (
   this: S,
   error: Error | null,
   callback: (error?: Error | null) => void
@@ -73,66 +75,66 @@ export interface StreamFactories {
   createReadable<T = Uint8Array>(
     options?: ReadableStreamOptions & {
       read?: (this: IPushableReadable<T>, size: number) => void;
-      destroy?: DestroyHook<IPushableReadable<T>>;
+      destroy?: StreamDestroyHook<IPushableReadable<T>>;
     }
   ): IPushableReadable<T>;
   /** Values are awaited, as `Readable.from` awaits them. */
   createReadableFromAsyncIterable<T>(
     iterable: AsyncIterable<T>,
-    options?: ObjectModeOptions
+    options?: StreamObjectModeOptions
   ): IReadable<Awaited<T>>;
   createReadableFromAsyncIterable(
-    iterable: AsyncIterable<ByteChunk>,
-    options: ByteModeOptions
+    iterable: AsyncIterable<StreamByteChunk>,
+    options: StreamByteModeOptions
   ): IReadable<Uint8Array>;
-  createReadableFromAsyncIterable<T extends ByteChunk>(
+  createReadableFromAsyncIterable<T extends StreamByteChunk>(
     iterable: AsyncIterable<T>,
     options?: EitherModeOptions
   ): IReadable<Awaited<T> | Uint8Array>;
   /** `undefined` entries are skipped. */
   createReadableFromArray<T>(
     data: readonly T[],
-    options?: ObjectModeOptions
+    options?: StreamObjectModeOptions
   ): IReadable<Exclude<T, undefined>>;
   createReadableFromArray(
-    data: readonly ByteChunk[],
-    options: ByteModeOptions
+    data: readonly StreamByteChunk[],
+    options: StreamByteModeOptions
   ): IReadable<Uint8Array>;
-  createReadableFromArray<T extends ByteChunk>(
+  createReadableFromArray<T extends StreamByteChunk>(
     data: readonly T[],
     options?: EitherModeOptions
   ): IReadable<Exclude<T, undefined> | Uint8Array>;
   createReadableFromGenerator<T>(
     generator: () => AsyncGenerator<T, void, unknown>,
-    options?: ObjectModeOptions
+    options?: StreamObjectModeOptions
   ): IReadable<Awaited<T>>;
   createReadableFromGenerator(
-    generator: () => AsyncGenerator<ByteChunk, void, unknown>,
-    options: ByteModeOptions
+    generator: () => AsyncGenerator<StreamByteChunk, void, unknown>,
+    options: StreamByteModeOptions
   ): IReadable<Uint8Array>;
-  createReadableFromGenerator<T extends ByteChunk>(
+  createReadableFromGenerator<T extends StreamByteChunk>(
     generator: () => AsyncGenerator<T, void, unknown>,
     options?: EitherModeOptions
   ): IReadable<Awaited<T> | Uint8Array>;
   /** Any thenable, adopted as `await` would; the stream yields what it resolves to. */
   createReadableFromPromise<T>(
     promise: PromiseLike<T>,
-    options?: ObjectModeOptions
+    options?: StreamObjectModeOptions
   ): IReadable<Awaited<T>>;
   createReadableFromPromise(
-    promise: PromiseLike<ByteChunk>,
-    options: ByteModeOptions
+    promise: PromiseLike<StreamByteChunk>,
+    options: StreamByteModeOptions
   ): IReadable<Uint8Array>;
-  createReadableFromPromise<T extends ByteChunk>(
+  createReadableFromPromise<T extends StreamByteChunk>(
     promise: PromiseLike<T>,
     options?: EitherModeOptions
   ): IReadable<Awaited<T> | Uint8Array>;
   createEmptyReadable<T = Uint8Array>(options?: ReadableStreamOptions): IReadable<T>;
   createWritable<T = Uint8Array>(
     options?: WritableStreamOptions & {
-      write?: (this: IWritable<T>, chunk: T, encoding: string, callback: Callback) => void;
-      final?: (this: IWritable<T>, callback: Callback) => void;
-      destroy?: DestroyHook<IWritable<T>>;
+      write?: (this: IWritable<T>, chunk: T, encoding: string, callback: WriteCallback) => void;
+      final?: (this: IWritable<T>, callback: WriteCallback) => void;
+      destroy?: StreamDestroyHook<IWritable<T>>;
     }
   ): IWritable<T>;
   createNullWritable<T = unknown>(options?: WritableStreamOptions): IWritable<T>;
@@ -170,10 +172,10 @@ export interface StreamFactories {
         this: IPushableDuplex<TRead, TWrite>,
         chunk: TWrite,
         encoding: string,
-        callback: Callback
+        callback: WriteCallback
       ) => void;
-      final?: (this: IPushableDuplex<TRead, TWrite>, callback: Callback) => void;
-      destroy?: DestroyHook<IPushableDuplex<TRead, TWrite>>;
+      final?: (this: IPushableDuplex<TRead, TWrite>, callback: WriteCallback) => void;
+      destroy?: StreamDestroyHook<IPushableDuplex<TRead, TWrite>>;
     }
   ): IPushableDuplex<TRead, TWrite>;
 }
@@ -216,7 +218,7 @@ function emptyRead(this: { push(chunk: unknown): boolean }): void {
   this.push(null);
 }
 
-function nullWrite(_chunk: unknown, _encoding: string, callback: Callback): void {
+function nullWrite(_chunk: unknown, _encoding: string, callback: WriteCallback): void {
   callback();
 }
 
@@ -240,11 +242,21 @@ export function makeCreateReadable(
   return options => new Readable(options);
 }
 
+const asyncIterableSchema = s.iterable({ strings: true, expected: "an async iterable" });
+
 export function makeCreateReadableFromAsyncIterable(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromAsyncIterable"] {
-  return (iterable, options) =>
-    Readable.from(iterable, { ...options, objectMode: options?.objectMode ?? true });
+  return (iterable, options) => {
+    // What `Readable.from` takes: an async or a plain iterable.
+    checkStreamArgument(
+      asyncIterableSchema,
+      iterable,
+      "Streams.createReadableFromAsyncIterable",
+      "iterable"
+    );
+    return Readable.from(iterable, { ...options, objectMode: options?.objectMode ?? true });
+  };
 }
 
 /**
@@ -252,10 +264,23 @@ export function makeCreateReadableFromAsyncIterable(
  * push, so there is no in-band way to carry an undefined chunk, while `0`, `""`
  * and `false` are ordinary values that must survive.
  */
+const arrayDataSchema = s.custom<unknown[]>(Array.isArray, "an array");
+
 export function makeCreateReadableFromArray(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromArray"] {
   return <T>(data: T[], options?: ReadableStreamOptions): IReadable<T> => {
+    checkStreamArgument(arrayDataSchema, data, "Streams.createReadableFromArray", "data");
+    // A pushed null ends a stream, so it cannot be carried as a chunk: refused here rather
+    // than ending the stream there and dropping everything after it.
+    const nullAt = data.indexOf(null as T);
+    if (nullAt >= 0) {
+      throw new StreamArgumentError(
+        "entries other than null (null ends a stream)",
+        `null at index ${nullAt}`,
+        { field: `data[${nullAt}]`, where: "Streams.createReadableFromArray" }
+      );
+    }
     let index = 0;
     return new Readable({
       ...options,
@@ -279,14 +304,19 @@ export function makeCreateReadableFromArray(
 export function makeCreateReadableFromGenerator(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromGenerator"] {
-  return (generator, options) =>
-    Readable.from(generator(), { ...options, objectMode: options?.objectMode ?? true });
+  return (generator, options) => {
+    checkFunction("createReadableFromGenerator", "generator", generator);
+    return Readable.from(generator(), { ...options, objectMode: options?.objectMode ?? true });
+  };
 }
+
+const thenableSchema = s.thenable();
 
 export function makeCreateReadableFromPromise(
   Readable: StreamClasses["Readable"]
 ): StreamFactories["createReadableFromPromise"] {
   return <T>(promise: Promise<T>, options?: ReadableStreamOptions): IReadable<T> => {
+    checkStreamArgument(thenableSchema, promise, "Streams.createReadableFromPromise", "promise");
     const readable = new Readable({
       ...options,
       objectMode: options?.objectMode ?? true,
@@ -339,6 +369,7 @@ export function makeCreateTransform(
       flush?: () => TOutput | undefined | PromiseLike<TOutput | undefined>;
     }
   ): ITransform<TInput, TOutput> => {
+    checkFunction("createTransform", "transformFn", transformFn);
     const flush = options?.flush;
     return new Transform({
       ...options,
@@ -366,24 +397,61 @@ export function makeCreateDuplex(Duplex: StreamClasses["Duplex"]): StreamFactori
   return options => new Duplex(options);
 }
 
+/** How a refused argument is named: its type, or "null". */
+function describeValue(value: unknown): string {
+  return value === null ? "null" : typeof value;
+}
+
+const functionSchema = s.function();
+
+function checkFunction(where: string, field: string, value: unknown): void {
+  checkStreamArgument(functionSchema, value, `Streams.${where}`, field);
+}
+
 export function makeFromBytes(Readable: StreamClasses["Readable"]): StreamFactories["fromBytes"] {
-  return data =>
-    new Readable({
+  return data => {
+    checkStreamArgument(byteArraySchema, data, "Streams.fromBytes", "data");
+    return new Readable({
       read(this: { push(chunk: unknown): boolean }) {
         this.push(data);
         this.push(null);
       }
     });
+  };
 }
+
+const stringSchema = s.string();
 
 export function makeFromString(Readable: StreamClasses["Readable"]): StreamFactories["fromString"] {
   const fromBytes = makeFromBytes(Readable);
-  return str => fromBytes(stringToUint8Array(str));
+  return str => {
+    checkStreamArgument(stringSchema, str, "Streams.fromString", "str");
+    return fromBytes(stringToUint8Array(str));
+  };
 }
 
 export function makeFromJSON(Readable: StreamClasses["Readable"]): StreamFactories["fromJSON"] {
   const fromString = makeFromString(Readable);
-  return data => fromString(JSON.stringify(data));
+  return data => {
+    let json: string | undefined;
+    try {
+      json = JSON.stringify(data);
+    } catch (cause) {
+      throw new StreamArgumentError(
+        "JSON-serialisable data",
+        `${describeValue(data)} (${(cause as Error).message})`,
+        { cause, field: "data", where: "Streams.fromJson" }
+      );
+    }
+    if (json === undefined) {
+      // JSON.stringify answers `undefined` for a function, a symbol and `undefined` itself.
+      throw new StreamArgumentError("JSON-serialisable data", describeValue(data), {
+        field: "data",
+        where: "Streams.fromJson"
+      });
+    }
+    return fromString(json);
+  };
 }
 
 export function makeTransform(Transform: StreamClasses["Transform"]): StreamFactories["transform"] {
@@ -393,8 +461,10 @@ export function makeTransform(Transform: StreamClasses["Transform"]): StreamFact
 
 export function makeFilter(Transform: StreamClasses["Transform"]): StreamFactories["filter"] {
   const createTransform = makeCreateTransform(Transform);
-  return <T>(predicate: (chunk: T) => boolean | Promise<boolean>) =>
-    createTransform<T, T>(async chunk => ((await predicate(chunk)) ? chunk : undefined), {
+  return <T>(predicate: (chunk: T) => boolean | Promise<boolean>) => {
+    checkFunction("filter", "predicate", predicate);
+    return createTransform<T, T>(async chunk => ((await predicate(chunk)) ? chunk : undefined), {
       objectMode: true
     });
+  };
 }

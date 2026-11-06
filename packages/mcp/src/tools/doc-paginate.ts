@@ -11,7 +11,7 @@
  * which otherwise only refresh when a human presses F9 in Word.
  */
 
-import { Io, Layout, Query } from "documonster/word";
+import { Document, Layout, Query, Transform } from "documonster/word";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -72,7 +72,7 @@ export const docPaginateTool = defineTool({
     const resolved = await resolveInRoot(config, args.path, { mustExist: true });
     await assertReadableSize(config, resolved, args.path);
     const inputVersion = await fingerprint(resolved);
-    const doc = await Io.readFile(resolved).catch((cause: unknown) => {
+    const doc = await Document.readFile(resolved).catch((cause: unknown) => {
       throw toolError.unsupported(
         `could not read ${args.path} as a Word document`,
         "Run doc_inspect to check the real file type.",
@@ -81,21 +81,21 @@ export const docPaginateTool = defineTool({
     });
 
     // Page size always comes from the document's own section properties:
-    // Layout.document takes no geometry override, and exposing a parameter the
+    // Layout.getPageMap takes no geometry override, and exposing a parameter the
     // engine ignores would be worse than not having one.
-    const layout = Layout.document(doc);
+    const layout = Layout.getPageMap(doc);
 
     const lines = [
       `# ${args.path} — page layout`,
       "",
       `- **pages: ${layout.pageCount}**`,
       `- sections: ${layout.sectionPageCounts.length} (${layout.sectionPageCounts.join(", ")} page(s) each)`,
-      `- paragraphs: ${Query.paragraphCount(doc)}`,
-      `- words: ${Query.countWords(doc)}`,
+      `- paragraphs: ${Query.getParagraphCount(doc)}`,
+      `- words: ${Query.getWordCount(doc)}`,
       "- page size: taken from the document's own section setup"
     ];
 
-    // Walk the body directly rather than using Query.getHeadings: that reports a
+    // Walk the body directly rather than using Query.listHeadings: that reports a
     // walk-order ordinal which counts paragraphs nested in tables, whereas
     // contentPages is indexed by body position. Mixing the two misreports pages
     // for any document containing a table.
@@ -139,8 +139,8 @@ export const docPaginateTool = defineTool({
 
     assertWritable(config);
 
-    const withFields = Io.updateFields(doc);
-    const withToc = Io.updateTableOfContents(withFields);
+    const withFields = Transform.updateFields(doc);
+    const withToc = Transform.updateTableOfContents(withFields);
 
     await assertUnchanged(resolved, inputVersion);
     const writeTarget = await resolveEditTarget(config, args.path, args.out);
@@ -148,10 +148,12 @@ export const docPaginateTool = defineTool({
     const backupPath = inPlace ? await backupOnce(writeTarget) : undefined;
 
     if (inPlace) {
-      await replaceAtomically(writeTarget.path, temporary => Io.writeFile(withToc, temporary));
+      await replaceAtomically(writeTarget.path, temporary =>
+        Document.writeFile(withToc, temporary)
+      );
     } else {
       await writeWithPolicy(writeTarget.path, args.overwrite === true, temporary =>
-        Io.writeFile(withToc, temporary)
+        Document.writeFile(withToc, temporary)
       );
     }
 
@@ -175,7 +177,7 @@ interface HeadingPage {
 
 /** Headings in body order, each with the page its paragraph starts on. */
 function collectHeadings(
-  doc: Awaited<ReturnType<typeof Io.readFile>>,
+  doc: Awaited<ReturnType<typeof Document.readFile>>,
   contentPages: readonly number[]
 ): HeadingPage[] {
   const found: HeadingPage[] = [];

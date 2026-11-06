@@ -16,7 +16,7 @@ import {
   findChildrenLocal,
   tryParseXml
 } from "@excel/utils/ooxml-validator/xml-utils";
-import type { XmlDocument, XmlElement } from "@xml/types";
+import type { XmlDocument } from "@xml/types";
 
 const textDecoder = new TextDecoder();
 
@@ -266,9 +266,4 @@ export class ValidationContext {
     this.relsCache.set(relsPath, data);
     return data;
   }
-}
-
-/** Get the root element of a DOM; returns undefined for missing DOM. */
-export function domRoot(dom: XmlDocument | undefined): XmlElement | undefined {
-  return dom?.root;
 }

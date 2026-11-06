@@ -11,7 +11,7 @@ import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
  * create worksheets. Keeping the registries here — above worksheet, below the
  * heavy workbook module — yields a clean one-directional graph:
  *
- *     workbook.browser.ts  (addWorksheet / importSheet / chartsheet / IO)
+ *     workbook.browser.ts  (addWorksheet / importWorksheet / chartsheet / IO)
  *        ↓
  *     workbook-model.ts  (WorkbookModel + getWorkbookModel — also reached by both writers)
  *        ↓
@@ -25,7 +25,7 @@ import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
  * time, so the emitted graph stays one-directional.
  */
 import type { ChartEntry } from "@excel/chart/model/types";
-import type { BuiltinCellStyle } from "@excel/core/builtin-cell-styles";
+import type { BuiltInCellStyle } from "@excel/core/builtin-cell-styles";
 import { BUILTIN_CELL_STYLES } from "@excel/core/builtin-cell-styles";
 import type { DefinedNamesData } from "@excel/core/defined-names";
 import type { OpaqueDrop, OpaquePart } from "@excel/core/opaque-part";
@@ -36,8 +36,8 @@ import type {
   ExternalLinkModel
 } from "@excel/core/workbook-model";
 import type { Worksheet } from "@excel/core/worksheet";
-import { getSheetName } from "@excel/core/worksheet-core";
-import { ImageError, WorksheetNameError } from "@excel/errors";
+import { describeHandle, getSheetName } from "@excel/core/worksheet-core";
+import { ExcelArgumentError, ExcelImageError, ExcelWorksheetNameError } from "@excel/errors";
 import type {
   Font,
   ImageData,
@@ -48,9 +48,13 @@ import type {
   WorkbookView,
   ThreadedCommentPerson
 } from "@excel/types";
+import { argumentChecks } from "@excel/utils/arguments";
+import { copyPlain } from "@excel/utils/copy-plain";
+import { checkStyle } from "@excel/utils/style-checks";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
 /**
  * A user function as the workbook *stores* it.
  *
@@ -65,6 +69,8 @@ export interface WorkbookFunctionDescriptor {
   readonly minArity: number;
   readonly maxArity: number;
   readonly volatile?: boolean;
+  /** {@link RegisterFunctionOptions.returnsArray}. */
+  readonly returnsArray?: boolean;
   /** The caller's function, unconverted — see the note above. */
   readonly invoke: (args: never[]) => unknown;
 }
@@ -92,30 +98,41 @@ export interface WorkbookData {
   language?: string;
   revision?: number;
   contentStatus?: string;
-  /** Source file path remembered by Node `readFile`; absent for buffers/browser inputs. */
+  /**
+   * Source file path remembered by Node `readFile`; absent for buffers/browser inputs.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   sourceFilePath?: string;
   /**
    * Override ContentType for `/xl/workbook.xml` captured from the source file's
    * `[Content_Types].xml` (templates / macro-enabled workbooks differ from a
    * plain .xlsx). Undefined for a freshly created workbook.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   workbookContentType?: string;
   properties: Partial<WorkbookProperties>;
   calcProperties: Partial<CalculationProperties>;
   views: WorkbookView[];
   media: WorkbookMedia[];
+  /** @deprecated Use `Pivot.list`. Removed from the published type in 1.0. */
   pivotTables: PivotTable[];
   protection?: WorkbookProtectionModel;
   externalLinks: ExternalLinkModel[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _worksheets: Worksheet[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _definedNames: DefinedNamesData;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _themes?: unknown;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _defaultFont?: Partial<Font>;
   /**
-   * Workbook-level named cell styles (OOXML `cellStyle`), keyed by style name.
-   * The key is the style name verbatim (case-sensitive, per OOXML). Populated
-   * by {@link defineCellStyle} and on read from an existing workbook's
+   * Workbook-level named cell styles (OOXML `cellStyle`), keyed by `excelNameKey(name)`: Excel compares cell style
+   * names without regard to case, so `Brand Title` and `brand title` are one style. Each entry keeps its spelling in
+   * `name`. Populated
+   * by {@link addCellStyle} and on read from an existing workbook's
    * `cellStyles`/`cellStyleXfs`.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _cellStyles?: Map<string, NamedStyleEntry>;
   /**
@@ -125,39 +142,88 @@ export interface WorkbookData {
    * `<formats>` and a `<colorFilter>` are preserved as XML with the number they were read with. The writer
    * starts its table from this one so those numbers stay valid; modelled rules and table columns hold these
    * same objects and are resolved back to the same index.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _dxfs?: (Partial<Style> | undefined)[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _writerExternalLinkCache: Map<string, ExternalLinkModel>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _tableNames: Set<string>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartEntries: Record<number, ChartEntry>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartRels: Record<number, RelationshipModel[]>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartStyles: Record<number, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartColors: Record<number, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartExStyles: Record<number, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartExColors: Record<number, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartExEntries: Record<number, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartExRels: Record<number, RelationshipModel[]>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartExStructuredEntries: Record<number, ChartExEntry>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _chartsheets: ChartsheetModel[];
+  /**
+   * The highest id of a sheet removed in this session — worksheets and chartsheets share the pool — so a removed
+   * sheet's id is never handed out again, as Excel does it (see `getNextId`).
+   * @internal
+   */
+  _lastSheetId?: number;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _persons: ThreadedCommentPerson[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _slicerParts: Record<string, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _slicerCacheParts: Record<string, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _timelineParts: Record<string, Uint8Array>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _timelineCacheParts: Record<string, Uint8Array>;
-  /** Preserved unmodelled package parts — see `WorkbookModel.opaqueParts`. */
+  /**
+   * Preserved unmodelled package parts — see `WorkbookModel.opaqueParts`.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   _opaqueParts: OpaquePart[];
+  /**
+   * Media ids an API call has stopped using in this session — see {@link releaseMedia}.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
+  _releasedMedia?: Set<number>;
   /**
    * `BrtBeginPivotCacheID` bindings an XLSB read preserved.
    *
    * XLSB-only, and here rather than in the pivot model because the parts they name are carried through as
    * opaque bytes: the reader does not build a `PivotTable` from them, but `workbook.bin` is rebuilt on write
    * and would otherwise drop the record that announces each cache.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _xlsbPivotCaches?: readonly { readonly cacheId: number; readonly relationshipId: string }[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _opaqueContentTypeDefaults: Record<string, string>;
-  /** Preserved parts not written back — see `WorkbookModel.opaqueDrops`. */
+  /**
+   * Preserved parts not written back — see `WorkbookModel.opaqueDrops`.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   _opaqueDrops: OpaqueDrop[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   userFunctions?: Map<string, WorkbookFunctionDescriptor>;
+}
+
+/**
+ * Refuse something that is not a workbook handle where one is required — `42`, `null`, `{}` — with an
+ * `ExcelArgumentError` naming `field`, rather than a `TypeError` from inside. One property read: a handle carries its
+ * sheet list, and nothing else that reaches here does.
+ */
+export function checkWorkbook(wb: unknown, field = "wb"): asserts wb is WorkbookData {
+  if ((wb as { _worksheets?: unknown } | null | undefined)?._worksheets === undefined) {
+    throw new ExcelArgumentError(field, `${field} must be a workbook, got ${describeHandle(wb)}.`);
+  }
 }
 
 /**
@@ -168,70 +234,193 @@ export interface WorkbookData {
  */
 export function validateCellStyleName(name: string): void {
   if (typeof name !== "string" || name === "") {
-    throw new WorksheetNameError("Named cell style name must be a non-empty string.");
+    throw new ExcelWorksheetNameError("Named cell style name must be a non-empty string.");
   }
-  if (name === "Normal") {
-    throw new WorksheetNameError('The built-in "Normal" cell style cannot be redefined.');
+  if (isNormalCellStyleName(name)) {
+    throw new ExcelWorksheetNameError('The built-in "Normal" cell style cannot be redefined.');
   }
+}
+
+/** Whether `name` is the built-in "Normal" style, in any case — Excel compares cell style names that way. */
+export function isNormalCellStyleName(name: string): boolean {
+  return excelNameKey(name) === NORMAL_STYLE_KEY;
+}
+
+const NORMAL_STYLE_KEY = excelNameKey("Normal");
+
+/** The stored named cell style `name` refers to, compared as Excel compares them (without regard to case). */
+export function findCellStyleEntry(wb: WorkbookData, name: string): NamedStyleEntry | undefined {
+  return typeof name === "string" ? wb._cellStyles?.get(excelNameKey(name)) : undefined;
 }
 
 /**
- * Define (or replace) a workbook-level named cell style such as "Heading 1".
- * Cells reference it via `Style.styleName` (e.g. `Cell.applyCellStyle`).
+ * Named cell styles keyed as Excel compares their names, without regard to case. Of two that differ only in case the
+ * first is kept and the later dropped, which is what Excel does with such a file.
+ */
+export function namedStyleMap(styles: Iterable<NamedStyleEntry>): Map<string, NamedStyleEntry> {
+  const map = new Map<string, NamedStyleEntry>();
+  for (const style of styles) {
+    const key = excelNameKey(style.name);
+    if (!map.has(key)) {
+      map.set(key, style);
+    }
+  }
+  return map;
+}
+
+/**
+ * Add (or replace) a workbook-level named cell style such as "Heading 1", and return the stored entry.
+ * Cells reference it via `Style.styleName` (e.g. `Cell.applyStyle`).
  *
- * The reserved built-in "Normal" style (builtinId 0) cannot be redefined; it is
+ * Names compare as Excel compares them, without regard to case: adding `brand title` when `Brand Title` exists
+ * replaces that style's definition, as re-adding `Brand Title` would, and the stored name keeps its first spelling
+ * (`Brand Title`) — the one Excel keeps when it merges two such styles.
+ *
+ * The reserved built-in "Normal" style (builtinId 0), in any case, cannot be redefined; it is
  * always emitted implicitly as `cellStyleXfs[0]`.
  */
-export function defineCellStyle(wb: WorkbookData, name: string, style: NamedStyle): void {
+export function addCellStyle(wb: WorkbookData, name: string, style: NamedStyle): NamedStyleEntry {
+  checkWorkbook(wb);
   validateCellStyleName(name);
+  argumentChecks("Workbook.addCellStyle").required("style", style);
+  argumentChecks("Workbook.addCellStyle").record("style", style);
+  checkStyle("Workbook.addCellStyle", style);
   if (!wb._cellStyles) {
     wb._cellStyles = new Map();
   }
-  wb._cellStyles.set(name, { ...style, name });
+  const key = excelNameKey(name);
+  const entry: NamedStyleEntry = {
+    ...copyPlain(style),
+    name: wb._cellStyles.get(key)?.name ?? name
+  };
+  wb._cellStyles.set(key, entry);
+  return copyPlain(entry);
 }
 
-/** Get a workbook-level named cell style by name, or `undefined` if absent. */
+/**
+ * Get a workbook-level named cell style by name (in any case), or `undefined` if absent. It is a copy: editing it changes nothing —
+ * change the style with `addCellStyle`, which checks what it is given.
+ */
 export function getCellStyle(wb: WorkbookData, name: string): NamedStyleEntry | undefined {
-  return wb._cellStyles?.get(name);
+  checkWorkbook(wb);
+  const entry = findCellStyleEntry(wb, name);
+  return entry && copyPlain(entry);
 }
 
-/** List all workbook-level named cell styles in definition order. */
+/** List all workbook-level named cell styles in definition order, as copies (see {@link getCellStyle}). */
 export function listCellStyles(wb: WorkbookData): NamedStyleEntry[] {
-  return wb._cellStyles ? [...wb._cellStyles.values()] : [];
+  checkWorkbook(wb);
+  return wb._cellStyles ? [...wb._cellStyles.values()].map(copyPlain) : [];
 }
 
-/** Remove a named cell style. Returns `true` if it existed. */
+/** Remove a named cell style (named in any case). Returns `true` if it existed. */
 export function removeCellStyle(wb: WorkbookData, name: string): boolean {
-  return wb._cellStyles ? wb._cellStyles.delete(name) : false;
+  checkWorkbook(wb);
+  return wb._cellStyles && typeof name === "string"
+    ? wb._cellStyles.delete(excelNameKey(name))
+    : false;
 }
 
 /**
  * Define one of the built-in Excel cell-style presets (e.g. "Heading1") on the
  * workbook and return its OOXML style name (e.g. "Heading 1") for use with
- * `Cell.applyCellStyle`. Built-in presets carry the correct `builtinId`, which
- * accessibility software relies on to recognise the style's semantic role.
+ * `Cell.applyStyle`. Built-in presets carry the correct `builtinId`, which
+ * accessibility software relies on to recognise the style's semantic role. A custom style of the same name in
+ * another case is that style, and is replaced; the name returned is the stored spelling.
  */
-export function useBuiltinCellStyle(wb: WorkbookData, id: BuiltinCellStyle): string {
+export function useBuiltInCellStyle(wb: WorkbookData, id: BuiltInCellStyle): string {
+  checkWorkbook(wb);
+  if (typeof id !== "string" || !Object.hasOwn(BUILTIN_CELL_STYLES, id)) {
+    argumentChecks("Workbook.useBuiltInCellStyle").fail(
+      "id",
+      `one of ${Object.keys(BUILTIN_CELL_STYLES).join(", ")}`,
+      id
+    );
+  }
   const { name, ...style } = BUILTIN_CELL_STYLES[id];
-  defineCellStyle(wb, name, style);
-  return name;
+  return addCellStyle(wb, name, style).name;
 }
 
 export function removeWorksheetEx(wb: WorkbookData, worksheet: Worksheet): void {
+  // Everything the sheet drew stops being a use of its media: pictures, background, watermark and
+  // header/footer images, and the picture fills of its charts. The charts go with the sheet — left
+  // registered, each was still written as an `xl/charts/chartN.xml` nothing pointed at.
+  for (const medium of worksheet._media ?? []) {
+    releaseMedia(wb, medium.imageId);
+  }
+  for (const chart of worksheet._charts ?? []) {
+    if (chart.chartNumber > 0) {
+      releaseChartMedia(wb, chart.chartNumber);
+      removeChartEntry(wb, chart.chartNumber);
+    }
+    if (chart.chartExNumber > 0) {
+      removeChartExStructuredEntry(wb, chart.chartExNumber);
+    }
+  }
   // Release any workbook-wide table names this sheet held so the names can
   // be reused by future tables on other sheets without spurious "name
   // already exists" errors.
   const tables = worksheet.tables;
   if (tables) {
     for (const tableName of Object.keys(tables)) {
-      wb._tableNames.delete(tableName.toLowerCase());
+      wb._tableNames.delete(excelNameKey(tableName));
     }
   }
+  worksheet._removed = true;
+  // Its id is not handed out again — see `getNextId`.
+  wb._lastSheetId = Math.max(wb._lastSheetId ?? 0, worksheet.id);
   wb._worksheets[worksheet.id] = undefined!;
 }
 
 export function getImage(wb: WorkbookData, id: number | string): WorkbookMedia | undefined {
   return wb.media[Number(id)];
+}
+
+/**
+ * Record that an API call removed a use of medium `id`. The id stays valid; the writer leaves the
+ * medium out of the package only if it is one of these *and* nothing written references it. A
+ * medium that arrived unreferenced in a file that was read, or that was added and never placed,
+ * is written as it always was.
+ *
+ * A picture with an SVG companion is two media — the raster fallback the blip embeds and the SVG its
+ * `asvg:svgBlip` extension names — so releasing one releases the other too. Releasing only the raster
+ * left the SVG written with nothing referencing it.
+ */
+export function releaseMedia(wb: WorkbookData, id: number | string | undefined): void {
+  const index = id === undefined ? NaN : Number(id);
+  if (Number.isInteger(index) && index >= 0) {
+    const released = (wb._releasedMedia ??= new Set());
+    if (released.has(index)) {
+      return;
+    }
+    released.add(index);
+    const svg = (wb.media[index] as { svgMediaId?: number } | undefined)?.svgMediaId;
+    if (svg !== undefined) {
+      releaseMedia(wb, svg);
+    }
+  }
+}
+
+/**
+ * Release the media a chart's relationships point at — its picture fills. Call it before the chart's
+ * entry is removed. A chart image is written as `xl/media/image{id + 1}`, which is how the
+ * relationship names it — a chart read from a package that named its media otherwise has its targets
+ * rewritten to that form on read (`reconcileChartMediaTargets`), so the name is the id.
+ */
+export function releaseChartMedia(wb: WorkbookData, chartNumber: number): void {
+  if (!(chartNumber > 0)) {
+    return;
+  }
+  const rels = [
+    ...((wb._chartEntries[chartNumber]?.rels ?? []) as { Target?: string }[]),
+    ...((wb._chartRels[chartNumber] ?? []) as { Target?: string }[])
+  ];
+  for (const rel of rels) {
+    const match = /(?:^|\/)media\/image(\d+)\.[^/]+$/.exec(rel.Target ?? "");
+    if (match) {
+      releaseMedia(wb, Number(match[1]) - 1);
+    }
+  }
 }
 
 /**
@@ -312,19 +501,35 @@ export function getChartExStructuredEntry(
   return wb._chartExStructuredEntries?.[chartExNumber];
 }
 
+/**
+ * Refuse a sheet name longer than Excel's 31 characters. The API entry points call this before
+ * {@link validateSheetName}, which shortens such a name — what a read of another program's file needs, and what a
+ * caller who chose the name should be told about instead: the sheet ended up named something they did not write, and
+ * formulas they wrote with the full name pointed nowhere.
+ */
+export function refuseLongSheetName(name: unknown): void {
+  if (typeof name === "string" && name.length > 31) {
+    throw new ExcelWorksheetNameError(
+      `Sheet name ${JSON.stringify(name)} is ${name.length} characters long; Excel allows at most 31.`
+    );
+  }
+}
+
 export function validateSheetName(
   wb: WorkbookData,
   name: string,
   existing?: Worksheet | { name: string }
 ): string {
   if (typeof name !== "string") {
-    throw new WorksheetNameError("The name has to be a string.");
+    throw new ExcelWorksheetNameError("The name has to be a string.");
   }
   if (name === "") {
-    throw new WorksheetNameError("The name can't be empty.");
+    throw new ExcelWorksheetNameError("The name can't be empty.");
   }
   if (name === "History") {
-    throw new WorksheetNameError('The name "History" is protected. Please use a different name.');
+    throw new ExcelWorksheetNameError(
+      'The name "History" is protected. Please use a different name.'
+    );
   }
   // Illegal characters per Excel's own naming rules: asterisk (*),
   // question mark (?), colon (:), forward slash (/), backslash (\),
@@ -332,12 +537,12 @@ export function validateSheetName(
   // to omit `\\`; unified here so both families enforce the same
   // char set.
   if (/[*?:/\\[\]]/.test(name)) {
-    throw new WorksheetNameError(
+    throw new ExcelWorksheetNameError(
       `Sheet name ${name} cannot include any of the following characters: * ? : \\ / [ ]`
     );
   }
   if (/(^')|('$)/.test(name)) {
-    throw new WorksheetNameError(
+    throw new ExcelWorksheetNameError(
       `The first or last character of sheet name cannot be a single quotation mark: ${name}`
     );
   }
@@ -347,15 +552,15 @@ export function validateSheetName(
     }
     name = name.substring(0, 31);
   }
-  const nameLower = name.toLowerCase();
+  const nameKey = sheetNameKey(name);
   const duplicateWorksheet = wb._worksheets.find(
-    ws => ws && ws !== existing && ws._name.toLowerCase() === nameLower
+    ws => ws && ws !== existing && sheetNameKey(ws._name) === nameKey
   );
   const duplicateChartsheet = wb._chartsheets.find(
-    cs => cs && cs !== existing && cs.name.toLowerCase() === nameLower
+    cs => cs && cs !== existing && sheetNameKey(cs.name) === nameKey
   );
   if (duplicateWorksheet || duplicateChartsheet) {
-    throw new WorksheetNameError(`Sheet name already exists: ${name}`);
+    throw new ExcelWorksheetNameError(`Sheet name already exists: ${name}`);
   }
   return name;
 }
@@ -370,10 +575,83 @@ export function removeChartExStructuredEntry(wb: WorkbookData, chartExNumber: nu
   delete wb._chartExColors[chartExNumber];
 }
 
+/** The workbook's defined names — the registry the `DefinedNames` namespace edits. */
 export function getDefinedNames(wb: WorkbookData): DefinedNamesData {
+  checkWorkbook(wb);
   return wb._definedNames;
 }
+/**
+ * The extensions an added image may carry: those `ImageData` documents, and `jpg`, which people write anyway
+ * and `imageContentTypeFor` types as `image/jpeg`. The extension names the media part and its content type,
+ * so anything else — a MIME type such as `image/png` above all — produced a part named `image1.image/png`
+ * that Excel reports as unreadable.
+ */
+const IMAGE_EXTENSIONS: readonly string[] = ["png", "jpeg", "gif", "jpg"];
+
+/**
+ * Throw {@link ExcelImageError} unless `extension` is one an added image may carry. An omitted extension is
+ * left to the writers, which name such a part `.png`.
+ */
+export function assertImageExtension(extension: unknown): void {
+  if (extension === undefined) {
+    return;
+  }
+  if (typeof extension !== "string" || !IMAGE_EXTENSIONS.includes(extension.toLowerCase())) {
+    throw new ExcelImageError(
+      `Invalid image extension ${JSON.stringify(extension)}; expected one of ${IMAGE_EXTENSIONS.join(", ")} (a file extension, not a MIME type)`
+    );
+  }
+}
+
 export function addWorkbookImage(wb: WorkbookData, image: ImageData): number {
+  checkImageData("Image.add", image);
+  return registerWorkbookImage(wb, image);
+}
+
+/**
+ * Refuse an image that cannot be written: no extension or one that is not an image's, or no source of bytes —
+ * `buffer`, `base64` or `filename` — and no `link`. Each of those was accepted and failed when the workbook was written, with a
+ * `TypeError` from inside the writer, or was written as a picture whose bytes were a string.
+ */
+export function checkImageData(where: string, image: unknown): void {
+  if (image === null || typeof image !== "object") {
+    throw new ExcelImageError(`${where}: the image must be an object, got ${String(image)}.`);
+  }
+  const record = image as Record<string, unknown>;
+  // The type requires it, and the XLSX writer named the part `image1.undefined` and failed on its content type.
+  if (record.extension === undefined) {
+    throw new ExcelImageError(
+      `${where}: the image needs an extension, one of ${IMAGE_EXTENSIONS.join(", ")}.`
+    );
+  }
+  assertImageExtension(record.extension);
+  const sources = ["buffer", "base64", "filename"].filter(key => record[key] != null);
+  if (
+    record.buffer != null &&
+    !(
+      ArrayBuffer.isView(record.buffer) &&
+      (record.buffer as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
+    )
+  ) {
+    throw new ExcelImageError(`${where}: the image's buffer must be bytes (a Uint8Array).`);
+  }
+  for (const key of ["base64", "filename", "link"]) {
+    if (record[key] != null && typeof record[key] !== "string") {
+      throw new ExcelImageError(`${where}: the image's ${key} must be a string.`);
+    }
+  }
+  if (sources.length === 0 && record.link == null) {
+    throw new ExcelImageError(
+      `${where}: the image has no bytes; give one of buffer, base64 or filename, or a link.`
+    );
+  }
+}
+
+/**
+ * {@link addWorkbookImage} without the extension check, for a reader registering a medium a package
+ * already holds under whatever extension it was stored with (`emf`, `svg`, …).
+ */
+export function registerWorkbookImage(wb: WorkbookData, image: ImageData): number {
   const { svg, ...raster } = image;
   if (
     svg &&
@@ -384,7 +662,7 @@ export function addWorkbookImage(wb: WorkbookData, image: ImageData): number {
   ) {
     // An SVG companion needs an embedded raster fallback; a *linked* (external)
     // raster has no package part to attach the svgBlip extension to.
-    throw new ImageError(
+    throw new ExcelImageError(
       "An SVG image requires an embedded raster fallback (buffer/base64/filename); it cannot be combined with an external link."
     );
   }
@@ -406,12 +684,15 @@ export function addWorkbookImage(wb: WorkbookData, image: ImageData): number {
 }
 
 /**
- * Look up a worksheet by index or name (or the first sheet when `id` is
- * omitted). Pure data accessor over `wb._worksheets` — kept in the core
+ * Look up a worksheet by its **sheet id** or by name, compared as Excel compares sheet names (or the first sheet when
+ * `id` is omitted). The id is the stable number a sheet was given when it was added — not its position, so it does
+ * not move when another sheet is removed, and a removed sheet's id is not given to a later one — whereas the
+ * chartsheet lookups take a 0-based position among the chartsheets. Pure data accessor over `wb._worksheets` — kept in the core
  * layer so the chart module can resolve sheets for cache population without
  * forming a `workbook → chart → workbook` import cycle.
  */
 export function getWorksheet(wb: WorkbookData, id?: number | string): Worksheet | undefined {
+  checkWorkbook(wb);
   if (id === undefined) {
     return wb._worksheets.find(Boolean);
   }
@@ -419,9 +700,9 @@ export function getWorksheet(wb: WorkbookData, id?: number | string): Worksheet 
     return wb._worksheets[id];
   }
   if (typeof id === "string") {
-    const idLower = id.toLowerCase();
+    const idKey = sheetNameKey(id);
     return wb._worksheets.find(
-      worksheet => worksheet && getSheetName(worksheet).toLowerCase() === idLower
+      worksheet => worksheet && sheetNameKey(getSheetName(worksheet)) === idKey
     );
   }
   return undefined;
@@ -429,6 +710,7 @@ export function getWorksheet(wb: WorkbookData, id?: number | string): Worksheet 
 
 /** All worksheets in tab order (excludes the reserved index-0 slot). See {@link getWorksheet}. */
 export function getWorksheets(wb: WorkbookData): Worksheet[] {
+  checkWorkbook(wb);
   return wb._worksheets
     .slice(1)
     .sort((a, b) => a.orderNo - b.orderNo)
@@ -473,7 +755,7 @@ export function copyChartSidecars(
   // wb`), re-register each referenced image in the destination
   // workbook and rewrite the Target to point at the new media
   // file. Without this, a pictureFill that round-tripped through
-  // `importSheet` pointed at the source workbook's media array —
+  // `importWorksheet` pointed at the source workbook's media array —
   // which the destination package doesn't ship, so Excel shows a
   // broken image icon.
   const srcRels = wb._chartRels[sourceChartNumber];

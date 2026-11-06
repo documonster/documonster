@@ -6,16 +6,19 @@
  */
 
 import { DEFAULT_LINEBREAK_REGEX } from "@csv/constants";
+import { CsvArgumentError } from "@csv/errors";
 import { detectDelimiterFor } from "@csv/parse/delimiter-detector";
 import { createOnSkipHandler } from "@csv/parse/helpers";
 import type { ScannerConfig } from "@csv/parse/scanner";
 import type { CsvParseOptions } from "@csv/types";
+import { checkParseOptions } from "@csv/utils/check-options";
 import {
   applyFirstChunkPreprocessing,
   normalizeQuoteOption,
   normalizeEscapeOption,
   detectLinebreak
 } from "@csv/utils/detect";
+import { describeValue as describeInput } from "@utils/describe-value";
 
 // =============================================================================
 // Types
@@ -53,6 +56,7 @@ export interface ParseConfig {
   rawOption: boolean;
   dynamicTyping: CsvParseOptions["dynamicTyping"];
   castDate: CsvParseOptions["castDate"];
+  decimalSeparator: "." | ",";
   invokeOnSkip: ReturnType<typeof createOnSkipHandler>;
   headers: CsvParseOptions["headers"];
 }
@@ -69,6 +73,8 @@ export interface CreateParseConfigOptions {
   options: CsvParseOptions;
   /** Override delimiter (for streaming after detection) */
   detectedDelimiter?: string;
+  /** The public call an argument error names (`Csv.parseStream`). Defaults to `Csv.parse`. */
+  where?: string;
 }
 
 /**
@@ -103,7 +109,8 @@ export interface ParseConfigResult {
  * ```
  */
 export function createParseConfig(opts: CreateParseConfigOptions): ParseConfigResult {
-  const { input, options, detectedDelimiter } = opts;
+  const { input, options, detectedDelimiter, where = "Csv.parse" } = opts;
+  checkParseOptions(options, where);
   const {
     delimiter: delimiterOption = ",",
     delimitersToGuess,
@@ -125,6 +132,7 @@ export function createParseConfig(opts: CreateParseConfigOptions): ParseConfigRe
     fastMode = false,
     dynamicTyping,
     castDate,
+    decimalSeparator = ".",
     beforeFirstChunk,
     info: infoOption = false,
     raw: rawOption = false,
@@ -144,7 +152,7 @@ export function createParseConfig(opts: CreateParseConfigOptions): ParseConfigRe
   if (input !== undefined) {
     processedInput = input;
 
-    processedInput = applyFirstChunkPreprocessing(processedInput, beforeFirstChunk);
+    processedInput = applyFirstChunkPreprocessing(processedInput, beforeFirstChunk, where);
   }
 
   const shouldSkipEmpty = skipEmptyLines;
@@ -218,6 +226,7 @@ export function createParseConfig(opts: CreateParseConfigOptions): ParseConfigRe
     rawOption,
     dynamicTyping,
     castDate,
+    decimalSeparator,
     invokeOnSkip: createOnSkipHandler(onSkip),
     headers
   };
@@ -225,15 +234,19 @@ export function createParseConfig(opts: CreateParseConfigOptions): ParseConfigRe
   return { config, processedInput };
 }
 
-/**
- * Resolve options into a normalized config object.
- * Convenience wrapper around createParseConfig that ensures processedInput is non-null.
- */
 export function resolveParseConfig(
   input: string,
-  options: CsvParseOptions
+  options: CsvParseOptions,
+  where = "Csv.parse"
 ): { config: ParseConfig; processedInput: string } {
-  const result = createParseConfig({ input, options });
+  // Otherwise a number or `null` failed inside BOM stripping with an untyped `TypeError`.
+  if (typeof input !== "string") {
+    throw new CsvArgumentError(
+      "input",
+      `${where}: input must be a string, got ${describeInput(input)}`
+    );
+  }
+  const result = createParseConfig({ input, options, where });
   return {
     config: result.config,
     processedInput: result.processedInput!

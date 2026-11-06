@@ -23,7 +23,7 @@ async function rezip(entries: Map<string, { data: Uint8Array }>): Promise<Uint8A
   for (const [name, entry] of entries) {
     archive.add(name, entry.data);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 function drawingKey(entries: Map<string, unknown>): string {
@@ -79,7 +79,7 @@ describe("drawing round-trip: grouped shapes and picture geometry", () => {
     const srcSheet = Workbook.getWorksheet(source, "S1")!;
 
     const dest = Workbook.create();
-    Workbook.importSheet(dest, srcSheet, "Copy");
+    Workbook.importWorksheet(dest, srcSheet, "Copy");
     expect(getImages(Workbook.getWorksheet(dest, "Copy")!)).toHaveLength(1);
 
     const out = await Workbook.toBuffer(dest);
@@ -108,7 +108,7 @@ describe("drawing round-trip: grouped shapes and picture geometry", () => {
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(src));
     const dest = Workbook.create();
-    Workbook.importSheet(dest, Workbook.getWorksheet(reopened, "S")!, "Copy");
+    Workbook.importWorksheet(dest, Workbook.getWorksheet(reopened, "S")!, "Copy");
 
     expect(getImages(Workbook.getWorksheet(dest, "Copy")!)).toHaveLength(2);
     expect(dest.media).toHaveLength(1);

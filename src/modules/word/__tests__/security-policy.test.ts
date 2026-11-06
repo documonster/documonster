@@ -1,7 +1,7 @@
 /**
  * DOCX Module - SecurityPolicy Tests
  *
- * Verifies the parts of WordSecurityPolicy that the reader actually
+ * Verifies the parts of DocxSecurityPolicy that the reader actually
  * enforces. Adding a new field to the policy interface without enforcing
  * it should fail the corresponding test below — the goal is to keep the
  * public policy API honest about what is and isn't implemented.
@@ -15,10 +15,10 @@ import { describe, it, expect } from "vitest";
 import { Document, Io, Security } from "../index";
 import type { Hyperlink, Paragraph, Run } from "../types";
 
-describe("WordSecurityPolicy: allowExternalTargets", () => {
+describe("DocxSecurityPolicy: allowExternalTargets", () => {
   it("default policy keeps external hyperlink URLs", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, {
+    Document.addParagraph(h, {
       type: "paragraph",
       children: [
         {
@@ -28,7 +28,7 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
         }
       ]
     } as Paragraph);
-    const bytes = await Io.package(Document.build(h));
+    const bytes = await Io.toBuffer(h);
 
     const parsed = await Io.read(bytes);
     const link = (parsed.body[0] as Paragraph).children.find(
@@ -39,7 +39,7 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
 
   it("strict policy strips external hyperlink URLs but keeps inner text", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, {
+    Document.addParagraph(h, {
       type: "paragraph",
       children: [
         {
@@ -49,9 +49,9 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
         }
       ]
     } as Paragraph);
-    const bytes = await Io.package(Document.build(h));
+    const bytes = await Io.toBuffer(h);
 
-    const parsed = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
+    const parsed = await Io.read(bytes, { securityPolicy: Security.STRICT_POLICY });
     const link = (parsed.body[0] as Paragraph).children.find(
       (c): c is Hyperlink => "type" in c && c.type === "hyperlink"
     );
@@ -64,21 +64,21 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
   });
 });
 
-describe("WordSecurityPolicy: preserveVbaProject", () => {
+describe("DocxSecurityPolicy: preserveVbaProject", () => {
   it("strict policy drops vbaProject binary on .docm round-trip", async () => {
     // Synthesize a minimal docm: a regular doc with a fake VBA blob
     // attached. The packager wires up the rels + content type for us.
     const h = Document.create();
     Document.addParagraph(h, "Body");
-    const doc = Document.build(h);
+    const doc = h;
     const docm = {
       ...doc,
       docType: "macroEnabledDocument" as const,
       vbaProject: new Uint8Array([0x01, 0x02, 0x03])
     };
-    const bytes = await Io.package(docm);
+    const bytes = await Io.toBuffer(docm);
 
-    const strict = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
+    const strict = await Io.read(bytes, { securityPolicy: Security.STRICT_POLICY });
     expect(strict.vbaProject).toBeUndefined();
 
     const lenient = await Io.read(bytes);
@@ -86,12 +86,12 @@ describe("WordSecurityPolicy: preserveVbaProject", () => {
   });
 });
 
-describe("WordSecurityPolicy: maxXmlDepth", () => {
+describe("DocxSecurityPolicy: maxXmlDepth", () => {
   /** Rebuild a minimal package with `part` replaced by `xml`. */
   async function withPart(part: string, xml: string): Promise<Uint8Array> {
     const h = Document.create();
     Document.addParagraph(h, "hello");
-    const files = await extractAll(await Io.package(Document.build(h)));
+    const files = await extractAll(await Io.toBuffer(h));
     const entries = [...files].map(([name, entry]) => ({ name, data: entry.data }));
     const data = new TextEncoder().encode(xml);
     const existing = entries.find(e => e.name === part);
@@ -121,7 +121,7 @@ describe("WordSecurityPolicy: maxXmlDepth", () => {
     );
     expect(error).toBeInstanceOf(DocxLimitExceededError);
     expect((error as DocxLimitExceededError).limit).toBe("xmlDepth");
-    expect((error as DocxLimitExceededError).maximum).toBe(40);
+    expect((error as DocxLimitExceededError).allowed).toBe(40);
   });
 
   it("reads the same document under a policy that allows its depth", async () => {
@@ -132,9 +132,9 @@ describe("WordSecurityPolicy: maxXmlDepth", () => {
   it("strict preset is tighter than the default", async () => {
     const bytes = await withPart("word/document.xml", nestedBody(80));
     await expect(Io.read(bytes)).resolves.toBeDefined();
-    await expect(
-      Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY })
-    ).rejects.toBeInstanceOf(DocxLimitExceededError);
+    await expect(Io.read(bytes, { securityPolicy: Security.STRICT_POLICY })).rejects.toBeInstanceOf(
+      DocxLimitExceededError
+    );
   });
 
   it("is not swallowed by best-effort parsing of auxiliary parts", async () => {

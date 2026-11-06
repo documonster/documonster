@@ -38,12 +38,13 @@ import {
   encodeBiffRecords,
   encodeRange,
   encodeWideString,
-  readRange,
+  readSheetRange,
   readWideString,
-  type BiffRange
+  type BiffRange,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** One comment, in the shape the XLSX comment writer also consumes. */
 export interface SheetComment {
@@ -107,7 +108,7 @@ export function readCommentsPart(
     const name = nameOf(record.id);
     if (name === "BrtCommentAuthor") {
       authors.push(
-        safely(() => readWideString(new BinaryReader(record.payload, 0, part), part)) ?? ""
+        safely(() => readWideString(new XlsbReader(record.payload, 0, part), part)) ?? ""
       );
       continue;
     }
@@ -151,9 +152,9 @@ function encodeCommentHeader(author: number, ref: string): Uint8Array {
 }
 
 function readCommentHeader(payload: Uint8Array, part: string): { author: number; ref: string } {
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const author = reader.readInt32();
-  const range = readRange(reader);
+  const range = readSheetRange(reader, "BrtBeginComment");
   // The anchor is stored as a range but a note is attached to one cell, so the first corner is the
   // address. Both corners are equal in every corpus comment.
   return { author, ref: encodeCell({ r: range.firstRow, c: range.firstColumn }) };
@@ -202,7 +203,7 @@ function encodeRichString(texts: readonly RichText[]): Uint8Array {
 
 /** Read a `RichStr` back to rich runs. */
 function readRichString(payload: Uint8Array, part: string): readonly RichText[] {
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const flags = reader.readUint8();
   const text = readWideString(reader, part);
   if ((flags & 0x01) === 0) {

@@ -47,7 +47,8 @@ export interface MarkdownParseOptions {
   trim?: boolean;
 
   /**
-   * Unescape Markdown escape sequences in cell values (e.g. `\|` -> `|`).
+   * Unescape the escapes `Markdown.format` writes: `\|` -> `|`, `\\` -> `\`, `\<` -> `<`.
+   * Other Markdown escapes are left as written.
    * @default true
    */
   unescape?: boolean;
@@ -61,12 +62,16 @@ export interface MarkdownParseOptions {
   /**
    * Maximum number of data rows to parse (excludes header).
    * Useful for previewing large tables.
+   *
+   * **A preview, not a guard:** the rows past it are left unread; nothing is thrown. (Excel's
+   * `XlsxReadOptions.maxRows` is the opposite — it refuses a sheet that is longer.)
    */
   maxRows?: number;
 
   /**
-   * Convert `<br>`, `<br/>`, `<br />` tags in cell content to newline characters.
-   * Useful for round-tripping multiline cell content through Markdown.
+   * Convert `<br>`, `<br/>`, `<br />` tags in cell content to newline characters. Set it to
+   * read back what `Markdown.format` writes: it writes a newline as `<br>` and a literal
+   * `<br>` as `\<br>`, which is not converted.
    * @default false
    */
   convertBr?: boolean;
@@ -102,10 +107,11 @@ export interface MarkdownColumnConfig {
  */
 export interface MarkdownFormatOptions {
   /**
-   * Column configuration. When provided, overrides auto-detected headers and alignment.
-   * Can be an array of strings (header names) or MarkdownColumnConfig objects.
+   * Column configuration. When provided, its headers and alignments replace `headers` column
+   * by column; the table has as many columns as the longer of the two. Can be an array of
+   * strings (header names) or MarkdownColumnConfig objects.
    */
-  columns?: (string | MarkdownColumnConfig)[];
+  columns?: readonly (string | MarkdownColumnConfig)[];
 
   /**
    * Default alignment for columns without explicit alignment.
@@ -148,6 +154,10 @@ export interface MarkdownFormatOptions {
 /**
  * Unified Markdown options for Workbook integration.
  * Combines parse and format options with worksheet-specific settings.
+ *
+ * Published from `documonster/markdown` only as a deprecated name; the Excel bridge's
+ * deprecated flat forms still take it. Its successors are the bridge's `ExcelMarkdownReadOptions`
+ * and `ExcelMarkdownWriteOptions`.
  */
 export interface MarkdownOptions extends MarkdownParseOptions, MarkdownFormatOptions {
   // === Worksheet ===
@@ -163,7 +173,10 @@ export interface MarkdownOptions extends MarkdownParseOptions, MarkdownFormatOpt
   // === Write options ===
   /** Date format string for formatting Date values */
   dateFormat?: string;
-  /** Use UTC for date formatting */
+  /**
+   * Take a date's fields from UTC — the calendar value an Excel date cell holds — rather than from the host's
+   * timezone. Default `true`; `false` writes local time.
+   */
   dateUTC?: boolean;
   /** Include empty rows in output */
   includeEmptyRows?: boolean;

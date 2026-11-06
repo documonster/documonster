@@ -218,8 +218,8 @@ describe("SUMIF", () => {
     expect(asNumber(fnSUMIF([quantities, rvString(">100")]))).toBe(0);
   });
 
-  it("returns #VALUE! when range is not an array", () => {
-    expect(fnSUMIF([rvNumber(5), rvString(">0")])).toEqual(ERRORS.VALUE);
+  it("reads a single value as a one-cell range", () => {
+    expect(fnSUMIF([rvNumber(5), rvString(">0")])).toEqual(rvNumber(5));
   });
 });
 
@@ -372,8 +372,8 @@ describe("SUMIF comprehensive", () => {
     expect(fnSUMIF([arr, ERRORS.NA])).toEqual(ERRORS.NA);
   });
 
-  it("range is scalar -> #VALUE!", () => {
-    expect(fnSUMIF([rvNumber(5), rvNumber(5)])).toEqual(ERRORS.VALUE);
+  it("range scalar is a one-cell range", () => {
+    expect(fnSUMIF([rvNumber(5), rvNumber(5)])).toEqual(rvNumber(5));
   });
 });
 
@@ -404,7 +404,7 @@ describe("SUMIFS comprehensive", () => {
     expect(fnSUMIFS([sums, c1, ERRORS.NA])).toEqual(ERRORS.NA);
   });
 
-  it("sum range scalar -> #VALUE!", () => {
+  it("sum range scalar vs a larger criteria range → #VALUE!", () => {
     expect(fnSUMIFS([rvNumber(5), c1, rvString("A")])).toEqual(ERRORS.VALUE);
   });
 
@@ -447,8 +447,8 @@ describe("COUNTIF comprehensive", () => {
     expect(asNumber(fnCOUNTIF([arr, rvString(">100")]))).toBe(0);
   });
 
-  it("range scalar -> #VALUE!", () => {
-    expect(fnCOUNTIF([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("range scalar is a one-cell range", () => {
+    expect(fnCOUNTIF([rvNumber(1), rvNumber(1)])).toEqual(rvNumber(1));
   });
 
   it("criteria error -> error", () => {
@@ -485,8 +485,8 @@ describe("COUNTIFS comprehensive", () => {
     expect(fnCOUNTIFS([c1])).toEqual(ERRORS.VALUE);
   });
 
-  it("first arg scalar -> #VALUE!", () => {
-    expect(fnCOUNTIFS([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("first arg scalar is a one-cell range", () => {
+    expect(fnCOUNTIFS([rvNumber(1), rvNumber(1)])).toEqual(rvNumber(1));
   });
 
   it("shape mismatch -> #VALUE!", () => {
@@ -520,8 +520,8 @@ describe("AVERAGEIF comprehensive", () => {
     expect(fnAVERAGEIF([arr, rvString(">100")])).toEqual(ERRORS.DIV0);
   });
 
-  it("range scalar -> #VALUE!", () => {
-    expect(fnAVERAGEIF([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("range scalar is a one-cell range", () => {
+    expect(fnAVERAGEIF([rvNumber(1), rvNumber(1)])).toEqual(rvNumber(1));
   });
 
   it("criteria error -> error", () => {
@@ -591,7 +591,7 @@ describe("MAXIFS comprehensive", () => {
     expect(fnMAXIFS([vals])).toEqual(ERRORS.VALUE);
   });
 
-  it("max-range scalar -> #VALUE!", () => {
+  it("max-range scalar vs a larger criteria range → #VALUE!", () => {
     expect(fnMAXIFS([rvNumber(1), c, rvString("A")])).toEqual(ERRORS.VALUE);
   });
 

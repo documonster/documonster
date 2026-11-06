@@ -5,7 +5,11 @@
 import { Readable, Writable } from "stream";
 
 import { isWritableStream } from "@stream/core/type-guards";
-import { makeReadableFromWeb, makeWritableFromWeb } from "@stream/core/web-conversions";
+import {
+  checkWritableLike,
+  makeReadableFromWeb,
+  makeWritableFromWeb
+} from "@stream/core/web-conversions";
 import type { ReadableFromWeb, WritableFromWeb } from "@stream/core/web-conversions";
 import type { WritableLike } from "@stream/types";
 
@@ -18,7 +22,7 @@ import type { WritableLike } from "@stream/types";
  */
 export function toWritable<T = Uint8Array>(stream: WritableLike | WritableStream<T>): WritableLike {
   if (!isWritableStream(stream) || stream instanceof Writable) {
-    return stream as WritableLike;
+    return checkWritableLike(stream);
   }
   // The module's own adapter: it drives the Web stream through its writer only
   // (so it also runs on Bun, whose `Writable.fromWeb` misbehaves) and aborts it

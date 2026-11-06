@@ -378,6 +378,9 @@ function isWideBmpEmoji(cp: number): boolean {
  * Ranges follow Unicode's East Asian Width property (values `W` and `F`).
  */
 export function isFullWidthCodePoint(codePoint: number): boolean {
+  if (codePoint < 0x1100) {
+    return false;
+  }
   return (
     (codePoint >= 0x1100 && codePoint <= 0x115f) || // Hangul Jamo initial consonants
     (codePoint >= 0x2e80 && codePoint <= 0x303e) || // CJK Radicals, Kangxi, CJK Symbols

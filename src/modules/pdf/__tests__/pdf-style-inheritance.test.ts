@@ -1,7 +1,5 @@
 import { inflateSync } from "node:zlib";
 
-import { cellSetAlignment, cellSetFont, cellSetValue } from "@excel/core/cell";
-import { getCell } from "@excel/core/worksheet";
 import { Cell, Column, Row, Sparkline, Workbook, Worksheet } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { describe, it, expect } from "vitest";
@@ -98,7 +96,7 @@ describe("PDF style rendering", () => {
       });
 
       // Style-only cells are deliberately excluded from worksheet dimensions.
-      expect(Worksheet.dimensions(ws)).toEqual({ top: 0, left: 0, bottom: 0, right: 0 });
+      expect(Worksheet.getDimensions(ws)).toBeUndefined();
 
       const content = decompressPdfContent(await excelToPdf(wb));
       expect((content.match(/1 0 0 rg/g) ?? []).length).toBe(1);
@@ -119,7 +117,7 @@ describe("PDF style rendering", () => {
       Cell.setStyle(ws, "C9", { fill: RED });
       Cell.setStyle(ws, "E3", { fill: RED });
 
-      expect(Worksheet.dimensions(ws)).toEqual({ top: 3, left: 3, bottom: 3, right: 3 });
+      expect(Worksheet.getDimensions(ws)).toEqual({ top: 3, left: 3, bottom: 3, right: 3 });
 
       const content = decompressPdfContent(await excelToPdf(wb));
       // Bounds used to grow rightward only, so A1 and C9 were dropped.
@@ -191,11 +189,10 @@ describe("PDF style rendering", () => {
       Column.setWidth(ws, 1, 30);
 
       // Cell has font size 8, first run has no font (should inherit 8pt)
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, {
+      Cell.setValue(ws, "A1", {
         richText: [{ text: "Hello " }, { text: "World", font: { size: 7 } }]
       });
-      cellSetFont(cell, { size: 8, name: "Arial" });
+      Cell.setFont(ws, "A1", { size: 8, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -222,14 +219,13 @@ describe("PDF style rendering", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Column.setWidth(ws, 1, 30);
 
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "Bold text " }, // no font → inherits cell bold
           { text: "Normal", font: { bold: false, size: 10 } } // explicit non-bold
         ]
       });
-      cellSetFont(cell, { bold: true, size: 10, name: "Arial" });
+      Cell.setFont(ws, "A1", { bold: true, size: 10, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -251,14 +247,13 @@ describe("PDF style rendering", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Column.setWidth(ws, 1, 30);
 
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "Test Code " }, // no font → inherits cell bold
           { text: "(Tests X)", font: { size: 7, name: "Arial" } } // has rPr but no <b/>
         ]
       });
-      cellSetFont(cell, { bold: true, size: 8, name: "Arial" });
+      Cell.setFont(ws, "A1", { bold: true, size: 8, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -279,14 +274,13 @@ describe("PDF style rendering", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Column.setWidth(ws, 1, 30);
 
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "Italic " }, // no font → inherits cell italic
           { text: "Normal", font: { italic: false, size: 10 } }
         ]
       });
-      cellSetFont(cell, { italic: true, size: 10, name: "Arial" });
+      Cell.setFont(ws, "A1", { italic: true, size: 10, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -317,14 +311,18 @@ describe("PDF style rendering", () => {
 
       // All cells have thin borders on all sides
       for (let col = 1; col <= 4; col++) {
-        Cell.setStyle(ws, 1, col, {
-          border: {
-            top: { style: "thin" },
-            right: { style: "thin" },
-            bottom: { style: "thin" },
-            left: { style: "thin" }
+        Cell.setStyle(
+          ws,
+          { row: 1, col },
+          {
+            border: {
+              top: { style: "thin" },
+              right: { style: "thin" },
+              bottom: { style: "thin" },
+              left: { style: "thin" }
+            }
           }
-        });
+        );
       }
       // D1 has text to block overflow
       Cell.setValue(ws, "D1", "STOP");
@@ -356,14 +354,18 @@ describe("PDF style rendering", () => {
       Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       for (let col = 1; col <= 2; col++) {
-        Cell.setStyle(ws, 1, col, {
-          border: {
-            top: { style: "thin" },
-            right: { style: "thin" },
-            bottom: { style: "thin" },
-            left: { style: "thin" }
+        Cell.setStyle(
+          ws,
+          { row: 1, col },
+          {
+            border: {
+              top: { style: "thin" },
+              right: { style: "thin" },
+              bottom: { style: "thin" },
+              left: { style: "thin" }
+            }
           }
-        });
+        );
       }
 
       const pdf = await excelToPdf(wb);
@@ -570,16 +572,15 @@ describe("PDF style rendering", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Column.setWidth(ws, 1, 10); // narrow to force wrapping
 
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "Big ", font: { size: 14 } },
           { text: "text\n", font: { size: 14 } },
           { text: "small text", font: { size: 7 } }
         ]
       });
-      cellSetFont(cell, { size: 10 });
-      cellSetAlignment(cell, { wrapText: true });
+      Cell.setFont(ws, "A1", { size: 10 });
+      Cell.setAlignment(ws, "A1", { wrapText: true });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);

@@ -12,10 +12,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { encodePng } from "@archive/png";
-import { rasterizeToRgba, renderDrawList, toSvg } from "@draw/index";
-import { mermaidToDrawList } from "@mermaid/index";
-import { createPdfDrawSurface, Pdf } from "@pdf/index";
+import { Draw } from "@draw/index";
+import { Mermaid } from "@mermaid/index";
+import { Pdf } from "@pdf/index";
 
 const OUT = path.join(process.cwd(), "tmp", "mermaid");
 
@@ -352,20 +351,19 @@ async function main(): Promise<void> {
 
   for (const [name, source] of DIAGRAMS) {
     // Once. Everything below reads this.
-    const list = mermaidToDrawList(source, { background: "#ffffff" });
+    const list = Mermaid.toDrawList(source, { background: "#ffffff" });
 
-    writeFileSync(path.join(OUT, `${name}.svg`), toSvg(list));
+    writeFileSync(path.join(OUT, `${name}.svg`), Draw.toSvg(list));
 
-    const image = rasterizeToRgba(list, { scale: 2 });
-    writeFileSync(path.join(OUT, `${name}.png`), encodePng(image.data, image.width, image.height));
+    writeFileSync(path.join(OUT, `${name}.png`), Draw.toPng(list, { scale: 2 }).png);
 
     const builder = new Pdf.Builder();
     const page = builder.addPage({ width: list.width + 40, height: list.height + 40 });
-    renderDrawList(
+    Draw.render(
       list,
-      createPdfDrawSurface(page, { x: 20, y: 20, width: list.width, height: list.height })
+      Pdf.createDrawSurface(page, { x: 20, y: 20, width: list.width, height: list.height })
     );
-    writeFileSync(path.join(OUT, `${name}.pdf`), await builder.build());
+    writeFileSync(path.join(OUT, `${name}.pdf`), await builder.toBuffer());
   }
 
   console.log(`Wrote ${DIAGRAMS.length} diagrams (svg + png + pdf) to ${OUT}`);

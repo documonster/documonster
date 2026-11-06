@@ -15,8 +15,8 @@
 
 import { stat } from "node:fs/promises";
 
-import { Cell, ExcelNotSupportedError, Workbook, Worksheet } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { Cell, ExcelUnsupportedFeatureError, Row, Workbook, Worksheet } from "documonster/excel";
+import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -186,9 +186,9 @@ export const sheetEditTool = defineTool({
       );
     }
 
-    const wb = Workbook.create();
+    let wb: Workbook.Handle;
     try {
-      await Workbook.readFile(wb, resolved);
+      wb = await Workbook.readFile(resolved);
     } catch (cause) {
       throw toolError.unsupported(
         `could not read ${args.path} as a workbook`,
@@ -227,7 +227,7 @@ export const sheetEditTool = defineTool({
     let formulaNote = "formulas not re-evaluated (recalculate: false)";
     if (recalculate) {
       try {
-        calculateFormulas(wb);
+        ExcelFormula.calculate(wb);
         formulaNote = "formulas re-evaluated";
       } catch (cause) {
         formulaNote = `formula re-evaluation failed: ${cause instanceof Error ? cause.message : String(cause)}`;
@@ -272,7 +272,7 @@ export const sheetEditTool = defineTool({
         ? await Workbook.toBuffer(wb, { format: container }).then(
             () => [],
             (cause: unknown): string[] =>
-              cause instanceof ExcelNotSupportedError ? [...cause.items] : []
+              cause instanceof ExcelUnsupportedFeatureError ? [...cause.items] : []
           )
         : [];
     await replaceAtomically(writeTarget.path, temporary =>
@@ -345,7 +345,7 @@ function applyOp(
           if (targetRow > window.bottom || targetCol > window.right) {
             continue;
           }
-          Cell.setValue(ws, targetRow, targetCol, value);
+          Cell.setValue(ws, { row: targetRow, col: targetCol }, value);
           written += 1;
         }
       }
@@ -374,7 +374,7 @@ function applyOp(
       let count = 0;
       for (let row = window.top; row <= window.bottom; row += 1) {
         for (let column = window.left; column <= window.right; column += 1) {
-          Cell.setValue(ws, row, column, null);
+          Cell.setValue(ws, { row, col: column }, null);
           count += 1;
         }
       }
@@ -386,11 +386,11 @@ function applyOp(
     // coordinates. That is a limitation of the underlying operation, not
     // something this tool can paper over, so it is reported rather than hidden.
     case "insert_rows":
-      Worksheet.insertRows(ws, op.at, op.rows as unknown[][] as never);
+      Row.insertMany(ws, op.at, op.rows as unknown[][] as never);
       return `inserted ${op.rows.length} row(s) before row ${op.at} — references to shifted cells elsewhere in the workbook are NOT adjusted; verify any formulas or charts that pointed below row ${op.at}`;
 
     case "delete_rows":
-      Worksheet.spliceRows(ws, op.at, op.count);
+      Row.splice(ws, op.at, op.count);
       return `deleted ${op.count} row(s) from row ${op.at} — references to those cells elsewhere in the workbook are NOT adjusted and may now be wrong; verify any formulas or charts that pointed at them`;
 
     case "set_style": {
@@ -398,22 +398,30 @@ function applyOp(
       for (let row = window.top; row <= window.bottom; row += 1) {
         for (let column = window.left; column <= window.right; column += 1) {
           if (op.bold !== undefined || op.italic !== undefined || op.fontColor !== undefined) {
-            Cell.setFont(ws, row, column, {
-              ...(Cell.getFont(ws, row, column) ?? {}),
-              ...(op.bold === undefined ? {} : { bold: op.bold }),
-              ...(op.italic === undefined ? {} : { italic: op.italic }),
-              ...(op.fontColor === undefined ? {} : { color: { argb: toArgb(op.fontColor) } })
-            });
+            Cell.setFont(
+              ws,
+              { row, col: column },
+              {
+                ...(Cell.getFont(ws, { row, col: column }) ?? {}),
+                ...(op.bold === undefined ? {} : { bold: op.bold }),
+                ...(op.italic === undefined ? {} : { italic: op.italic }),
+                ...(op.fontColor === undefined ? {} : { color: { argb: toArgb(op.fontColor) } })
+              }
+            );
           }
           if (op.fillColor !== undefined) {
-            Cell.setFill(ws, row, column, {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: toArgb(op.fillColor) }
-            });
+            Cell.setFill(
+              ws,
+              { row, col: column },
+              {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: toArgb(op.fillColor) }
+              }
+            );
           }
           if (op.numFmt !== undefined) {
-            Cell.setNumFmt(ws, row, column, op.numFmt);
+            Cell.setNumFmt(ws, { row, col: column }, op.numFmt);
           }
         }
       }
@@ -431,7 +439,7 @@ function applyOp(
       if (op.rows !== undefined && op.rows.length > 0) {
         for (const [rowOffset, row] of op.rows.entries()) {
           for (const [columnOffset, value] of row.entries()) {
-            Cell.setValue(added, rowOffset + 1, columnOffset + 1, value);
+            Cell.setValue(added, { row: rowOffset + 1, col: columnOffset + 1 }, value);
           }
         }
       }

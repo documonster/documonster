@@ -101,6 +101,53 @@ describe("extractStaticDeps", () => {
     const deps = extractStaticDeps(bound);
     expect(deps.cells).toEqual([{ sheet: "Data", row: 1, col: 1 }]);
   });
+
+  it("SUMIF / AVERAGEIF depend on the cells their sum range stretches to", () => {
+    const stretched = (source: string) =>
+      extractStaticDeps(compile(source).bound).areas.filter(a => a.left === 2);
+    expect(stretched('SUMIF(A1:A3,">0",B1)')).toEqual([
+      { sheet: "Sheet1", top: 1, left: 2, bottom: 3, right: 2 }
+    ]);
+    expect(stretched('_XLFN.AVERAGEIF(A2:A4,">0",B5:B5)')).toEqual([
+      { sheet: "Sheet1", top: 5, left: 2, bottom: 5, right: 2 },
+      { sheet: "Sheet1", top: 5, left: 2, bottom: 7, right: 2 }
+    ]);
+    expect(stretched('SUMIF(A:A,">0",B1)')).toEqual([
+      { sheet: "Sheet1", top: 1, left: 2, bottom: 1_048_576, right: 2 }
+    ]);
+    // Cut at the last row, as Excel reads it.
+    expect(stretched('SUMIF(A1:A3,">0",B1048575)')).toEqual([
+      { sheet: "Sheet1", top: 1_048_575, left: 2, bottom: 1_048_576, right: 2 }
+    ]);
+  });
+
+  it("LOOKUP depends on the cells its result vector stretches to", () => {
+    const stretched = (source: string) =>
+      extractStaticDeps(compile(source).bound).areas.filter(a => a.left === 2 || a.top === 2);
+    // A single cell runs across; a column runs down; a 2-D result vector (#N/A) adds nothing.
+    expect(stretched("LOOKUP(3,A1:A5,B1)").at(-1)).toEqual({
+      sheet: "Sheet1",
+      top: 1,
+      left: 2,
+      bottom: 1,
+      right: 6
+    });
+    expect(stretched("LOOKUP(3,A1:A5,B1:B2)").at(-1)).toEqual({
+      sheet: "Sheet1",
+      top: 1,
+      left: 2,
+      bottom: 5,
+      right: 2
+    });
+    expect(stretched("LOOKUP(3,{1,2,3},A2)").at(-1)).toEqual({
+      sheet: "Sheet1",
+      top: 2,
+      left: 1,
+      bottom: 2,
+      right: 3
+    });
+    expect(extractStaticDeps(compile("LOOKUP(3,A1:A5,B1:C2)").bound).areas).toHaveLength(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -187,6 +234,15 @@ describe("analyzeExpr", () => {
     const a = analyzeExpr(bound);
     expect(a.isVolatile).toBe(true);
     expect(a.hasDynamicRefs).toBe(true);
+  });
+
+  it("a SUMIF / AVERAGEIF sum range known only at run time flags hasDynamicRefs", () => {
+    const dynamic = (source: string) => analyzeExpr(compile(source).bound).hasDynamicRefs;
+    expect(dynamic('SUMIF(A1:A3,">0",INDEX(B1:B9,2))')).toBe(true);
+    expect(dynamic('AVERAGEIF(INDEX(A1:C3,0,1),">0",B1)')).toBe(true);
+    expect(dynamic('SUMIF(A1:A3,">0",B1)')).toBe(false);
+    expect(dynamic('SUMIF(A1:A3,">0",{1;2;3})')).toBe(false);
+    expect(dynamic('SUMIF(A1:A3,">0")')).toBe(false);
   });
 
   it("volatility bubbles up through arithmetic", () => {

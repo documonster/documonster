@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Ole, Vba } from "../index";
+import { Document, Build, Ole, Vba } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -63,20 +63,20 @@ console.log(
 const baseDoc = (() => {
   const dd = Document.create();
   Document.useDefaultStyles(dd);
-  Document.addParagraphElement(
+  Document.addParagraph(
     dd,
     Build.paragraph([Build.text("Document with an embedded OLE object (Excel sheet stub).")])
   );
-  return Document.build(dd);
+  return dd;
 })();
 const docWithOle = Ole.add(baseDoc, ole);
-fs.writeFileSync(path.join(outDir, "01-with-ole.docx"), await Io.toBuffer(docWithOle));
+fs.writeFileSync(path.join(outDir, "01-with-ole.docx"), await Document.toBuffer(docWithOle));
 console.log(`  → 01-with-ole.docx`);
 
 // ---------------------------------------------------------------------------
 // 3. Read it back and inspect the OLE objects
 // ---------------------------------------------------------------------------
-const reread = await Io.read(await Io.toBuffer(docWithOle));
+const reread = await Document.read(await Document.toBuffer(docWithOle));
 console.log(`  hasOleObjects(reread): ${Ole.has(reread)}`);
 const extraction = Ole.extract(reread);
 console.log(`  extractOleObjects: ${extraction.objects.length} OLE part(s)`);
@@ -112,14 +112,14 @@ console.log(`  getVbaProjectData length: ${Vba.getData(docWithVba)?.length ?? 0}
 console.log(`  listVbaParts count: ${Vba.listParts(docWithVba).length}`);
 
 // Save .docm file
-const docmBytes = await Io.toBuffer(docWithVba);
+const docmBytes = await Document.toBuffer(docWithVba);
 fs.writeFileSync(path.join(outDir, "02-macro-enabled.docm"), docmBytes);
 console.log(`  → 02-macro-enabled.docm (${docmBytes.length} bytes)`);
 
 // Round-trip then strip
-const rereadVba = await Io.read(docmBytes);
+const rereadVba = await Document.read(docmBytes);
 console.log(`  re-read .docm has VBA: ${Vba.has(rereadVba)}`);
 const stripped = Vba.remove(rereadVba);
 console.log(`  after remove: ${Vba.has(stripped)}`);
-fs.writeFileSync(path.join(outDir, "03-macros-stripped.docx"), await Io.toBuffer(stripped));
+fs.writeFileSync(path.join(outDir, "03-macros-stripped.docx"), await Document.toBuffer(stripped));
 console.log(`  → 03-macros-stripped.docx`);

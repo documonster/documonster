@@ -301,9 +301,11 @@ functions the exports map does not publish.** `excel-bridge.ts:14` told readers 
 `import { excelToPdf } from "documonster/pdf"`; the correct form is `Pdf.fromExcel`. The same
 drift hit `pdf()`→`Pdf.create`, `readPdf`→`Pdf.read`, `PdfDocumentBuilder`→`Pdf.Builder`,
 `PdfEditor`→`Pdf.Editor`, `docxToPdf`→`Pdf.fromDocx`,
-`createWordChartPdfRenderer`→`await Pdf.wordChartRenderer()`, `readDocx`→`Io.read`,
-`toBuffer`→`Io.toBuffer`, `diffDocuments`→`Diff.documents` and
-`searchByFormat`→`Query.searchByFormat`. One comment in `pdf/index.ts` disagreed with itself:
+`createWordChartPdfRenderer`→`await Pdf.wordChartRenderer()`, `readDocx`→`Document.read`,
+`toBuffer`→`Document.toBuffer`, `diffDocuments`→`Diff.documents` and
+`searchByFormat`→`Query.searchByFormat`. (Later renames, noted here so the record above stays
+intact: `Pdf.create` became `Pdf.fromTable`, `Pdf.read` became `Pdf.extract`, and
+`Pdf.wordChartRenderer` became `Pdf.createWordChartRenderer`.) One comment in `pdf/index.ts` disagreed with itself:
 its second example already used `Pdf.fromExcel` while its first and third did not.
 
 `verify:public-types` could not see any of it, because its subject is whether a type reachable

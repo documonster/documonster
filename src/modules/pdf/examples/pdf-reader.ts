@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 import { PdfStructureError } from "../errors";
 import { Pdf } from "../index";
@@ -507,14 +507,14 @@ console.log("\n--- 8. Excel-to-PDF Roundtrip ---\n");
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Inventory");
-Worksheet.setColumns(ws, [
+Column.setDefinitions(ws, [
   { header: "Item", key: "item", width: 20 },
   { header: "SKU", key: "sku", width: 15 },
   { header: "Qty", key: "qty", width: 10 },
   { header: "Price", key: "price", width: 12 },
   { header: "In Stock", key: "inStock", width: 10 }
 ]);
-Worksheet.addRows(ws, [
+Row.addMany(ws, [
   { item: "Laptop Pro", sku: "LP-001", qty: 42, price: 1299.99, inStock: true },
   { item: "Wireless Mouse", sku: "WM-055", qty: 350, price: 29.99, inStock: true },
   { item: "USB-C Hub", sku: "UH-112", qty: 0, price: 49.99, inStock: false },

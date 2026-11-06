@@ -7,7 +7,7 @@
  * structural check and opens in Excel with no chart.
  *
  * Note what the round trip shows: the chart *part* survives as preserved bytes while the model does not carry
- * it back, so `Chart.get` finds nothing on the reloaded sheet. That is a real limitation and it is visible here
+ * it back, so `Chart.list` finds nothing on the reloaded sheet. That is a real limitation and it is visible here
  * rather than asserted away.
  *
  * Run: pnpm example --filter xlsb-charts
@@ -20,13 +20,15 @@ import { Chart, Workbook, Worksheet } from "@excel/index";
 const workbook = Workbook.create();
 const sheet = sampleSheet(workbook);
 
-Chart.addColumn(
-  sheet as never,
+Chart.place(
+  sheet,
+  { tl: { col: 4, row: 1 }, br: { col: 10, row: 12 } },
   {
+    type: "bar",
+    barDir: "col",
     title: "Units by region",
     series: [{ name: "Units", categories: "Data!$A$2:$A$4", values: "Data!$B$2:$B$4" }]
-  } as never,
-  { tl: { col: 4, row: 1 }, br: { col: 10, row: 12 } } as never
+  }
 );
 
 const { results, dropped } = await writeBoth(workbook, "xlsb-charts");

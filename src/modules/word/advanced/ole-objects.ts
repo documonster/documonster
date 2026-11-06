@@ -14,8 +14,19 @@
  * not full OLE compound document manipulation.
  */
 
+import { asPlainBytes } from "@utils/binary";
 import { ContentType } from "@word/constants";
+import {
+  checkBytes,
+  checkFinite,
+  checkHandle,
+  checkOneOf,
+  checkRecord,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
 import { getFileName } from "@word/core/opc-paths";
+import { markDerived } from "@word/core/ownership";
 import type {
   BodyContent,
   DocxDocument,
@@ -84,6 +95,7 @@ export interface OleExtractionResult {
  * @returns Extraction result with OLE object metadata.
  */
 export function extractOleObjects(doc: DocxDocument): OleExtractionResult {
+  checkHandle(doc, "document", "doc", "Ole.extract");
   const objects: OleObject[] = [];
   const summary: Record<string, number> = {};
 
@@ -142,6 +154,7 @@ export function extractOleObjects(doc: DocxDocument): OleExtractionResult {
  * Check if a document contains any OLE embedded objects.
  */
 export function hasOleObjects(doc: DocxDocument): boolean {
+  checkHandle(doc, "document", "doc", "Ole.has");
   if (doc.oleObjects && doc.oleObjects.length > 0) {
     return true;
   }
@@ -159,12 +172,16 @@ export function hasOleObjects(doc: DocxDocument): boolean {
  * Get the binary data of a specific OLE object by its relationship ID.
  * Returns undefined if not found.
  */
-export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | undefined {
+export function getOleObjectData(
+  doc: DocxDocument,
+  rId: string
+): Uint8Array<ArrayBuffer> | undefined {
+  checkHandle(doc, "document", "doc", "Ole.getData");
   // Structured OLE objects carry the exact rId used on document.xml.rels.
   if (doc.oleObjects) {
     for (const ole of doc.oleObjects) {
       if (ole.rId === rId) {
-        return ole.data;
+        return ole.data && asPlainBytes(ole.data);
       }
     }
   }
@@ -179,7 +196,7 @@ export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | u
       if (part.relationships) {
         for (const rel of part.relationships) {
           if (rel.id === rId) {
-            return part.data;
+            return asPlainBytes(part.data);
           }
         }
       }
@@ -191,7 +208,7 @@ export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | u
       const expectedStem = rId.replace("rId", "oleObject");
       const oleStemRe = new RegExp(`(^|/)${escapeRegex(expectedStem)}(?:\\.[^./]+)?$`);
       if (oleStemRe.test(part.path)) {
-        return part.data;
+        return asPlainBytes(part.data);
       }
     }
   }
@@ -251,6 +268,23 @@ export function createOleEmbedding(
     previewFileName?: string;
   }
 ): OleEmbeddingResult {
+  const where = "Ole.createEmbedding";
+  data = checkBytes(data, "data", where);
+  checkString(progId, "progId", where);
+  if (progId === "") {
+    invalidArgument(where, "progId", "a non-empty string", progId);
+  }
+  checkRecord(options, "options", where, { optional: true });
+  checkPartFileName(options?.fileName, "options.fileName", where);
+  checkPartFileName(options?.previewFileName, "options.previewFileName", where);
+  if (options?.previewImage !== undefined) {
+    options = {
+      ...options,
+      previewImage: checkBytes(options.previewImage, "options.previewImage", where)
+    };
+    // The preview needs a type for `[Content_Types].xml`.
+    checkString(options.previewContentType, "options.previewContentType", where);
+  }
   const oleSeq = nextOleSequence();
   const fileName = options?.fileName ?? `oleObject${oleSeq}.bin`;
   const olePart: OpaquePart = {
@@ -267,7 +301,12 @@ export function createOleEmbedding(
     return { olePart, oleRId, progId };
   }
   if (!options.previewContentType) {
-    throw new Error("createOleEmbedding: options.previewImage requires options.previewContentType");
+    invalidArgument(
+      where,
+      "options.previewContentType",
+      "a content type when options.previewImage is set",
+      options.previewContentType
+    );
   }
   const previewExt = previewExtFromContentType(options.previewContentType);
   const previewSeq = nextPreviewSequence();
@@ -296,6 +335,14 @@ export function createOleEmbedding(
  *    that references the same rId and embeds the ProgId, so the object is
  *    visible in Word and round-trips through `readDocx`.
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
+ * The embedding's relationship id and part paths are kept unless `doc`
+ * already uses them — adding the same embedding twice, or adding one to a
+ * document read back from an earlier run — in which case the object is given
+ * unused ones; read the result's `oleObjects` for the names it ended up with.
+ *
  * @param doc - The document to add the OLE object to.
  * @param embedding - Result from {@link createOleEmbedding}.
  * @param options - Display geometry (defaults to a 2"×2" icon box).
@@ -312,22 +359,33 @@ export function addOleObject(
     displayAs?: OleDisplayAs;
   }
 ): DocxDocument {
+  checkHandle(doc, "document", "doc", "Ole.add");
+  const where = "Ole.add";
+  checkRecord(embedding, "embedding", where);
+  checkRecord(embedding.olePart, "embedding.olePart", where);
+  checkString(embedding.oleRId, "embedding.oleRId", where);
+  checkString(embedding.progId, "embedding.progId", where);
+  checkRecord(options, "options", where, { optional: true });
+  checkFinite(options?.widthPt, "options.widthPt", where, { optional: true, min: 0 });
+  checkFinite(options?.heightPt, "options.heightPt", where, { optional: true, min: 0 });
+  checkOneOf(options?.displayAs, DISPLAY_AS, "options.displayAs", where, { optional: true });
   const widthPt = options?.widthPt ?? 96;
   const heightPt = options?.heightPt ?? 96;
   const drawAspect = (options?.displayAs ?? "icon") === "icon" ? "Icon" : "Content";
+  const placed = withUnusedOleNames(doc, embedding);
 
   const olePartEntry: OleObjectPart = {
-    path: embedding.olePart.path,
-    data: embedding.olePart.data,
-    rId: embedding.oleRId,
-    progId: embedding.progId,
-    contentType: embedding.olePart.contentType,
-    ...(embedding.previewPart && embedding.previewRId
+    path: placed.olePart.path,
+    data: placed.olePart.data,
+    rId: placed.oleRId,
+    progId: placed.progId,
+    contentType: placed.olePart.contentType,
+    ...(placed.previewPart && placed.previewRId
       ? {
-          previewPath: embedding.previewPart.path,
-          previewData: embedding.previewPart.data,
-          previewRId: embedding.previewRId,
-          previewContentType: embedding.previewPart.contentType
+          previewPath: placed.previewPart.path,
+          previewData: placed.previewPart.data,
+          previewRId: placed.previewRId,
+          previewContentType: placed.previewPart.contentType
         }
       : {})
   };
@@ -336,12 +394,12 @@ export function addOleObject(
   // r:id of the binary; the v:shape provides geometry and (when present) the
   // preview image fill via v:imagedata. This is the canonical OOXML shape for
   // an embedded OLE object (ECMA-376 §17.3.3.19 + VML).
-  const shapeId = `_ole_${embedding.oleRId}`;
+  const shapeId = `_ole_${placed.oleRId}`;
   const styleWidth = widthPt.toFixed(0);
   const styleHeight = heightPt.toFixed(0);
   const imageData =
-    embedding.previewRId != null
-      ? `<v:imagedata r:id="${xmlEncodeAttr(embedding.previewRId)}" o:title=""/>`
+    placed.previewRId != null
+      ? `<v:imagedata r:id="${xmlEncodeAttr(placed.previewRId)}" o:title=""/>`
       : "";
   const rawXml =
     `<w:object>` +
@@ -349,14 +407,14 @@ export function addOleObject(
     `style="width:${styleWidth}pt;height:${styleHeight}pt">` +
     imageData +
     `</v:shape>` +
-    `<o:OLEObject Type="Embed" ProgID="${xmlEncodeAttr(embedding.progId)}" ` +
+    `<o:OLEObject Type="Embed" ProgID="${xmlEncodeAttr(placed.progId)}" ` +
     `ShapeID="${xmlEncodeAttr(shapeId)}" DrawAspect="${drawAspect}" ` +
-    `r:id="${xmlEncodeAttr(embedding.oleRId)}"/>` +
+    `r:id="${xmlEncodeAttr(placed.oleRId)}"/>` +
     `</w:object>`;
 
-  const referencedRIds = [embedding.oleRId];
-  if (embedding.previewRId != null) {
-    referencedRIds.push(embedding.previewRId);
+  const referencedRIds = [placed.oleRId];
+  if (placed.previewRId != null) {
+    referencedRIds.push(placed.previewRId);
   }
   const drawing: OpaqueDrawing = {
     type: "opaqueDrawing",
@@ -364,11 +422,99 @@ export function addOleObject(
     referencedRIds
   };
 
-  return {
-    ...doc,
-    body: [...doc.body, drawing as BodyContent],
-    oleObjects: [...(doc.oleObjects ?? []), olePartEntry]
+  return markDerived(
+    {
+      ...doc,
+      body: [...doc.body, drawing as BodyContent],
+      oleObjects: [...(doc.oleObjects ?? []), olePartEntry]
+    },
+    doc
+  );
+}
+
+const DISPLAY_AS: ReadonlySet<string> = new Set<OleDisplayAs>(["icon", "content"]);
+
+/**
+ * `embedding` with its relationship ids and part paths moved off any the
+ * document already uses. Both are package-internal names: the counter that
+ * mints them restarts with every process, so an embedding added to a document
+ * read back from an earlier run — or the same embedding added twice — would
+ * otherwise collide with an object already there and fail to package.
+ */
+function withUnusedOleNames(doc: DocxDocument, embedding: OleEmbeddingResult): OleEmbeddingResult {
+  const usedIds = new Set<string>();
+  const usedPaths = new Set<string>();
+  for (const ole of doc.oleObjects ?? []) {
+    usedIds.add(ole.rId);
+    usedPaths.add(ole.path);
+    if (ole.previewRId) {
+      usedIds.add(ole.previewRId);
+    }
+    if (ole.previewPath) {
+      usedPaths.add(ole.previewPath);
+    }
+  }
+  for (const part of doc.opaqueParts ?? []) {
+    usedPaths.add(part.path);
+  }
+  const freeId = (id: string): string => {
+    let candidate = id;
+    for (let n = 2; usedIds.has(candidate); n++) {
+      candidate = `${id}_${n}`;
+    }
+    usedIds.add(candidate);
+    return candidate;
   };
+  const freePath = (path: string): string => {
+    const dot = path.lastIndexOf(".");
+    const stem = dot > path.lastIndexOf("/") ? path.slice(0, dot) : path;
+    const ext = path.slice(stem.length);
+    let candidate = path;
+    for (let n = 2; usedPaths.has(candidate); n++) {
+      candidate = `${stem}_${n}${ext}`;
+    }
+    usedPaths.add(candidate);
+    return candidate;
+  };
+  const oleRId = freeId(embedding.oleRId);
+  const olePath = freePath(embedding.olePart.path);
+  const result: OleEmbeddingResult = {
+    ...embedding,
+    oleRId,
+    olePart:
+      olePath === embedding.olePart.path
+        ? embedding.olePart
+        : { ...embedding.olePart, path: olePath }
+  };
+  if (!embedding.previewPart || embedding.previewRId == null) {
+    return result;
+  }
+  const previewPath = freePath(embedding.previewPart.path);
+  return {
+    ...result,
+    previewRId: freeId(embedding.previewRId),
+    previewPart:
+      previewPath === embedding.previewPart.path
+        ? embedding.previewPart
+        : { ...embedding.previewPart, path: previewPath }
+  };
+}
+
+/** A part's file name: it is joined to a folder, so it must not name another one. */
+function checkPartFileName(value: unknown, field: string, where: string): void {
+  if (value === undefined) {
+    return;
+  }
+  if (
+    typeof value === "string" &&
+    value !== "" &&
+    !/[/\\]/.test(value) &&
+    value !== "." &&
+    value !== ".."
+  ) {
+    return;
+  }
+  invalidArgument(where, field, "a file name with no folder", value);
 }
 
 /** Module-level counters used to allocate unique file names per call. */

@@ -100,7 +100,7 @@ describe("formats survive a round trip", () => {
     Cell.setStyle(sheet, "A2", { numFmt: "0.0%" });
 
     const reopened = await roundTrip(source);
-    const worksheet = Workbook.getWorksheets(reopened)[0]!;
+    const worksheet = Workbook.listWorksheets(reopened)[0]!;
     expect(Cell.getStyle(worksheet, "A1")?.numFmt).toBe("#,##0.00");
     expect(Cell.getStyle(worksheet, "A2")?.numFmt).toBe("0.0%");
   });
@@ -117,7 +117,7 @@ describe("formats survive a round trip", () => {
     expect(entries.has("xl/styles.bin")).toBe(true);
 
     const reopened = await roundTrip(source);
-    expect(Cell.getStyle(Workbook.getWorksheets(reopened)[0]!, "A1")?.numFmt).toBeUndefined();
+    expect(Cell.getStyle(Workbook.listWorksheets(reopened)[0]!, "A1")?.numFmt).toBeUndefined();
   });
 
   it("shares one entry between cells with the same format", async () => {
@@ -163,7 +163,7 @@ describe("formats survive a round trip", () => {
     Cell.setValue(sheet, "A1", 1);
 
     const reopened = await roundTrip(source);
-    expect(Cell.getStyle(Workbook.getWorksheets(reopened)[0]!, "B2")?.numFmt).toBe("yyyy-mm-dd");
+    expect(Cell.getStyle(Workbook.listWorksheets(reopened)[0]!, "B2")?.numFmt).toBe("yyyy-mm-dd");
   });
 
   it("carries a format on a formula cell", async () => {
@@ -173,7 +173,7 @@ describe("formats survive a round trip", () => {
     Cell.setValue(sheet, "A2", { formula: "A1*1.2", result: 120 });
     Cell.setStyle(sheet, "A2", { numFmt: "#,##0.00" });
 
-    const worksheet = Workbook.getWorksheets(await roundTrip(source))[0]!;
+    const worksheet = Workbook.listWorksheets(await roundTrip(source))[0]!;
     expect(Cell.getStyle(worksheet, "A2")?.numFmt).toBe("#,##0.00");
     expect(Cell.getValue(worksheet, "A2")).toMatchObject({ formula: "A1*1.2", result: 120 });
   });
@@ -187,7 +187,7 @@ describe("formats survive a round trip", () => {
     Cell.setValue(sheet, "A1", 0.5);
     Cell.setStyle(sheet, "A1", { numFmt: { id: 9, formatCode: "0%" } });
 
-    expect(Cell.getStyle(Workbook.getWorksheets(await roundTrip(source))[0]!, "A1")?.numFmt).toBe(
+    expect(Cell.getStyle(Workbook.listWorksheets(await roundTrip(source))[0]!, "A1")?.numFmt).toBe(
       "0%"
     );
   });
@@ -203,7 +203,7 @@ describe("dates", () => {
     Cell.setValue(sheet, "A1", when);
     Cell.setStyle(sheet, "A1", { numFmt: "yyyy-mm-dd" });
 
-    const value = Cell.getValue(Workbook.getWorksheets(await roundTrip(source))[0]!, "A1");
+    const value = Cell.getValue(Workbook.listWorksheets(await roundTrip(source))[0]!, "A1");
     expect(value).toBeInstanceOf(Date);
     expect((value as Date).toISOString()).toBe(when.toISOString());
   });
@@ -217,7 +217,7 @@ describe("dates", () => {
     Cell.setValue(sheet, "A2", 42650);
     Cell.setStyle(sheet, "A2", { numFmt: "#,##0" });
 
-    const worksheet = Workbook.getWorksheets(await roundTrip(source))[0]!;
+    const worksheet = Workbook.listWorksheets(await roundTrip(source))[0]!;
     expect(Cell.getValue(worksheet, "A1")).toBe(42650);
     expect(Cell.getValue(worksheet, "A2")).toBe(42650);
   });
@@ -229,7 +229,7 @@ describe("dates", () => {
     Cell.setValue(sheet, "A1", new Date(Date.UTC(2020, 0, 15)));
     Cell.setStyle(sheet, "A1", { numFmt: builtinNumberFormat(14)! });
 
-    const value = Cell.getValue(Workbook.getWorksheets(await roundTrip(source))[0]!, "A1");
+    const value = Cell.getValue(Workbook.listWorksheets(await roundTrip(source))[0]!, "A1");
     expect(value).toBeInstanceOf(Date);
     expect((value as Date).toISOString()).toBe(new Date(Date.UTC(2020, 0, 15)).toISOString());
   });
@@ -274,7 +274,7 @@ describe("the 1904 date system", () => {
       await Workbook.read(reopened, bytes);
 
       expect(reopened.properties.date1904, `date1904: ${date1904}`).toBe(date1904);
-      const value = Cell.getValue(Workbook.getWorksheets(reopened)[0]!, "A1");
+      const value = Cell.getValue(Workbook.listWorksheets(reopened)[0]!, "A1");
       expect(value, `date1904: ${date1904}`).toBeInstanceOf(Date);
       // The same instant either way. The serial differs by 1462; the date must not.
       expect((value as Date).toISOString(), `date1904: ${date1904}`).toBe(when.toISOString());
@@ -349,7 +349,7 @@ describe("fonts and fills reach the cells that asked for them", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
 
     for (const { address, style } of styled) {
       // `toMatchObject`, not `toEqual`: a `BrtFont` has no optional fields — it always carries a
@@ -392,7 +392,7 @@ describe("fonts and fills reach the cells that asked for them", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     // Two distinct fonts. Were the XF pointing at the wrong index, both cells would report one.
     expect(Cell.getStyle(read, "A1")?.font?.name).toBe("Arial");
     expect(Cell.getStyle(read, "A2")?.font?.name).toBe("Courier New");
@@ -414,7 +414,7 @@ describe("fonts and fills reach the cells that asked for them", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    expect(Cell.getStyle(Workbook.getWorksheets(reopened)[0]!, "A1")?.fill).toEqual({
+    expect(Cell.getStyle(Workbook.listWorksheets(reopened)[0]!, "A1")?.fill).toEqual({
       type: "pattern",
       pattern: "solid",
       fgColor: { argb: "FF123456" }

@@ -9,12 +9,20 @@
  * This is intended for small-to-medium XML where tree access is convenient.
  */
 
-import { isForbiddenKey } from "@utils/object";
+import { check, s } from "@utils/schema";
+import {
+  checkElement,
+  checkFunctionArgument,
+  checkParseOptions,
+  checkStringArgument,
+  checkXmlInput,
+  xmlArgument
+} from "@xml/arguments";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
 import type {
-  ToPlainObjectOptions,
+  XmlToPlainObjectOptions,
   XmlCData,
   XmlComment,
   XmlDocument,
@@ -29,11 +37,15 @@ import type {
 // Security
 // =============================================================================
 
-/** Create a clean attribute map, filtering dangerous keys. */
+/**
+ * Copy an attribute map into one with no prototype. Every name is kept: on a null-prototype
+ * object `constructor` or `__proto__` is an ordinary property, so filtering them protected
+ * nothing and silently dropped the document's attributes.
+ */
 function safeAttributes(raw: Record<string, string>): Record<string, string> {
   const attrs: Record<string, string> = Object.create(null);
   for (const key in raw) {
-    if (Object.prototype.hasOwnProperty.call(raw, key) && !isForbiddenKey(key)) {
+    if (Object.prototype.hasOwnProperty.call(raw, key)) {
       attrs[key] = raw[key];
     }
   }
@@ -79,6 +91,11 @@ function appendText(parent: XmlElement, text: string): void {
  * elements" error. The returned `XmlDocument.root` is the first root element,
  * and `XmlDocument.roots` contains all root-level elements.
  *
+ * **Lenient about the declaration**: a `<?xml …?>` that is not at the very start (after
+ * whitespace, a second one, one inside an element) is dropped rather than refused, because
+ * this parser reads files other programs wrote. The writers (`Xml.Writer`,
+ * `Xml.StreamWriter`) never produce one.
+ *
  * @example
  * ```ts
  * const doc = parseXml('<root><child id="1">text</child></root>');
@@ -87,6 +104,8 @@ function appendText(parent: XmlElement, text: string): void {
  * ```
  */
 function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
+  checkXmlInput("Xml.parse", xml);
+  checkParseOptions("Xml.parse", options);
   const includeComments = options?.comments ?? false;
   const includePI = options?.processingInstructions ?? false;
   const cdataAsNodes = options?.cdataAsNodes ?? false;
@@ -197,17 +216,22 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
     throw new XmlParseError("document has multiple root elements");
   }
 
-  // Collect top-level comments and processing instructions (prologue)
-  const prologue = syntheticRoot.children.filter(
-    (n): n is XmlComment | XmlProcessingInstruction =>
-      n.type === "comment" || n.type === "processing-instruction"
-  );
+  // Top-level comments and processing instructions, split at the root: those before it are
+  // the prologue, those after it the epilogue (in fragment mode, everything after the first
+  // root). They used to be collected together as `prologue`.
+  const top = syntheticRoot.children;
+  const firstRoot = top.indexOf(roots[0]);
+  const isMisc = (n: XmlNode): n is XmlComment | XmlProcessingInstruction =>
+    n.type === "comment" || n.type === "processing-instruction";
+  const prologue = top.slice(0, firstRoot).filter(isMisc);
+  const epilogue = top.slice(firstRoot + 1).filter(isMisc);
 
   return {
     declaration,
     root: roots[0],
     roots,
-    prologue
+    prologue,
+    epilogue
   };
 }
 
@@ -216,7 +240,8 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
 // =============================================================================
 
 /**
- * Find the first child element with the given name.
+ * The first child element with the given name, or `undefined`. Published as
+ * `Xml.findChild`.
  */
 function findChild(element: XmlElement, name: string): XmlElement | undefined {
   for (const child of element.children) {
@@ -228,7 +253,8 @@ function findChild(element: XmlElement, name: string): XmlElement | undefined {
 }
 
 /**
- * Find all child elements with the given name.
+ * Every child element with the given name, in document order. Published as
+ * `Xml.listChildren`.
  */
 function findChildren(element: XmlElement, name: string): XmlElement[] {
   const result: XmlElement[] = [];
@@ -310,8 +336,9 @@ function walk(element: XmlElement, visitor: (el: XmlElement) => void): void {
  */
 function toPlainObject(
   element: XmlElement,
-  options?: ToPlainObjectOptions
+  options?: XmlToPlainObjectOptions
 ): Record<string, unknown> {
+  checkElement("Xml.toPlainObject", element);
   const opts = resolveOptions(options);
 
   function convertElement(el: XmlElement): unknown {
@@ -354,7 +381,59 @@ function toPlainObject(
     return resolveValue(obj, text, hasAttributes, hasChildren, opts);
   }
 
-  return { [element.name]: convertElement(element) } as Record<string, unknown>;
+  // No prototype, like every nested object and `Xml.parseToObject`'s result.
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  result[element.name] = convertElement(element);
+  return result;
 }
 
 export { parseXml, findChild, findChildren, textContent, attr, walk, toPlainObject };
+
+// =============================================================================
+// Checked public forms (`Xml.findChild`, …)
+// =============================================================================
+
+function checkName(where: string, name: unknown): void {
+  checkStringArgument(where, "name", name);
+}
+
+/** `Xml.findChild`: {@link findChild}, refusing what is not an element and a name. */
+function findChildOf(element: XmlElement, name: string): XmlElement | undefined {
+  checkElement("Xml.findChild", element);
+  checkName("Xml.findChild", name);
+  return findChild(element, name);
+}
+
+/** `Xml.listChildren`: {@link findChildren}, refusing what is not an element and a name. */
+function listChildrenOf(element: XmlElement, name: string): XmlElement[] {
+  checkElement("Xml.listChildren", element);
+  checkName("Xml.listChildren", name);
+  return findChildren(element, name);
+}
+
+const xmlNodeSchema = s.custom(
+  v => typeof v === "object" && v !== null && typeof (v as { type?: unknown }).type === "string",
+  "an XmlNode (pass doc.root for a document)"
+);
+
+/** `Xml.getText`: {@link textContent}, refusing what is not a node. */
+function getTextOf(node: XmlNode): string {
+  check(xmlNodeSchema, node, xmlArgument("Xml.getText", "node"));
+  return textContent(node);
+}
+
+/** `Xml.getAttr`: {@link attr}, refusing what is not an element and a name. */
+function getAttrOf(element: XmlElement, name: string): string | undefined {
+  checkElement("Xml.getAttr", element);
+  checkName("Xml.getAttr", name);
+  return attr(element, name);
+}
+
+/** `Xml.eachElement`: {@link walk}, refusing what is not an element and a function. */
+function eachElementOf(element: XmlElement, visitor: (el: XmlElement) => void): void {
+  checkElement("Xml.eachElement", element);
+  checkFunctionArgument("Xml.eachElement", "visitor", visitor);
+  walk(element, visitor);
+}
+
+export { findChildOf, listChildrenOf, getTextOf, getAttrOf, eachElementOf };

@@ -22,8 +22,25 @@
 import { XlsbParseError } from "@excel/errors";
 import { decodeRange, encodeRange as encodeRangeAddress } from "@excel/utils/address";
 import { MAX_RECORD_ID } from "@excel/xlsb/spec/records";
-import type { BinaryReader } from "@utils/binary";
-import { BinaryWriter, concatUint8Arrays, decodeBytesToString } from "@utils/binary";
+import { BinaryReader, BinaryWriter, concatUint8Arrays, decodeBytesToString } from "@utils/binary";
+
+/**
+ * A reader over BIFF12 bytes — a record payload, a formula's token stream.
+ *
+ * Every payload decoder reads through one of these rather than the bare byte reader, so that a record shorter than its
+ * fields is reported as what it is: a malformed part, as an `XlsbParseError` naming the part, and not a built-in
+ * `RangeError` a caller cannot tell apart from a bug in this library.
+ */
+export class XlsbReader extends BinaryReader {
+  /** The part being read, as named in errors. */
+  get part(): string {
+    return this.label;
+  }
+
+  protected override outOfBounds(detail: string): Error {
+    return new XlsbParseError(this.label, detail);
+  }
+}
 
 /** One framed record, with the payload as a view into the source. */
 export interface BiffRecord {
@@ -71,11 +88,6 @@ export function* iterateBiffRecords(bytes: Uint8Array, context: string): Generat
     };
     offset += length.value;
   }
-}
-
-/** Read the whole part into an array. Convenient where streaming buys nothing. */
-export function readBiffRecords(bytes: Uint8Array, context: string): BiffRecord[] {
-  return [...iterateBiffRecords(bytes, context)];
 }
 
 interface VarUInt {
@@ -304,7 +316,12 @@ export interface BiffRange {
   readonly lastColumn: number;
 }
 
-/** Read an `UncheckedRfX`. */
+/**
+ * Read an `UncheckedRfX` exactly as stored, out-of-grid bounds included.
+ *
+ * For the validator, which has to see a bad bound to report it. A reader building a model uses
+ * {@link readSheetRange}.
+ */
 export function readRange(reader: BinaryReader): BiffRange {
   return {
     firstRow: reader.readUint32(),
@@ -312,6 +329,43 @@ export function readRange(reader: BinaryReader): BiffRange {
     firstColumn: reader.readUint32(),
     lastColumn: reader.readUint32()
   };
+}
+
+/** Read an `UncheckedRfX` that must lie on the sheet — see {@link checkSheetRange}. */
+export function readSheetRange(reader: XlsbReader, what: string): BiffRange {
+  return checkSheetRange(readRange(reader), reader.part, what);
+}
+
+/**
+ * `range`, or an `XlsbParseError` when a bound lies off the 1,048,576 × 16,384 grid.
+ *
+ * Checked where the bytes are decoded, because past that point a range is just four numbers: a defined name, a
+ * validation or a merge whose first row was `0x00EE0000` reached code that walks a range cell by cell and allocated
+ * until the process aborted — uncatchable, so the caller could not even report the file as bad.
+ */
+export function checkSheetRange(range: BiffRange, part: string, what: string): BiffRange {
+  checkSheetIndex(range.firstRow, "row", part, what);
+  checkSheetIndex(range.lastRow, "row", part, what);
+  checkSheetIndex(range.firstColumn, "column", part, what);
+  checkSheetIndex(range.lastColumn, "column", part, what);
+  return range;
+}
+
+/** `index` (zero-based), or an `XlsbParseError` when it lies past the sheet's last row or column. */
+export function checkSheetIndex(
+  index: number,
+  axis: "row" | "column",
+  part: string,
+  what: string
+): number {
+  const limit = axis === "row" ? XLSB_MAX_ROWS : XLSB_MAX_COLUMNS;
+  if (!Number.isInteger(index) || index < 0 || index >= limit) {
+    throw new XlsbParseError(
+      part,
+      `${what} names ${axis} ${index + 1}, past the sheet's ${limit} ${axis}s`
+    );
+  }
+  return index;
 }
 
 /**
@@ -329,6 +383,17 @@ export function rangeReference(range: BiffRange): string {
 }
 
 /** Encode an `UncheckedRfX`. */
+/**
+ * The top-left cell of the bounding box of `ranges` — the anchor a validation's or a conditional format's relative
+ * references are offsets from, as Excel measures them.
+ */
+export function boundingTopLeft(ranges: readonly BiffRange[]): { row: number; column: number } {
+  return {
+    row: Math.min(...ranges.map(range => range.firstRow)),
+    column: Math.min(...ranges.map(range => range.firstColumn))
+  };
+}
+
 /**
  * An `A1:B2` reference as a {@link BiffRange}, or `undefined` when it is not one.
  *

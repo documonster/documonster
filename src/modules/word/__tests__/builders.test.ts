@@ -5,12 +5,13 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  Build,
   Document,
   DocxInvalidStructureError,
   DocxUnsupportedFeatureError,
   DocxWriteError,
-  Build,
   Io,
+  Package,
   Query,
   Theme
 } from "../index";
@@ -364,17 +365,17 @@ describe("Math helpers", () => {
   });
 
   it("mathSuperScript", () => {
-    const sup = Build.mathSuperScript(mc, mc);
+    const sup = Build.mathSuperscript(mc, mc);
     expect((sup as any).type).toBe("mathSuperScript");
   });
 
   it("mathSubScript", () => {
-    const sub = Build.mathSubScript(mc, mc);
+    const sub = Build.mathSubscript(mc, mc);
     expect((sub as any).type).toBe("mathSubScript");
   });
 
   it("mathSubSuperScript", () => {
-    const ss = Build.mathSubSuperScript(mc, mc, mc);
+    const ss = Build.mathSubSuperscript(mc, mc, mc);
     expect((ss as any).type).toBe("mathSubSuperScript");
   });
 
@@ -497,7 +498,7 @@ describe("toBase64", () => {
   it("produces a base64 string from a document", async () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Hello");
-    const b64 = await Io.toBase64(Document.build(doc));
+    const b64 = await Io.toBase64(doc);
     expect(typeof b64).toBe("string");
     expect(b64.length).toBeGreaterThan(0);
   });
@@ -506,9 +507,9 @@ describe("toBase64", () => {
 describe("fillTemplateFromBuffer", () => {
   it("fills a template buffer with data", async () => {
     const doc = Document.create();
-    Document.addParagraphElement(doc, Build.paragraph([Build.text("{{name}}")]));
-    const buffer = await Io.package(Document.build(doc));
-    const result = await Io.fillTemplateFromBuffer(buffer, { name: "Alice" });
+    Document.addParagraph(doc, Build.paragraph([Build.text("{{name}}")]));
+    const buffer = await Io.toBuffer(doc);
+    const result = await Package.fillTemplate(buffer, { name: "Alice" });
     expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBeGreaterThan(0);
   });
@@ -558,7 +559,7 @@ describe("addBulletList / addNumberedList: numbering-instance resilience", () =>
     // registers both abstract and instance; we then strip the instance
     // and call addBulletList again to verify it heals itself.
     Document.addBulletList(h, ["A"]);
-    const built1 = Document.build(h);
+    const built1 = h;
     expect(built1.numberingInstances?.length).toBe(1);
 
     // Surgically remove the instance to simulate a drift scenario (this
@@ -572,7 +573,7 @@ describe("addBulletList / addNumberedList: numbering-instance resilience", () =>
     // Must not throw — and must re-register an instance for the existing
     // bullet abstract.
     expect(() => Document.addBulletList(h, ["B"])).not.toThrow();
-    const built2 = Document.build(h);
+    const built2 = h;
     expect(built2.numberingInstances?.length).toBe(1);
     expect(built2.abstractNumberings?.length).toBe(1);
   });
@@ -581,7 +582,7 @@ describe("addBulletList / addNumberedList: numbering-instance resilience", () =>
     const h = Document.create();
     Document.addBulletList(h, ["A", "B"]);
     Document.addBulletList(h, ["C", "D"]);
-    const built = Document.build(h);
+    const built = h;
     // One abstract, one instance — repeated bullet calls share both.
     expect(built.abstractNumberings?.length).toBe(1);
     expect(built.numberingInstances?.length).toBe(1);
@@ -591,7 +592,7 @@ describe("addBulletList / addNumberedList: numbering-instance resilience", () =>
     const h = Document.create();
     Document.addBulletList(h, ["A"]);
     Document.addNumberedList(h, ["1"]);
-    const built = Document.build(h);
+    const built = h;
     expect(built.abstractNumberings?.length).toBe(2);
     expect(built.numberingInstances?.length).toBe(2);
   });

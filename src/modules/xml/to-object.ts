@@ -9,11 +9,12 @@
  * {@link toPlainObject} from `./dom` instead.
  */
 
+import { checkParseToObjectOptions, checkXmlInput } from "@xml/arguments";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import type { ResolvedOptions } from "@xml/to-object-shared";
 import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
-import type { ParseXmlToObjectOptions } from "@xml/types";
+import type { XmlParseToObjectOptions } from "@xml/types";
 
 // =============================================================================
 // Stack Frame
@@ -61,8 +62,10 @@ interface Frame {
  * // { root: { "@_attr": "1", child: "text" } }
  * ```
  */
-function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown> {
-  const opts = resolveOptions(options);
+function parseXmlToObject(xml: string, options?: XmlParseToObjectOptions): Record<string, unknown> {
+  checkXmlInput("Xml.parseToObject", xml);
+  checkParseToObjectOptions("Xml.parseToObject", options);
+  const opts = resolveOptions(options, "Xml.parseToObject");
 
   const parser = new SaxParser({
     position: false,

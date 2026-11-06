@@ -55,10 +55,10 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 import { Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
-import { Build, Document, Io } from "documonster/word";
+import { Build, Document } from "documonster/word";
 import { z } from "zod";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
@@ -454,11 +454,11 @@ async function makeFixture(): Promise<Fixture> {
   const doc = Document.create();
   Document.addParagraph(doc, "alpha beta gamma");
   Document.addParagraph(doc, "{{%logo}}");
-  await Io.writeFile(Document.build(doc), path.join(root, "real.docx"));
+  await Document.writeFile(doc, path.join(root, "real.docx"));
   const builder = new Pdf.Builder();
   builder.addPage().drawText("hello", { x: 60, y: 700 });
-  await writeFile(path.join(root, "real.pdf"), await builder.build());
-  const zip = new ArchiveFile();
+  await writeFile(path.join(root, "real.pdf"), await builder.toBuffer());
+  const zip = new Archive.ArchiveFile();
   zip.addText("payload\n", "inner.txt");
   await zip.writeToFile(path.join(root, "real.zip"));
   const wb = Workbook.create();
@@ -476,7 +476,7 @@ async function makeFixture(): Promise<Fixture> {
       Build.insertedRun(Build.text("14"), { author: "Alice", id: 2 })
     ]
   });
-  await Io.writeFile(Document.build(tracked), path.join(root, "tracked.docx"));
+  await Document.writeFile(tracked, path.join(root, "tracked.docx"));
 
   // The secure default: a private output root, disjoint from the input root.
   return { config: resolveConfig(["--root", root]), root, outside, secret };

@@ -25,12 +25,13 @@ import type { AnchorData } from "@excel/core/anchor";
  *
  * No file below this one imports the heavy `worksheet.ts`.
  */
-import type { CellData, CellValueInputType, CellValueType } from "@excel/core/cell";
+import type { CellData } from "@excel/core/cell";
 import {
   CellTypes,
   cellComment,
   cellCreate,
   cellGetValue,
+  cellReadValue,
   cellSetComment,
   cellSetModel,
   cellSetNumFmt,
@@ -43,7 +44,7 @@ import type { ColumnData, ColumnDefn, ColumnHeaderValue, ColumnModel } from "@ex
 import { columnHeaders } from "@excel/core/column";
 import type { DataValidationsData } from "@excel/core/data-validations";
 import { Enums } from "@excel/core/enums";
-import type { FormCheckboxData } from "@excel/core/form-control";
+import type { FormCheckboxData, LegacyControlModel } from "@excel/core/form-control";
 import type { WorksheetImage } from "@excel/core/image";
 import type { OpaqueRelationship } from "@excel/core/opaque-part";
 import type { PivotTable } from "@excel/core/pivot-table";
@@ -60,13 +61,21 @@ import {
 import type { SparklineGroup } from "@excel/core/sparkline";
 import { invalidateSharedCellStyle, sharedCellFacet } from "@excel/core/style-sharing";
 import type { TableData } from "@excel/core/table";
+import { sanitizeTableName } from "@excel/core/table-name";
 import type { Workbook } from "@excel/core/workbook";
-import { ColumnOutOfBoundsError, ExcelError, InvalidAddressError } from "@excel/errors";
+import {
+  ExcelColumnOutOfBoundsError,
+  ExcelArgumentError,
+  ExcelError,
+  ExcelInvalidAddressError,
+  ExcelRowOutOfBoundsError
+} from "@excel/errors";
 import type {
   Alignment,
   AutoFilter,
   Borders,
   CellValue,
+  CellValueInput,
   ColBreak,
   ConditionalFormattingOptions,
   DecodedAddress,
@@ -74,6 +83,7 @@ import type {
   Font,
   HeaderFooter,
   IgnoredError,
+  NumFmt,
   PageSetup,
   Protection,
   RowBreak,
@@ -88,6 +98,8 @@ import type {
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
+import { isRecordArgument } from "@utils/object";
 
 /** Opaque worksheet auto-filter criteria preserved for XLSX round trips. */
 export interface AutoFilterCriteria {
@@ -155,14 +167,22 @@ export interface ChartHandle {
  * `worksheet.ts`).
  */
 export interface WorksheetData {
+  /** @internal Set once the sheet is removed from its workbook; edits are refused from then on. */
+  _removed?: boolean;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _workbook: Workbook;
   id: number;
   orderNo: number;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _name: string;
   state: WorksheetState;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _rows: RowData[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _columns: ColumnData[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _keys: { [key: string]: ColumnData };
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _merges: { [key: string]: RangeData };
   rowBreaks: RowBreak[];
   colBreaks: ColBreak[];
@@ -171,14 +191,19 @@ export interface WorksheetData {
   headerFooter: HeaderFooter;
   dataValidations: DataValidationsData;
   views: Partial<WorksheetView>[];
+  /** @deprecated Use `Worksheet.getAutoFilter` / `Worksheet.setAutoFilter`. Removed from the published type in 1.0. */
   autoFilter: AutoFilter | null;
   /**
    * Filter criteria captured from a loaded `<autoFilter>`. The public
    * `autoFilter` property is only a range, so criteria are carried verbatim to
    * survive a save; they are dropped automatically once the range changes.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _autoFilterCriteria?: AutoFilterCriteria;
-  /** The worksheet's `<sortState>` block, preserved verbatim from a loaded file. */
+  /**
+   * The worksheet's `<sortState>` block, preserved verbatim from a loaded file.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   _sortStateXml?: string;
   /**
    * Relationships from this sheet to preserved parts this library does not model
@@ -187,8 +212,15 @@ export interface WorksheetData {
    * They live on the sheet rather than on the workbook because that is where
    * Excel looks for them, and they travel with the sheet's own model so that
    * reordering or renaming sheets cannot detach a part from the one that owns it.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _opaqueRels?: OpaqueRelationship[];
+  /**
+   * Legacy form controls other than checkboxes — buttons, list boxes, spinners, … — kept as read so a
+   * rewrite carries them. Not modelled; see {@link LegacyControlModel}.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
+  _legacyControls?: LegacyControlModel[];
   /**
    * Set when this sheet stands in for a *chartsheet* the reader could not model.
    *
@@ -201,6 +233,7 @@ export interface WorksheetData {
    *
    * So it holds the *path* of the part it stands for, not a boolean: the writer needs to point the sheet's
    * relationship at the real chartsheet, and a flag would only tell it not to write the wrong thing.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _chartsheetPlaceholder?: string;
   /**
@@ -212,8 +245,14 @@ export interface WorksheetData {
    * silently produce `undefined` instead of a compile error.
    *
    * Absent on a random-access worksheet, whose rows are still there when the package is written.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _retainedComments?: readonly unknown[];
+  /**
+   * Hyperlinks a streamed sheet kept, as `_retainedComments` keeps its notes.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
+  _retainedHyperlinks?: readonly unknown[];
   /**
    * Relationship id of the drawing this sheet already pointed at, from an XLSB read.
    *
@@ -221,39 +260,88 @@ export interface WorksheetData {
    * as an opaque part, so the reference is the one piece a rewrite must reproduce. Nothing else uses
    * it: the XLSX writer rebuilds the reference from the modelled drawing, and a workbook that never
    * came from XLSB does not have one.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _xlsbDrawingRelationshipId?: string;
-  /** Additional root namespace declarations needed by preserved worksheet XML. */
+  /**
+   * Additional root namespace declarations needed by preserved worksheet XML.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   _worksheetNamespaceAttributes?: Record<string, string>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _worksheetMcIgnorable?: string;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _sortStateAutoFilterRef?: string;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _media: WorksheetImage[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _shapes: ShapeModel[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _charts: ChartHandle[];
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _sparklineGroups: SparklineGroup[];
   sheetProtection: SheetProtection | null;
+  /** @deprecated Use `Table.list` or `Table.get`. Removed from the published type in 1.0. */
   tables: { [key: string]: TableData };
+  /** @deprecated Use `Pivot.list`. Removed from the published type in 1.0. */
   pivotTables: PivotTable[];
+  /** @deprecated Use `ConditionalFormatting.list`. Removed from the published type in 1.0. */
   conditionalFormattings: ConditionalFormattingOptions[];
+  /** @deprecated Use `Form.list`. Removed from the published type in 1.0. */
   formControls: FormCheckboxData[];
   ignoredErrors: IgnoredError[];
   threadedComments: Array<{ ref: string; comment: ThreadedComment }>;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _headerRowCount?: number;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _drawing: unknown;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _watermark: WatermarkOptions | null;
-  /** The exact media entry created by the watermark API, for precise removal. */
+  /**
+   * The exact media entry created by the watermark API, for precise removal.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   _watermarkMedia: WorksheetImage | null;
   /**
    * Optional streaming-writer hook. Present on streaming worksheet writers,
    * absent on plain record worksheets; `_commitRow` dispatches to it when set.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
    */
   _commitRow?: (row: RowData) => void;
+}
+
+/**
+ * Refuse something that is not a worksheet handle where one is required — `42`, `null`, `{}`, a sheet's name —
+ * with an `ExcelArgumentError` naming `field`, rather than a `TypeError` from inside or a silent `undefined`.
+ *
+ * Called by the chokepoints every public worksheet function goes through (row and cell lookup, the attached check),
+ * so it costs one property read per call: a handle carries its column-key registry, and nothing else that reaches
+ * here does.
+ */
+export function checkWorksheet(ws: unknown, field = "ws"): asserts ws is WorksheetData {
+  // `_keys`, the column-key registry, rather than the row store: the streaming reader's and writer's worksheets reach
+  // the same row and column helpers, and carry one too.
+  if ((ws as { _keys?: unknown } | null | undefined)?._keys === undefined) {
+    throw new ExcelArgumentError(field, `${field} must be a worksheet, got ${describeHandle(ws)}.`);
+  }
+}
+
+/** How a wrong handle is named in an error message. */
+export function describeHandle(value: unknown): string {
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+    return String(value);
+  }
+  return Array.isArray(value) ? "an array" : "an object that is not one";
 }
 
 // =============================================================================
 // Sheet identity accessors
 // =============================================================================
 
+/** The sheet's name. */
 export function getSheetName(ws: WorksheetData): string {
   return ws._name;
 }
@@ -267,7 +355,8 @@ export function getSheetWorkbook(ws: WorksheetData): Workbook {
 // =============================================================================
 
 export function getColumnKey(ws: WorksheetData, key: string): ColumnData | undefined {
-  return ws._keys[key];
+  // Own-property only: a key such as `"toString"` must not resolve against `Object.prototype`.
+  return Object.hasOwn(ws._keys, key) ? ws._keys[key] : undefined;
 }
 
 export function setColumnKey(ws: WorksheetData, key: string, value: ColumnData): void {
@@ -296,7 +385,7 @@ export function eachColumnKey(
  * A read addressed by column reference needs the number and nothing else (the
  * cells live in the rows, not in the column record), so it resolves the
  * reference through this instead of walking through a handle: `getColumn` pads
- * `ws._columns` up to the column asked for, which moves `Worksheet.columns`
+ * `ws._columns` up to the column asked for, which moves `Column.getDefinitions`
  * and is a mutation on a read path — see `core/__tests__/read-side-effects.test.ts`.
  *
  * Unlike `getColumn` it also *validates*, so a reference that names no column
@@ -306,6 +395,7 @@ export function eachColumnKey(
  * bad argument.
  */
 export function findColumnNumber(ws: WorksheetData, c: string | number): number {
+  checkWorksheet(ws);
   if (typeof c === "string") {
     // Own-property only. `ws._keys` is a plain object, so a bare `ws._keys[c]`
     // resolves `"toString"` / `"constructor"` against `Object.prototype` and
@@ -314,26 +404,45 @@ export function findColumnNumber(ws: WorksheetData, c: string | number): number 
     const keyed = Object.prototype.hasOwnProperty.call(ws._keys, c) ? ws._keys[c] : undefined;
     return keyed ? keyed.number : colCache.l2n(c);
   }
-  if (!Number.isInteger(c)) {
-    throw new ColumnOutOfBoundsError(c);
+  return checkColumnNumber(c);
+}
+
+/**
+ * `c` when it is a column number Excel has — a whole number from 1 to 16 384 — or `ExcelColumnOutOfBoundsError`. Every
+ * numeric column position goes through it before anything is read or created: a getter and a setter refuse the same
+ * numbers, and a setter refuses before it has materialised a column.
+ */
+export function checkColumnNumber(c: unknown): number {
+  if (typeof c !== "number" || !Number.isInteger(c)) {
+    throw new ExcelColumnOutOfBoundsError(c as number);
   }
-  // `n2l` owns the 1..16384 bound and throws `ColumnOutOfBoundsError` past it,
-  // so the numeric form is rejected exactly as `l2n` rejects `"XFE"` above
+  // `n2l` owns the 1..16384 bound and throws `ExcelColumnOutOfBoundsError` past it,
+  // so the numeric form is rejected exactly as `l2n` rejects `"XFE"`
   // rather than duplicating the limit here.
   colCache.n2l(c);
   return c;
 }
 
+/** The column record for a key, letter or number, or `undefined` when none exists. Creates nothing. */
+export function findColumn(ws: WorksheetData, c: string | number): ColumnData | undefined {
+  const n = findColumnNumber(ws, c);
+  return ws._columns[n - 1];
+}
+
 export function getColumn(ws: WorksheetData, c: string | number): ColumnData {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   let colNum: number;
   if (typeof c === "string") {
-    const col = ws._keys[c];
+    // Resolved as `findColumnNumber` resolves it. A bare `ws._keys[c]` found `Object.prototype.toString` for
+    // `"toString"`, so `Column.setWidth(ws, "toString", 5)` wrote a width onto a built-in function.
+    const col = getColumnKey(ws, c);
     if (col) {
       return col;
     }
     colNum = colCache.l2n(c);
   } else {
-    colNum = c;
+    colNum = checkColumnNumber(c);
   }
   if (colNum > ws._columns.length) {
     let n = ws._columns.length + 1;
@@ -367,8 +476,42 @@ export function _commitRow(ws: WorksheetData, row: RowData): void {
   }
 }
 
+/**
+ * The row-access a streaming worksheet writer provides, when `ws` is one.
+ *
+ * A writer stands in for a worksheet (it hands itself to the core factories), but it keeps only its uncommitted rows,
+ * behind an offset that moves as rows are written out and that resets whenever it compacts its buffer. Indexing its
+ * row array as `r - 1` therefore lands on the wrong row once anything has been committed — `Row.setHeight` on row
+ * 2002 of a writer that had flushed 2000 rows set the height of a new, detached row. Every by-number row lookup goes
+ * through {@link rowAt} or {@link getRow}, which ask the writer itself.
+ */
+function streamingRows(ws: WorksheetData):
+  | {
+      findRow(rowNumber: number): RowData | undefined;
+      getRow(rowNumber: number): RowData;
+      eachRow(
+        options: { includeEmpty?: boolean } | undefined,
+        callback: (row: RowData, rowNumber: number) => void
+      ): void;
+    }
+  | undefined {
+  const writer = ws as unknown as { _commitRow?: unknown };
+  return typeof writer._commitRow === "function" ? (writer as never) : undefined;
+}
+
+/** Row `r` of the sheet if it exists, without creating it — read correctly from a streaming writer too. */
+function rowAt(ws: WorksheetData, r: number): RowData | undefined {
+  const writer = streamingRows(ws);
+  return writer ? writer.findRow(r) : ws._rows[r - 1];
+}
+
 export function findRow(ws: WorksheetData, r: number): RowData | undefined {
-  return ws._rows[r - 1];
+  checkWorksheet(ws);
+  const row = rowAt(ws, r);
+  if (row === undefined) {
+    checkRowNumber(r);
+  }
+  return row;
 }
 
 export function findRows(
@@ -376,15 +519,53 @@ export function findRows(
   start: number,
   length: number
 ): (RowData | undefined)[] {
+  checkWorksheet(ws);
+  if (streamingRows(ws)) {
+    return Array.from({ length: Math.max(0, length) }, (_, i) => rowAt(ws, start + i));
+  }
   return ws._rows.slice(start - 1, start - 1 + length);
 }
 
+/**
+ * Refuse an edit to a worksheet its workbook no longer has. Writes to a removed sheet used to succeed and vanish:
+ * nothing writes the sheet out any more. Reads still answer, so a caller can copy what the sheet held.
+ */
+export function checkWorksheetAttached(ws: WorksheetData): void {
+  // Something that is not an object at all is refused as a handle; an object is left to the callers that need a full
+  // worksheet (a chart on a chartsheet carries a placeholder sheet, which this must accept).
+  if (typeof ws !== "object" || ws === null) {
+    checkWorksheet(ws);
+  }
+  if (ws._removed === true) {
+    throw new ExcelArgumentError(
+      "worksheet",
+      `Worksheet "${ws._name}" was removed from its workbook; it can no longer be edited.`
+    );
+  }
+}
+
 export function getRow(ws: WorksheetData, r: number): RowData {
+  if ((ws as { _keys?: unknown } | null | undefined)?._keys === undefined) {
+    checkWorksheet(ws);
+  }
+  checkWorksheetAttached(ws);
+  const writer = streamingRows(ws);
+  if (writer) {
+    return writer.getRow(r);
+  }
   let row = ws._rows[r - 1];
   if (!row) {
+    checkRowNumber(r);
     row = ws._rows[r - 1] = rowCreate(ws, r);
   }
   return row;
+}
+
+/** Rows are whole numbers from 1 to 1,048,576; anything else names no row. */
+export function checkRowNumber(r: number): void {
+  if (!Number.isInteger(r) || r < 1 || r > 1048576) {
+    throw new ExcelRowOutOfBoundsError(r, "Excel rows are whole numbers from 1 to 1048576");
+  }
 }
 
 export function getRows(ws: WorksheetData, start: number, length: number): RowData[] | undefined {
@@ -412,6 +593,7 @@ export function eachRow(
   optOrCallback: { includeEmpty?: boolean } | ((row: RowData, rowNumber: number) => void),
   maybeCallback?: (row: RowData, rowNumber: number) => void
 ): void {
+  checkWorksheet(ws);
   let options: { includeEmpty?: boolean } | undefined;
   let callback: (row: RowData, rowNumber: number) => void;
   if (typeof optOrCallback === "function") {
@@ -419,6 +601,11 @@ export function eachRow(
   } else {
     options = optOrCallback;
     callback = maybeCallback!;
+  }
+  const writer = streamingRows(ws);
+  if (writer && options?.includeEmpty) {
+    writer.eachRow(options, callback);
+    return;
   }
   if (options && options.includeEmpty) {
     const n = ws._rows.length;
@@ -434,7 +621,13 @@ export function eachRow(
   }
 }
 
+/**
+ * The sheet's values as a **1-based**, sparse array of rows: index `r` is row `r` and, within it, index `c` is column
+ * `c` — the shape the `Cell` namespace's `(row, col)` form takes. Index `0` is unused. For a 0-based dense array use
+ * `Worksheet.toAoa`.
+ */
 export function getSheetValues(ws: WorksheetData): CellValue[][] {
+  checkWorksheet(ws);
   const rows: CellValue[][] = [];
   ws._rows.forEach(row => {
     if (row) {
@@ -450,7 +643,7 @@ export function getSheetValues(ws: WorksheetData): CellValue[][] {
 
 export function findCell(ws: WorksheetData, r: number | string, c?: number): CellData | undefined {
   const address = colCache.getAddress(r, c);
-  const row = ws._rows[address.row - 1];
+  const row = rowAt(ws, address.row);
   return row ? rowFindCell(row, address.col) : undefined;
 }
 
@@ -474,11 +667,65 @@ export function locateCell(
   c?: number
 ): CellData | undefined {
   const decoded = colCache.getAddress(r, c);
-  const cell = ws._rows[decoded.row - 1]?.cells[decoded.col - 1];
-  if (cell === undefined) {
-    colCache.validateAddress(decoded.address);
+  const cell = rowAt(ws, decoded.row)?.cells[decoded.col - 1];
+  if (cell === undefined || (typeof r === "string" && !isCellReferenceText(r))) {
+    checkCellAddress(typeof r === "string" ? r : decoded.address, decoded);
   }
   return cell;
+}
+
+/**
+ * `B7`, `$B$7`, `B$7`, `$B7`: optional `$`, letters, optional `$`, digits — and nothing after them. Letters of either
+ * case: `b7` is `B7`, as Excel's UI reads it and as `colCache` decodes it.
+ */
+function isCellReferenceText(text: string): boolean {
+  let i = text.charCodeAt(0) === 36 ? 1 : 0;
+  const lettersStart = i;
+  while (i < text.length && isLetter(text.charCodeAt(i))) {
+    i++;
+  }
+  if (i === lettersStart) {
+    return false;
+  }
+  if (text.charCodeAt(i) === 36) {
+    i++;
+  }
+  const digitsStart = i;
+  while (i < text.length && text.charCodeAt(i) >= 48 && text.charCodeAt(i) <= 57) {
+    i++;
+  }
+  return i > digitsStart && i === text.length;
+}
+
+/**
+ * A reference that names one cell of the grid — letters then digits, a row from 1 to 1,048,576 and a column from 1 to
+ * 16,384. `colCache.validateAddress` checks only the shape, so `A0` and `A99999999` passed it and a reader answered
+ * `null` for a cell that cannot exist.
+ */
+function isLetter(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function checkCellAddress(
+  text: string,
+  decoded: { address: string; row: number; col: number }
+): void {
+  if (!isCellReferenceText(text)) {
+    throw new ExcelInvalidAddressError(
+      text,
+      "a cell reference is column letters then a row number, such as B7 or $B$7"
+    );
+  }
+  colCache.validateAddress(decoded.address);
+  if (
+    !(decoded.row >= 1 && decoded.row <= 1048576) ||
+    !(decoded.col >= 1 && decoded.col <= 16384)
+  ) {
+    throw new ExcelInvalidAddressError(
+      text,
+      "a cell reference names a row from 1 to 1048576 and a column from A to XFD"
+    );
+  }
 }
 
 /**
@@ -487,7 +734,7 @@ export function locateCell(
  */
 export function resolveAddress(ws: WorksheetData, r: number | string, c?: number): DecodedAddress {
   const decoded = colCache.getAddress(r, c);
-  colCache.validateAddress(decoded.address);
+  checkCellAddress(typeof r === "string" ? r : decoded.address, decoded);
   return { sheetName: ws._name, address: decoded.address, row: decoded.row, col: decoded.col };
 }
 
@@ -501,13 +748,101 @@ export function inheritedNumFmt(
   row: number,
   col: number
 ): Style["numFmt"] | undefined {
-  return ws._rows[row - 1]?.style.numFmt || ws._columns[col - 1]?.style.numFmt || undefined;
+  return rowAt(ws, row)?.style.numFmt || ws._columns[col - 1]?.style.numFmt || undefined;
+}
+
+/**
+ * The cell {@link getCell} would return, without attaching anything to the sheet: the existing cell, or a
+ * new one built from the row's and column's styles exactly as {@link getCell} would build it, but held by
+ * nothing. For a reader that must answer as for a materialised cell and may not change the sheet.
+ */
+export function previewCell(ws: WorksheetData, r: number | string, c?: number): CellData {
+  const address = colCache.getAddress(r, c);
+  const row = rowAt(ws, address.row);
+  return (
+    row?.cells[address.col - 1] ??
+    cellCreate(
+      row ?? rowCreate(ws, address.row),
+      ws._columns[address.col - 1] ?? columnCreate(ws, address.col),
+      address.address
+    )
+  );
 }
 
 export function getCell(ws: WorksheetData, r: number | string, c?: number): CellData {
   const address = colCache.getAddress(r, c);
+  const existing = rowAt(ws, address.row)?.cells[address.col - 1];
+  if (existing !== undefined && (typeof r !== "string" || isCellReferenceText(r))) {
+    checkWorksheetAttached(ws);
+    return existing;
+  }
+  // Validated on a miss only, like `locateCell`: a malformed reference ("1A", "A0") decodes to no cell, and
+  // creating one used to fail deep inside with "A Cell needs a Row" instead of naming the address.
+  checkCellAddress(typeof r === "string" ? r : address.address, address);
   const row = getRow(ws, address.row);
   return rowGetCellEx(row, address);
+}
+
+/**
+ * The normalised bounds of a bounded range on `ws`, refused as {@link getRangeValues} documents. `site` prefixes the
+ * public call and names the parameter, for a caller that has one.
+ */
+export function resolveRangeBounds(
+  ws: WorksheetData,
+  range: string | RangeData,
+  site?: { where: string; field: string }
+): { top: number; left: number; bottom: number; right: number } {
+  checkWorksheet(ws);
+  const r = typeof range === "string" ? rangeCreate(range) : range;
+
+  const bounds = [r.top, r.left, r.bottom, r.right];
+  const decoded = bounds.every(n => Number.isInteger(n));
+  const set = decoded && bounds.every(n => n >= 1);
+  // `rangeTl`/`rangeToString` coerce 0 and NaN bounds to 1, so an unusable range
+  // would render as a plausible-looking "A1:A1". Describe the raw bounds instead.
+  const label =
+    typeof range === "string"
+      ? range
+      : set
+        ? rangeRange(r)
+        : `{ top: ${r.top}, left: ${r.left}, bottom: ${r.bottom}, right: ${r.right} }`;
+
+  if (!decoded) {
+    // `colCache.decodeAddress` yields `undefined` for a missing row or column,
+    // which `rangeCreate` turns into a NaN bound. That covers both unbounded
+    // references ("A:A", "1:5") and strings it cannot decode at all.
+    throw new ExcelInvalidAddressError(
+      label,
+      'expected a bounded A1 range like "G7:H19" — whole-column and whole-row references have no bounds to read',
+      site
+    );
+  }
+  if (!set) {
+    // All-zero is `rangeCreate`'s unset sentinel — e.g. `Range.create()`, or the
+    // dimensions of a sheet with no cells. Reading it as "A1" would hide the bug.
+    throw new ExcelInvalidAddressError(
+      label,
+      "range bounds must be 1-based row and column numbers; this range is unset or empty",
+      site
+    );
+  }
+  if (r.sheetName) {
+    const sheetName = getSheetName(ws);
+    if (sheetNameKey(r.sheetName) !== sheetNameKey(sheetName)) {
+      throw new ExcelError(
+        `${site ? `${site.where}: ` : ""}Range "${label}" refers to worksheet "${r.sheetName}" but was read from worksheet "${sheetName}"`
+      );
+    }
+  }
+
+  // `rangeCreate` normalises reversed corners, but `RangeData` is a plain record
+  // a caller can hand-build, so normalise here too rather than deriving a
+  // negative height and failing inside `new Array()`.
+  const top = Math.min(r.top, r.bottom);
+  const bottom = Math.max(r.top, r.bottom);
+  const left = Math.min(r.left, r.right);
+  const right = Math.max(r.left, r.right);
+  return { top, left, bottom, right };
 }
 
 /**
@@ -532,59 +867,13 @@ export function getCell(ws: WorksheetData, r: number | string, c?: number): Cell
  *   {@link RangeData} handle. Reversed corners are normalised, including on a
  *   hand-built handle. An optional sheet qualifier must name `ws` (compared
  *   case-insensitively, as Excel does).
- * @throws {InvalidAddressError} If the range cannot be decoded, is unbounded
+ * @throws {ExcelInvalidAddressError} If the range cannot be decoded, is unbounded
  *   (`"A:A"`, `"1:5"`), or is unset — including the dimensions of a sheet that
  *   has no cells.
  * @throws {ExcelError} If the range is qualified with a different worksheet.
  */
 export function getRangeValues(ws: WorksheetData, range: string | RangeData): CellValue[][] {
-  const r = typeof range === "string" ? rangeCreate(range) : range;
-
-  const bounds = [r.top, r.left, r.bottom, r.right];
-  const decoded = bounds.every(n => Number.isInteger(n));
-  const set = decoded && bounds.every(n => n >= 1);
-  // `rangeTl`/`rangeToString` coerce 0 and NaN bounds to 1, so an unusable range
-  // would render as a plausible-looking "A1:A1". Describe the raw bounds instead.
-  const label =
-    typeof range === "string"
-      ? range
-      : set
-        ? rangeRange(r)
-        : `{ top: ${r.top}, left: ${r.left}, bottom: ${r.bottom}, right: ${r.right} }`;
-
-  if (!decoded) {
-    // `colCache.decodeAddress` yields `undefined` for a missing row or column,
-    // which `rangeCreate` turns into a NaN bound. That covers both unbounded
-    // references ("A:A", "1:5") and strings it cannot decode at all.
-    throw new InvalidAddressError(
-      label,
-      'expected a bounded A1 range like "G7:H19" — whole-column and whole-row references have no bounds to read'
-    );
-  }
-  if (!set) {
-    // All-zero is `rangeCreate`'s unset sentinel — e.g. `Range.create()`, or the
-    // dimensions of a sheet with no cells. Reading it as "A1" would hide the bug.
-    throw new InvalidAddressError(
-      label,
-      "range bounds must be 1-based row and column numbers; this range is unset or empty"
-    );
-  }
-  if (r.sheetName) {
-    const sheetName = getSheetName(ws);
-    if (r.sheetName.toLowerCase() !== sheetName.toLowerCase()) {
-      throw new ExcelError(
-        `Range "${label}" refers to worksheet "${r.sheetName}" but was read from worksheet "${sheetName}"`
-      );
-    }
-  }
-
-  // `rangeCreate` normalises reversed corners, but `RangeData` is a plain record
-  // a caller can hand-build, so normalise here too rather than deriving a
-  // negative height and failing inside `new Array()`.
-  const top = Math.min(r.top, r.bottom);
-  const bottom = Math.max(r.top, r.bottom);
-  const left = Math.min(r.left, r.right);
-  const right = Math.max(r.left, r.right);
+  const { top, left, bottom, right } = resolveRangeBounds(ws, range);
 
   const width = right - left + 1;
   const result: CellValue[][] = new Array(bottom - top + 1);
@@ -594,7 +883,7 @@ export function getRangeValues(ws: WorksheetData, range: string | RangeData): Ce
     const rowHandle = findRow(ws, row);
     for (let col = left; col <= right; col++) {
       const cell = rowHandle ? rowFindCell(rowHandle, col) : undefined;
-      rowData[col - left] = cell ? cellGetValue(cell) : null;
+      rowData[col - left] = cell ? cellReadValue(cell) : null;
     }
     result[row - top] = rowData;
   }
@@ -709,7 +998,7 @@ export function columnEachCell(
   });
 }
 
-export function columnValues(c: ColumnData): CellValueType[] {
+export function columnValues(c: ColumnData): CellValue[] {
   return columnValuesAt(c.worksheet, c.number);
 }
 
@@ -719,15 +1008,12 @@ export function columnValues(c: ColumnData): CellValueType[] {
  * record to read through it.
  *
  * `base` is the index row 1 lands on: `1` keys the array by row number and
- * leaves an empty leading slot (what `Column.values` returns), `0` makes it a
+ * leaves an empty leading slot (what `Column.getValues(ws, c, { base: 1 })` returns), `0` makes it a
  * plain array (`Column.getValues`). Either way an empty cell is a hole.
  */
-export function columnValuesAt(
-  ws: WorksheetData,
-  colNumber: number,
-  base: 0 | 1 = 1
-): CellValueType[] {
-  const v: CellValueType[] = [];
+export function columnValuesAt(ws: WorksheetData, colNumber: number, base: 0 | 1 = 1): CellValue[] {
+  checkWorksheet(ws);
+  const v: CellValue[] = [];
   // Deliberately not via `columnEachCell`: its callback signature demands a
   // `CellData`, so it materialises a cell on every row of the column. This is a
   // getter, so walk the rows non-destructively instead.
@@ -739,7 +1025,7 @@ export function columnValuesAt(
     }
     const cell = rowFindCell(row, colNumber);
     if (cell && cellType(cell) !== Enums.ValueType.Null) {
-      v[row.number - 1 + base] = cellGetValue(cell);
+      v[row.number - 1 + base] = cellReadValue(cell);
     }
   }
   return v;
@@ -761,7 +1047,7 @@ export function columnValuesAt(
 export function columnSetValuesAt(
   ws: WorksheetData,
   colNumber: number,
-  v: readonly CellValueInputType[]
+  v: readonly CellValueInput[]
 ): void {
   if (!v) {
     return;
@@ -840,7 +1126,14 @@ export function columnFromModel(worksheet: WorksheetData, cols: ColumnModel[]): 
       columns.push(columnCreate(worksheet, count++));
     }
     while (count <= col.max) {
-      columns.push(columnCreate(worksheet, count++, col));
+      const column = columnCreate(worksheet, count++, col);
+      // As read: a definition's default width is for columns a caller declares, and a column the file gave no width
+      // keeps none — written back, the default became a width the author had chosen.
+      column.width = col.width;
+      if (col.customWidth !== undefined) {
+        column.customWidth = col.customWidth;
+      }
+      columns.push(column);
     }
   }
   return columns;
@@ -851,7 +1144,7 @@ export function columnFromModel(worksheet: WorksheetData, cols: ColumnModel[]): 
 // container iteration, so they live in the core layer)
 // =============================================================================
 
-export function columnSetNumFmt(c: ColumnData, value: string | undefined): void {
+export function columnSetNumFmt(c: ColumnData, value: string | NumFmt | undefined): void {
   c.style.numFmt = value;
   columnEachCell(c, cell => {
     cellSetNumFmt(cell, value);
@@ -1050,6 +1343,13 @@ export function rowSplice(r: RowData, start: number, count: number, ...inserts: 
         cellSetComment(cDst, undefined);
       }
     }
+    // The cells past the new end had nothing to take from, and were only emptied: drop them, as a row splice drops
+    // the rows past its new end. Left in place they counted towards `Column.getCount` and `Cell.has` until the
+    // workbook was written and read back.
+    const kept = Math.max(nEnd + nExpand, Math.min(nEnd, start - 1));
+    if (r.cells.length > kept) {
+      r.cells.length = kept;
+    }
   } else if (nExpand > 0) {
     for (i = nEnd; i >= nKeep; i--) {
       cSrc = r.cells[i - 1];
@@ -1066,8 +1366,10 @@ export function rowSplice(r: RowData, start: number, count: number, ...inserts: 
 
   for (i = 0; i < inserts.length; i++) {
     cDst = rowGetCell(r, start + i);
-    cellSetValue(cDst, inserts[i]);
+    // The style is cleared before the value is set, which may give the cell a format of its own: a Temporal value
+    // carries `hh:mm:ss` or `yyyy-mm-dd`, and clearing after it wrote a time as a date.
     cDst.style = {};
+    cellSetValue(cDst, inserts[i]);
     cellSetComment(cDst, undefined);
   }
 }
@@ -1092,6 +1394,7 @@ export function rowCommit(r: RowData): void {
 // =============================================================================
 
 export function get_lastRowNumber(ws: WorksheetData): number {
+  checkWorksheet(ws);
   // need to cope with results of splice
   const rows = ws._rows;
   let n = rows.length;
@@ -1137,6 +1440,7 @@ export function addRow(ws: WorksheetData, value: RowValues, style: string = "n")
 }
 
 export function addRows(ws: WorksheetData, value: RowValues[], style: string = "n"): RowData[] {
+  checkWorksheet(ws);
   const rows: RowData[] = [];
   value.forEach(row => {
     rows.push(addRow(ws, row, style));
@@ -1149,9 +1453,23 @@ export function addRows(ws: WorksheetData, value: RowValues[], style: string = "
  * `tables` record — kept in the core layer (not `worksheet.ts`) so the chart
  * module can read table ranges without forming a `worksheet → chart →
  * worksheet` import cycle.
+ *
+ * `name` may be the table's stored name or the name a file gave it: a file's name Excel cannot hold is
+ * stored corrected (`"T1"` as `"_T1"`, `"My Table"` as `"My_Table"` — `Table.add` refuses such a name
+ * instead), and the correction is deterministic, so the file's name still finds it. No stored name is ever one that
+ * needs correcting, so the fallback cannot reach a different table. Names are compared as Excel compares them
+ * (`excelNameKey`), so a different case finds the table too.
  */
-export function getTable(ws: WorksheetData, name: string): TableData {
-  return ws.tables[name];
+export function getTable(ws: WorksheetData, name: string): TableData | undefined {
+  const own = (key: string) =>
+    Object.prototype.hasOwnProperty.call(ws.tables, key) ? ws.tables[key] : undefined;
+  const exact = own(name) ?? own(sanitizeTableName(name));
+  if (exact !== undefined) {
+    return exact;
+  }
+  // Table names are case-insensitive in Excel, compared by `excelNameKey`: `t2` is the table `T2`.
+  const keys = new Set([excelNameKey(name), excelNameKey(sanitizeTableName(name))]);
+  return Object.values(ws.tables).find(table => keys.has(excelNameKey(table.table.name)));
 }
 
 /** All tables defined on the worksheet. See {@link getTable} for the layering rationale. */
@@ -1163,11 +1481,55 @@ export function getTables(ws: WorksheetData): TableData[] {
 // Panes and the auto-filter
 // ============================================================================
 
+/** What {@link freeze} holds in view. */
+export interface FreezePanesOptions {
+  /**
+   * `"frozen"`, as {@link panes} reports frozen panes — so its result can be given back to `freeze`. Optional; any
+   * other value is refused.
+   */
+  state?: "frozen";
+  /** How many leading columns stay in view. Default `0`. */
+  columns?: number;
+  /** How many leading rows stay in view. Default `0`. */
+  rows?: number;
+}
+
+/** Where {@link split} divides the sheet, in twentieths of a point. */
+export interface SplitPanesOptions {
+  /**
+   * `"split"`, as {@link panes} reports split panes — so its result can be given back to `split`. Optional; any
+   * other value is refused.
+   */
+  state?: "split";
+  /** Horizontal offset of the vertical split bar. Default `0` (no vertical split). */
+  x?: number;
+  /** Vertical offset of the horizontal split bar. Default `0` (no horizontal split). */
+  y?: number;
+}
+
+/** Frozen panes as `Worksheet.getPanes` reports them: what `freeze` takes. */
+export interface FrozenPanes extends FreezePanesOptions {
+  state: "frozen";
+  columns: number;
+  rows: number;
+}
+
+/** Split panes as `Worksheet.getPanes` reports them: what `split` takes. */
+export interface SplitPanes extends SplitPanesOptions {
+  state: "split";
+  x: number;
+  y: number;
+}
+
+/** A sheet's panes as `Worksheet.getPanes` reports them — in the words `freeze` and `split` take. */
+export type WorksheetPanes = FrozenPanes | SplitPanes;
+
 /**
  * Freeze rows and columns so they stay in view while the rest scrolls.
  *
- * `columns` and `rows` are how many to hold — `freeze(ws, 1, 1)` pins the first column and the header row.
- * Zero for either means that axis does not freeze, and `freeze(ws, 0, 0)` is the same as {@link unfreeze}.
+ * `columns` and `rows` are how many to hold — `freeze(ws, { columns: 1, rows: 1 })` pins the first column and
+ * the header row. Zero (or omitting) either means that axis does not freeze, and `freeze(ws, {})` is the same
+ * as {@link unfreeze}.
  *
  * ## Why this exists
  *
@@ -1180,7 +1542,28 @@ export function getTables(ws: WorksheetData): TableData[] {
  * `topLeftCell` is computed rather than accepted, because it is not an independent choice: it is the first cell
  * *outside* the frozen region, and any other value is a file that scrolls somewhere the author did not ask for.
  */
-export function freeze(ws: WorksheetData, columns = 0, rows = 0): void {
+export function freeze(ws: WorksheetData, options?: FreezePanesOptions): void;
+/**
+ * @deprecated Pass the counts in the options object: `freeze(ws, { columns, rows })`. Removed in 1.0.
+ */
+export function freeze(ws: WorksheetData, columns?: number, rows?: number): void;
+export function freeze(
+  ws: WorksheetData,
+  columnsOrOptions?: number | FreezePanesOptions,
+  legacyRows?: number
+): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
+  if (isRecordArgument(columnsOrOptions)) {
+    freezeCounts(ws, columnsOrOptions.columns, columnsOrOptions.rows);
+  } else {
+    freezeCounts(ws, columnsOrOptions, legacyRows);
+  }
+}
+
+// The positional form's own defaults: only `undefined` defaults, so a `null` placeholder reaches
+// `Math.trunc` and counts as zero, exactly as it did when this was the public signature.
+function freezeCounts(ws: WorksheetData, columns = 0, rows = 0): void {
   const heldColumns = Math.max(0, Math.trunc(columns));
   const heldRows = Math.max(0, Math.trunc(rows));
   if (heldColumns === 0 && heldRows === 0) {
@@ -1208,7 +1591,27 @@ export function freeze(ws: WorksheetData, columns = 0, rows = 0): void {
  * frozen view and twips for a split one, which is the kind of overloading a public member should absorb rather
  * than pass on, so this function's name says which it is.
  */
-export function split(ws: WorksheetData, x = 0, y = 0): void {
+export function split(ws: WorksheetData, options?: SplitPanesOptions): void;
+/**
+ * @deprecated Pass the offsets in the options object: `split(ws, { x, y })`. Removed in 1.0.
+ */
+export function split(ws: WorksheetData, x?: number, y?: number): void;
+export function split(
+  ws: WorksheetData,
+  xOrOptions?: number | SplitPanesOptions,
+  legacyY?: number
+): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
+  if (isRecordArgument(xOrOptions)) {
+    splitAt(ws, xOrOptions.x, xOrOptions.y);
+  } else {
+    splitAt(ws, xOrOptions, legacyY);
+  }
+}
+
+// As `freezeCounts`: the positional form's defaults, so `null` still counts as zero.
+function splitAt(ws: WorksheetData, x = 0, y = 0): void {
   const horizontal = Math.max(0, Math.trunc(x));
   const vertical = Math.max(0, Math.trunc(y));
   if (horizontal === 0 && vertical === 0) {
@@ -1229,6 +1632,8 @@ export function split(ws: WorksheetData, x = 0, y = 0): void {
 
 /** Remove any frozen or split panes, leaving a normally scrolling sheet. */
 export function unfreeze(ws: WorksheetData): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   ws.views = [];
 }
 
@@ -1240,6 +1645,7 @@ export function unfreeze(ws: WorksheetData): void {
  * may carry.
  */
 export function panes(ws: WorksheetData): Partial<WorksheetView> | undefined {
+  checkWorksheet(ws);
   const view = ws.views?.[0];
   return view === undefined || view.state === "normal" ? undefined : view;
 }
@@ -1255,10 +1661,13 @@ export function panes(ws: WorksheetData): Partial<WorksheetView> | undefined {
  * `getModel`/`setModel` — see {@link freeze} for why that is not an acceptable answer for a documented feature.
  */
 export function setAutoFilter(ws: WorksheetData, range: AutoFilter | null): void {
+  checkWorksheet(ws);
+  checkWorksheetAttached(ws);
   ws.autoFilter = range;
 }
 
 /** The auto-filter range, or `null` when the sheet has none. */
 export function autoFilter(ws: WorksheetData): AutoFilter | null {
+  checkWorksheet(ws);
   return ws.autoFilter ?? null;
 }

@@ -9,11 +9,12 @@
  */
 
 import { writeImageXObject } from "@pdf/builder/image-utils";
+import { checkPdfExportOptions } from "@pdf/core/arguments";
 import { initEncryption } from "@pdf/core/encryption";
 import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "@pdf/core/pdf-object";
 import { PdfContentStream, isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
 import { PdfWriter } from "@pdf/core/pdf-writer";
-import { PdfError, PdfFontError, PdfRenderError } from "@pdf/errors";
+import { PdfArgumentError, PdfError, PdfFontError, PdfRenderError } from "@pdf/errors";
 import { compilePdfFontConfig } from "@pdf/font/font-config";
 import { FontManager } from "@pdf/font/font-manager";
 import { findSystemFontForCodePoints } from "@pdf/font/system-fonts";
@@ -49,7 +50,8 @@ import type {
 import { PageSizes, PdfCellType, isPdfChartsheet } from "@pdf/types";
 import { addCjkLanguageEvidence, concludeCjkLanguage, createCjkLanguageEvidence } from "@utils/cjk";
 import type { CjkLanguage, CjkLanguageEvidence } from "@utils/cjk";
-import { yieldToEventLoop } from "@utils/utils.base";
+import { sheetNameKey } from "@utils/name-key";
+import { createYieldBudget } from "@utils/yield";
 
 // =============================================================================
 // Public API
@@ -57,7 +59,8 @@ import { yieldToEventLoop } from "@utils/utils.base";
 
 /**
  * Export a PdfWorkbook to PDF format.
- * Yields to the event loop between each output page during layout and rendering.
+ * Yields to the event loop between output pages during layout and rendering, whenever about
+ * 10 ms of work have passed since the last yield.
  *
  * @param workbook - The workbook data to export
  * @param options - Export options controlling layout, pagination, and appearance
@@ -66,8 +69,10 @@ import { yieldToEventLoop } from "@utils/utils.base";
  */
 export async function exportPdf(
   workbook: PdfWorkbook,
-  options?: PdfExportOptions
+  options?: PdfExportOptions,
+  where = "Pdf.fromTable"
 ): Promise<Uint8Array> {
+  checkPdfExportOptions(where, options);
   // Bind the header/footer substitutions once so `&F` / `&Z` / `&D` / `&T`
   // resolve identically on every sheet and page of this export.
   const headerFooter = options?.headerFooter;
@@ -81,7 +86,7 @@ export async function exportPdf(
       date: headerFooter?.date ?? new Date()
     }
   };
-  const ctx = await prepareExport(workbook, resolvedInput);
+  const ctx = await prepareExport(workbook, resolvedInput, where);
 
   for (const sheet of ctx.sheets) {
     await layoutSheetInto(ctx, sheet, resolvedInput);
@@ -108,16 +113,14 @@ interface ExportContext {
  */
 async function prepareExport(
   workbook: PdfWorkbook,
-  options?: PdfExportOptions
+  options: PdfExportOptions | undefined,
+  where: string
 ): Promise<ExportContext> {
-  const sheets = selectSheets(workbook, options?.sheets);
+  const sheets = selectSheets(workbook, options?.sheets, where);
+  checkWatermarkSheets(workbook, options?.watermark, where);
 
   if (sheets.length === 0) {
     throw new PdfError("No sheets to export. The workbook is empty or no sheets matched.");
-  }
-
-  if (options?.font && options.fonts) {
-    throw new PdfFontError("`font` and `fonts` cannot be used together");
   }
 
   let fontManager: FontManager;
@@ -353,7 +356,7 @@ function registerAutoDiscoveredFont(
   // afterwards — so a face chosen for the body could be missing a character that
   // arrived later, and returning here left it to a Type3 NOTDEF box. The builder
   // already reconsidered an incomplete face; this pipeline did not, so the same
-  // document came out with tofu through `Pdf.create` and correct through
+  // document came out with tofu through `Pdf.fromTable` and correct through
   // `Pdf.Builder`.
   //
   // A face the caller embedded explicitly is never revisited: `embedFont` is a
@@ -525,6 +528,7 @@ async function renderAllPages(
   const totalPages = allPages.length;
   const imageObjectCache: ImageObjectCache = new WeakMap();
 
+  const yieldIfDue = createYieldBudget();
   for (let i = 0; i < allPages.length; i++) {
     renderSinglePage(
       allPages[i],
@@ -540,7 +544,7 @@ async function renderAllPages(
       watermark
     );
     if (i < allPages.length - 1) {
-      await yieldToEventLoop();
+      await yieldIfDue();
     }
   }
 
@@ -890,6 +894,7 @@ function buildFinalPdf(
     title: documentOptions.title || workbook.title || undefined,
     author: documentOptions.author || workbook.creator || undefined,
     subject: documentOptions.subject || workbook.subject || undefined,
+    keywords: options?.keywords || workbook.keywords || undefined,
     creator: documentOptions.creator,
     creationDate: options?.creationDate,
     modDate: options?.modDate
@@ -910,9 +915,14 @@ function buildFinalPdf(
 // =============================================================================
 
 /**
- * Select which sheets to export based on the options.
+ * Select which sheets to export based on the options. An empty list, like none, selects every
+ * visible sheet.
  */
-function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfWorkbookSheet[] {
+function selectSheets(
+  workbook: PdfWorkbook,
+  sheets: readonly (string | number)[] | undefined,
+  where: string
+): PdfWorkbookSheet[] {
   const allSheets = workbook.sheets;
 
   if (!sheets || sheets.length === 0) {
@@ -920,23 +930,51 @@ function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfW
     return allSheets.filter(ws => ws.state !== "hidden" && ws.state !== "veryHidden");
   }
 
+  // A selector that matches no sheet is refused: it used to be skipped, which dropped a
+  // requested sheet without a word (or, when nothing matched, reported an empty workbook).
   const result: PdfWorkbookSheet[] = [];
-  for (const selector of sheets) {
-    if (typeof selector === "string") {
-      const ws = allSheets.find(s => s.name.toLowerCase() === selector.toLowerCase());
-      if (ws) {
-        result.push(ws);
-      }
-    } else if (typeof selector === "number") {
-      // 1-based position in the sheets array
-      const ws = allSheets[selector - 1];
-      if (ws) {
-        result.push(ws);
-      }
+  sheets.forEach((selector, i) => {
+    const ws =
+      typeof selector === "string"
+        ? allSheets.find(s => sheetNameKey(s.name) === sheetNameKey(selector))
+        : // 1-based position in the sheets array, worksheets and chartsheets in tab order
+          allSheets[selector - 1];
+    if (ws === undefined) {
+      throw new PdfArgumentError(
+        `options.sheets[${i}]`,
+        typeof selector === "string"
+          ? `${where}: options.sheets[${i}] — the workbook has no sheet named ${JSON.stringify(selector)}; it has ${describeSheetNames(allSheets)}`
+          : `${where}: options.sheets[${i}] — position ${selector} is past the last sheet (positions are 1-based, and the workbook has ${allSheets.length})`
+      );
     }
-  }
+    result.push(ws);
+  });
 
   return result;
+}
+
+function describeSheetNames(sheets: readonly PdfWorkbookSheet[]): string {
+  return sheets.length === 0 ? "none" : sheets.map(s => JSON.stringify(s.name)).join(", ");
+}
+
+/**
+ * Refuse a `watermark.sheets` name that names no sheet of the workbook, as an unknown name in
+ * `sheets` is refused: a mistyped name used to leave every page without the watermark, and
+ * nothing said so.
+ */
+function checkWatermarkSheets(
+  workbook: PdfWorkbook,
+  watermark: PdfWatermark | undefined,
+  where: string
+): void {
+  watermark?.sheets?.forEach((name, i) => {
+    if (!workbook.sheets.some(s => sheetNameKey(s.name) === sheetNameKey(name))) {
+      throw new PdfArgumentError(
+        `options.watermark.sheets[${i}]`,
+        `${where}: options.watermark.sheets[${i}] — the workbook has no sheet named ${JSON.stringify(name)}; it has ${describeSheetNames(workbook.sheets)}`
+      );
+    }
+  });
 }
 
 // =============================================================================
@@ -1294,8 +1332,8 @@ function isWatermarkApplicable(watermark: PdfWatermark, page: LayoutPage): boole
   }
   if (watermark.sheets && watermark.sheets.length > 0) {
     // Case-insensitive sheet name matching, consistent with the rest of the API
-    const sheetLower = page.sheetName.toLowerCase();
-    if (!watermark.sheets.some(s => s.toLowerCase() === sheetLower)) {
+    const sheetKey = sheetNameKey(page.sheetName);
+    if (!watermark.sheets.some(s => sheetNameKey(s) === sheetKey)) {
       return false;
     }
   }

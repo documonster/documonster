@@ -85,7 +85,7 @@ async function makeXlsxWithSlicerAndTimeline(): Promise<Uint8Array> {
     .set("xl/slicerCaches/slicerCache1.xml", encoder.encode(slicerCacheXml))
     .set("xl/timelines/timeline1.xml", encoder.encode(timelineXml))
     .set("xl/timelineCaches/timelineCache1.xml", encoder.encode(timelineCacheXml));
-  return editor.bytes();
+  return editor.toBuffer();
 }
 
 describe("slicer + timeline raw passthrough", () => {

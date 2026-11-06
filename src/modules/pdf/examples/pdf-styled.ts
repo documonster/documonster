@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -38,7 +38,7 @@ const wb = Workbook.create();
 // =============================================================================
 
 const wsFonts = Workbook.addWorksheet(wb, "Fonts");
-Worksheet.setColumns(wsFonts, [
+Column.setDefinitions(wsFonts, [
   { header: "Style", width: 20 },
   { header: "Sample", width: 30 }
 ]);
@@ -80,7 +80,7 @@ Cell.setStyle(wsFonts, "B9", { font: { name: "Courier New" } });
 // =============================================================================
 
 const wsFills = Workbook.addWorksheet(wb, "Fills & Borders");
-Worksheet.setColumns(wsFills, [
+Column.setDefinitions(wsFills, [
   { header: "Description", width: 25 },
   { header: "Cell", width: 25 }
 ]);
@@ -179,7 +179,7 @@ Cell.setStyle(wsFills, "B10", {
 // =============================================================================
 
 const wsAlign = Workbook.addWorksheet(wb, "Alignment");
-Worksheet.setColumns(wsAlign, [{ width: 20 }, { width: 20 }, { width: 20 }, { width: 20 }]);
+Column.setDefinitions(wsAlign, [{ width: 20 }, { width: 20 }, { width: 20 }, { width: 20 }]);
 
 // Horizontal alignment
 Cell.setValue(wsAlign, "A1", "Left");
@@ -308,7 +308,7 @@ Cell.setStyle(wsAlign, "A19", { alignment: { vertical: "middle", horizontal: "ce
 // =============================================================================
 
 const wsData = Workbook.addWorksheet(wb, "Data Types");
-Worksheet.setColumns(wsData, [
+Column.setDefinitions(wsData, [
   { header: "Type", width: 20 },
   { header: "Value", width: 30 }
 ]);

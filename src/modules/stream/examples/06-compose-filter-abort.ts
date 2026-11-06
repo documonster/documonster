@@ -1,68 +1,58 @@
 /**
- * Example: compose / filter / finishedAll / addAbortSignal
+ * Example: compose / filter / Streams.waitForFinished / addAbortSignal
  *
  * Demonstrates composition + functional helpers:
- * - compose()       — fuse several transforms into one transform stream
- * - filter()        — functional predicate transform (drops non-matching chunks)
- * - finishedAll()   — await completion of multiple streams at once
- * - addAbortSignal() — wire an AbortSignal to destroy a stream on abort
+ * - compose()               — fuse several transforms into one transform stream
+ * - Streams.filter()        — functional predicate transform (drops non-matching chunks)
+ * - Streams.waitForFinished()   — await completion of multiple streams at once
+ * - addAbortSignal()        — wire an AbortSignal to destroy a stream on abort
  *
  * Usage: pnpm example --filter 06-compose-filter-abort
  */
 
-import {
-  addAbortSignal,
-  collect,
-  compose,
-  createReadableFromArray,
-  createTransform,
-  filter,
-  finished,
-  finishedAll,
-  pipeline
-} from "@stream";
+import { addAbortSignal, compose, finished, pipeline, Streams } from "@stream";
 
 /** compose(): chain transforms into a single composite transform. */
 export async function exampleCompose(): Promise<void> {
-  const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-  const addOne = createTransform<number, number>(n => n + 1, { objectMode: true });
+  const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+  const addOne = Streams.createTransform<number, number>(n => n + 1, { objectMode: true });
 
   // compose -> a single transform: n => (n * 2) + 1
   const composed = compose<number, number>(double, addOne);
 
-  const source = createReadableFromArray([1, 2, 3], { objectMode: true });
+  const source = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
   const out = source.pipe(composed);
 
-  const results = await collect<number>(out);
+  const results = await Streams.collect<number>(out);
   console.log("compose results:", results);
 }
 
-/** filter(): keep only chunks matching the predicate. */
+/** Streams.filter(): keep only chunks matching the predicate. */
 export async function exampleFilter(): Promise<void> {
-  const source = createReadableFromArray([1, 2, 3, 4, 5, 6], { objectMode: true });
-  const evens = filter<number>(n => n % 2 === 0);
+  const source = Streams.createReadableFromArray([1, 2, 3, 4, 5, 6], { objectMode: true });
+  const evens = Streams.filter<number>(n => n % 2 === 0);
 
-  const results = await collect<number>(source.pipe(evens));
+  const results = await Streams.collect<number>(source.pipe(evens));
   console.log("filter (evens):", results);
 }
 
-/** finishedAll(): resolve once every stream has finished. */
+/** Streams.waitForFinished(): resolve once every stream has finished. */
 export async function exampleFinishedAll(): Promise<void> {
-  const a = createReadableFromArray(["a1", "a2"], { objectMode: true });
-  const b = createReadableFromArray(["b1", "b2", "b3"], { objectMode: true });
+  const a = Streams.createReadableFromArray(["a1", "a2"], { objectMode: true });
+  const b = Streams.createReadableFromArray(["b1", "b2", "b3"], { objectMode: true });
 
   // Streams must be consumed to reach their end.
   a.resume();
   b.resume();
 
-  await finishedAll([a, b]);
+  await Streams.waitForFinished([a, b]);
   console.log("finishedAll: both streams finished");
 }
 
 /** addAbortSignal(): destroy a stream when the signal aborts. */
 export async function exampleAddAbortSignal(): Promise<void> {
   const controller = new AbortController();
-  const source = createReadableFromArray(["x", "y", "z"], { objectMode: true });
+  const source = Streams.createReadableFromArray(["x", "y", "z"], { objectMode: true });
 
   addAbortSignal(controller.signal, source);
 
@@ -86,10 +76,10 @@ export async function exampleComposeFilterAbort(): Promise<void> {
 
 // pipeline is imported to show it pairs with these helpers; keep a tiny demo.
 export async function examplePipelineWithFilter(): Promise<void> {
-  const source = createReadableFromArray([10, 15, 20, 25], { objectMode: true });
-  const big = filter<number>(n => n >= 20);
+  const source = Streams.createReadableFromArray([10, 15, 20, 25], { objectMode: true });
+  const big = Streams.filter<number>(n => n >= 20);
   const collected: number[] = [];
-  const sink = createTransform<number, number>(
+  const sink = Streams.createTransform<number, number>(
     n => {
       collected.push(n);
       return n;

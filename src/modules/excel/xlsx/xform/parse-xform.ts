@@ -1,3 +1,4 @@
+import { createPartDecoder } from "@excel/utils/part-decoder";
 /**
  * The loops that drive an xform through a parse: SAX events in, the xform's `parseOpen` / `parseText` /
  * `parseClose` callbacks called, its model out.
@@ -7,9 +8,14 @@
  * lived on it, writing a workbook retained `@xml/sax` without ever parsing anything.
  */
 import type { BaseXform } from "@excel/xlsx/xform/base-xform";
+import {
+  createNamespaceContext,
+  withNamespaceContext
+} from "@excel/xlsx/xform/fragment-namespaces";
+import { createPrefixNormalizer } from "@excel/xlsx/xform/namespace-prefixes";
 import { toError } from "@utils/errors";
 import { SaxParser } from "@xml/sax";
-import type { SaxEvent, SaxTag } from "@xml/types";
+import type { ParseOpenTag, XmlSaxEvent, XmlSaxTag } from "@xml/types";
 
 // HAN CELL namespace prefix normalization
 // HAN CELL uses non-standard namespace prefixes (ep:, cp:, dc:, etc.)
@@ -62,7 +68,7 @@ function stripPrefix(name: string, nsPrefix: string | null): string {
  */
 export async function parseXformEvents<TModel>(
   xform: BaseXform<TModel>,
-  saxParser: AsyncIterable<SaxEvent[]>
+  saxParser: AsyncIterable<XmlSaxEvent[]>
 ): Promise<TModel | undefined> {
   // IMPORTANT:
   // Do not return early once parsing is "done".
@@ -76,13 +82,15 @@ export async function parseXformEvents<TModel>(
   let nsMode = 0;
   let nsPrefix: string | null = null;
 
-  for await (const events of saxParser) {
-    if (done) {
-      continue;
-    }
+  // Prefixes are normalised to the ones the xforms match first — see `namespace-prefixes.ts`.
+  const prefixes = createPrefixNormalizer();
+  // A capture an xform starts asks the normaliser for text — see `fragment-namespaces.ts`.
+  const namespaces = createNamespaceContext(prefixes, xform);
+
+  const dispatch = (events: XmlSaxEvent[]): void => {
     for (const event of events) {
       if (event.eventType === "opentag") {
-        const value = event.value;
+        const value = prefixes.open(event.value);
         // Fast path for normal Excel files (majority case)
         if (nsMode === 1) {
           xform.parseOpen(value);
@@ -115,10 +123,10 @@ export async function parseXformEvents<TModel>(
       } else if (event.eventType === "cdata") {
         xform.parseCdata(event.value);
       } else if (event.eventType === "closetag") {
-        const value = event.value;
+        const name = prefixes.close(event.value.name);
         // Fast path for normal files
         if (nsMode === 1) {
-          if (!xform.parseClose(value.name)) {
+          if (!xform.parseClose(name)) {
             done = true;
             finalModel = xform.model;
             break;
@@ -126,12 +134,18 @@ export async function parseXformEvents<TModel>(
           continue;
         }
         // HAN CELL mode - strip prefix
-        if (!xform.parseClose(stripPrefix(value.name, nsPrefix))) {
+        if (!xform.parseClose(stripPrefix(name, nsPrefix))) {
           done = true;
           finalModel = xform.model;
           break;
         }
       }
+    }
+  };
+
+  for await (const events of saxParser) {
+    if (!done) {
+      withNamespaceContext(namespaces, () => dispatch(events));
     }
   }
 
@@ -148,7 +162,7 @@ export async function parseXformStream<TModel>(
   stream: AsyncIterable<unknown> | Iterable<unknown>
 ): Promise<TModel | undefined> {
   const parser = new SaxParser({ invalidCharHandling: "skip" });
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = createPartDecoder();
 
   let done = false;
   let finalModel: TModel | undefined;
@@ -169,9 +183,30 @@ export async function parseXformStream<TModel>(
     // When done, silently swallow all SAX errors
   });
 
-  parser.on("opentag", (tag: SaxTag) => {
-    if (done) {
+  // Prefixes are normalised to the ones the xforms match first — see `namespace-prefixes.ts`. The
+  // normaliser stays out of the handlers until the text declares a prefix it has to rewrite, so a part
+  // with Excel's prefixes is parsed exactly as if it did not exist.
+  const prefixes = createPrefixNormalizer({ lazy: true, hinted: true });
+  // A capture an xform starts asks the normaliser for text — see `fragment-namespaces.ts`.
+  const namespaces = createNamespaceContext(prefixes, xform);
+  // The parser's count of prefixed attribute names when the previous tag opened: a tag that moved it has one.
+  let prefixedAttributes = 0;
+  // Tested in the one handler rather than installing a second: two handler functions make the parser's call
+  // site polymorphic for every part read afterwards, which costs more than the test.
+  let normalizing = false;
+
+  // Once the parser has reported an error, no xform hears anything more. The parser keeps going after an error and
+  // delivers close tags for elements it never opened, and an xform handed one reads state it never set up — a
+  // `TypeError` from inside the xform instead of the parser's `XmlParseError`.
+  const onOpenTag = (raw: XmlSaxTag): void => {
+    if (done || parseError !== undefined) {
       return;
+    }
+    let tag: ParseOpenTag = raw;
+    if (normalizing) {
+      const count = parser.prefixedAttributes;
+      tag = prefixes.open(raw, count !== prefixedAttributes);
+      prefixedAttributes = count;
     }
     // Fast path for normal Excel files (majority case)
     if (nsMode === 1) {
@@ -201,30 +236,45 @@ export async function parseXformStream<TModel>(
     } else {
       xform.parseOpen(tag);
     }
-  });
+  };
+  parser.on("opentag", onOpenTag);
 
   parser.on("text", (text: string) => {
-    if (!done) {
+    if (!done && parseError === undefined) {
       xform.parseText(text);
     }
   });
 
   parser.on("cdata", (text: string) => {
-    if (!done) {
+    if (!done && parseError === undefined) {
       xform.parseCdata(text);
     }
   });
 
-  parser.on("closetag", (tag: SaxTag) => {
-    if (done) {
+  const onCloseTag = (tag: XmlSaxTag): void => {
+    if (done || parseError !== undefined) {
       return;
     }
-    const name = nsMode === 2 ? stripPrefix(tag.name, nsPrefix) : tag.name;
+    const raw = normalizing ? prefixes.close(tag.name) : tag.name;
+    const name = nsMode === 2 ? stripPrefix(raw, nsPrefix) : raw;
     if (!xform.parseClose(name)) {
       done = true;
       finalModel = xform.model;
     }
-  });
+  };
+  parser.on("closetag", onCloseTag);
+
+  const write = (text: string): void => {
+    // Scanned even once active: the normaliser counts declarations to skip looking for them per tag.
+    if (prefixes.scan(text) && !normalizing) {
+      normalizing = true;
+      parser.countPrefixedAttributes = true;
+      // Counting starts here, so a tag the parser is part-way through may have read a prefixed name uncounted. It
+      // is the one tag that cannot be vouched for, and a count one ahead makes it report having one.
+      prefixedAttributes = -1;
+    }
+    withNamespaceContext(namespaces, () => parser.write(text));
+  };
 
   // IMPORTANT: Do not return early from the async iterator.
   // In true streaming scenarios the iterator is backed by a Node.js Readable.
@@ -236,7 +286,7 @@ export async function parseXformStream<TModel>(
     }
     const chunkStr =
       typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
-    parser.write(chunkStr);
+    write(chunkStr);
     if (parseError) {
       throw toError(parseError);
     }
@@ -246,13 +296,13 @@ export async function parseXformStream<TModel>(
     // Flush trailing bytes from streaming decoder (catches truncated UTF-8)
     const trailing = decoder.decode();
     if (trailing) {
-      parser.write(trailing);
+      write(trailing);
       if (parseError) {
         throw toError(parseError);
       }
     }
 
-    parser.close();
+    withNamespaceContext(namespaces, () => parser.close());
     if (parseError) {
       throw toError(parseError);
     }

@@ -1,3 +1,4 @@
+import { PdfArgumentError } from "@pdf/errors";
 import { pdf } from "@pdf/pdf";
 import type { PdfExportOptions, PdfTextWatermark, PdfImageWatermark } from "@pdf/types";
 import { getFontAscent, getFontDescent, measureTextWidth } from "@utils/font-metrics";
@@ -385,10 +386,39 @@ describe("PDF Watermark Filtering", () => {
         type: "text",
         text: "COMBO",
         pages: [1],
-        sheets: ["Sheet 1"]
+        sheets: ["Sheet1"]
       }
     });
     expectValidPdf(bytes);
+    // Drawn exactly once: on page 1 of Sheet1 (this test once named "Sheet 1", matched nothing,
+    // and passed without a watermark anywhere).
+    expect(pdfToString(bytes).match(/COMBO/g)).toHaveLength(1);
+  });
+
+  it("refuses a watermark sheet name that names no sheet, as `sheets` does (R4P-C2)", async () => {
+    let error: unknown;
+    try {
+      await pdf([["a"]], { watermark: { type: "text", text: "DRAFT", sheets: ["Sheet 1"] } });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(PdfArgumentError);
+    expect((error as PdfArgumentError).field).toBe("options.watermark.sheets[0]");
+    expect((error as Error).message).toBe(
+      'Pdf.fromTable: options.watermark.sheets[0] — the workbook has no sheet named "Sheet 1"; it has "Sheet1"'
+    );
+    // Compared as Excel compares names, so a different case still names the sheet.
+    const ok = await pdf([["a"]], {
+      watermark: { type: "text", text: "DRAFT", sheets: ["SHEET1"] }
+    });
+    expect(pdfToString(ok)).toContain("DRAFT");
+  });
+
+  it("skips a watermark page number past the last page, and keeps `sheets: []` meaning all", async () => {
+    const past = await pdf([["a"]], { watermark: { type: "text", text: "LATE", pages: [99] } });
+    expect(pdfToString(past)).not.toContain("LATE");
+    const all = await pdf([["a"]], { sheets: [], watermark: { type: "text", text: "ALL" } });
+    expect(pdfToString(all)).toContain("ALL");
   });
 });
 

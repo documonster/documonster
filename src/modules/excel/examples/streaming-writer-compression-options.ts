@@ -16,7 +16,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { streamBothFormats } from "@excel/examples/utils/stream-both";
-import { Stream } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
+import type { Stream } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,13 +31,13 @@ const style = {
 
 /** The same content every time, so the only variable is the level. */
 function build(wb: Stream.WorkbookWriter): void {
-  const ws = wb.addWorksheet("blort");
-  ws.columns = [
+  const ws = Workbook.addWorksheet(wb, "blort");
+  Column.setDefinitions(ws, [
     { header: "A1", width: 10 },
     { header: "B1", width: 20, style },
     { header: "C1", width: 30 }
-  ];
-  Stream.setRowFont(ws.getRow(2), {
+  ]);
+  Row.setFont(ws, 2, {
     name: "Broadway",
     color: { argb: "FFFF0000" },
     outline: true,
@@ -46,7 +47,7 @@ function build(wb: Stream.WorkbookWriter): void {
   // every setting and the example would demonstrate nothing.
   for (let row = 2; row <= 400; row++) {
     for (const column of ["A", "B", "C"]) {
-      Stream.setCellValue(ws.getCell(`${column}${row}`), `${column}${row}`);
+      Cell.setValue(ws, `${column}${row}`, `${column}${row}`);
     }
   }
   ws.commit();

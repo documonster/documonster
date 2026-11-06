@@ -54,7 +54,7 @@ describe("ZIP Encryption End-to-End", () => {
 
       const parser = new ZipParser(zipData);
       // ZipCrypto header check has 1/256 false positive rate per ZIP spec.
-      // Wrong password always fails, but error may be DecryptionError or CRC32/inflate mismatch.
+      // Wrong password always fails, but error may be ZipDecryptionError or CRC32/inflate mismatch.
       await expect(parser.extract("data.txt", "wrong")).rejects.toThrow(
         /incorrect password|CRC32 mismatch|size mismatch|invalid/i
       );
@@ -99,7 +99,7 @@ describe("ZIP Encryption End-to-End", () => {
           encryptionMethod: "aes-256",
           password: "test"
         })
-      ).toThrow(/async API/i);
+      ).toThrow(/asynchronous API/i);
     });
   });
 
@@ -710,7 +710,7 @@ describe("ZIP Encryption End-to-End", () => {
       }
     });
 
-    it("should throw PasswordRequiredError for encrypted entry without password in streaming mode", async () => {
+    it("should throw ZipPasswordRequiredError for encrypted entry without password in streaming mode", async () => {
       const zipData = await createZip(
         [{ name: "secret.txt", data: new TextEncoder().encode("secret") }],
         { encryptionMethod: "zipcrypto", password: "pw" }

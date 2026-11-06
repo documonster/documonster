@@ -5,16 +5,47 @@
  * as ZipArchive and ZipReader, allowing seamless format switching.
  */
 
-import { ArchiveError, createAbortError, createLinkedAbortController } from "@archive/core/errors";
+import {
+  OPTIONS,
+  checkArchiveArgument,
+  dateSchema,
+  limitSchema,
+  streamOptionShape,
+  uintSchema
+} from "@archive/core/arguments";
+import {
+  checkArchiveSource,
+  checkBytes,
+  checkEntryName,
+  checkEntryPath,
+  checkString
+} from "@archive/core/entry-checks";
+import {
+  ArchiveArgumentError,
+  ArchiveError,
+  createAbortError,
+  createLinkedAbortController,
+  oneShotSourceReadError,
+  throwIfAborted
+} from "@archive/core/errors";
 import type {
   ArchiveProgressPhase,
   ArchiveStreamOptions,
   ArchiveOperationBase
 } from "@archive/core/progress";
-import type { ArchiveSink } from "@archive/io/archive-sink";
-import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
-import type { ArchiveSource } from "@archive/io/archive-source";
-import { toAsyncIterable, toUint8Array, isInMemoryArchiveSource } from "@archive/io/archive-source";
+import { decodeEntryText } from "@archive/core/text";
+import type { ArchivePipeToOptions, ArchiveSink } from "@archive/io/archive-sink";
+import { checkSinkArgument, collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
+import {
+  asyncIterableToReadableStream,
+  checkSourceArgument,
+  isInMemoryArchiveSource,
+  isSyncArchiveSource,
+  iterateArchiveSource,
+  toUint8Array,
+  toUint8ArraySync
+} from "@archive/io/archive-source";
 import type { TarType } from "@archive/tar/tar-constants";
 import { TAR_TYPE, DEFAULT_TAR_MODE, DEFAULT_TAR_DIR_MODE } from "@archive/tar/tar-constants";
 import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
@@ -22,8 +53,11 @@ import { isDataEntry, isDirectory } from "@archive/tar/tar-entry-info";
 import type { TarHeaderOptions } from "@archive/tar/tar-header";
 import { encodeHeader, createPadding, createEndOfArchive } from "@archive/tar/tar-header";
 import type { TarParseOptions } from "@archive/tar/tar-parser";
-import { parseTar, parseTarStream } from "@archive/tar/tar-parser";
-import { concatUint8Arrays, textEncoder, getTextDecoder } from "@utils/binary";
+import { entrySizeLimit, parseTar, readTarStream } from "@archive/tar/tar-parser";
+import { isWritableStream } from "@stream/core/type-guards";
+import { concatUint8Arrays, textEncoder, asPlainBytes, plainChunks } from "@utils/binary";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // ============================================================================
 // Types
@@ -41,6 +75,88 @@ export interface TarArchiveOptions {
 
   /** Default throttle for progress callbacks */
   progressIntervalMs?: number;
+}
+
+/** The largest value a ustar 8-byte octal field holds: the limit for `mode`. */
+const TAR_OCTAL_7_MAX = 0o7777777;
+
+/**
+ * The options of a TAR builder. A TAR mtime is any valid `Date`: one outside the octal field's
+ * 1970–2242 is written in GNU base-256, which GNU tar, bsdtar and libarchive read.
+ */
+export const tarArchiveOptionShape = {
+  modTime: dateSchema.optional(),
+  ...streamOptionShape<TarArchiveProgress>()
+};
+const tarArchiveOptionsSchema = s.object(tarArchiveOptionShape, OPTIONS);
+const _tarArchiveOptionsMatch: SchemaMatches<typeof tarArchiveOptionsSchema, TarArchiveOptions> =
+  true;
+void _tarArchiveOptionsMatch;
+
+/** The options of a TAR builder (`createTar`, `packTar`). */
+export function checkTarArchiveOptions(
+  where: string,
+  options: TarArchiveOptions | undefined
+): void {
+  checkArchiveArgument(tarArchiveOptionsSchema.optional(), options, where, "options");
+}
+
+/** The entry types a caller may give: everything but the GNU and PAX metadata records. */
+const TAR_ENTRY_TYPES: readonly string[] = [
+  TAR_TYPE.FILE,
+  TAR_TYPE.FILE_OLD,
+  TAR_TYPE.HARD_LINK,
+  TAR_TYPE.SYMLINK,
+  TAR_TYPE.CHAR_DEVICE,
+  TAR_TYPE.BLOCK_DEVICE,
+  TAR_TYPE.DIRECTORY,
+  TAR_TYPE.FIFO,
+  TAR_TYPE.CONTIGUOUS
+];
+
+/** A ustar `uname` / `gname` field: 32 bytes with a terminating NUL. */
+const TAR_NAME_FIELD_MAX_BYTES = 31;
+
+function checkTarNameField(where: string, field: string, value: string | undefined): void {
+  if (value === undefined) {
+    return;
+  }
+  if (textEncoder.encode(value).length > TAR_NAME_FIELD_MAX_BYTES) {
+    throw new ArchiveArgumentError(
+      field,
+      `${where}: ${field} ${JSON.stringify(value)} is longer than the ${TAR_NAME_FIELD_MAX_BYTES} bytes a TAR header holds`
+    );
+  }
+}
+
+const tarEntryOptionsSchema = s.object(
+  {
+    mode: uintSchema(TAR_OCTAL_7_MAX).optional(),
+    // Past 2097151 an id is written in GNU base-256, which holds every safe integer.
+    uid: uintSchema(Number.MAX_SAFE_INTEGER).optional(),
+    gid: uintSchema(Number.MAX_SAFE_INTEGER).optional(),
+    uname: s.string().optional(),
+    gname: s.string().optional(),
+    modTime: dateSchema.optional(),
+    mtime: dateSchema.optional(),
+    type: s.oneOf(TAR_ENTRY_TYPES as readonly TarType[]).optional(),
+    linkname: s.string().optional()
+  },
+  OPTIONS
+);
+const _tarEntryOptionsMatch: SchemaMatches<typeof tarEntryOptionsSchema, TarArchiveEntryOptions> =
+  true;
+void _tarEntryOptionsMatch;
+
+function checkTarEntry(
+  where: string,
+  name: string,
+  options: TarArchiveEntryOptions | undefined
+): void {
+  checkEntryName(where, name);
+  checkArchiveArgument(tarEntryOptionsSchema.optional(), options, where, "options");
+  checkTarNameField(where, "options.uname", options?.uname);
+  checkTarNameField(where, "options.gname", options?.gname);
 }
 
 export interface TarArchiveEntryOptions {
@@ -100,11 +216,18 @@ export type TarArchiveStreamOptions = ArchiveStreamOptions<TarArchiveProgress>;
  */
 export type TarArchiveOperation = ArchiveOperationBase<TarArchiveProgress> & {
   /** Async iterable of TAR output chunks */
-  iterable: AsyncIterable<Uint8Array>;
+  iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 };
 
 export interface TarReaderOptions {
-  /** Maximum file size to extract into memory (default: 100MB) */
+  /**
+   * Largest entry, in bytes, that may be read into memory (`ArchiveFileTooLargeError`). The same
+   * option as ZIP's `maxEntrySize`.
+   * @default 104857600 (100 MiB)
+   */
+  maxEntrySize?: number;
+
+  /** @deprecated Use {@link maxEntrySize}. Removed in 1.0. */
   maxFileSize?: number;
 
   /** Default abort signal */
@@ -156,10 +279,10 @@ type TarInput = {
  *
  * @example
  * ```ts
- * const archive = new TarArchive();
+ * const archive = Archive.createTar();
  * archive.add("file.txt", "Hello, World!");
  * archive.add("dir/", null); // Directory
- * const bytes = await archive.bytes();
+ * const bytes = await archive.toBuffer();
  * ```
  */
 export class TarArchive {
@@ -168,6 +291,7 @@ export class TarArchive {
   private _sealed = false;
 
   constructor(options: TarArchiveOptions = {}) {
+    checkTarArchiveOptions("Archive.createTar", options);
     this._options = {
       modTime: options.modTime ?? new Date(),
       signal: options.signal,
@@ -180,11 +304,25 @@ export class TarArchive {
    * Add an entry to the archive
    */
   add(name: string, source: ArchiveSource | null, options?: TarArchiveEntryOptions): this {
+    return this._addAt("Archive.TarArchive#add", name, source, options);
+  }
+
+  /** @internal {@link add}, naming `where` — the public call — in what it refuses. */
+  _addAt(
+    where: string,
+    name: string,
+    source: ArchiveSource | null,
+    options?: TarArchiveEntryOptions
+  ): this {
     if (this._sealed) {
-      throw new ArchiveError("Cannot add entries after output has started");
+      throw new ArchiveError(`${where}: cannot add entries after output has started`);
     }
     if (!name) {
-      throw new ArchiveError("Entry name is required");
+      throw new ArchiveArgumentError("name", `${where}: name must be a non-empty string`);
+    }
+    checkTarEntry(where, name, options);
+    if (source !== null) {
+      checkArchiveSource(where, "source", source);
     }
 
     // Normalize directory names
@@ -208,7 +346,8 @@ export class TarArchive {
    * Add a directory entry
    */
   addDirectory(name: string, options?: Omit<TarArchiveEntryOptions, "type">): this {
-    return this.add(name.endsWith("/") ? name : name + "/", null, {
+    const dirName = typeof name === "string" && !name.endsWith("/") ? name + "/" : name;
+    return this._addAt("Archive.TarArchive#addDirectory", dirName, null, {
       ...options,
       type: TAR_TYPE.DIRECTORY
     });
@@ -222,7 +361,8 @@ export class TarArchive {
     target: string,
     options?: Omit<TarArchiveEntryOptions, "type" | "linkname">
   ): this {
-    return this.add(name, new Uint8Array(0), {
+    checkString("Archive.TarArchive#addSymlink", "target", target);
+    return this._addAt("Archive.TarArchive#addSymlink", name, new Uint8Array(0), {
       ...options,
       type: TAR_TYPE.SYMLINK,
       linkname: target,
@@ -233,7 +373,7 @@ export class TarArchive {
   /**
    * Generate archive as async iterable (matches ZipArchive.stream)
    */
-  stream(options: TarArchiveStreamOptions = {}): AsyncIterable<Uint8Array> {
+  stream(options: TarArchiveStreamOptions = {}): AsyncIterable<Uint8Array<ArrayBuffer>> {
     return this.operation(options).iterable;
   }
 
@@ -275,7 +415,7 @@ export class TarArchive {
           if (isInMemoryArchiveSource(source)) {
             data = await toUint8Array(source);
           } else {
-            data = await collect(toAsyncIterable(source, { signal }));
+            data = await collect(iterateArchiveSource(source, { signal }));
           }
 
           progress.bytesIn += data.length;
@@ -348,7 +488,7 @@ export class TarArchive {
     }
 
     return {
-      iterable: generate(),
+      iterable: plainChunks(generate()),
       signal,
       abort(reason?: unknown) {
         controller.abort(reason);
@@ -363,16 +503,35 @@ export class TarArchive {
   }
 
   /**
-   * Generate archive as Uint8Array (matches ZipArchive.bytes)
+   * Generate archive as Uint8Array (matches ZipArchive.toBuffer)
    */
-  async bytes(options: TarArchiveStreamOptions = {}): Promise<Uint8Array> {
-    return collect(this.stream(options));
+  async toBuffer(options: TarArchiveStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
+    return asPlainBytes(await collect(this.stream(options)));
   }
 
   /**
-   * Generate archive synchronously (matches ZipArchive.bytesSync)
+   * @deprecated Use {@link toBuffer}. Removed in 1.0.
    */
-  bytesSync(): Uint8Array {
+  async bytes(options: TarArchiveStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
+    return this.toBuffer(options);
+  }
+
+  /**
+   * @deprecated Use {@link toBufferSync}. Removed in 1.0.
+   */
+  bytesSync(): Uint8Array<ArrayBuffer> {
+    return asPlainBytes(this._buildSync("bytesSync"));
+  }
+
+  /**
+   * Generate archive synchronously (matches ZipArchive.toBufferSync)
+   */
+  toBufferSync(): Uint8Array<ArrayBuffer> {
+    return asPlainBytes(this._buildSync("toBufferSync"));
+  }
+
+  /** Build synchronously; `method` names the public entry point in error messages. */
+  protected _buildSync(method: string): Uint8Array {
     this._sealed = true;
 
     const chunks: Uint8Array[] = [];
@@ -380,14 +539,13 @@ export class TarArchive {
     for (const { name, source, options } of this._entries) {
       // Get source data synchronously
       let data: Uint8Array;
-      if (source instanceof Uint8Array) {
-        data = source;
-      } else if (typeof source === "string") {
-        data = textEncoder.encode(source);
-      } else if (source instanceof ArrayBuffer) {
-        data = new Uint8Array(source);
+      if (isSyncArchiveSource(source)) {
+        data = toUint8ArraySync(source);
       } else {
-        throw new ArchiveError("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
+        throw new ArchiveArgumentError(
+          "source",
+          `Archive.TarArchive#${method}: a source must be bytes or a string to be written synchronously (a Blob or a stream needs toBuffer)`
+        );
       }
 
       const size = isDataEntry(options?.type) ? data.length : 0;
@@ -433,6 +591,7 @@ export class TarArchive {
    * Pipe archive to sink (matches ZipArchive.pipeTo)
    */
   async pipeTo(sink: ArchiveSink, options: TarArchiveStreamOptions = {}): Promise<void> {
+    checkSinkArgument("Archive.TarArchive#pipeTo", sink);
     await pipeIterableToSink(this.stream(options), sink);
   }
 }
@@ -446,11 +605,18 @@ export interface TarReaderEntry {
   readonly isDirectory: boolean;
   readonly info: TarEntryInfo;
   /** Get entry data as Uint8Array (matches UnzipEntry.bytes) */
-  bytes(): Promise<Uint8Array>;
+  bytes(): Promise<Uint8Array<ArrayBuffer>>;
   /** Get entry data as string (matches UnzipEntry.text) */
   text(encoding?: string): Promise<string>;
   /** Stream entry data (matches UnzipEntry.stream) */
-  stream(): AsyncIterable<Uint8Array>;
+  stream(): AsyncIterable<Uint8Array<ArrayBuffer>>;
+  /** Entry data as a Web `ReadableStream` (matches UnzipEntry.readableStream) */
+  readableStream(): ReadableStream<Uint8Array>;
+  /**
+   * Pipe entry to a Web `WritableStream`, with its `pipeTo` options (matches
+   * UnzipEntry.pipeTo)
+   */
+  pipeTo(sink: WritableStream<Uint8Array>, options?: ArchivePipeToOptions): Promise<void>;
   /** Pipe entry to sink (matches UnzipEntry.pipeTo) */
   pipeTo(sink: ArchiveSink): Promise<void>;
   /** Discard entry (matches UnzipEntry.discard) */
@@ -458,22 +624,37 @@ export interface TarReaderEntry {
 }
 
 export function createTarReaderEntry(info: TarEntryInfo, data: Uint8Array): TarReaderEntry {
+  if (typeof info !== "object" || info === null || typeof info.path !== "string") {
+    throw new ArchiveArgumentError(
+      "info",
+      "Archive.createTarReaderEntry: info must be a TarEntryInfo with a string path"
+    );
+  }
+  checkBytes("Archive.createTarReaderEntry", "data", data);
   const entry: TarReaderEntry = {
     info,
     path: info.path,
     isDirectory: isDirectory(info) || info.path.endsWith("/"),
-    async bytes(): Promise<Uint8Array> {
-      return data;
+    async bytes(): Promise<Uint8Array<ArrayBuffer>> {
+      return asPlainBytes(data);
     },
     async text(encoding?: string): Promise<string> {
-      return getTextDecoder(encoding).decode(data);
+      return decodeEntryText(data, encoding);
     },
-    async *stream(): AsyncIterable<Uint8Array> {
+    async *stream(): AsyncIterable<Uint8Array<ArrayBuffer>> {
       if (data.length > 0) {
-        yield data;
+        yield asPlainBytes(data);
       }
     },
-    async pipeTo(sink: ArchiveSink): Promise<void> {
+    readableStream(): ReadableStream<Uint8Array> {
+      return asyncIterableToReadableStream(entry.stream());
+    },
+    async pipeTo(sink: ArchiveSink, options?: ArchivePipeToOptions): Promise<void> {
+      checkSinkArgument("Archive.TarReaderEntry#pipeTo", sink);
+      if (isWritableStream(sink)) {
+        await entry.readableStream().pipeTo(sink, options);
+        return;
+      }
       await pipeIterableToSink(entry.stream(), sink);
     },
     discard(): void {
@@ -487,27 +668,65 @@ export function createTarReaderEntry(info: TarEntryInfo, data: Uint8Array): TarR
 // TarReader - For reading TAR archives (matches ZipReader interface)
 // ============================================================================
 
+/**
+ * Reads a TAR archive (`Archive.openTar` returns one).
+ *
+ * Over a one-shot source — a `ReadableStream`, an async iterable or a Node stream — the order of
+ * calls matters, because the source can be read only once:
+ *
+ * - `list()`, `get()` or `bytes()` first reads the whole archive and keeps its entries. Every
+ *   later call, `entries()` included, works from what was kept, as often as asked, until
+ *   `close()` drops it.
+ * - Iterating `entries()`, `entriesStream()` or `operation().iterable` first streams the source,
+ *   keeping nothing, and spends it: any later call throws an `ArchiveError` ("already
+ *   consumed"). Only starting the iteration reads; asking for the iterable does not.
+ *
+ * Bytes, a string or a `Blob` are read again by every call and are unaffected, and
+ * `Archive.openTarGz` keeps the decompressed archive, so its calls work in any order.
+ */
 export class TarReader {
-  private readonly _source: ArchiveSource;
+  private readonly _source: ArchiveSource | ArchiveBytes;
   private readonly _options: TarReaderOptions;
   private _parsedEntries: TarReaderEntry[] | null = null;
+  // Bumped by close(): a pass that started before it must not refill the cache it cleared
+  private _generation = 0;
+  // A one-shot source (a stream) can be read by one pass; `get` / `list` keep what that pass read
+  private _sourceRead = false;
 
-  constructor(source: ArchiveSource, options: TarReaderOptions = {}) {
+  constructor(source: ArchiveSource | ArchiveBytes, options: TarReaderOptions = {}) {
     this._source = source;
     this._options = options;
   }
 
   /**
-   * Iterate over entries (matches ZipReader.entries)
+   * Iterate over entries (matches `ZipReader.entries`). Over a one-shot source that `list` / `get`
+   * / `bytes` did not read first, iterating streams the source and spends it (see
+   * {@link TarReader}).
    */
   entries(options: TarReaderStreamOptions = {}): AsyncIterable<TarReaderEntry> {
-    return this.operation(options).iterable;
+    return this._operation(options, "entries").iterable;
   }
 
   /**
-   * Get operation object with abort/progress control (matches ZipReader.operation)
+   * The entries as a Web `ReadableStream` (matches `ZipReader.entriesStream`); reading it spends
+   * a one-shot source as {@link TarReader.entries} does.
+   */
+  entriesStream(options: TarReaderStreamOptions = {}): ReadableStream<TarReaderEntry> {
+    const op = this._operation(options, "entriesStream");
+    return asyncIterableToReadableStream(op.iterable, reason => {
+      op.abort(reason ?? "cancelled");
+    });
+  }
+
+  /**
+   * Get operation object with abort/progress control (matches `ZipReader.operation`); iterating
+   * its `iterable` spends a one-shot source as {@link TarReader.entries} does.
    */
   operation(options: TarReaderStreamOptions = {}): TarReaderOperation {
+    return this._operation(options, "operation");
+  }
+
+  private _operation(options: TarReaderStreamOptions, where: string): TarReaderOperation {
     const signalOpt = options.signal ?? this._options.signal;
     const { controller, cleanup: cleanupAbortLink } = createLinkedAbortController(signalOpt);
     const signal = controller.signal;
@@ -522,21 +741,53 @@ export class TarReader {
     };
 
     const onProgress = options.onProgress ?? this._options.onProgress;
-    const source = this._source;
+    const resolveSource = () => this._resolveSource(signal);
+    const claimOneShotSource = (): void => {
+      if (this._sourceRead) {
+        throw oneShotSourceReadError(`Archive.TarReader#${where}`);
+      }
+      this._sourceRead = true;
+    };
+    // The entries a `get` / `list` over a one-shot source kept: the source itself is spent
+    const kept = isInMemoryArchiveSource(this._source) ? null : this._parsedEntries;
     const parseOptions: TarParseOptions = {
-      maxFileSize: this._options.maxFileSize,
+      maxEntrySize: entrySizeLimit(this._options),
       signal
     };
 
-    // Capture reference for caching parsed entries
-    const parsedEntriesRef = { entries: this._parsedEntries };
+    // Every entry of one complete pass, cached for get() / list()
+    const collected: TarReaderEntry[] = [];
+    const generation = this._generation;
     const setParsedEntries = (entries: TarReaderEntry[]) => {
-      this._parsedEntries = entries;
-      parsedEntriesRef.entries = entries;
+      if (this._generation === generation) {
+        this._parsedEntries = entries;
+      }
     };
 
     async function* generate(): AsyncIterable<TarReaderEntry> {
       try {
+        if (kept !== null) {
+          for (const entry of kept) {
+            throwIfAborted(signal);
+            progress.entriesTotal++;
+            progress.bytesOut += entry.info.size;
+            progress.currentEntry = { path: entry.path, isDirectory: entry.isDirectory };
+            yield entry;
+            progress.entriesDone++;
+            if (onProgress) {
+              onProgress({ ...progress });
+            }
+          }
+          progress.phase = "done";
+          if (onProgress) {
+            onProgress({ ...progress });
+          }
+          return;
+        }
+        const source = await resolveSource();
+        if (!isInMemoryArchiveSource(source)) {
+          claimOneShotSource();
+        }
         if (isInMemoryArchiveSource(source)) {
           // Buffer mode - parse all at once
           const data = await toUint8Array(source);
@@ -551,7 +802,7 @@ export class TarReader {
               throw createAbortError();
             }
 
-            const entryData = await entry.data();
+            const entryData = await entry.bytes();
             progress.bytesOut += entryData.length;
             progress.currentEntry = {
               path: entry.info.path,
@@ -560,11 +811,7 @@ export class TarReader {
 
             const readerEntry = createTarReaderEntry(entry.info, entryData);
 
-            // Cache for get() method
-            if (!parsedEntriesRef.entries) {
-              setParsedEntries([]);
-            }
-            parsedEntriesRef.entries!.push(readerEntry);
+            collected.push(readerEntry);
 
             yield readerEntry;
 
@@ -573,9 +820,10 @@ export class TarReader {
               onProgress({ ...progress });
             }
           }
+          setParsedEntries(collected);
         } else {
-          // Streaming mode
-          for await (const entry of parseTarStream(
+          // Streaming mode — entries are not retained, so memory stays bounded
+          for await (const entry of readTarStream(
             source as AsyncIterable<Uint8Array>,
             parseOptions
           )) {
@@ -584,7 +832,7 @@ export class TarReader {
               throw createAbortError();
             }
 
-            const entryData = await entry.data();
+            const entryData = await entry.bytes();
             progress.bytesOut += entryData.length;
             progress.entriesTotal++;
             progress.currentEntry = {
@@ -632,49 +880,76 @@ export class TarReader {
   }
 
   /**
-   * Get a specific entry by path (matches ZipReader.get)
+   * Get a specific entry by path (matches `ZipReader.get`); `undefined` when the archive has no such
+   * entry. Of two members with one name the later is returned, as `tar -x` and `unpackTar` keep
+   * it. Parses (and caches) the whole archive on first call — which is what lets a one-shot
+   * source be read again by later calls; after an iteration has spent it, throws an
+   * `ArchiveError` (see {@link TarReader}).
    */
-  async get(path: string): Promise<TarReaderEntry | null> {
-    // If we haven't parsed yet, do so now
-    if (!this._parsedEntries) {
-      // Consume entries() which will cache them in _parsedEntries
-      for await (const _ of this.entries()) {
-        // entries() already caches to _parsedEntries
-      }
-    }
-
-    return this._parsedEntries!.find(e => e.path === path) ?? null;
+  async get(path: string): Promise<TarReaderEntry | undefined> {
+    checkEntryPath("Archive.TarReader#get", path);
+    return this._get(path, "get");
   }
 
   /**
-   * List all entry paths (matches common pattern)
+   * List all entry paths, in archive order (matches `ZipReader.list`). Parses and caches the
+   * archive as {@link TarReader.get} does.
    */
   async list(): Promise<string[]> {
-    if (!this._parsedEntries) {
-      // Consume entries() which will cache them in _parsedEntries
-      for await (const _ of this.entries()) {
-        // entries() already caches to _parsedEntries
-      }
-    }
-    return this._parsedEntries!.map(e => e.path);
+    return (await this._ensureParsed("list")).map(e => e.path);
   }
 
   /**
-   * Get bytes of a specific entry (matches ZipReader.bytes)
+   * Read one entry's bytes (matches `ZipReader.bytes`); `undefined` when the archive has no such
+   * entry. Parses and caches the archive as {@link TarReader.get} does.
    */
-  async bytes(path: string): Promise<Uint8Array | null> {
+  async bytes(path: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
+    checkEntryPath("Archive.TarReader#bytes", path);
+    // Through `get`, so a subclass that overrides it is honoured
     const entry = await this.get(path);
-    if (!entry) {
-      return null;
+    return entry ? entry.bytes() : undefined;
+  }
+
+  private async _get(path: string, where: string): Promise<TarReaderEntry | undefined> {
+    return (await this._ensureParsed(where)).findLast(e => e.path === path);
+  }
+
+  /**
+   * The source each pass parses. A subclass that must transform a one-shot source (such as
+   * gunzipping it) overrides this to do so once and return a replayable result.
+   */
+  protected _resolveSource(
+    _signal: AbortSignal
+  ): ArchiveSource | ArchiveBytes | Promise<ArchiveSource | ArchiveBytes> {
+    return this._source;
+  }
+
+  private async _ensureParsed(where: string): Promise<TarReaderEntry[]> {
+    const cached = this._parsedEntries;
+    if (cached) {
+      return cached;
     }
-    return entry.bytes();
+    // A buffered source caches itself on a complete pass; a streaming one does not
+    // (iterating it must not retain every entry), so collect here.
+    const generation = this._generation;
+    const all: TarReaderEntry[] = [];
+    for await (const entry of this._operation({}, where).iterable) {
+      all.push(entry);
+    }
+    if (this._generation !== generation) {
+      // close() ran during the pass: answer this call, but keep the cache it released empty
+      return all;
+    }
+    return (this._parsedEntries ??= all);
   }
 
   /**
    * Close reader and release resources (matches ZipReader.close)
    */
   async close(): Promise<void> {
-    // No persistent resources to release for TAR
+    // No persistent resources to release for TAR; drop the cache, including what an
+    // in-flight pass would otherwise store when it finishes
+    this._generation++;
     this._parsedEntries = null;
   }
 }
@@ -697,52 +972,136 @@ export function createTarReader(source: ArchiveSource, options?: TarReaderOption
   return new TarReader(source, options);
 }
 
+/**
+ * Open a TAR archive for reading, checking the source and options when it is opened.
+ * Published as `Archive.openTar`.
+ *
+ * Over a one-shot source (a `ReadableStream`, an async iterable or a Node stream) the first call
+ * decides how it is read. `list()`, `get()` or `bytes()` reads it once and keeps the entries
+ * for every later call, `entries()` included, until `close()`. Iterating `entries()`,
+ * `entriesStream()` or `operation().iterable` streams it instead, keeping nothing, and spends it:
+ * any later call throws an `ArchiveError`. Bytes, a string or a `Blob` are unaffected, and
+ * `Archive.openTarGz` replays its source in any order. See `TarReader`.
+ *
+ * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
+ *   read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
+ */
+export function openTarReader(
+  source: ArchiveSource | ArchiveBytes,
+  options?: TarReaderOptions
+): TarReader {
+  checkTarReaderArguments("Archive.openTar", source, options);
+  return new TarReader(source, options);
+}
+
+const tarReaderOptionsSchema = s.object(
+  {
+    maxEntrySize: limitSchema.optional(),
+    maxFileSize: limitSchema.optional(),
+    ...streamOptionShape<TarReaderProgress>()
+  },
+  OPTIONS
+);
+const _tarReaderOptionsMatch: SchemaMatches<typeof tarReaderOptionsSchema, TarReaderOptions> = true;
+void _tarReaderOptionsMatch;
+
+/** What `openTar` / `openTarGz` are given, checked when the reader is opened. */
+export function checkTarReaderArguments(
+  where: string,
+  source: unknown,
+  options: TarReaderOptions | undefined
+): void {
+  checkSourceArgument(where, source);
+  checkArchiveArgument(tarReaderOptionsSchema.optional(), options, where, "options");
+}
+
 // ============================================================================
 // Convenience functions for quick TAR creation
 // ============================================================================
 
+/**
+ * One entry for the one-shot builders (`packZip`, `packTar`, `packTarGz`, …): an object
+ * `{ name, source }` or a `[name, source]` pair.
+ */
 export type TarEntryInput = { name: string; source: ArchiveSource } | [string, ArchiveSource];
 
 /** Helper to add entries to archive from Map or Iterable */
-export function addEntries(
-  archive: TarArchive,
-  entries: Map<string, ArchiveSource> | Iterable<TarEntryInput>
+/**
+ * Walk the `entries` a `pack*` function was given — a map of name to source (a `Map` or any
+ * `ReadonlyMap`, read by iteration), or an
+ * iterable of `[name, source]` pairs or `{ name, source }` objects — handing each to `add`.
+ * Anything else is an `ArchiveArgumentError` naming `entries` or the entry at fault.
+ */
+export function forEachEntryInput(
+  where: string,
+  entries: ReadonlyMap<string, ArchiveSource> | Iterable<TarEntryInput>,
+  add: (name: string, source: ArchiveSource) => void
 ): void {
   if (entries instanceof Map) {
     for (const [name, source] of entries) {
-      archive.add(name, source);
+      add(name, source);
     }
-  } else {
-    for (const entry of entries) {
-      if (Array.isArray(entry)) {
-        archive.add(entry[0], entry[1]);
-      } else {
-        archive.add(entry.name, entry.source);
-      }
-    }
+    return;
   }
+  if (
+    entries === null ||
+    typeof entries !== "object" ||
+    typeof (entries as Iterable<unknown>)[Symbol.iterator] !== "function"
+  ) {
+    throw new ArchiveArgumentError(
+      "entries",
+      `${where}: entries must be a Map or an iterable of [name, source] pairs or { name, source } objects, got ${
+        entries === null ? "null" : typeof entries
+      }`
+    );
+  }
+  let index = 0;
+  for (const entry of entries as Iterable<unknown>) {
+    if (Array.isArray(entry)) {
+      add(entry[0], entry[1]);
+    } else if (entry !== null && typeof entry === "object" && "name" in entry) {
+      const { name, source } = entry as { name: string; source: ArchiveSource };
+      add(name, source);
+    } else {
+      throw new ArchiveArgumentError(
+        `entries[${index}]`,
+        `${where}: entries[${index}] must be a [name, source] pair or a { name, source } object`
+      );
+    }
+    index++;
+  }
+}
+
+export function addEntries(
+  archive: TarArchive,
+  entries: ReadonlyMap<string, ArchiveSource> | Iterable<TarEntryInput>,
+  where = "Archive.packTar"
+): void {
+  forEachEntryInput(where, entries, (name, source) => archive._addAt(where, name, source));
 }
 
 /**
  * Create a TAR archive from entries (async)
  */
 export async function tar(
-  entries: Map<string, ArchiveSource> | Iterable<TarEntryInput>,
+  entries: ReadonlyMap<string, ArchiveSource> | Iterable<TarEntryInput>,
   options?: TarArchiveOptions
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
+  checkTarArchiveOptions("Archive.packTar", options);
   const archive = new TarArchive(options);
   addEntries(archive, entries);
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 /**
  * Create a TAR archive from entries (sync)
  */
 export function tarSync(
-  entries: Map<string, string | Uint8Array | ArrayBuffer> | Iterable<TarEntryInput>,
+  entries: ReadonlyMap<string, string | Uint8Array | ArrayBuffer> | Iterable<TarEntryInput>,
   options?: TarArchiveOptions
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
+  checkTarArchiveOptions("Archive.packTarSync", options);
   const archive = new TarArchive(options);
-  addEntries(archive, entries);
-  return archive.bytesSync();
+  addEntries(archive, entries, "Archive.packTarSync");
+  return archive.toBufferSync();
 }

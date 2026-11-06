@@ -18,8 +18,8 @@
  * parser here would be a second opinion about a syntax neither container interprets.
  */
 import type { HeaderFooter } from "@excel/types";
-import { encodeNullableWideString, readNullableWideString } from "@excel/xlsb/binary";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { encodeNullableWideString, readNullableWideString, XlsbReader } from "@excel/xlsb/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /**
  * `fDifferentOddEven` and `fDifferentFirst`, the two flags that say whether the later strings mean
@@ -50,7 +50,7 @@ export function readHeaderFooter(
   if (payload.length < 2) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   try {
     const flags = reader.readUint16();
     const fields = [

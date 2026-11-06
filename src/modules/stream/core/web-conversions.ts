@@ -16,12 +16,41 @@
  */
 
 import {
+  checkStreamArgument,
+  toWebReadableOptionsSchema,
+  webReadableOptionsSchema,
+  webWritableOptionsSchema
+} from "@stream/arguments";
+import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
+import { StreamUnsupportedTypeError } from "@stream/errors";
+import {
   readableFromWeb as adaptReadableFromWeb,
   readableToWeb as adaptReadableToWeb,
   writableFromWeb as adaptWritableFromWeb,
   writableToWeb as adaptWritableToWeb
 } from "@stream/kernel/web-adapters";
-import type { IReadable, IWritable } from "@stream/types";
+import type { IReadable, IWritable, WritableLike } from "@stream/types";
+import type { SchemaMatches } from "@utils/schema";
+
+/** `stream` if it can be written to as a Node-style writable (`write` and `end`); else a typed error. */
+export function checkWritableLike(stream: unknown): WritableLike {
+  const s = stream as { write?: unknown; end?: unknown } | null;
+  if (
+    typeof s !== "object" ||
+    s === null ||
+    typeof s.write !== "function" ||
+    typeof s.end !== "function"
+  ) {
+    throw new StreamUnsupportedTypeError(
+      "Streams.toWritable",
+      stream === null ? "null" : typeof stream,
+      {
+        field: "stream"
+      }
+    );
+  }
+  return stream as WritableLike;
+}
 
 /** Options for adapting a Web `ReadableStream` into a Node-style Readable. */
 export interface WebReadableOptions {
@@ -77,13 +106,49 @@ export type WritableFromWeb = <T = any>(
   options?: WebWritableOptions
 ) => IWritable<T>;
 
+function describeValue(value: unknown): string {
+  return value === null ? "null" : typeof value;
+}
+
+const _webReadableOptionsMatch: SchemaMatches<typeof webReadableOptionsSchema, WebReadableOptions> =
+  true;
+void _webReadableOptionsMatch;
+const _webWritableOptionsMatch: SchemaMatches<typeof webWritableOptionsSchema, WebWritableOptions> =
+  true;
+void _webWritableOptionsMatch;
+
 export function makeReadableFromWeb(Readable: StreamCtor): ReadableFromWeb {
-  return (stream: ReadableStream, options?: WebReadableOptions) =>
-    adaptReadableFromWeb(Readable, stream, options);
+  return (stream: ReadableStream, options?: WebReadableOptions) => {
+    if (!isReadableStream(stream)) {
+      throw new StreamUnsupportedTypeError("Streams.fromWebReadable", describeValue(stream), {
+        field: "stream"
+      });
+    }
+    checkStreamArgument(
+      webReadableOptionsSchema.optional(),
+      options,
+      "Streams.fromWebReadable",
+      "options"
+    );
+    return adaptReadableFromWeb(Readable, stream, options);
+  };
 }
 
 export function makeWritableFromWeb(Writable: StreamCtor): WritableFromWeb {
-  return (stream, options) => adaptWritableFromWeb(Writable, stream, options);
+  return (stream, options) => {
+    if (!isWritableStream(stream)) {
+      throw new StreamUnsupportedTypeError("Streams.fromWebWritable", describeValue(stream), {
+        field: "stream"
+      });
+    }
+    checkStreamArgument(
+      webWritableOptionsSchema.optional(),
+      options,
+      "Streams.fromWebWritable",
+      "options"
+    );
+    return adaptWritableFromWeb(Writable, stream, options);
+  };
 }
 
 /** A Node-style Readable as a Web `ReadableStream`. */
@@ -91,10 +156,38 @@ export function readableToWeb<T = any>(
   stream: IReadable<T>,
   options?: { strategy?: QueuingStrategy<T> }
 ): ReadableStream<T> {
+  const s = stream as { on?: unknown; read?: unknown } | null;
+  if (
+    typeof s !== "object" ||
+    s === null ||
+    typeof s.on !== "function" ||
+    typeof s.read !== "function"
+  ) {
+    throw new StreamUnsupportedTypeError("Streams.toWebReadable", describeValue(stream), {
+      field: "stream"
+    });
+  }
+  checkStreamArgument(
+    toWebReadableOptionsSchema.optional(),
+    options,
+    "Streams.toWebReadable",
+    "options"
+  );
   return adaptReadableToWeb<T>(stream, options);
 }
 
 /** A Node-style Writable as a Web `WritableStream`. */
 export function writableToWeb<T = any>(stream: IWritable<T>): WritableStream<T> {
+  const s = stream as { on?: unknown; write?: unknown } | null;
+  if (
+    typeof s !== "object" ||
+    s === null ||
+    typeof s.on !== "function" ||
+    typeof s.write !== "function"
+  ) {
+    throw new StreamUnsupportedTypeError("Streams.toWebWritable", describeValue(stream), {
+      field: "stream"
+    });
+  }
   return adaptWritableToWeb<T>(stream);
 }

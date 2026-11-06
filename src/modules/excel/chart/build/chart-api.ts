@@ -1,14 +1,22 @@
 import type { AddChartExOptions, AddChartExSeriesOptions } from "@excel/chart/model/chart-ex-types";
 import type { AddChartOptions, AddChartSeriesOptions } from "@excel/chart/model/types";
-import type { CellValueInputType } from "@excel/core/cell";
-import { cellSetValue } from "@excel/core/cell";
+import { cellSetValue, checkCellValue } from "@excel/core/cell";
 import type { TableData } from "@excel/core/table";
 import { tableModel } from "@excel/core/table";
 import type { Worksheet } from "@excel/core/worksheet";
-import { getCell, getSheetName, getTable } from "@excel/core/worksheet-core";
-import { ChartOptionsError } from "@excel/errors";
+import {
+  checkWorksheetAttached,
+  getCell,
+  getSheetName,
+  getTable,
+  resolveAddress
+} from "@excel/core/worksheet-core";
+import { ExcelChartOptionsError } from "@excel/errors";
+import type { CellValueInput } from "@excel/types";
 import { quoteSheetName } from "@excel/utils/address";
+import { argumentChecks } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
+import { sheetNameKey } from "@utils/name-key";
 
 export interface SeriesFromColumnsOptions {
   categories?: string;
@@ -23,10 +31,7 @@ export interface AddChartFromTableOptions extends Omit<AddChartOptions, "series"
   structuredReferences?: boolean;
 }
 
-export interface AddChartFromRowsOptions<T extends Record<string, unknown>> extends Omit<
-  AddChartOptions,
-  "series"
-> {
+export interface AddChartFromRowsOptions<T extends object> extends Omit<AddChartOptions, "series"> {
   x: keyof T & string;
   y: (keyof T & string) | Array<keyof T & string>;
   sheetName?: string;
@@ -34,10 +39,34 @@ export interface AddChartFromRowsOptions<T extends Record<string, unknown>> exte
   includeHeaders?: boolean;
 }
 
+/**
+ * Refuse arguments of the wrong shape where every entry to these builders — `Chart.*`, `ChartClassic.*`, `ChartEx.*`
+ * and the deprecated flat names — receives them: a missing options object or a non-array of rows used to fail with a
+ * `TypeError` from inside the builder.
+ */
+function checkBuildArguments(where: string, options: unknown, rows?: { value: unknown }): void {
+  const check = argumentChecks(where);
+  check.required("options", options);
+  check.record("options", options);
+  if (rows !== undefined) {
+    check.required("rows", rows.value);
+    check.array("rows", rows.value);
+  }
+}
+
 export function seriesFromColumns(
   sheetName: string,
   options: SeriesFromColumnsOptions
 ): AddChartSeriesOptions {
+  const check = argumentChecks("createSeriesFromColumns");
+  check.required("sheetName", sheetName);
+  check.string("sheetName", sheetName, { nonEmpty: true });
+  check.required("options", options);
+  if (check.record("options", options)) {
+    check.required("options.values", options.values);
+    check.string("options.values", options.values, { nonEmpty: true });
+    check.string("options.categories", options.categories);
+  }
   return {
     name: options.name,
     categories: options.categories ? qualifyRange(sheetName, options.categories) : undefined,
@@ -74,31 +103,49 @@ function resolveTableLayout(
 ): ResolvedTableLayout {
   const resolved = typeof table === "string" ? getTable(worksheet, table) : table;
   if (!resolved) {
-    throw new ChartOptionsError(`Table not found: ${String(table)}.`);
+    throw new ExcelChartOptionsError("table", `Table not found: ${String(table)}.`);
+  }
+  // A structured reference names the table wherever it is, but the plain ranges are built on `worksheet`: a table
+  // from another sheet made the two forms of the same call chart different cells.
+  if (resolved.worksheet !== worksheet) {
+    throw new ExcelChartOptionsError(
+      "table",
+      `Table ${JSON.stringify(tableModel(resolved).name)} is on sheet ${JSON.stringify(getSheetName(resolved.worksheet))}, ` +
+        `not ${JSON.stringify(getSheetName(worksheet))}: pass the sheet the table is on.`
+    );
   }
   const model = tableModel(resolved);
   const tableRef = colCache.decode(model.tableRef ?? model.ref);
   if (!("top" in tableRef)) {
-    throw new ChartOptionsError(`Invalid table range: ${model.ref}.`);
+    throw new ExcelChartOptionsError("table", `Invalid table range: ${model.ref}.`);
   }
   if (tableRef.bottom < tableRef.top) {
-    throw new ChartOptionsError(`Invalid table range: ${model.ref}.`);
+    throw new ExcelChartOptionsError("table", `Invalid table range: ${model.ref}.`);
   }
   const headerRow = model.headerRow !== false;
   const dataStartRow = tableRef.top + (headerRow ? 1 : 0);
   const dataEndRow = tableRef.bottom - (model.totalsRow ? 1 : 0);
   if (dataEndRow < dataStartRow) {
-    throw new ChartOptionsError(`Table has no data rows: ${model.name}.`);
+    throw new ExcelChartOptionsError("table", `Table has no data rows: ${model.name}.`);
   }
   const columnNames = model.columns.map(c => c.name);
-  const categoryIndex = resolveTableColumn(columnNames, options.categoryColumn ?? 0);
+  const categoryIndex = resolveTableColumn(
+    columnNames,
+    options.categoryColumn ?? 0,
+    "options.categoryColumn"
+  );
   const explicitValueCols = options.valueColumns;
   const valueColumns =
     explicitValueCols && explicitValueCols.length > 0
-      ? explicitValueCols.map(col => resolveTableColumn(columnNames, col))
+      ? explicitValueCols.map((col, i) =>
+          resolveTableColumn(columnNames, col, `options.valueColumns[${i}]`)
+        )
       : model.columns.map((_, i) => i).filter(i => i !== categoryIndex);
   if (valueColumns.length === 0) {
-    throw new ChartOptionsError(`Table has no value columns: ${model.name}.`);
+    throw new ExcelChartOptionsError(
+      "options.valueColumns",
+      `Table has no value columns: ${model.name}.`
+    );
   }
   return {
     dataStartRow,
@@ -117,7 +164,8 @@ function buildColumnReference(layout: ResolvedTableLayout, columnIndex: number):
   if (layout.structured) {
     const name = layout.columnNames[columnIndex];
     if (name === undefined) {
-      throw new ChartOptionsError(
+      throw new ExcelChartOptionsError(
+        "table",
         `Table column at index ${columnIndex} has no name; cannot emit a structured reference.`
       );
     }
@@ -137,6 +185,7 @@ export function chartOptionsFromTable(
   table: TableData | string,
   options: AddChartFromTableOptions
 ): AddChartOptions {
+  checkBuildArguments("createOptionsFromTable", options);
   const layout = resolveTableLayout(worksheet, table, options);
   const categoryReference = buildColumnReference(layout, layout.categoryIndex);
   const series = layout.valueColumns.map(index => ({
@@ -147,13 +196,14 @@ export function chartOptionsFromTable(
   return { ...stripTableHelperOptions(options), series };
 }
 
-export function chartOptionsFromRows<T extends Record<string, unknown>>(
+export function chartOptionsFromRows<T extends object>(
   worksheet: Worksheet,
-  rows: T[],
+  rows: readonly T[],
   options: AddChartFromRowsOptions<T>
 ): AddChartOptions {
+  checkBuildArguments("createOptionsFromRows", options, { value: rows });
   if (rows.length === 0) {
-    throw new ChartOptionsError("chartOptionsFromRows requires at least one row.");
+    throw new ExcelChartOptionsError("rows", "rows must contain at least one row.");
   }
   const staged = stageRowsIntoWorksheet(worksheet, rows, options);
   const sheetName = getSheetName(worksheet);
@@ -204,7 +254,8 @@ function escapeStructuredReferenceName(name: string): string {
   // Canonical structure check — identifier must start with a letter /
   // underscore, then letters / digits / underscore / dot / non-ASCII.
   if (!/^[A-Za-z_\u00A0-\uFFFF][A-Za-z0-9_.\u00A0-\uFFFF]*$/.test(name)) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
+      "table",
       `Invalid Excel table name for structured reference: ${JSON.stringify(name)}.`
     );
   }
@@ -214,7 +265,8 @@ function escapeStructuredReferenceName(name: string): string {
   // names — without this guard a name like `"Tab\u2028le"` would pass
   // our validation but break the formula parser downstream.
   if (/[\u00A0\u1680\u2000-\u200F\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(name)) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
+      "table",
       `Excel table name contains whitespace / separator / zero-width character: ${JSON.stringify(name)}.`
     );
   }
@@ -230,17 +282,21 @@ function escapeStructuredReferenceColumn(name: string): string {
   return name.replace(/([[\]#'@])/g, "'$1");
 }
 
-function resolveTableColumn(names: Array<string | undefined>, column: string | number): number {
+function resolveTableColumn(
+  names: Array<string | undefined>,
+  column: string | number,
+  field: string
+): number {
   if (typeof column === "number") {
     if (column < 0 || column >= names.length) {
-      throw new ChartOptionsError(`Table column index out of range: ${column}.`);
+      throw new ExcelChartOptionsError(field, `Table column index out of range: ${column}.`);
     }
     return column;
   }
   const target = column.toLowerCase();
   const idx = names.findIndex(name => name !== undefined && name.toLowerCase() === target);
   if (idx < 0) {
-    throw new ChartOptionsError(`Table column not found: ${column}.`);
+    throw new ExcelChartOptionsError(field, `Table column not found: ${column}.`);
   }
   return idx;
 }
@@ -355,7 +411,10 @@ function absoluteA1Range(range: string): string {
 // Shared row-staging helpers
 // ---------------------------------------------------------------------------
 
-interface StagedRows<T extends Record<string, unknown>> {
+const MAX_SHEET_ROW = 1048576;
+const MAX_SHEET_COL = 16384;
+
+interface StagedRows<T extends object> {
   yKeys: Array<keyof T & string>;
   startCol: number;
   dataStartRow: number;
@@ -367,10 +426,14 @@ interface StagedRows<T extends Record<string, unknown>> {
  * resolved data extents. Shared by `chartOptionsFromRows` /
  * `chartExOptionsFromRows` so the two paths agree on cell coercion,
  * sheet-name validation, and header handling.
+ *
+ * Everything is checked before the first cell is written — the start cell, that the block fits on the sheet, and
+ * every value — so a refused call leaves the sheet as it was. Writing as it went left the header and the rows before
+ * a bad value behind it, over whatever those cells held.
  */
-function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
+function stageRowsIntoWorksheet<T extends object>(
   worksheet: Worksheet,
-  rows: T[],
+  rows: readonly T[],
   options: {
     x: keyof T & string;
     y: (keyof T & string) | Array<keyof T & string>;
@@ -379,15 +442,17 @@ function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
     includeHeaders?: boolean;
   }
 ): StagedRows<T> {
+  checkWorksheetAttached(worksheet);
   if (
     options.sheetName !== undefined &&
     !sheetNamesEqual(options.sheetName, getSheetName(worksheet))
   ) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
+      "options.sheetName",
       `sheetName must match the target worksheet: got ${JSON.stringify(options.sheetName)}, expected ${JSON.stringify(getSheetName(worksheet))}.`
     );
   }
-  const start = colCache.decodeAddress(options.startCell ?? "A1");
+  const start = resolveAddress(worksheet, options.startCell ?? "A1");
   const includeHeaders = options.includeHeaders !== false;
   const yKeys: Array<keyof T & string> = Array.isArray(options.y) ? options.y : [options.y];
   // Reject `y` lists that include the `x` key — without this check the
@@ -396,25 +461,39 @@ function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
   // same column as both the category and value axis without any
   // diagnostic.
   if (yKeys.some(k => k === (options.x as unknown))) {
-    throw new ChartOptionsError(
+    throw new ExcelChartOptionsError(
+      "options.y",
       `chart y columns must not include the x key: x=${JSON.stringify(options.x)} appears in y=${JSON.stringify(yKeys)}.`
     );
   }
   const keys: Array<keyof T & string> = [options.x, ...yKeys];
   const startRow = start.row;
   const startCol = start.col;
+  const dataRowOffset = includeHeaders ? 1 : 0;
+  const lastRow = startRow + dataRowOffset + rows.length - 1;
+  const lastCol = startCol + keys.length - 1;
+  if (lastRow > MAX_SHEET_ROW || lastCol > MAX_SHEET_COL) {
+    throw new ExcelChartOptionsError(
+      "rows",
+      `the rows do not fit on the sheet from ${start.address}: they need ${keys.length} column(s) and ` +
+        `${rows.length + dataRowOffset} row(s), and a sheet ends at column XFD, row ${MAX_SHEET_ROW}.`
+    );
+  }
+  const values = rows.map((row, r) =>
+    keys.map(key => {
+      const value = coerceCellValue(row[key], key, `rows[${r}].${key}`);
+      checkCellValue(value);
+      return value;
+    })
+  );
   if (includeHeaders) {
     keys.forEach((key, i) => {
       cellSetValue(getCell(worksheet, startRow, startCol + i), key);
     });
   }
-  const dataRowOffset = includeHeaders ? 1 : 0;
-  rows.forEach((row, r) => {
-    keys.forEach((key, c) => {
-      cellSetValue(
-        getCell(worksheet, startRow + dataRowOffset + r, startCol + c),
-        coerceCellValue(row[key], key)
-      );
+  values.forEach((row, r) => {
+    row.forEach((value, c) => {
+      cellSetValue(getCell(worksheet, startRow + dataRowOffset + r, startCol + c), value);
     });
   });
   const dataStartRow = startRow + dataRowOffset;
@@ -433,7 +512,7 @@ function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
  * clear message rather than silently flowing into the worksheet as an
  * `as never` cast and surfacing elsewhere as a confusing writer error.
  */
-function coerceCellValue(value: unknown, key: string): CellValueInputType {
+function coerceCellValue(value: unknown, key: string, field: string): CellValueInput {
   if (value === undefined || value === null) {
     return null;
   }
@@ -443,17 +522,17 @@ function coerceCellValue(value: unknown, key: string): CellValueInputType {
     typeof value === "boolean" ||
     value instanceof Date
   ) {
-    return value as CellValueInputType;
+    return value as CellValueInput;
   }
-  throw new ChartOptionsError(
+  throw new ExcelChartOptionsError(
+    field,
     `Unsupported row value for column ${JSON.stringify(key)}: ${typeof value}. ` +
       `Expected string | number | boolean | Date | null | undefined.`
   );
 }
 
 function sheetNamesEqual(a: string, b: string): boolean {
-  // Excel sheet names are case-insensitive.
-  return a.toLowerCase() === b.toLowerCase();
+  return sheetNameKey(a) === sheetNameKey(b);
 }
 
 /**
@@ -540,7 +619,7 @@ export interface AddChartExFromTableOptions extends Omit<
  * helper writes the rows into the worksheet first (headers optional) and
  * then emits the corresponding absolute ranges.
  */
-export interface AddChartExFromRowsOptions<T extends Record<string, unknown>> extends Omit<
+export interface AddChartExFromRowsOptions<T extends object> extends Omit<
   AddChartExOptions,
   "series" | "categories"
 > {
@@ -572,6 +651,7 @@ export function chartExOptionsFromTable(
   table: TableData | string,
   options: AddChartExFromTableOptions & { type: Exclude<AddChartExOptions["type"], "regionMap"> }
 ): AddChartExOptions {
+  checkBuildArguments("createOptionsFromTable", options);
   const layout = resolveTableLayout(worksheet, table, options);
   const categories = buildColumnReference(layout, layout.categoryIndex);
   const series: AddChartExSeriesOptions[] = layout.valueColumns.map(index => ({
@@ -586,13 +666,14 @@ export function chartExOptionsFromTable(
  * dataset, staging the rows into the worksheet before emitting ranges.
  * Mirrors {@link chartOptionsFromRows} for classic charts.
  */
-export function chartExOptionsFromRows<T extends Record<string, unknown>>(
+export function chartExOptionsFromRows<T extends object>(
   worksheet: Worksheet,
-  rows: T[],
+  rows: readonly T[],
   options: AddChartExFromRowsOptions<T> & { type: Exclude<AddChartExOptions["type"], "regionMap"> }
 ): AddChartExOptions {
+  checkBuildArguments("createOptionsFromRows", options, { value: rows });
   if (rows.length === 0) {
-    throw new ChartOptionsError("chartExOptionsFromRows requires at least one row.");
+    throw new ExcelChartOptionsError("rows", "rows must contain at least one row.");
   }
   const staged = stageRowsIntoWorksheet(worksheet, rows, options);
   const sheetName = getSheetName(worksheet);

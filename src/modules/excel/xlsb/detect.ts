@@ -10,7 +10,9 @@
  * and the `await import()` the streaming reader uses for the same modules could never take effect.
  */
 
+import { ArchiveLimitExceededError } from "@archive/core/errors";
 import { ZipParser } from "@archive/unzip/zip-parser";
+import { containerLimitError } from "@excel/utils/container-errors";
 
 /**
  * The workbook part that distinguishes the containers.
@@ -27,13 +29,20 @@ export const XLSB_WORKBOOK_PART = "xl/workbook.bin";
  * Reads the ZIP central directory only, so it is O(entries) rather than O(bytes), and answers
  * `false` for anything it cannot parse — a caller that wants a diagnosis gets a better one from the
  * loader that then tries to read the file than from a sniffer that declined to.
+ *
+ * `maxEntries` is the read's own bound, applied here because this is the first walk of the directory: checked only
+ * by the loader afterwards, the records it exists to keep from being allocated already had been. A package past it
+ * is the read's `ExcelLimitExceededError`, not "not XLSB".
  */
-export function isXlsbPackage(bytes: Uint8Array): boolean {
+export function isXlsbPackage(bytes: Uint8Array, maxEntries?: number): boolean {
   try {
-    return new ZipParser(bytes)
+    return new ZipParser(bytes, maxEntries === undefined ? {} : { maxEntries })
       .getEntries()
       .some(entry => entry.path.toLowerCase() === XLSB_WORKBOOK_PART);
-  } catch {
+  } catch (error) {
+    if (error instanceof ArchiveLimitExceededError) {
+      throw containerLimitError(error);
+    }
     return false;
   }
 }

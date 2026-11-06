@@ -128,7 +128,7 @@ describe("a streamed XLSB package", () => {
   it("reads back the values that were written", async () => {
     const handle = Workbook.create();
     await Workbook.read(handle, streamed);
-    const sheet = Workbook.getWorksheets(handle)[0];
+    const sheet = Workbook.listWorksheets(handle)[0];
     expect(Cell.getValue(sheet, "A1")).toBe("Year");
     expect(Cell.getValue(sheet, "C1")).toBe("Note");
     expect(Cell.getValue(sheet, "A2")).toBe(2023);

@@ -6,6 +6,9 @@
  * - Callback-to-promise conversion (promisify)
  */
 
+import { checkStreamArgument } from "@stream/arguments";
+import { s } from "@utils/schema";
+
 // =============================================================================
 // State Inspection
 // =============================================================================
@@ -34,6 +37,11 @@ export function isErrored(stream: { errored?: unknown } | null | undefined): boo
 export function promisify<T>(
   fn: (callback: (error?: Error | null, result?: T) => void) => void
 ): Promise<T> {
+  try {
+    checkStreamArgument(s.function(), fn, "Streams.LowLevel.fromCallback", "fn");
+  } catch (error) {
+    return Promise.reject(error);
+  }
   return new Promise((resolve, reject) => {
     fn((error, result) => {
       if (error) {

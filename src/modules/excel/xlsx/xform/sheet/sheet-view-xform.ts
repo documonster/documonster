@@ -1,5 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { parseXsdFloatOrText, parseXsdIntOrText } from "@excel/xlsx/xform/xsd-values";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 const VIEW_STATES: { [key: string]: string } = {
@@ -105,7 +106,8 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
       case "frozen":
         xSplit = model.xSplit ?? 0;
         ySplit = model.ySplit ?? 0;
-        topLeftCell = model.topLeftCell || colCache.getAddress(ySplit + 1, xSplit + 1).address;
+        topLeftCell =
+          model.topLeftCell || colCache.getAddress(Number(ySplit) + 1, Number(xSplit) + 1).address;
         activePane =
           (model.xSplit && model.ySplit && "bottomRight") ||
           (model.xSplit && "topRight") ||
@@ -158,14 +160,15 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
     switch (node.name) {
       case "sheetView":
         this.sheetView = {
-          workbookViewId: parseInt(node.attributes.workbookViewId, 10),
+          // A number that is not one keeps its text, for the reader to set aside (`sheet-settings-checks`).
+          workbookViewId: parseXsdIntOrText(node.attributes.workbookViewId) as number,
           rightToLeft: node.attributes.rightToLeft === "1",
           tabSelected: node.attributes.tabSelected === "1",
           showRuler: !(node.attributes.showRuler === "0"),
           showRowColHeaders: !(node.attributes.showRowColHeaders === "0"),
           showGridLines: !(node.attributes.showGridLines === "0"),
-          zoomScale: parseInt(node.attributes.zoomScale ?? "100", 10),
-          zoomScaleNormal: parseInt(node.attributes.zoomScaleNormal ?? "100", 10),
+          zoomScale: (parseXsdIntOrText(node.attributes.zoomScale) ?? 100) as number,
+          zoomScaleNormal: (parseXsdIntOrText(node.attributes.zoomScaleNormal) ?? 100) as number,
           style: node.attributes.view
         };
         this.pane = undefined;
@@ -174,8 +177,9 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
 
       case "pane":
         this.pane = {
-          xSplit: parseInt(node.attributes.xSplit ?? "0", 10),
-          ySplit: parseInt(node.attributes.ySplit ?? "0", 10),
+          // `xsd:double`: a split pane's splits are a distance, and only a frozen one's count cells.
+          xSplit: (parseXsdFloatOrText(node.attributes.xSplit) ?? 0) as number,
+          ySplit: (parseXsdFloatOrText(node.attributes.ySplit) ?? 0) as number,
           topLeftCell: node.attributes.topLeftCell,
           activePane: node.attributes.activePane ?? "topLeft",
           state: node.attributes.state

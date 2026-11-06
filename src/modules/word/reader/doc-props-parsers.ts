@@ -11,6 +11,7 @@
 import type { Mutable } from "@word/core/internal-utils";
 import { attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
+import { namespacesInScope, unmodelledChildren, wordLocalName } from "@word/reader/preserved-xml";
 import type {
   AppProperties,
   CoreProperties,
@@ -101,6 +102,19 @@ function parseAppProps(xmlStr: string, maxDepth?: number): AppProperties {
     }
   }
 
+  // Everything the fields above did not take — `Template`, `TotalTime`,
+  // `TitlesOfParts`, an empty `Company` — is kept verbatim.
+  const preservedXml = unmodelledChildren(
+    root,
+    {},
+    child =>
+      [...strFields, ...intFields].includes(child.name) &&
+      props[child.name.charAt(0).toLowerCase() + child.name.slice(1)] !== undefined
+  );
+  if (preservedXml.length > 0) {
+    props.preservedXml = preservedXml;
+  }
+
   return props;
 }
 
@@ -154,13 +168,32 @@ function parseCustomPropsXml(xmlStr: string, maxDepth?: number): CustomProperty[
 // Font Table Parser
 // =============================================================================
 
+/** The `w:font` children read into the model; the writer writes them back. */
+const MODELLED_FONT_CHILDREN = new Set([
+  "altName",
+  "panose1",
+  "charset",
+  "family",
+  "pitch",
+  "sig",
+  "embedRegular",
+  "embedBold",
+  "embedItalic",
+  "embedBoldItalic"
+]);
+
 function parseFontTableXml(xmlStr: string, maxDepth?: number): FontDef[] {
   const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
+  const rootScope = namespacesInScope({}, root);
   const fonts: FontDef[] = [];
 
   for (const fontEl of findChildrenNs(root, "font")) {
     const f: Mutable<FontDef> = { name: attrVal(fontEl, "name") ?? "" };
+    const altName = findChildNs(fontEl, "altName");
+    if (altName) {
+      f.altName = attrVal(altName, "val");
+    }
     const p1 = findChildNs(fontEl, "panose1");
     if (p1) {
       f.panose1 = attrVal(p1, "val");
@@ -209,6 +242,13 @@ function parseFontTableXml(xmlStr: string, maxDepth?: number): FontDef[] {
           }
         }
       }
+    }
+    const preservedXml = unmodelledChildren(fontEl, rootScope, child => {
+      const local = wordLocalName(child);
+      return local !== undefined && MODELLED_FONT_CHILDREN.has(local);
+    });
+    if (preservedXml.length > 0) {
+      f.preservedXml = preservedXml;
     }
     fonts.push(f);
   }

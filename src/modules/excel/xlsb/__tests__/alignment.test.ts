@@ -180,7 +180,7 @@ describe("alignment and protection reach the cells that asked for them", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     for (const { address, style } of styled) {
       expect(Cell.getStyle(read, address), address).toMatchObject(style);
     }
@@ -199,7 +199,7 @@ describe("alignment and protection reach the cells that asked for them", () => {
     expect(listing.length).toBeGreaterThan(0);
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     for (const address of ["A1", "A2", "A3"]) {
       expect(Cell.getStyle(read, address)?.alignment?.horizontal).toBe("center");
     }

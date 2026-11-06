@@ -2,11 +2,11 @@
 //
 // Type-level contract for formula recalculation (issue #193).
 //
-// `calculateFormulas` from `documonster/excel/formula` is the only public
+// `ExcelFormula.calculate` from `documonster/excel/formula` is the only public
 // evaluation seam. The formula module no longer exposes a workbook-shaped host
 // contract or a second calculation entry.
 
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import type { FormulaFunction, FormulaValue } from "@excel/bridge/formula";
 import { Workbook } from "@excel/index";
 import type { Formula } from "@formula/index";
@@ -14,7 +14,7 @@ import type { Formula } from "@formula/index";
 declare const wb: Workbook.Handle;
 
 // Public path — must typecheck.
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 type HasCalculate = "calculate" extends keyof typeof Formula ? true : false;
 const formulaHasNoCalculate: HasCalculate = false;

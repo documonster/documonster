@@ -8,37 +8,17 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import {
+  DrawingMl,
+  ChartEx,
+  ChartClassic,
   CHART_EX_PRESETS,
   CHART_PRESETS,
-  applyChartExPreset,
-  buildChartModel,
-  chartExOptionsFromRows,
-  chartExOptionsFromTable,
-  chartOptionsFromRows,
-  chartOptionsFromTable,
-  fillChartCaches,
-  parseSpPr,
-  buildSpPr,
-  buildChartExModel,
-  buildChartScene,
-  renderChartPng,
-  renderChartSvg,
-  applyChartPreset,
   EXCEL_CHART_EX_PRESETS,
   EXCEL_CHART_PRESETS,
-  drawChartPdf,
-  seriesFromColumns,
-  applyChartExPreset as rootApplyChartExPreset,
   CHART_EX_PRESETS as ROOT_CHART_EX_PRESETS,
   EXCEL_CHART_EX_PRESETS as ROOT_EXCEL_CHART_EX_PRESETS,
   CHART_PRESETS as ROOT_CHART_PRESETS,
-  EXCEL_CHART_PRESETS as ROOT_EXCEL_CHART_PRESETS,
-  buildChartExModel as rootBuildChartExModel,
-  renderChartExSvg as rootRenderChartExSvg,
-  renderChartSvg as rootRenderChartSvg,
-  seriesFromColumns as rootSeriesFromColumns,
-  chartOptionsFromRows as rootChartOptionsFromRows,
-  chartOptionsFromTable as rootChartOptionsFromTable
+  EXCEL_CHART_PRESETS as ROOT_EXCEL_CHART_PRESETS
 } from "@excel/chart/index";
 import type {
   AddChartOptions,
@@ -62,6 +42,7 @@ import type {
   ChartExType,
   SeriesFromColumnsOptions
 } from "@excel/chart/index";
+import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import { tableSetName } from "@excel/core/table";
 import {
   addAreaChart,
@@ -93,7 +74,7 @@ import {
   addWaterfallChart,
   getCharts
 } from "@excel/core/worksheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Workbook } from "@excel/index";
 import { describeSvgGeometry, extractSvgGeometry } from "@test/svg-geometry";
 import {
   validateXmlName as rootValidateXmlName,
@@ -124,7 +105,7 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addColumnChart(ws, { series: [baseSeries("S")], grouping: "stacked" }, "C1:J10");
 
-    const group = Chart.chartTypes(getCharts(ws)[0])[0] as BarChartGroup;
+    const group = Chart.getTypes(getCharts(ws)[0])[0] as BarChartGroup;
     expect(group.type).toBe("bar");
     expect(group.barDir).toBe("col");
     expect(group.grouping).toBe("stacked");
@@ -135,7 +116,7 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addLineChart(ws, { series: [baseSeries("S")] }, "C1:J10");
 
-    expect(Chart.chartTypes(getCharts(ws)[0])[0].type).toBe("line");
+    expect(Chart.getTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("addHistogramChart creates a chartEx histogram", () => {
@@ -144,10 +125,10 @@ describe("P1: chart convenience APIs and presets", () => {
     addHistogramChart(ws, { series: [{ name: "H", values: "Sheet1!$B$1:$B$5" }] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    expect(Chart.isChartEx(chart)).toBe(true);
+    expect(Chart.isEx(chart)).toBe(true);
     expect(
-      Chart.chartExModel(chart)!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr
-        ?.binning?.binType
+      Chart.getExModel(chart)!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr?.binning
+        ?.binType
     ).toBe("auto");
   });
 
@@ -156,34 +137,35 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addPresetChart(ws, "bar3DConeClustered", { series: [baseSeries("S")] }, "C1:J10");
 
-    const group = Chart.chartTypes(getCharts(ws)[0])[0] as BarChartGroup;
+    const group = Chart.getTypes(getCharts(ws)[0])[0] as BarChartGroup;
     expect(group.type).toBe("bar3D");
     expect(group.barDir).toBe("bar");
     expect(group.shape).toBe("cone");
   });
 
   it("applyChartPreset covers Excel 3D shape, stock, scatter, and surface aliases", () => {
-    const cases: Array<[Parameters<typeof applyChartPreset>[0], Partial<AddChartOptions>]> = [
+    const cases: Array<[Parameters<typeof ChartClassic.applyPreset>[0], Partial<AddChartOptions>]> =
       [
-        "cylinderColStacked100",
-        { type: "bar3D", barDir: "col", grouping: "percentStacked", shape: "cylinder" }
-      ],
-      [
-        "pyramidBarStacked",
-        { type: "bar3D", barDir: "bar", grouping: "stacked", shape: "pyramid" }
-      ],
-      [
-        "coneBarStacked100",
-        { type: "bar3D", barDir: "bar", grouping: "percentStacked", shape: "cone" }
-      ],
-      ["pieExploded3D", { type: "pie3D" }],
-      ["stockOHLC", { type: "stock" }],
-      ["scatterLinesNoMarkers", { type: "scatter", scatterStyle: "line" }],
-      ["surfaceTopView", { type: "surface3D", view3D: { rotX: 90, rotY: 0 } }],
-      ["topViewWireframe", { type: "surface3D", wireframe: true, view3D: { rotX: 90, rotY: 0 } }]
-    ];
+        [
+          "cylinderColStacked100",
+          { type: "bar3D", barDir: "col", grouping: "percentStacked", shape: "cylinder" }
+        ],
+        [
+          "pyramidBarStacked",
+          { type: "bar3D", barDir: "bar", grouping: "stacked", shape: "pyramid" }
+        ],
+        [
+          "coneBarStacked100",
+          { type: "bar3D", barDir: "bar", grouping: "percentStacked", shape: "cone" }
+        ],
+        ["pieExploded3D", { type: "pie3D" }],
+        ["stockOHLC", { type: "stock" }],
+        ["scatterLinesNoMarkers", { type: "scatter", scatterStyle: "line" }],
+        ["surfaceTopView", { type: "surface3D", view3D: { rotX: 90, rotY: 0 } }],
+        ["topViewWireframe", { type: "surface3D", wireframe: true, view3D: { rotX: 90, rotY: 0 } }]
+      ];
     for (const [preset, expected] of cases) {
-      const options = applyChartPreset(preset, { series: [baseSeries("S")] });
+      const options = ChartClassic.applyPreset(preset, { series: [baseSeries("S")] });
       expect(options).toMatchObject(expected);
     }
   });
@@ -193,11 +175,11 @@ describe("P1: chart convenience APIs and presets", () => {
   // OHLC preset ships with. All stock variants now emit the
   // appropriate feature combination.
   it("stock presets enable hi-low lines by default; OHLC adds up-down bars too", () => {
-    const hlc = applyChartPreset("stockHLC", { series: [baseSeries("S")] });
+    const hlc = ChartClassic.applyPreset("stockHLC", { series: [baseSeries("S")] });
     expect(hlc).toMatchObject({ type: "stock", hiLowLines: true });
     expect(hlc.upDownBars).toBeFalsy();
 
-    const ohlc = applyChartPreset("stockOHLC", { series: [baseSeries("S")] });
+    const ohlc = ChartClassic.applyPreset("stockOHLC", { series: [baseSeries("S")] });
     expect(ohlc).toMatchObject({ type: "stock", hiLowLines: true, upDownBars: true });
   });
 
@@ -212,14 +194,20 @@ describe("P1: chart convenience APIs and presets", () => {
   // via `buildComboChartModel`.
   it("stockVHLC / stockVOHLC presets are rejected because they need a combo chart", () => {
     expect(() =>
-      applyChartPreset("stockVHLC" as unknown as Parameters<typeof applyChartPreset>[0], {
-        series: [baseSeries("S")]
-      })
+      ChartClassic.applyPreset(
+        "stockVHLC" as unknown as Parameters<typeof ChartClassic.applyPreset>[0],
+        {
+          series: [baseSeries("S")]
+        }
+      )
     ).toThrow(/Unknown chart preset/);
     expect(() =>
-      applyChartPreset("stockVOHLC" as unknown as Parameters<typeof applyChartPreset>[0], {
-        series: [baseSeries("S")]
-      })
+      ChartClassic.applyPreset(
+        "stockVOHLC" as unknown as Parameters<typeof ChartClassic.applyPreset>[0],
+        {
+          series: [baseSeries("S")]
+        }
+      )
     ).toThrow(/Unknown chart preset/);
   });
 
@@ -227,37 +215,38 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(EXCEL_CHART_PRESETS.length).toBeGreaterThanOrEqual(70);
     expect(new Set(EXCEL_CHART_PRESETS).size).toBe(EXCEL_CHART_PRESETS.length);
 
-    const cases: Array<[Parameters<typeof applyChartPreset>[0], Partial<AddChartOptions>]> = [
+    const cases: Array<[Parameters<typeof ChartClassic.applyPreset>[0], Partial<AddChartOptions>]> =
       [
-        "col3DConeStacked100",
-        { type: "bar3D", barDir: "col", grouping: "percentStacked", shape: "cone" }
-      ],
-      [
-        "bar3DCylinderStacked",
-        { type: "bar3D", barDir: "bar", grouping: "stacked", shape: "cylinder" }
-      ],
-      [
-        "bar3DPyramidClustered",
-        { type: "bar3D", barDir: "bar", grouping: "clustered", shape: "pyramid" }
-      ],
-      ["barOfPie", { type: "ofPie", ofPieType: "bar" }],
-      ["pieOfPie", { type: "ofPie", ofPieType: "pie" }],
-      ["area3DStacked100", { type: "area3D", grouping: "percentStacked" }],
-      ["scatterMarker", { type: "scatter", scatterStyle: "marker" }],
-      ["radarMarkers", { type: "radar", radarStyle: "marker" }],
-      ["surface3DWireframe", { type: "surface3D", wireframe: true }],
-      ["stockOHLC", { type: "stock", hiLowLines: true, upDownBars: true }]
-    ];
+        [
+          "col3DConeStacked100",
+          { type: "bar3D", barDir: "col", grouping: "percentStacked", shape: "cone" }
+        ],
+        [
+          "bar3DCylinderStacked",
+          { type: "bar3D", barDir: "bar", grouping: "stacked", shape: "cylinder" }
+        ],
+        [
+          "bar3DPyramidClustered",
+          { type: "bar3D", barDir: "bar", grouping: "clustered", shape: "pyramid" }
+        ],
+        ["barOfPie", { type: "ofPie", ofPieType: "bar" }],
+        ["pieOfPie", { type: "ofPie", ofPieType: "pie" }],
+        ["area3DStacked100", { type: "area3D", grouping: "percentStacked" }],
+        ["scatterMarker", { type: "scatter", scatterStyle: "marker" }],
+        ["radarMarkers", { type: "radar", radarStyle: "marker" }],
+        ["surface3DWireframe", { type: "surface3D", wireframe: true }],
+        ["stockOHLC", { type: "stock", hiLowLines: true, upDownBars: true }]
+      ];
 
     for (const [preset, expected] of cases) {
-      const options = applyChartPreset(preset, { series: [baseSeries("S")] });
+      const options = ChartClassic.applyPreset(preset, { series: [baseSeries("S")] });
       expect(options).toMatchObject(expected);
     }
   });
 
   it("applyChartPreset maps series-level exploded pie settings", () => {
-    const options = applyChartPreset("pieExploded", { series: [baseSeries("S")] });
-    const model = buildChartModel(options);
+    const options = ChartClassic.applyPreset("pieExploded", { series: [baseSeries("S")] });
+    const model = ChartClassic.createModel(options);
     const group = ctg(model) as PieChartGroup;
 
     expect(group.type).toBe("pie");
@@ -265,8 +254,8 @@ describe("P1: chart convenience APIs and presets", () => {
   });
 
   it("applyChartPreset maps bubble3D to bubble series", () => {
-    const options = applyChartPreset("bubble3D", { series: [bubbleSeries("S")] });
-    const model = buildChartModel(options);
+    const options = ChartClassic.applyPreset("bubble3D", { series: [bubbleSeries("S")] });
+    const model = ChartClassic.createModel(options);
     const group = ctg(model) as BubbleChartGroup;
 
     expect(group.type).toBe("bubble");
@@ -279,18 +268,18 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(CHART_EX_PRESETS.boxAndWhisker.options.type).toBe("boxWhisker");
 
     const series = [{ name: "S", values: VALUES_A }];
-    expect(applyChartExPreset("histogram", { series })).toMatchObject({ type: "histogram" });
-    expect(applyChartExPreset("pareto", { series })).toMatchObject({ type: "pareto" });
-    expect(applyChartExPreset("boxAndWhisker", { series })).toMatchObject({
+    expect(ChartEx.applyPreset("histogram", { series })).toMatchObject({ type: "histogram" });
+    expect(ChartEx.applyPreset("pareto", { series })).toMatchObject({ type: "pareto" });
+    expect(ChartEx.applyPreset("boxAndWhisker", { series })).toMatchObject({
       type: "boxWhisker"
     });
-    expect(applyChartExPreset("map", { series })).toMatchObject({ type: "regionMap" });
+    expect(ChartEx.applyPreset("map", { series })).toMatchObject({ type: "regionMap" });
   });
 
   it("creates chart options from column ranges without hand-written sheet formulas", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sales Data");
-    const series = Chart.seriesFromColumns(ws, {
+    const series = Chart.createSeriesFromColumns(ws, {
       categories: "A2:A4",
       values: "B2:B4",
       name: "Sales"
@@ -298,7 +287,7 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(series.categories).toBe("'Sales Data'!$A$2:$A$4");
     expect(series.values).toBe("'Sales Data'!$B$2:$B$4");
 
-    const standalone = seriesFromColumns("Sales Data", {
+    const standalone = ChartClassic.createSeriesFromColumns("Sales Data", {
       categories: "A2:A4",
       values: "B2:B4",
       name: "Sales"
@@ -336,17 +325,20 @@ describe("P1: chart convenience APIs and presets", () => {
       "E12:K22"
     );
     expect(getCharts(ws)).toHaveLength(2);
+    expect((Chart.getTypes(getCharts(ws)[0])[0].series[0] as BarSeries).val?.numRef?.formula).toBe(
+      "SalesTable[Sales]"
+    );
+    expect((Chart.getTypes(getCharts(ws)[1])[0].series[0] as BarSeries).cat?.strRef?.formula).toBe(
+      "Sheet1!$H$21:$H$22"
+    );
     expect(
-      (Chart.chartTypes(getCharts(ws)[0])[0].series[0] as BarSeries).val?.numRef?.formula
-    ).toBe("SalesTable[Sales]");
-    expect(
-      (Chart.chartTypes(getCharts(ws)[1])[0].series[0] as BarSeries).cat?.strRef?.formula
-    ).toBe("Sheet1!$H$21:$H$22");
-    expect(
-      chartOptionsFromTable(ws, "SalesTable", { type: "line", valueColumns: ["Profit"] }).series
+      ChartClassic.createOptionsFromTable(ws, "SalesTable", {
+        type: "line",
+        valueColumns: ["Profit"]
+      }).series
     ).toHaveLength(1);
     expect(
-      chartOptionsFromRows(ws, [{ month: "Mar", sales: 30 }], {
+      ChartClassic.createOptionsFromRows(ws, [{ month: "Mar", sales: 30 }], {
         type: "bar",
         x: "month",
         y: "sales",
@@ -368,7 +360,7 @@ describe("P1: chart convenience APIs and presets", () => {
       ]
     });
 
-    const dynamic = chartOptionsFromTable(ws, "SalesTable", {
+    const dynamic = ChartClassic.createOptionsFromTable(ws, "SalesTable", {
       type: "bar",
       categoryColumn: "Month",
       valueColumns: ["Sales", "Profit %"]
@@ -377,7 +369,7 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(dynamic.series?.[0].values).toBe("SalesTable[Sales]");
     expect(dynamic.series?.[1].values).toBe("SalesTable[Profit %]");
 
-    const fixed = chartOptionsFromTable(ws, "SalesTable", {
+    const fixed = ChartClassic.createOptionsFromTable(ws, "SalesTable", {
       type: "bar",
       categoryColumn: "Month",
       valueColumns: ["Sales"],
@@ -400,13 +392,13 @@ describe("P1: chart convenience APIs and presets", () => {
       ]
     });
 
-    const options = chartOptionsFromTable(ws, "SalesTable", {
+    const options = ChartClassic.createOptionsFromTable(ws, "SalesTable", {
       type: "bar",
       categoryColumn: "Month",
       valueColumns: ["Sales"]
     });
-    const model = buildChartModel(options);
-    fillChartCaches(model, wb);
+    const model = ChartClassic.createModel(options);
+    ChartClassic.fillCaches(model, wb);
     const series = model.chart.plotArea.chartTypes[0].series[0] as BarSeries;
 
     expect(series.cat?.strRef?.cache?.points).toEqual([
@@ -434,13 +426,13 @@ describe("P1: chart convenience APIs and presets", () => {
     });
     tableSetName(table, "Odd.Table");
 
-    const options = chartOptionsFromTable(ws, table, {
+    const options = ChartClassic.createOptionsFromTable(ws, table, {
       type: "bar",
       categoryColumn: "Region",
       valueColumns: ["Sales]#'@"]
     });
-    const model = buildChartModel(options);
-    fillChartCaches(model, wb);
+    const model = ChartClassic.createModel(options);
+    ChartClassic.fillCaches(model, wb);
     const series = model.chart.plotArea.chartTypes[0].series[0] as BarSeries;
 
     expect(series.val?.numRef?.formula).toBe("Odd.Table[Sales']'#'''@]");
@@ -455,11 +447,11 @@ describe("P1: chart convenience APIs and presets", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Workbook.addWorksheet(wb, "Other");
 
-    expect(() => chartOptionsFromRows(ws, [], { type: "bar", x: "month", y: "sales" })).toThrow(
-      /at least one row/
-    );
     expect(() =>
-      chartOptionsFromRows(ws, [{ month: "Jan", sales: 10 }], {
+      ChartClassic.createOptionsFromRows(ws, [], { type: "bar", x: "month", y: "sales" })
+    ).toThrow(/at least one row/);
+    expect(() =>
+      ChartClassic.createOptionsFromRows(ws, [{ month: "Jan", sales: 10 }], {
         type: "bar",
         x: "month",
         y: "sales",
@@ -479,7 +471,7 @@ describe("P1: chart convenience APIs and presets", () => {
     });
 
     expect(() =>
-      chartOptionsFromTable(ws, "EmptySales", {
+      ChartClassic.createOptionsFromTable(ws, "EmptySales", {
         type: "bar",
         categoryColumn: "Month",
         valueColumns: ["Sales"]
@@ -501,7 +493,7 @@ describe("P1: chart convenience APIs and presets", () => {
       ]
     });
 
-    const structured = chartExOptionsFromTable(ws, "RegionSales", {
+    const structured = ChartEx.createOptionsFromTable(ws, "RegionSales", {
       type: "sunburst",
       categoryColumn: "Region",
       valueColumns: ["Sales", "Profit %"]
@@ -513,7 +505,7 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(structured.series[0].name).toBe("Sales");
     expect(structured.series[1].values).toBe("RegionSales[Profit %]");
 
-    const absolute = chartExOptionsFromTable(ws, "RegionSales", {
+    const absolute = ChartEx.createOptionsFromTable(ws, "RegionSales", {
       type: "funnel",
       categoryColumn: "Region",
       structuredReferences: false
@@ -526,11 +518,11 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(absolute.series[1].values).toBe("'Data Sheet'!$C$2:$C$4");
 
     // Histogram should build cleanly too.
-    const hist = chartExOptionsFromTable(ws, "RegionSales", {
+    const hist = ChartEx.createOptionsFromTable(ws, "RegionSales", {
       type: "histogram",
       valueColumns: ["Sales"]
     });
-    const histModel = buildChartExModel(hist);
+    const histModel = ChartEx.createModel(hist);
     expect(histModel.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId).toBe(
       "clusteredColumn"
     );
@@ -540,7 +532,7 @@ describe("P1: chart convenience APIs and presets", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    const waterfall = chartExOptionsFromRows(
+    const waterfall = ChartEx.createOptionsFromRows(
       ws,
       [
         { stage: "Start", value: 100 },
@@ -560,7 +552,7 @@ describe("P1: chart convenience APIs and presets", () => {
     expect(Cell.getValue(ws, "B4")).toBe(30);
 
     // Skipping headers + offset startCell.
-    const treemap = chartExOptionsFromRows(
+    const treemap = ChartEx.createOptionsFromRows(
       ws,
       [
         { leaf: "A", size: 1 },
@@ -619,10 +611,10 @@ describe("P1: chart convenience APIs and presets", () => {
     const tableChart = charts.find(chart => chart.chartExNumber === tableChartNum);
     const rowChart = charts.find(chart => chart.chartExNumber === rowChartNum);
     expect(
-      Chart.chartExModel(tableChart!)?.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId
+      Chart.getExModel(tableChart!)?.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId
     ).toBe("funnel");
     expect(
-      Chart.chartExModel(rowChart!)?.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId
+      Chart.getExModel(rowChart!)?.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId
     ).toBe("waterfall");
   });
 
@@ -637,20 +629,20 @@ describe("P1: chart convenience APIs and presets", () => {
       rows: []
     });
 
-    expect(() => chartExOptionsFromTable(ws, "EmptyEx", { type: "sunburst" })).toThrow(
+    expect(() => ChartEx.createOptionsFromTable(ws, "EmptyEx", { type: "sunburst" })).toThrow(
       /no data rows/
     );
 
-    expect(() => chartExOptionsFromTable(ws, "MissingTable", { type: "treemap" })).toThrow(
+    expect(() => ChartEx.createOptionsFromTable(ws, "MissingTable", { type: "treemap" })).toThrow(
       /Table not found/
     );
 
-    expect(() => chartExOptionsFromRows(ws, [], { type: "funnel", x: "a", y: "b" })).toThrow(
+    expect(() => ChartEx.createOptionsFromRows(ws, [], { type: "funnel", x: "a", y: "b" })).toThrow(
       /at least one row/
     );
 
     expect(() =>
-      chartExOptionsFromRows(ws, [{ a: "x", b: 1 }], {
+      ChartEx.createOptionsFromRows(ws, [{ a: "x", b: 1 }], {
         type: "funnel",
         x: "a",
         y: "b",
@@ -662,7 +654,7 @@ describe("P1: chart convenience APIs and presets", () => {
   it("Chart.setUserShapesXml attaches a drawing overlay and round-trips through xlsx write", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 2]
     ]);
@@ -677,7 +669,7 @@ describe("P1: chart convenience APIs and presets", () => {
 
     const chart = getCharts(ws)[0];
     // Freshly built chart has no user shapes.
-    expect(Chart.userShapesXml(chart)).toBeUndefined();
+    expect(Chart.getUserShapesXml(chart)).toBeUndefined();
 
     const userShapesXml =
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
@@ -692,10 +684,10 @@ describe("P1: chart convenience APIs and presets", () => {
       "</c:userShapes>";
 
     Chart.setUserShapesXml(chart, userShapesXml);
-    expect(Chart.userShapesXml(chart)).toBeDefined();
-    expect(textDecoder.decode(Chart.userShapesXml(chart)!)).toContain("Callout");
+    expect(Chart.getUserShapesXml(chart)).toBeDefined();
+    expect(textDecoder.decode(Chart.getUserShapesXml(chart)!)).toContain("Callout");
     // The chart model should now carry a rel id for the drawing part.
-    expect(Chart.chartModel(chart)?.userShapesRelId).toMatch(/^rId/);
+    expect(Chart.getModel(chart)?.userShapesRelId).toMatch(/^rId/);
 
     const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
@@ -712,14 +704,14 @@ describe("P1: chart convenience APIs and presets", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    expect(Chart.userShapesXml(chart2)).toBeDefined();
-    expect(textDecoder.decode(Chart.userShapesXml(chart2)!)).toContain("Callout");
+    expect(Chart.getUserShapesXml(chart2)).toBeDefined();
+    expect(textDecoder.decode(Chart.getUserShapesXml(chart2)!)).toContain("Callout");
   });
 
   it("Chart.setUserShapesXml validates input and removeUserShapes drops the rel", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 2]
     ]);
@@ -740,23 +732,23 @@ describe("P1: chart convenience APIs and presets", () => {
       chart,
       '<c:userShapes xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>'
     );
-    expect(Chart.userShapesXml(chart)).toBeDefined();
-    expect(Chart.chartModel(chart)!.userShapesRelId).toBeDefined();
+    expect(Chart.getUserShapesXml(chart)).toBeDefined();
+    expect(Chart.getModel(chart)!.userShapesRelId).toBeDefined();
 
     // Empty bytes == remove.
     Chart.setUserShapesXml(chart, new Uint8Array(0));
-    expect(Chart.userShapesXml(chart)).toBeUndefined();
-    expect(Chart.chartModel(chart)!.userShapesRelId).toBeUndefined();
+    expect(Chart.getUserShapesXml(chart)).toBeUndefined();
+    expect(Chart.getModel(chart)!.userShapesRelId).toBeUndefined();
 
     // Explicit remove is idempotent.
     Chart.removeUserShapes(chart);
-    expect(Chart.userShapesXml(chart)).toBeUndefined();
+    expect(Chart.getUserShapesXml(chart)).toBeUndefined();
   });
 
   it("adds classic and chartEx shortcuts from worksheet helpers", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 10, 1, 3],
       ["Q2", 20, 2, 4]
     ]);
@@ -774,7 +766,7 @@ describe("P1: chart convenience APIs and presets", () => {
     addSurfaceChart(ws, { series: [baseSeries("Surface")], wireframe: true }, "E67:L76");
 
     const charts = getCharts(ws);
-    expect(charts.slice(0, 7).map(chart => Chart.chartTypes(chart)[0].type)).toEqual([
+    expect(charts.slice(0, 7).map(chart => Chart.getTypes(chart)[0].type)).toEqual([
       "bar",
       "area",
       "doughnut",
@@ -783,8 +775,8 @@ describe("P1: chart convenience APIs and presets", () => {
       "stock",
       "surface"
     ]);
-    expect((Chart.chartTypes(charts[0])[0] as BarChartGroup).barDir).toBe("bar");
-    expect((Chart.chartTypes(charts[0])[0] as BarChartGroup).grouping).toBe("stacked");
+    expect((Chart.getTypes(charts[0])[0] as BarChartGroup).barDir).toBe("bar");
+    expect((Chart.getTypes(charts[0])[0] as BarChartGroup).grouping).toBe("stacked");
 
     const chartExSeries = { name: "Modern", values: VALUES_A };
     addParetoChart(ws, { series: [chartExSeries] }, "N1:T10");
@@ -800,7 +792,7 @@ describe("P1: chart convenience APIs and presets", () => {
         .slice(7)
         .map(
           chart =>
-            Chart.chartExModel(chart)?.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId
+            Chart.getExModel(chart)?.chartSpace.chart.plotArea.plotAreaRegion?.series[0].layoutId
         )
     ).toEqual([
       "clusteredColumn",
@@ -827,7 +819,7 @@ describe("P1: chart convenience APIs and presets", () => {
       "F1:M10"
     );
 
-    const group = Chart.chartTypes(getCharts(ws)[0])[0] as LineChartGroup;
+    const group = Chart.getTypes(getCharts(ws)[0])[0] as LineChartGroup;
     expect(group.type).toBe("line");
     expect(group.series[0].cat?.strRef?.formula).toBe("Sheet1!$C$4:$C$5");
     expect(group.series[0].val?.numRef?.formula).toBe("Sheet1!$D$4:$D$5");
@@ -1002,23 +994,27 @@ describe("P1: chart convenience APIs and presets", () => {
       startCell: "D1"
     };
 
-    expect(rootSeriesFromColumns("Root API", seriesOptions).values).toBe("'Root API'!$B$2:$B$2");
-    expect(rootChartOptionsFromTable(ws, "RootSales", tableOptions).series).toHaveLength(1);
+    expect(ChartClassic.createSeriesFromColumns("Root API", seriesOptions).values).toBe(
+      "'Root API'!$B$2:$B$2"
+    );
+    expect(ChartClassic.createOptionsFromTable(ws, "RootSales", tableOptions).series).toHaveLength(
+      1
+    );
     expect(
-      rootChartOptionsFromRows(ws, [{ month: "Feb", sales: 20 }], rowOptions).series
+      ChartClassic.createOptionsFromRows(ws, [{ month: "Feb", sales: 20 }], rowOptions).series
     ).toHaveLength(1);
     expect(ROOT_CHART_PRESETS).toBe(CHART_PRESETS);
     expect(ROOT_CHART_EX_PRESETS).toBe(CHART_EX_PRESETS);
     expect(ROOT_EXCEL_CHART_PRESETS).toBe(EXCEL_CHART_PRESETS);
     expect(ROOT_EXCEL_CHART_EX_PRESETS).toBe(EXCEL_CHART_EX_PRESETS);
-    expect(rootApplyChartExPreset("map", { series: [{ values: "Root API!$B$2:$B$3" }] }).type).toBe(
+    expect(ChartEx.applyPreset("map", { series: [{ values: "Root API!$B$2:$B$3" }] }).type).toBe(
       "regionMap"
     );
-    expect(rootRenderChartSvg(makeRootExportRenderedChartModel())).toContain("<svg");
+    expect(ChartClassic.toSvg(makeRootExportRenderedChartModel())).toContain("<svg");
     const chartExType: ChartExType = "histogram";
     expect(
-      rootRenderChartExSvg(
-        rootBuildChartExModel({
+      ChartEx.toSvg(
+        ChartEx.createModel({
           type: chartExType,
           series: [{ name: "S", values: "Root API!$B$2:$B$3", literalValues: [1, 2] }]
         })
@@ -1026,7 +1022,7 @@ describe("P1: chart convenience APIs and presets", () => {
     ).toContain("<svg");
     expect(rootXmlEncodeAttr('a " b')).toBe("a &quot; b");
     expect(() => rootValidateXmlName("valid:name")).not.toThrow();
-    const scene: ChartScene = buildChartScene(makeRootExportRenderedChartModel());
+    const scene: ChartScene = ChartClassic.Backend.toScene(makeRootExportRenderedChartModel());
     const legend: ChartSceneLegend = scene.legend;
     const series: ChartSceneSeries = scene.series[0];
     const title: ChartSceneText | undefined = scene.title;
@@ -1039,18 +1035,22 @@ describe("P1: chart convenience APIs and presets", () => {
 describe("Builder gap fixes verification", () => {
   it("rejects invalid classic chart option combinations", () => {
     expect(() =>
-      buildChartModel({
+      ChartClassic.createModel({
         type: "pie",
         series: [{ ...baseSeries("S"), trendline: { type: "linear" } }]
       })
     ).toThrow(/trendline/);
     expect(() =>
-      buildChartModel({ type: "surface", series: [baseSeries("S")], dataLabels: { showVal: true } })
+      ChartClassic.createModel({
+        type: "surface",
+        series: [baseSeries("S")],
+        dataLabels: { showVal: true }
+      })
     ).toThrow(/dataLabels/);
   });
 
   it("stock chart supports hiLowLines, upDownBars, dropLines", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "stock",
       series: [
         baseSeries("Open"),
@@ -1076,7 +1076,7 @@ describe("Builder gap fixes verification", () => {
     // builder now refuses the option up front with a diagnostic
     // error rather than silently producing schema-invalid XML.
     expect(() =>
-      buildChartModel({
+      ChartClassic.createModel({
         type: "stock",
         series: [baseSeries("S1"), baseSeries("S2", VALUES_B)],
         varyColors: true
@@ -1085,7 +1085,7 @@ describe("Builder gap fixes verification", () => {
   });
 
   it("ofPie chart supports gapWidth and serLines", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "ofPie",
       series: [baseSeries("S")],
       gapWidth: 200,
@@ -1120,15 +1120,15 @@ describe("Renderer gap fixes verification", () => {
     const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
-    const s = Chart.chartModel(getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0])!.chart.plotArea
+    const s = Chart.getModel(getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0])!.chart.plotArea
       .chartTypes[0].series[0];
-    const parsed = parseSpPr(s.spPr!);
+    const parsed = DrawingMl.parseSpPr(s.spPr!);
     expect(parsed.line?.width).toBe(25400);
     expect(parsed.line?.dash).toBe("dash");
   });
 
   it("line cap/join/compound are preserved through structured render", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       line: { width: 12700, cap: "rnd", join: "round", compound: "sng" }
     });
     // buildSpPr returns a structured object (no _rawXml)
@@ -1140,7 +1140,7 @@ describe("Renderer gap fixes verification", () => {
   });
 
   it("sysClr color renders correctly", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       fill: { solid: { sysClr: "windowText" } }
     });
     // buildSpPr returns a structured object (no _rawXml)
@@ -1149,7 +1149,7 @@ describe("Renderer gap fixes verification", () => {
   });
 
   it("prstClr color renders correctly", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       fill: { solid: { prstClr: "red" } }
     });
     // buildSpPr returns a structured object (no _rawXml)
@@ -1158,7 +1158,7 @@ describe("Renderer gap fixes verification", () => {
   });
 
   it("shade and satMod modifiers render on theme color", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       fill: { solid: { theme: 4, shade: 75000, satMod: 120000 } }
     });
     // buildSpPr returns a structured object (no _rawXml)
@@ -1172,7 +1172,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   function makeRenderedChartModel(options?: Partial<AddChartOptions>): ChartModel {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 5],
       ["B", 20, 12],
       ["C", 30, 25]
@@ -1187,13 +1187,13 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    return Chart.chartModel(getCharts(ws)[0])!;
+    return Chart.getModel(getCharts(ws)[0])!;
   }
 
   function makeRenderedBubbleChartModel(): ChartModel {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       [1, 10, 5],
       [2, 20, 12],
       [3, 30, 25]
@@ -1213,11 +1213,11 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    return Chart.chartModel(getCharts(ws)[0])!;
+    return Chart.getModel(getCharts(ws)[0])!;
   }
 
   it("renderChartSvg returns a standalone SVG chart preview", () => {
-    const svg = renderChartSvg(makeRenderedChartModel());
+    const svg = ChartClassic.toSvg(makeRenderedChartModel());
     expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
     expect(svg).toContain("Sales");
     expect(svg).toContain("<rect");
@@ -1227,7 +1227,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   it("renderChartSvg has a stable golden hash for a decorated combo preview", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 2],
       ["B", 20, 4],
       ["C", 15, 5]
@@ -1262,7 +1262,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       "E1:L12"
     );
 
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 420, height: 260 });
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
+      width: 420,
+      height: 260
+    });
     // Hashed over the *normalised geometry*, not the markup. A hash of the SVG
     // bytes cannot survive a re-implementation — change an attribute's order or
     // emit `<polyline>` where a `<path>` used to be and it breaks even though the
@@ -1285,11 +1288,11 @@ describe("P2: chart SVG/PDF renderer", () => {
         .map(kind => `${kind}:${counts.get(kind)!}`)
         .join(" ")
     ).toBe("circle:3 polygon:3 polyline:13 rect:6 text:20");
-    expect(stableHash(describeSvgGeometry(svg))).toBe("ed77541d");
+    expect(stableHash(describeSvgGeometry(svg))).toBe("c3056985");
   });
 
   it("renderChartSvg is documented as a deterministic preview, not Excel-identical", () => {
-    const svg = renderChartSvg(makeRenderedChartModel());
+    const svg = ChartClassic.toSvg(makeRenderedChartModel());
     expect(svg).toContain("deterministic preview");
     expect(svg).toContain("not an Excel-identical layout");
   });
@@ -1303,7 +1306,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     const build = (label: string, legendPosition: "r" | "b" = "r"): ChartModel => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
-      Worksheet.addRows(ws, [
+      Row.addMany(ws, [
         ["A", 10],
         ["B", 20]
       ]);
@@ -1317,12 +1320,12 @@ describe("P2: chart SVG/PDF renderer", () => {
         },
         "D1:J10"
       );
-      return Chart.chartModel(getCharts(ws)[0])!;
+      return Chart.getModel(getCharts(ws)[0])!;
     };
     // Horizontal legend: width growth is visible on the legend rect itself;
     // plot width is governed by other padding so it does not shrink here.
-    const shortBottom = buildChartScene(build("S", "b"), { width: 400, height: 240 });
-    const longBottom = buildChartScene(
+    const shortBottom = ChartClassic.Backend.toScene(build("S", "b"), { width: 400, height: 240 });
+    const longBottom = ChartClassic.Backend.toScene(
       build("A much longer series name than the default one", "b"),
       { width: 400, height: 240 }
     );
@@ -1330,8 +1333,8 @@ describe("P2: chart SVG/PDF renderer", () => {
 
     // Vertical legend: long labels push the plot rectangle inwards. Use a
     // wide canvas so the unclamped legend column width can express itself.
-    const shortRight = buildChartScene(build("S", "r"), { width: 800, height: 240 });
-    const longRight = buildChartScene(
+    const shortRight = ChartClassic.Backend.toScene(build("S", "r"), { width: 800, height: 240 });
+    const longRight = ChartClassic.Backend.toScene(
       build("A much longer series name than the default one", "r"),
       { width: 800, height: 240 }
     );
@@ -1349,7 +1352,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // emit a matching ChartSceneLine.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30]
@@ -1370,7 +1373,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
       width: 320,
       height: 240
     });
@@ -1392,7 +1395,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     }
 
     // And the SVG output must contain the leader stroke (colour hardcoded).
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, {
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
       width: 320,
       height: 240
     });
@@ -1409,7 +1412,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     const cats = Array.from({ length: 8 }, (_, i) => `Cat${i + 1}`);
     const vals = Array.from({ length: 8 }, (_, i) => 10 + (i % 3));
-    Worksheet.addRows(
+    Row.addMany(
       ws,
       cats.map((c, i) => [c, vals[i]])
     );
@@ -1430,7 +1433,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:F8"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
       width: 160,
       height: 120
     });
@@ -1455,7 +1458,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     const width = 400;
     const height = 240;
     const baseModel = makeRenderedChartModel();
-    const baseSvg = renderChartSvg(baseModel, { width, height });
+    const baseSvg = ChartClassic.toSvg(baseModel, { width, height });
     const manualModel = makeRenderedChartModel();
     manualModel.chart.plotArea.layout = {
       manualLayout: {
@@ -1469,7 +1472,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         h: 0.6
       }
     };
-    const manualSvg = renderChartSvg(manualModel, { width, height });
+    const manualSvg = ChartClassic.toSvg(manualModel, { width, height });
 
     // Extract the plot rectangle's leftmost <line> x attribute from each SVG —
     // the deterministic renderer emits axis gridlines starting at plot.x.
@@ -1509,8 +1512,8 @@ describe("P2: chart SVG/PDF renderer", () => {
       });
       return model;
     };
-    const leftSvg = renderChartSvg(buildModel("l"), { width: 400, height: 240 });
-    const rightSvg = renderChartSvg(buildModel("r"), { width: 400, height: 240 });
+    const leftSvg = ChartClassic.toSvg(buildModel("l"), { width: 400, height: 240 });
+    const rightSvg = ChartClassic.toSvg(buildModel("r"), { width: 400, height: 240 });
 
     // Left-positioned labels must be emitted with text-anchor="end" (so the
     // glyphs end at the anchor x); right-positioned labels with "start".
@@ -1525,10 +1528,10 @@ describe("P2: chart SVG/PDF renderer", () => {
     expect(rightLabelAnchors.length).toBeGreaterThan(0);
   });
 
-  it("Chart.toSVG renders a classic chart through the high-level API", () => {
+  it("Chart.toSvg renders a classic chart through the high-level API", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1542,16 +1545,16 @@ describe("P2: chart SVG/PDF renderer", () => {
       "D1:J10"
     );
 
-    const svg = Chart.toSVG(getCharts(ws)[0], { width: 320, height: 180 });
+    const svg = Chart.toSvg(getCharts(ws)[0], { width: 320, height: 180 });
     expect(svg).toContain('width="320"');
     expect(svg).toContain("Line Preview");
     expect(svg).toContain("<polyline");
   });
 
-  it("Chart.toPNG renders a classic chart without a browser canvas", async () => {
+  it("Chart.toPng renders a classic chart without a browser canvas", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1565,19 +1568,19 @@ describe("P2: chart SVG/PDF renderer", () => {
       "D1:J10"
     );
 
-    const png = await Chart.toPNG(getCharts(ws)[0], { width: 320, height: 180 });
+    const png = await Chart.toPng(getCharts(ws)[0], { width: 320, height: 180 });
     expectPngDimensions(png, 320, 180);
   });
 
   it("renderChartPng has a stable golden raster signature", async () => {
-    const png = await renderChartPng(makeRenderedChartModel(), { width: 220, height: 140 });
+    const png = await ChartClassic.toPng(makeRenderedChartModel(), { width: 220, height: 140 });
     expectPngDimensions(png, 220, 140);
     // The exact IDAT hash is platform-dependent (system font differences
     // produce different glyph pixels on macOS vs Linux). Assert the PNG is
     // non-trivial (contains enough pixel data to be a real chart, not a
     // blank white rectangle) and that repeated calls are deterministic.
     expect(png.length).toBeGreaterThan(1000);
-    const png2 = await renderChartPng(makeRenderedChartModel(), { width: 220, height: 140 });
+    const png2 = await ChartClassic.toPng(makeRenderedChartModel(), { width: 220, height: 140 });
     expect(pngSignature(png2)).toBe(pngSignature(png));
   });
 
@@ -1597,8 +1600,8 @@ describe("P2: chart SVG/PDF renderer", () => {
     valueAxis!.title = { text: { paragraphs: [{ runs: [{ text: "Units" }] }] } };
 
     const [basePng, rotatedPng] = await Promise.all([
-      renderChartPng(baseModel, { width: 260, height: 160 }),
-      renderChartPng(rotatedModel, { width: 260, height: 160 })
+      ChartClassic.toPng(baseModel, { width: 260, height: 160 }),
+      ChartClassic.toPng(rotatedModel, { width: 260, height: 160 })
     ]);
     // Sanity: both PNGs have the expected geometry.
     expectPngDimensions(basePng, 260, 160);
@@ -1611,11 +1614,11 @@ describe("P2: chart SVG/PDF renderer", () => {
     // Meanwhile the SVG must still emit the canonical rotate transform so
     // the browser path continues to match visually (regression guard for
     // SVG emit — unrelated to the basic raster fix but cheap to assert).
-    const svg = renderChartSvg(rotatedModel, { width: 260, height: 160 });
+    const svg = ChartClassic.toSvg(rotatedModel, { width: 260, height: 160 });
     expect(svg).toMatch(/transform="rotate\(-90 /);
   });
 
-  it("Chart.toPNG renders a ChartEx chart without a browser canvas", async () => {
+  it("Chart.toPng renders a ChartEx chart without a browser canvas", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     addHistogramChart(
@@ -1628,14 +1631,14 @@ describe("P2: chart SVG/PDF renderer", () => {
       "D1:J10"
     );
 
-    const png = await Chart.toPNG(getCharts(ws)[0], { width: 300, height: 160 });
+    const png = await Chart.toPng(getCharts(ws)[0], { width: 300, height: 160 });
     expectPngDimensions(png, 300, 160);
   });
 
-  it("Chart.toPNG honors scale, transparent background, and DPI metadata", async () => {
+  it("Chart.toPng honors scale, transparent background, and DPI metadata", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1648,14 +1651,14 @@ describe("P2: chart SVG/PDF renderer", () => {
       "D1:J10"
     );
 
-    const svg = Chart.toSVG(getCharts(ws)[0], {
+    const svg = Chart.toSvg(getCharts(ws)[0], {
       width: 160,
       height: 90,
       backgroundColor: "transparent"
     });
     expect(svg).not.toContain('fill="#fff"');
 
-    const png = await Chart.toPNG(getCharts(ws)[0], {
+    const png = await Chart.toPng(getCharts(ws)[0], {
       width: 160,
       height: 90,
       scale: 2,
@@ -1667,19 +1670,19 @@ describe("P2: chart SVG/PDF renderer", () => {
   });
 
   it("renderChartPng produces distinct content for different chart types", async () => {
-    const barPng = await renderChartPng(makeRenderedChartModel({ type: "bar" }), {
+    const barPng = await ChartClassic.toPng(makeRenderedChartModel({ type: "bar" }), {
       width: 200,
       height: 120
     });
-    const piePng = await renderChartPng(makeRenderedChartModel({ type: "pie" }), {
+    const piePng = await ChartClassic.toPng(makeRenderedChartModel({ type: "pie" }), {
       width: 200,
       height: 120
     });
-    const linePng = await renderChartPng(makeRenderedChartModel({ type: "line" }), {
+    const linePng = await ChartClassic.toPng(makeRenderedChartModel({ type: "line" }), {
       width: 200,
       height: 120
     });
-    const areaPng = await renderChartPng(makeRenderedChartModel({ type: "area" }), {
+    const areaPng = await ChartClassic.toPng(makeRenderedChartModel({ type: "area" }), {
       width: 200,
       height: 120
     });
@@ -1700,7 +1703,10 @@ describe("P2: chart SVG/PDF renderer", () => {
   });
 
   it("buildChartScene produces shared geometry for SVG and PDF rendering", () => {
-    const scene = buildChartScene(makeRenderedChartModel(), { width: 300, height: 180 });
+    const scene = ChartClassic.Backend.toScene(makeRenderedChartModel(), {
+      width: 300,
+      height: 180
+    });
     expect(scene.width).toBe(300);
     expect(scene.height).toBe(180);
     expect(scene.series[0].type).toBe("bar");
@@ -1710,7 +1716,7 @@ describe("P2: chart SVG/PDF renderer", () => {
 
   it("buildChartScene handles horizontal bar charts", () => {
     const model = makeRenderedChartModel({ type: "bar", barDir: "bar" });
-    const scene = buildChartScene(model, { width: 300, height: 180 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 300, height: 180 });
     const series = scene.series[0];
 
     expect(series.type).toBe("bar");
@@ -1728,7 +1734,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // vertical stacks of all-negative values did the mirror-image thing.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 5],
       ["B", 20, 12],
       ["C", 30, 25]
@@ -1744,7 +1750,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const [base, top] = scene.series as [
       (typeof scene.series)[number],
       (typeof scene.series)[number]
@@ -1775,7 +1784,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // up to the axis, overlapping the first segment.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", -10, -5],
       ["B", -20, -8],
       ["C", -30, -15]
@@ -1791,7 +1800,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const [base, top] = scene.series as [
       (typeof scene.series)[number],
       (typeof scene.series)[number]
@@ -1819,7 +1831,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // frame instead of growing from the visible axis floor.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 30],
       ["B", 50],
       ["C", 80]
@@ -1832,7 +1844,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 260 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 260
+    });
     const series = scene.series[0];
     if (series.type !== "bar") {
       throw new Error("expected bar series");
@@ -1855,7 +1870,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // `valueToX` naturally flip the axis direction.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30]
@@ -1868,11 +1883,14 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const rev = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 260 });
+    const rev = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 260
+    });
     // Build a matching chart without orientation for comparison.
     const wb2 = Workbook.create();
     const ws2 = Workbook.addWorksheet(wb2, "Sheet1");
-    Worksheet.addRows(ws2, [
+    Row.addMany(ws2, [
       ["A", 10],
       ["B", 20],
       ["C", 30]
@@ -1882,7 +1900,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       { series: [{ name: "S", categories: "Sheet1!$A$1:$A$3", values: "Sheet1!$B$1:$B$3" }] },
       "D1:J10"
     );
-    const normal = buildChartScene(Chart.chartModel(getCharts(ws2)[0])!, {
+    const normal = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws2)[0])!, {
       width: 400,
       height: 260
     });
@@ -1914,7 +1932,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // series' points sit at the cumulative sum of prior series.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 5],
       ["B", 20, 12],
       ["C", 30, 25]
@@ -1930,7 +1948,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const [base, top] = scene.series as [
       (typeof scene.series)[number],
       (typeof scene.series)[number]
@@ -2025,7 +2046,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         }
       }
     };
-    const svg = renderChartSvg(model, { width: 400, height: 240 });
+    const svg = ChartClassic.toSvg(model, { width: 400, height: 240 });
     // The blank at index 2 must split the polyline into two separate
     // `<polyline>` elements — one for indices 0-1, one for indices
     // 3-4. Before the fix a single polyline contained "x,0" at the
@@ -2135,7 +2156,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         }
       }
     };
-    const scene = buildChartScene(model, { width: 400, height: 260 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 400, height: 260 });
     const series = scene.series[0];
     if (series.type !== "bar" || !series.errorBars) {
       throw new Error("expected bar series with error bars");
@@ -2159,7 +2180,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // bars and above for `minus`-only.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30]
@@ -2183,7 +2204,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const bar = scene.series[0];
     if (bar.type !== "bar" || !bar.errorBars || bar.errorBars.length === 0) {
       throw new Error("expected bar series with error bars");
@@ -2256,7 +2280,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         }
       }
     };
-    const scene = buildChartScene(model, { width: 300, height: 200 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 300, height: 200 });
     // Left axis (`axPos=l`) is the Y axis in a column chart; its stroke
     // colour must come from the raw-XML `<a:srgbClr val="FF00AA"/>`.
     expect(scene.axes.y?.color).toBe("#FF00AA");
@@ -2269,7 +2293,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // slice for emphasis saw it sitting in the default position.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 30],
       ["B", 40],
       ["C", 30]
@@ -2290,7 +2314,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const pie = scene.series[0];
     if (pie.type !== "pie") {
       throw new Error("expected pie series");
@@ -2317,7 +2344,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // — one `c:dPt` per slice specifying `spPr.solidFill.srgb`.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Apple", 20],
       ["Banana", 30],
       ["Cherry", 50]
@@ -2341,7 +2368,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const pie = scene.series[0];
     expect(pie.type).toBe("pie");
     if (pie.type !== "pie") {
@@ -2362,7 +2392,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // bars whose real captions were author-specified strings.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Alpha", 10],
       ["Beta", 20],
       ["Gamma", 30]
@@ -2374,7 +2404,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const labelTexts = scene.yLabels.map(label => label.text);
     expect(labelTexts).toContain("Alpha");
     expect(labelTexts).toContain("Beta");
@@ -2392,7 +2425,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // `majorGridlines`, matching Excel's native render.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30]
@@ -2405,7 +2438,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     expect(scene.gridlines.length).toBeGreaterThan(0);
     for (const line of scene.gridlines) {
       expect(line.x1).toBeCloseTo(line.x2, 5);
@@ -2421,7 +2457,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // a scatter chart (X axis naturally carries gridlines).
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       [1, 10],
       [2, 20],
       [3, 30]
@@ -2434,7 +2470,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const verticalLines = scene.gridlines.filter(g => Math.abs(g.x1 - g.x2) < 1e-3);
     expect(verticalLines.length).toBeGreaterThan(0);
   });
@@ -2448,7 +2487,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // matching tick labels — not six ticks at 0/20/40/60/80/100.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 0],
       ["B", 50],
       ["C", 100]
@@ -2462,7 +2501,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     // Gridlines: horizontal lines across the plot. With majorUnit=25
     // on [0, 100] we expect ticks at 0, 25, 50, 75, 100; the two
     // endpoints coincide with the plot edges so the renderer skips
@@ -2476,8 +2518,8 @@ describe("P2: chart SVG/PDF renderer", () => {
   });
 
   it("renderChartSvg draws area and bubble primitives", () => {
-    const areaSvg = renderChartSvg(makeRenderedChartModel({ type: "area" }));
-    const bubbleSvg = renderChartSvg(makeRenderedBubbleChartModel());
+    const areaSvg = ChartClassic.toSvg(makeRenderedChartModel({ type: "area" }));
+    const bubbleSvg = ChartClassic.toSvg(makeRenderedBubbleChartModel());
 
     expect(areaSvg).toContain("<polygon");
     expect(areaSvg).toContain("<polyline");
@@ -2493,7 +2535,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // `resolveChartColor` hook.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -2512,7 +2554,10 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     expect(scene.gridlines.some(g => g.color.toUpperCase() === "#4472C4")).toBe(true);
   });
 
@@ -2523,7 +2568,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // reverted to the default grey on render.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 2]
     ]);
@@ -2540,14 +2585,17 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     expect(scene.title?.color.toUpperCase()).toBe("#ED7D31");
   });
 
   it("renderChartSvg overlays combo chart groups instead of rendering only the first group", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 1],
       ["B", 20, 2],
       ["C", 30, 3]
@@ -2572,7 +2620,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "E1:L12"
     );
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!);
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!);
     expect(svg).toContain("Combo");
     expect(svg).toContain("<rect");
     expect(svg).toContain("<polyline");
@@ -2583,7 +2631,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   it("buildChartScene exposes secondary axes, legend visibility, and axis titles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 1000],
       ["B", 20, 4000],
       ["C", 30, 9000]
@@ -2611,15 +2659,15 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "E1:L12"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
     const secondaryValueAxis = model.chart.plotArea.axes.find(
       axis => axis.axisType === "val" && axis.axPos === "r"
     )!;
     secondaryValueAxis.title = {
       text: { paragraphs: [{ runs: [{ text: "Users" }] }] }
     };
-    const scene = buildChartScene(model, { width: 420, height: 260 });
-    const svg = renderChartSvg(model, { width: 420, height: 260 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 420, height: 260 });
+    const svg = ChartClassic.toSvg(model, { width: 420, height: 260 });
 
     expect(scene.axes.y2).toBeDefined();
     expect(scene.secondaryYLabels.map(label => label.text)).toContain("9000");
@@ -2633,8 +2681,8 @@ describe("P2: chart SVG/PDF renderer", () => {
   });
 
   it("buildChartScene hides the legend when the chart has no legend", () => {
-    const scene = buildChartScene(makeRenderedChartModel({ showLegend: false }));
-    const svg = renderChartSvg(makeRenderedChartModel({ showLegend: false }));
+    const scene = ChartClassic.Backend.toScene(makeRenderedChartModel({ showLegend: false }));
+    const svg = ChartClassic.toSvg(makeRenderedChartModel({ showLegend: false }));
     expect(scene.legend.visible).toBe(false);
     expect(svg).not.toContain('font-size="10" fill="#555">S</text>');
   });
@@ -2657,13 +2705,13 @@ describe("P2: chart SVG/PDF renderer", () => {
     const ofPie = makeRenderedChartModel({ type: "ofPie" });
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 15, 8, 12],
       ["B", 20, 24, 18, 19],
       ["C", 30, 34, 27, 33],
       ["D", 24, 26, 20, 22]
     ]);
-    const stock = buildChartModel({
+    const stock = ChartClassic.createModel({
       type: "stock",
       series: [
         { name: "Open", categories: CATEGORIES, values: "Sheet1!$B$1:$B$4" },
@@ -2672,9 +2720,9 @@ describe("P2: chart SVG/PDF renderer", () => {
         { name: "Close", categories: CATEGORIES, values: "Sheet1!$E$1:$E$4" }
       ]
     });
-    fillChartCaches(stock, wb);
+    ChartClassic.fillCaches(stock, wb);
     const svg = [decorated, radar, surface, ofPie, stock]
-      .map(model => renderChartSvg(model))
+      .map(model => ChartClassic.toSvg(model))
       .join("\n");
     expect(svg).toContain("Trend");
     expect(svg).toContain("stroke-dasharray");
@@ -2765,7 +2813,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     // leader lines are produced by the pie pass separately below.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -2816,7 +2864,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         return this;
       }
     };
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 320,
@@ -2839,7 +2887,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   it("drawChartPdf draws pie leader lines as connector strokes", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -2874,7 +2922,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         return this;
       }
     };
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 320,
@@ -2906,7 +2954,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -2920,7 +2968,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 320,
@@ -2958,7 +3006,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -2971,7 +3019,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 320,
@@ -3002,7 +3050,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -3016,7 +3064,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 320,
@@ -3057,7 +3105,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -3073,7 +3121,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
     model.chart.title!.txPr = {
       _rawXml:
         '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1800" b="1" i="1"><a:solidFill><a:srgbClr val="123456"/></a:solidFill><a:latin typeface="Verdana"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr>'
@@ -3111,7 +3159,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -3125,7 +3173,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       "D1:J10"
     );
     const baseline = lineCalls.length;
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 300,
@@ -3163,7 +3211,7 @@ describe("P2: chart SVG/PDF renderer", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -3176,7 +3224,7 @@ describe("P2: chart SVG/PDF renderer", () => {
       },
       "D1:J10"
     );
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 300,
@@ -3195,7 +3243,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   it("drawChartPdf renders bar3D with three faces per bar (axonometric projection)", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -3232,7 +3280,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         return this;
       }
     };
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 300,
@@ -3253,7 +3301,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   it("drawChartPdf renders dataTable rows and swatch cells", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 100],
       ["Q2", 200],
       ["Q3", 150]
@@ -3285,7 +3333,7 @@ describe("P2: chart SVG/PDF renderer", () => {
         return this;
       }
     };
-    drawChartPdf(page, Chart.chartModel(getCharts(ws)[0])!, {
+    drawChartPdf(page, Chart.getModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 320,

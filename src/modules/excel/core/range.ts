@@ -1,5 +1,6 @@
 import { ExcelError } from "@excel/errors";
 import type { DecodedAddress } from "@excel/types";
+import { quoteSheetName } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
 
 /**
@@ -27,15 +28,10 @@ interface RowWithDimensions {
 /** Input types accepted by {@link Range.create}. */
 export type RangeInput = RangeData | string | number | RangeInput[];
 
-function serialisedSheetName(r: RangeData): string {
+export function serialisedSheetName(r: RangeData): string {
   const { sheetName } = r;
-  if (sheetName) {
-    if (/^[a-zA-Z0-9]*$/.test(sheetName)) {
-      return `${sheetName}!`;
-    }
-    return `'${sheetName.replace(/'/g, "''")}'!`;
-  }
-  return "";
+  // The one quoting rule: a sheet named `2023` or `A1` left bare read as a number or a cell reference.
+  return sheetName ? `${quoteSheetName(sheetName)}!` : "";
 }
 
 function decodeInto(r: RangeData, argv: RangeInput[]): void {
@@ -174,6 +170,7 @@ export function rangeRight(r: RangeData): number {
   return r.right || 1;
 }
 
+/** Grow the range to cover the rectangle `top, left, bottom, right` (1-based). */
 export function rangeExpand(
   r: RangeData,
   top: number,
@@ -243,14 +240,17 @@ export function rangeAbsoluteShort(r: RangeData): string {
   return rangeCount(r) > 1 ? rangeAbsolute(r) : serialisedSheetName(r) + rangeAbsoluteTopLeft(r);
 }
 
+/** How many cells the range covers. */
 export function rangeCount(r: RangeData): number {
   return (1 + rangeBottom(r) - rangeTop(r)) * (1 + rangeRight(r) - rangeLeft(r));
 }
 
+/** The range as `A1:B2` text. */
 export function rangeToString(r: RangeData): string {
   return rangeRange(r);
 }
 
+/** Whether the two ranges share a cell (on the same sheet, when both name one). */
 export function rangeIntersects(r: RangeData, other: RangeData): boolean {
   if (other.sheetName && r.sheetName && other.sheetName !== r.sheetName) {
     return false;
@@ -270,6 +270,7 @@ export function rangeIntersects(r: RangeData, other: RangeData): boolean {
   return true;
 }
 
+/** Whether the range covers the cell at `addressStr` (`"B2"`). */
 export function rangeContains(r: RangeData, addressStr: string): boolean {
   const address = colCache.decodeEx(addressStr);
   if ("row" in address && "col" in address) {
@@ -278,6 +279,7 @@ export function rangeContains(r: RangeData, addressStr: string): boolean {
   return false;
 }
 
+/** Whether the range covers the cell `address`. */
 export function rangeContainsEx(r: RangeData, address: DecodedAddress): boolean {
   if (address.sheetName && r.sheetName && address.sheetName !== r.sheetName) {
     return false;
@@ -290,6 +292,7 @@ export function rangeContainsEx(r: RangeData, address: DecodedAddress): boolean 
   );
 }
 
+/** Visit every cell of the range, row by row, as `(address, row, col)`. */
 export function rangeForEachAddress(
   r: RangeData,
   cb: (address: string, row: number, col: number) => void

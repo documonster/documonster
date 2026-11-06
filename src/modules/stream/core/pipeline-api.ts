@@ -1,7 +1,8 @@
 /**
  * The module's `pipeline()` calling convention, shared by both entry points:
- * stages, then optional `{ signal, end }` options, then an optional callback;
- * a promise is returned either way. Each entry supplies how to run the stages.
+ * stages, then optional `{ signal, end }` options, then an optional callback.
+ * With a callback the last stage is returned, as `node:stream` returns it; without
+ * one, a promise. Each entry supplies how to run the stages.
  */
 
 import type { PipelineCallback, PipelineOptions } from "@stream/core/options";
@@ -14,7 +15,7 @@ export function createPipeline(
   run: PipelineRunner
 ): (
   ...args: [...PipelineStageLike[], PipelineOptions | PipelineCallback] | PipelineStageLike[]
-) => Promise<void> {
+) => Promise<void> | PipelineStageLike {
   return function pipeline(...args) {
     let stages = args as unknown[];
     let options: PipelineOptions | undefined;
@@ -43,6 +44,7 @@ export function createPipeline(
         () => cb(),
         err => cb(err)
       );
+      return stages[stages.length - 1] as PipelineStageLike;
     }
     return promise;
   };

@@ -11,7 +11,7 @@ describe("parse.browser - worker inflate (optional)", () => {
     for (const f of files) {
       z.add(f.name, encoder.encode(f.content));
     }
-    return z.bytesSync();
+    return z.toBufferSync();
   }
 
   it("should parse entries when worker inflate is enabled (with fallback)", async () => {

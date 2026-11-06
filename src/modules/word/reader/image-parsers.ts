@@ -5,7 +5,9 @@
  * These are pure parsers that don't depend on ReaderContext.
  */
 
+import { WRITTEN, readToken } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
+import { frameFieldsOf, readDrawingFrame } from "@word/reader/drawing-frame";
 import { parseOutline, parseSrcRect, parseSvgBlip, parseXfrm } from "@word/reader/drawing-helpers";
 import { safeParseInt, serializeElement } from "@word/reader/parse-utils";
 import type { FloatingImage, InlineImageContent, OpaqueRunContent, RunContent } from "@word/types";
@@ -78,7 +80,21 @@ function parseDrawingContent(drawingEl: XmlElement, content: RunContent[]): void
       }
     }
 
+    img._frame = readDrawingFrame(inlineEl, frameFieldsOf(img));
     content.push(img);
+    return;
+  }
+
+  // An anchored drawing — a floating picture, shape or chart. Kept verbatim
+  // here so it survives wherever the paragraph lives: in a header, footer,
+  // note, comment or table cell. A top-level body paragraph additionally
+  // lifts it out as a modelled block, and drops this copy (see
+  // `stripDrawingOpaqueRuns`).
+  if (findChild(drawingEl, "wp:anchor")) {
+    content.push({
+      type: "opaqueRun",
+      rawXml: serializeElement(drawingEl)
+    } satisfies OpaqueRunContent);
   }
 }
 
@@ -178,11 +194,13 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
   // Horizontal position
   const hPosEl = findChild(anchorEl, "wp:positionH");
   if (hPosEl) {
-    const h: Mutable<NonNullable<FloatingImage["horizontalPosition"]>> = {
-      relativeTo: hPosEl.attributes["relativeFrom"] as NonNullable<
-        FloatingImage["horizontalPosition"]
-      >["relativeTo"]
-    };
+    const h: Mutable<NonNullable<FloatingImage["horizontalPosition"]>> = {};
+    h.relativeTo = readToken(
+      hPosEl.attributes["relativeFrom"],
+      WRITTEN.horizontalRelative,
+      h,
+      "relativeTo"
+    ) as NonNullable<FloatingImage["horizontalPosition"]>["relativeTo"];
     const offsetEl = findChild(hPosEl, "wp:posOffset");
     if (offsetEl) {
       const n = parseInt(textContent(offsetEl), 10);
@@ -192,7 +210,9 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     }
     const alignEl = findChild(hPosEl, "wp:align");
     if (alignEl) {
-      h.align = textContent(alignEl) as NonNullable<FloatingImage["horizontalPosition"]>["align"];
+      h.align = readToken(textContent(alignEl), WRITTEN.horizontalAlign, h, "align") as NonNullable<
+        FloatingImage["horizontalPosition"]
+      >["align"];
     }
     img.horizontalPosition = h;
   }
@@ -200,11 +220,13 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
   // Vertical position
   const vPosEl = findChild(anchorEl, "wp:positionV");
   if (vPosEl) {
-    const v: Mutable<NonNullable<FloatingImage["verticalPosition"]>> = {
-      relativeTo: vPosEl.attributes["relativeFrom"] as NonNullable<
-        FloatingImage["verticalPosition"]
-      >["relativeTo"]
-    };
+    const v: Mutable<NonNullable<FloatingImage["verticalPosition"]>> = {};
+    v.relativeTo = readToken(
+      vPosEl.attributes["relativeFrom"],
+      WRITTEN.verticalRelative,
+      v,
+      "relativeTo"
+    ) as NonNullable<FloatingImage["verticalPosition"]>["relativeTo"];
     const offsetEl = findChild(vPosEl, "wp:posOffset");
     if (offsetEl) {
       const n = parseInt(textContent(offsetEl), 10);
@@ -214,7 +236,9 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     }
     const alignEl = findChild(vPosEl, "wp:align");
     if (alignEl) {
-      v.align = textContent(alignEl) as NonNullable<FloatingImage["verticalPosition"]>["align"];
+      v.align = readToken(textContent(alignEl), WRITTEN.verticalAlign, v, "align") as NonNullable<
+        FloatingImage["verticalPosition"]
+      >["align"];
     }
     img.verticalPosition = v;
   }
@@ -227,20 +251,20 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     const wn = wrapChild.name;
     let wrap: Mutable<NonNullable<FloatingImage["wrap"]>> | undefined;
     if (wn === "wp:wrapSquare") {
-      wrap = {
-        style: "square",
-        side: wrapChild.attributes["wrapText"] as NonNullable<FloatingImage["wrap"]>["side"]
-      };
+      wrap = { style: "square" };
+      wrap.side = readToken(wrapChild.attributes["wrapText"], WRITTEN.wrapSide, wrap, "side") as
+        | NonNullable<FloatingImage["wrap"]>["side"]
+        | undefined;
     } else if (wn === "wp:wrapTight") {
-      wrap = {
-        style: "tight",
-        side: wrapChild.attributes["wrapText"] as NonNullable<FloatingImage["wrap"]>["side"]
-      };
+      wrap = { style: "tight" };
+      wrap.side = readToken(wrapChild.attributes["wrapText"], WRITTEN.wrapSide, wrap, "side") as
+        | NonNullable<FloatingImage["wrap"]>["side"]
+        | undefined;
     } else if (wn === "wp:wrapThrough") {
-      wrap = {
-        style: "through",
-        side: wrapChild.attributes["wrapText"] as NonNullable<FloatingImage["wrap"]>["side"]
-      };
+      wrap = { style: "through" };
+      wrap.side = readToken(wrapChild.attributes["wrapText"], WRITTEN.wrapSide, wrap, "side") as
+        | NonNullable<FloatingImage["wrap"]>["side"]
+        | undefined;
     } else if (wn === "wp:wrapTopAndBottom") {
       wrap = { style: "topAndBottom" };
     } else if (wn === "wp:wrapNone") {
@@ -311,6 +335,7 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     }
   }
 
+  img._frame = readDrawingFrame(anchorEl, frameFieldsOf(img));
   return img;
 }
 

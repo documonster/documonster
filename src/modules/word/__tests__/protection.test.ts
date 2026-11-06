@@ -8,7 +8,7 @@ import { Document, Security } from "../index";
 import type { DocxDocument } from "../types";
 
 function minimalDoc(): DocxDocument {
-  return Document.build(Document.create());
+  return Document.create();
 }
 
 describe("Document protection", () => {
@@ -157,7 +157,7 @@ describe("Document protection", () => {
     });
   });
 
-  describe("verifyProtectionPassword", () => {
+  describe("verifyPassword", () => {
     it("returns true for correct password", async () => {
       const doc = minimalDoc();
       const protected_ = await Security.protect(doc, {
@@ -185,7 +185,7 @@ describe("Document protection", () => {
 
   describe("round-trip through DOCX", () => {
     it("preserves protection settings through protect → build → verify", async () => {
-      const doc = Document.build(Document.create());
+      const doc = Document.create();
       const protected_ = await Security.protect(doc, {
         edit: "forms",
         password: "roundtrip",

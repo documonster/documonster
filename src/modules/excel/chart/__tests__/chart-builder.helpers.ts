@@ -23,7 +23,7 @@ import type {
   PlotArea
 } from "@excel/chart";
 import { addChart, getCharts } from "@excel/core/worksheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Workbook } from "@excel/index";
 import { expect } from "vitest";
 
 const textDecoder = new TextDecoder();
@@ -132,7 +132,7 @@ export function readU32be(bytes: Uint8Array, offset: number): number {
 export function makeRootExportRenderedChartModel(): ChartModel {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "Sheet1");
-  Worksheet.addRows(ws, [
+  Row.addMany(ws, [
     ["A", 10],
     ["B", 20]
   ]);
@@ -145,7 +145,7 @@ export function makeRootExportRenderedChartModel(): ChartModel {
     },
     "D1:J10"
   );
-  return Chart.chartModel(getCharts(ws)[0])!;
+  return Chart.getModel(getCharts(ws)[0])!;
 }
 
 // ---------------------------------------------------------------------------

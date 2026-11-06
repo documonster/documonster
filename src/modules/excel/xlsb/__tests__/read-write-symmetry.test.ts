@@ -23,6 +23,7 @@ import {
   Cell,
   Chart,
   Column,
+  ConditionalFormatting,
   DefinedNames,
   Image,
   Pivot,
@@ -52,7 +53,7 @@ const FEATURES: readonly Feature[] = [
   {
     name: "conditional formatting",
     build: (_workbook, sheet) =>
-      Worksheet.addConditionalFormatting(sheet, {
+      ConditionalFormatting.add(sheet, {
         ref: "A2:A3",
         rules: [
           {
@@ -242,7 +243,7 @@ const FEATURES: readonly Feature[] = [
   {
     name: "header watermark",
     build: (workbook, sheet) => {
-      Watermark.add(sheet, {
+      Watermark.set(sheet, {
         imageId: Image.add(workbook, { buffer: PNG, extension: "png" }),
         mode: "header"
       } as never);
@@ -423,14 +424,13 @@ describe("what a write emits, and what survives being read back", () => {
     // Counting records proves the write happened; it does not prove the *rule* survived. A reader that
     // returned every rule as a bare `expression` would keep the count and change the meaning.
     //
-    // `formulae` is the one field that does not come back: decoding an `Rgce` token stream to formula text
-    // needs the reverse of `encodeParsedFormula`, which does not exist here. That is a narrowing this asserts
-    // rather than hides — inventing a plausible operand would give a rule that looks complete and evaluates
-    // differently.
+    // `formulae` included. It used to come back empty, which this asserted as an accepted narrowing; it was not
+    // harmless — the XLSX written from such a read had a `<cfRule type="cellIs">` with no `<formula>`, and saving
+    // that file once it had been read back threw — and the decoder it was said to need already existed.
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [["H"], [1], [9]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A2:A3",
       rules: [
         {
@@ -457,7 +457,7 @@ describe("what a write emits, and what survives being read back", () => {
       operator: "greaterThan",
       stopIfTrue: true
     });
-    expect(blocks[0]!.rules[0]!.formulae).toEqual([]);
+    expect(blocks[0]!.rules[0]!.formulae).toEqual(["5"]);
     // And it keeps its *format*, which is a separate part of the package. Without reading `BrtDXF` back the
     // rule returned with a `dxfId` into a table nothing parsed, the next write found no `style` and wrote
     // "no format", and the rule then fired and displayed nothing — harder to notice than a missing rule,
@@ -483,7 +483,7 @@ describe("what a write emits, and what survives being read back", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [["H"], [1], [9]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A2:A3",
       rules: [{ type: "cellIs", operator: "greaterThan", formulae: ["5"], priority: 1, style }]
     } as never);
@@ -511,7 +511,7 @@ describe("what a write emits, and what survives being read back", () => {
     const model = Worksheet.getModel(sheet);
     (model as { autoFilter?: string }).autoFilter = "A1:A3";
     Worksheet.setModel(sheet, model);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A2:A3",
       rules: [
         {
@@ -539,7 +539,7 @@ describe("what a write emits, and what survives being read back", () => {
       archive.add(name, name === sheetPath ? encodeBiffRecords(kept) : entry.data);
     }
     const reopened = Workbook.create();
-    await Workbook.read(reopened, await archive.bytes());
+    await Workbook.read(reopened, await archive.toBuffer());
     const read = Worksheet.getModel(Workbook.getWorksheet(reopened, "S")!);
     // The records after the filter are still there.
     expect(read.conditionalFormattings).toHaveLength(1);

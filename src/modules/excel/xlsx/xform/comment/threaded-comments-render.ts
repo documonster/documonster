@@ -103,11 +103,13 @@ export function renderPersonList(persons: ThreadedCommentPerson[]): string {
       `displayName="${escapeAttr(p.displayName)}"`,
       `id="${escapeAttr(p.id)}"`
     ];
-    if (p.userId !== undefined) {
-      attrs.push(`userId="${escapeAttr(p.userId)}"`);
+    // The deprecated positional `registerPerson` stores its identity as given, `null` and numbers included; `null` is
+    // no identity, and anything else is written as its text rather than failing the write with a `TypeError`.
+    if (p.userId !== undefined && p.userId !== null) {
+      attrs.push(`userId="${escapeAttr(String(p.userId))}"`);
     }
-    if (p.providerId !== undefined) {
-      attrs.push(`providerId="${escapeAttr(p.providerId)}"`);
+    if (p.providerId !== undefined && p.providerId !== null) {
+      attrs.push(`providerId="${escapeAttr(String(p.providerId))}"`);
     }
     parts.push(`<person ${attrs.join(" ")}/>`);
   }

@@ -2,12 +2,12 @@
  * Example: CSV Module — Advanced / Streaming APIs
  *
  * Complements `csv-complete.ts` by covering the branch APIs it skips:
- * - Csv.parseRows: true streaming async generator (one row at a time)
- * - Csv.parseWithProgress: buffered parse with a progress callback
+ * - Csv.parseStream: true streaming async generator (one row at a time)
+ * - Csv.parseAsync + onProgress: buffered parse with a progress callback
  * - Csv.generateRows: sync row-string iterator (memory efficient)
- * - Csv.generateAsync: async row-string iterator (supports delay)
+ * - Csv.generateRowsAsync: async row-string iterator (supports delay)
  * - Csv.generateData: raw data rows (array or objectMode)
- * - Csv.createGenerator: reusable preconfigured generator (generate/rows/data/asyncRows)
+ * - Csv.createGenerator: reusable preconfigured generator (generate/rows/data/rowsAsync)
  * - Error handling: CsvError / isCsvError
  *
  * Usage:   pnpm example --filter csv-advanced
@@ -26,10 +26,10 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 // =============================================================================
-// 1. Csv.parseRows — true streaming async generator
+// 1. Csv.parseStream — true streaming async generator
 // =============================================================================
 
-console.log("=== 1. Csv.parseRows (streaming async generator) ===");
+console.log("=== 1. Csv.parseStream (streaming async generator) ===");
 
 const csv1 = `id,name,score
 1,Alice,95
@@ -39,7 +39,7 @@ const csv1 = `id,name,score
 
 // Yields one row at a time — never buffers the whole result.
 const collected: Record<string, unknown>[] = [];
-for await (const row of Csv.parseRows(csv1, { headers: true, dynamicTyping: true })) {
+for await (const row of Csv.parseStream(csv1, { headers: true, dynamicTyping: true })) {
   collected.push(row as Record<string, unknown>);
 }
 console.log("Streamed rows:", collected.length);
@@ -47,7 +47,7 @@ console.log("First row:", collected[0]);
 
 // With per-row validation — only rows passing the predicate are yielded.
 const passing: Record<string, unknown>[] = [];
-for await (const row of Csv.parseRows(csv1, {
+for await (const row of Csv.parseStream(csv1, {
   headers: true,
   dynamicTyping: true,
   validate: r => ((r as Record<string, unknown>).score as number) >= 50
@@ -60,10 +60,10 @@ console.log(
 );
 
 // =============================================================================
-// 2. Csv.parseWithProgress — buffered parse with progress reporting
+// 2. Csv.parseAsync + onProgress — buffered parse with progress reporting
 // =============================================================================
 
-console.log("\n=== 2. Csv.parseWithProgress ===");
+console.log("\n=== 2. Csv.parseAsync + onProgress ===");
 
 // Build a larger CSV to make progress meaningful.
 const bigCsv = Csv.generate({
@@ -78,11 +78,11 @@ const bigCsv = Csv.generate({
 }).csv;
 
 const progressUpdates: { rowsProcessed: number; bytesProcessed?: number }[] = [];
-const progResult = await Csv.parseWithProgress(
-  bigCsv,
-  { headers: true, dynamicTyping: true },
-  info => progressUpdates.push(info)
-);
+const progResult = await Csv.parseAsync(bigCsv, {
+  headers: true,
+  dynamicTyping: true,
+  onProgress: info => progressUpdates.push(info)
+});
 
 const progRows = Array.isArray(progResult) ? progResult : progResult.rows;
 console.log("Parsed rows:", Array.isArray(progRows) ? progRows.length : "n/a");
@@ -123,13 +123,13 @@ for (const _line of Csv.generateRows({ columns: 2, rows: -1, seed: 1, headers: f
 console.log("Pulled from unlimited iterator then broke at:", count);
 
 // =============================================================================
-// 4. Csv.generateAsync — async row-string iterator (with delay)
+// 4. Csv.generateRowsAsync — async row-string iterator (with delay)
 // =============================================================================
 
-console.log("\n=== 4. Csv.generateAsync (async iterator) ===");
+console.log("\n=== 4. Csv.generateRowsAsync (async iterator) ===");
 
 const asyncLines: string[] = [];
-for await (const line of Csv.generateAsync({
+for await (const line of Csv.generateRowsAsync({
   columns: [
     { name: "ts", type: "timestamp" },
     { name: "city", type: "city" }
@@ -202,12 +202,12 @@ console.log("rows(2) produced", overrideLines.length, "lines (incl. header)");
 const dataRows = gen.data(3);
 console.log("data(3) rows:", dataRows.length);
 
-// asyncRows(): async iterator
+// rowsAsync(): async iterator
 let asyncCount = 0;
-for await (const _line of gen.asyncRows({ rows: 2 })) {
+for await (const _line of gen.rowsAsync({ rows: 2 })) {
   asyncCount++;
 }
-console.log("asyncRows produced", asyncCount, "lines (incl. header)");
+console.log("rowsAsync produced", asyncCount, "lines (incl. header)");
 
 // =============================================================================
 // 7. Error handling — CsvError / isCsvError

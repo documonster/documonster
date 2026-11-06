@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Table, Workbook, Worksheet } from "@excel/index";
+import { Column, Table, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -19,7 +19,7 @@ const ws = Workbook.addWorksheet(wb, "Foo");
 const now = new Date();
 const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDay());
 
-Worksheet.setColumns(ws, [{ key: "date", width: 32 }, { key: "number" }, { key: "word" }]);
+Column.setDefinitions(ws, [{ key: "date", width: 32 }, { key: "number" }, { key: "word" }]);
 
 const words = [
   "Twas",

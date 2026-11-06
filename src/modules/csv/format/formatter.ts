@@ -20,6 +20,7 @@
  * - BOM support
  */
 
+import { CsvArgumentError } from "@csv/errors";
 import type {
   CsvFormatRegex,
   FormatFieldContext,
@@ -35,15 +36,14 @@ import type {
   TransformContext,
   TransformResult
 } from "@csv/types";
+import { checkFormatRow, checkFormatRows, describeValue } from "@csv/utils/check-options";
 import { startsWithFormulaChar } from "@csv/utils/detect";
 import type { DecimalSeparator } from "@csv/utils/number";
 import { formatNumberForCsv } from "@csv/utils/number";
 import {
   deduplicateHeaders,
-  isRowHashArray,
-  rowHashArrayToHeaders,
-  rowHashArrayToValues,
-  rowHashArrayMapByHeaders,
+  detectRowKeys,
+  extractRowValues,
   processColumns
 } from "@csv/utils/row";
 
@@ -92,7 +92,11 @@ export function applyTypeTransform(
 /**
  * Default type conversion to string.
  */
-export function defaultToString(value: unknown, decimalSeparator: DecimalSeparator): string {
+export function defaultToString(
+  value: unknown,
+  decimalSeparator: DecimalSeparator,
+  where = "Csv.format"
+): string {
   if (value === null || value === undefined) {
     return "";
   }
@@ -100,6 +104,12 @@ export function defaultToString(value: unknown, decimalSeparator: DecimalSeparat
     return formatNumberForCsv(value, decimalSeparator);
   }
   if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new CsvArgumentError(
+        "data",
+        `${where}: a cell holds an Invalid Date, which has no text form`
+      );
+    }
     return value.toISOString();
   }
   if (typeof value === "bigint") {
@@ -109,12 +119,26 @@ export function defaultToString(value: unknown, decimalSeparator: DecimalSeparat
     return value ? "true" : "false";
   }
   if (typeof value === "object") {
+    // An object or array is written as JSON (`typeTransform.object` overrides it). One JSON
+    // cannot write — a circular structure — used to come out as "[object Object]".
+    let json: string | undefined;
     try {
-      return JSON.stringify(value);
-    } catch {
-      // Handle circular references or other JSON.stringify errors
-      return "[object Object]";
+      json = JSON.stringify(value);
+    } catch (cause) {
+      throw new CsvArgumentError(
+        "data",
+        `${where}: a cell holds an object JSON cannot write (a circular structure?); format it with typeTransform.object`,
+        { cause }
+      );
     }
+    return json ?? "";
+  }
+  if (typeof value === "function" || typeof value === "symbol") {
+    // A function used to be written as its source text and a symbol as "Symbol(x)".
+    throw new CsvArgumentError(
+      "data",
+      `${where}: a cell holds a ${typeof value}, which has no CSV text`
+    );
   }
   return String(value);
 }
@@ -154,7 +178,8 @@ export function formatField(
     quoteAll,
     escapeFormulae,
     decimalSeparator,
-    transform
+    transform,
+    where
   } = ctx;
 
   // Apply type-based transform if provided (not for headers)
@@ -162,22 +187,31 @@ export function formatField(
   // Track if transform explicitly requested quoting control
   let transformQuoteHint: boolean | undefined;
 
-  if (!isHeader && transform) {
+  if (isFormattedValue(value)) {
+    // `Csv.forceQuote(v)` / `Csv.preventQuote(v)` written straight into a row.
+    str = value.value;
+    transformQuoteHint = value.quote;
+  } else if (!isHeader && transform) {
     // Create fresh context for each call to ensure safety if user stores reference
     const transformCtx: TransformContext = { column: header ?? index, index: outputRowIndex };
     const transformed = applyTypeTransform(value, transform, transformCtx);
 
     if (transformed === undefined || transformed === null) {
-      str = defaultToString(value, decimalSeparator);
+      str = defaultToString(value, decimalSeparator, where);
     } else if (isFormattedValue(transformed)) {
       // FormattedValue contains explicit quoting hint
       str = transformed.value;
       transformQuoteHint = transformed.quote;
+    } else if (typeof transformed === "string") {
+      str = transformed;
     } else {
-      str = transformed as string;
+      throw new CsvArgumentError(
+        "options.typeTransform",
+        `${where}: options.typeTransform must return a string, Csv.forceQuote(…), Csv.preventQuote(…), null or undefined, got ${describeValue(transformed)} for column ${header ?? index}`
+      );
     }
   } else {
-    str = defaultToString(value, decimalSeparator);
+    str = defaultToString(value, decimalSeparator, where);
   }
 
   // Escape formulae to prevent CSV injection (OWASP recommendation)
@@ -235,6 +269,13 @@ export function formatField(
 // Row Formatting
 // =============================================================================
 
+/** The names a header row's fields give their columns: each field's text, as it is written before any quoting. */
+export function headerNames(row: unknown, cfg: FormatConfig): string[] {
+  return (Array.isArray(row) ? row : []).map(value =>
+    isFormattedValue(value) ? value.value : defaultToString(value, cfg.decimalSeparator, cfg.where)
+  );
+}
+
 /**
  * Format an entire row to CSV string.
  *
@@ -256,7 +297,8 @@ export function formatRowWithLookup(
     quoteAll,
     escapeFormulae,
     decimalSeparator,
-    transform
+    transform,
+    where
   } = options;
 
   const len = row.length;
@@ -275,7 +317,8 @@ export function formatRowWithLookup(
     quoteAll,
     escapeFormulae,
     decimalSeparator,
-    transform
+    transform,
+    where
   };
 
   // Build string directly without intermediate array from map()
@@ -303,8 +346,21 @@ function applyRowTransform(cfg: FormatConfig, row: Row, index: number): Row | nu
     return row;
   }
   const t = cfg.typeTransform.row(row, index);
-  return t === null ? null : t;
+  if (t === null) {
+    return null;
+  }
+  checkFormatRow(t, index, "typeTransform.row", cfg.where);
+  return t;
 }
+
+/**
+ * What `Csv.format` takes: rows of values (any value — a `Date`, `Csv.forceQuote(…)` — not
+ * only the {@link Row} primitives), objects, or `[key, value]` lists.
+ */
+export type CsvFormatData =
+  | readonly Row[]
+  | readonly Record<string, unknown>[]
+  | readonly (readonly unknown[] | Readonly<Record<string, unknown>>)[];
 
 interface NormalizedInput {
   keys: string[] | null;
@@ -317,7 +373,7 @@ interface NormalizedInput {
  * Handles: objects, arrays, RowHashArray, and columns config.
  */
 function normalizeInput(
-  data: Row[] | Record<string, unknown>[],
+  data: CsvFormatData,
   options: CsvFormatOptions,
   cfg: FormatConfig
 ): NormalizedInput {
@@ -335,105 +391,36 @@ function normalizeInput(
     return { keys: null, displayHeaders: null, rows: [] };
   }
 
-  const firstRow = data[0];
-
-  // Columns config takes precedence
+  // Columns config takes precedence, then explicit headers. Keyed rows (objects and
+  // RowHashArrays) are otherwise mapped by the first row's keys, so a row that lists its
+  // keys in another order still lands in the right columns; those keys are the header row
+  // unless `headers: false`.
+  let keys: string[] | null;
+  let displayHeaders: string[] | null;
   if (columns && columns.length > 0) {
     const processed = processColumns(columns)!;
-    const keys = processed.keys;
-    const displayHeaders = processed.headers;
-
-    const rows: unknown[][] = [];
-    for (let i = 0; i < data.length; i++) {
-      const row = applyRowTransform(cfg, data[i] as Row, i);
-      if (row === null) {
-        continue;
-      }
-
-      let values: unknown[];
-      if (isRowHashArray(row)) {
-        values = rowHashArrayMapByHeaders(row as [string, unknown][], keys);
-      } else if (Array.isArray(row)) {
-        values = row;
-      } else {
-        values = keys.map(k => (row as Record<string, unknown>)[k]);
-      }
-
-      rows.push(values);
-    }
-
-    return { keys, displayHeaders, rows };
+    keys = processed.keys;
+    displayHeaders = processed.headers;
+  } else if (Array.isArray(headers)) {
+    keys = headers;
+    displayHeaders = headers;
+  } else {
+    const detected = detectRowKeys(data[0]);
+    keys = detected.length > 0 ? detected : null;
+    displayHeaders = headers === false ? null : keys;
   }
-
-  // RowHashArray input
-  if (isRowHashArray(firstRow)) {
-    const hashArrays = data as [string, unknown][][];
-    const keys =
-      headers === true
-        ? rowHashArrayToHeaders(hashArrays[0])
-        : Array.isArray(headers)
-          ? headers
-          : null;
-
-    const rows: unknown[][] = [];
-    for (let i = 0; i < hashArrays.length; i++) {
-      const row = applyRowTransform(cfg, hashArrays[i] as Row, i);
-      if (row === null) {
-        continue;
-      }
-
-      let values: unknown[];
-      if (isRowHashArray(row)) {
-        values = keys ? rowHashArrayMapByHeaders(row, keys) : rowHashArrayToValues(row);
-      } else if (Array.isArray(row)) {
-        values = row;
-      } else {
-        values = keys ? keys.map(k => (row as Record<string, unknown>)[k]) : Object.values(row);
-      }
-
-      rows.push(values);
-    }
-
-    return { keys, displayHeaders: keys, rows };
-  }
-
-  // Object input
-  if (!Array.isArray(firstRow) && typeof firstRow === "object") {
-    const objects = data as Record<string, unknown>[];
-    const keys =
-      headers === true ? Object.keys(objects[0]) : Array.isArray(headers) ? headers : null;
-
-    const rows: unknown[][] = [];
-    for (let i = 0; i < objects.length; i++) {
-      const obj = applyRowTransform(cfg, objects[i] as Row, i);
-      if (obj === null) {
-        continue;
-      }
-
-      const values = keys
-        ? keys.map(k => (obj as Record<string, unknown>)[k])
-        : Object.values(obj as Record<string, unknown>);
-      rows.push(values);
-    }
-
-    return { keys, displayHeaders: keys, rows };
-  }
-
-  // Array input
-  const arrays = data as unknown[][];
-  const keys = Array.isArray(headers) ? headers : null;
 
   const rows: unknown[][] = [];
-  for (let i = 0; i < arrays.length; i++) {
-    const row = applyRowTransform(cfg, arrays[i] as Row, i);
+  for (let i = 0; i < data.length; i++) {
+    checkFormatRow(data[i], i, undefined, cfg.where);
+    const row = applyRowTransform(cfg, data[i] as Row, i);
     if (row === null) {
       continue;
     }
-
-    rows.push(row as unknown[]);
+    rows.push(extractRowValues(row, keys));
   }
 
-  return { keys, displayHeaders: keys, rows };
+  return { keys, displayHeaders, rows };
 }
 
 // =============================================================================
@@ -449,15 +436,15 @@ function normalizeInput(
  * @example
  * ```ts
  * // Array of arrays
- * formatCsv([["a", "b"], ["1", "2"]])
+ * Csv.format([["a", "b"], ["1", "2"]])
  * // "a,b\n1,2"
  *
  * // Array of objects
- * formatCsv([{ name: "Alice", age: 30 }])
+ * Csv.format([{ name: "Alice", age: 30 }])
  * // "name,age\nAlice,30"
  *
  * // With options
- * formatCsv(data, {
+ * Csv.format(data, {
  *   delimiter: ";",
  *   quoteColumns: { name: true },
  *   escapeFormulae: true,
@@ -465,11 +452,9 @@ function normalizeInput(
  * })
  * ```
  */
-export function formatCsv(
-  data: Row[] | Record<string, unknown>[],
-  options: CsvFormatOptions = {}
-): string {
+export function formatCsv(data: CsvFormatData, options: CsvFormatOptions = {}): string {
   const cfg = createFormatConfig(options);
+  checkFormatRows(data, cfg.where);
   const { displayHeaders, rows } = normalizeInput(data, options, cfg);
 
   // Collect lines into array and join at the end.
@@ -491,24 +476,47 @@ export function formatCsv(
         quoteAll: cfg.quoteAll,
         escapeFormulae: cfg.escapeFormulae,
         decimalSeparator: cfg.decimalSeparator,
-        transform: undefined
+        transform: undefined,
+        where: cfg.where
+      })
+    );
+  }
+
+  // The first array row as the header row, when the rows carry their own (`firstRowIsHeader`).
+  const headerFirst = options.firstRowIsHeader === true && !effectiveHeaders && rows.length > 0;
+  // Its texts name the columns, as `headers` would: what `quoteHeaders` and `quoteColumns` match by name.
+  const firstRowNames = headerFirst ? headerNames(rows[0], cfg) : undefined;
+  if (headerFirst) {
+    lines.push(
+      formatRowWithLookup(rows[0], cfg.regex, {
+        quoteLookup: cfg.shouldQuoteHeader,
+        delimiter: cfg.delimiter,
+        headers: firstRowNames,
+        isHeader: true,
+        outputRowIndex: 0,
+        quoteAll: cfg.quoteAll,
+        escapeFormulae: cfg.escapeFormulae,
+        decimalSeparator: cfg.decimalSeparator,
+        transform: undefined,
+        where: cfg.where
       })
     );
   }
 
   // Data rows
-  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+  for (let rowIdx = headerFirst ? 1 : 0; rowIdx < rows.length; rowIdx++) {
     lines.push(
       formatRowWithLookup(rows[rowIdx], cfg.regex, {
         quoteLookup: cfg.shouldQuoteColumn,
         delimiter: cfg.delimiter,
-        headers: effectiveHeaders as string[] | undefined,
+        headers: firstRowNames ?? (effectiveHeaders as string[] | undefined),
         isHeader: false,
         outputRowIndex: rowIdx,
         quoteAll: cfg.quoteAll,
         escapeFormulae: cfg.escapeFormulae,
         decimalSeparator: cfg.decimalSeparator,
-        transform: cfg.typeTransform
+        transform: cfg.typeTransform,
+        where: cfg.where
       })
     );
   }

@@ -13,6 +13,21 @@
  * it without each one needing its own check.
  */
 
+import {
+  checkArray,
+  checkNumber,
+  checkNumbers,
+  checkObject,
+  checkOptionalBoolean,
+  checkOptionalColorToken,
+  checkOptionalObject,
+  checkOptionalString,
+  checkPointList,
+  checkRasterTextStyle,
+  checkString,
+  fail
+} from "@draw/arguments";
+import { DrawArgumentError } from "@draw/errors";
 import type { GlyphOutline, RasterFont, RasterFontSource } from "@draw/raster/glyph-outline";
 import { fontHasGlyph, parseInjectedFonts } from "@draw/raster/glyph-outline";
 import { rasterizeGlyph } from "@draw/raster/glyph-rasterizer";
@@ -20,13 +35,14 @@ import { STROKE_FONT } from "@draw/raster/stroke-font";
 import { resolveFontChain } from "@draw/raster/system-raster-font";
 import { measureText } from "@draw/text";
 import { DEFAULT_TEXT_FAMILY } from "@draw/types";
-import type { RasterTextStyle } from "@draw/types";
+import type { DrawTextAnchor, RasterTextStyle } from "@draw/types";
 import { TextFeatureTally, isSimpleText, isWellMeasuredText } from "@utils/complex-text";
 import {
   isFullWidthCodePoint,
   isNonPrintingControl,
   isZeroWidthCodePoint
 } from "@utils/font-metrics";
+import { isRecordArgument } from "@utils/object";
 import { parseCssColor } from "@utils/svg-lex";
 import { shapeTextForFace } from "@utils/text-shaping";
 
@@ -108,9 +124,157 @@ export interface RasterPoint {
   y: number;
 }
 
+/** How {@link BasicRasterCanvas.strokeRect} draws an outline. */
+export interface DrawRasterLineOptions {
+  /** CSS colour. Omitted, or one that does not parse, draws nothing. */
+  readonly color?: string;
+  /** Line width in pixels. Defaults to 1. */
+  readonly width?: number;
+}
+
+/** How {@link BasicRasterCanvas.drawPolyline} and `strokeEllipse` stroke a line. */
+export interface DrawRasterStrokeOptions extends DrawRasterLineOptions {
+  /** Dash pattern in pixels, alternating on and off and starting with on. Omitted is solid. */
+  readonly dash?: readonly number[];
+  /** Shape of each corner. Defaults to `"miter"`. */
+  readonly join?: "miter" | "round" | "bevel";
+  /** Shape of each end, and of every dash's ends. Defaults to `"butt"`. */
+  readonly cap?: "butt" | "round" | "square";
+}
+
+/** A rotation of drawn text about a point, in degrees clockwise (Y-down). */
+export interface DrawRasterTextRotation {
+  readonly angle: number;
+  readonly originX: number;
+  readonly originY: number;
+}
+
+/** How {@link BasicRasterCanvas.drawText} draws a line of text. */
+export interface DrawRasterTextOptions extends RasterTextStyle {
+  /** Font size in pixels. */
+  readonly fontSize: number;
+  /** CSS colour. Omitted, or one that does not parse, draws nothing. */
+  readonly color?: string;
+  /** Alignment around `x`. Defaults to `"start"`. */
+  readonly anchor?: DrawTextAnchor;
+  /** Rotation about a point. Omitted draws the text level. */
+  readonly rotation?: DrawRasterTextRotation;
+}
+
+/** The shape options of a stroke, leaving out what was not given. */
+function shapeOf(options: DrawRasterStrokeOptions): Pick<DrawRasterStrokeOptions, "join" | "cap"> {
+  return {
+    ...(options.join === undefined ? {} : { join: options.join }),
+    ...(options.cap === undefined ? {} : { cap: options.cap })
+  };
+}
+
+function checkOptionalDash(where: string, field: string, value: unknown): void {
+  if (value !== undefined) {
+    checkArray(where, field, value);
+    value.forEach((length, i) => checkNumber(where, `${field}[${i}]`, length));
+  }
+}
+
+/**
+ * The trailing arguments of a stroking primitive: an options object, or the deprecated
+ * positional colour, width, dash and shape.
+ */
+function checkStrokeArguments(
+  where: string,
+  colorOrOptions: unknown,
+  width: unknown,
+  dash?: unknown,
+  shape?: unknown,
+  widthField = "width"
+): void {
+  if (isRecordArgument(colorOrOptions)) {
+    const options = colorOrOptions as Record<string, unknown>;
+    checkOptionalColorToken(where, "options.color", options.color);
+    if (options.width !== undefined) {
+      checkNumber(where, "options.width", options.width);
+    }
+    checkOptionalDash(where, "options.dash", options.dash);
+    return;
+  }
+  if (
+    colorOrOptions !== undefined &&
+    colorOrOptions !== null &&
+    typeof colorOrOptions !== "string"
+  ) {
+    fail(where, "options", "an options object", colorOrOptions);
+  }
+  checkNumber(where, widthField, width);
+  checkOptionalDash(where, "dash", dash);
+  checkOptionalObject(where, "shape", shape);
+}
+
+function checkOptionalRotation(where: string, field: string, value: unknown): void {
+  if (value !== undefined) {
+    checkObject(where, field, value);
+    const rotation = value as Record<string, unknown>;
+    checkNumbers(where, {
+      [`${field}.angle`]: rotation.angle,
+      [`${field}.originX`]: rotation.originX,
+      [`${field}.originY`]: rotation.originY
+    });
+  }
+}
+
 /** Clamp an integer into `[min, max]`. */
 function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+/**
+ * The part of a segment inside a rectangle (Liang–Barsky), unchanged when it lies inside
+ * already; `undefined` when none of it does or a coordinate is not finite.
+ */
+function clipSegment(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number
+): [number, number, number, number] | undefined {
+  if (![x1, y1, x2, y2, minX, minY, maxX, maxY].every(Number.isFinite)) {
+    return undefined;
+  }
+  const inside = (x: number, y: number): boolean =>
+    x >= minX && x <= maxX && y >= minY && y <= maxY;
+  if (inside(x1, y1) && inside(x2, y2)) {
+    return [x1, y1, x2, y2];
+  }
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  let t0 = 0;
+  let t1 = 1;
+  for (const [p, q] of [
+    [-dx, x1 - minX],
+    [dx, maxX - x1],
+    [-dy, y1 - minY],
+    [dy, maxY - y1]
+  ]) {
+    if (p === 0) {
+      if (q < 0) {
+        return undefined;
+      }
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) {
+      t0 = Math.max(t0, t);
+    } else {
+      t1 = Math.min(t1, t);
+    }
+    if (t0 > t1) {
+      return undefined;
+    }
+  }
+  return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
 }
 
 /**
@@ -156,6 +320,17 @@ export class BasicRasterCanvas {
     readonly width: number,
     readonly height: number
   ) {
+    for (const [field, value] of [
+      ["width", width],
+      ["height", height]
+    ] as const) {
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new DrawArgumentError(
+          field,
+          `new Draw.Backend.BasicRasterCanvas: ${field} must be a positive integer number of pixels, got ${String(value)}`
+        );
+      }
+    }
     this.data = new Uint8Array(width * height * 4);
   }
 
@@ -173,6 +348,9 @@ export class BasicRasterCanvas {
     radius: number,
     color: string | undefined
   ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillRoundRect";
+    checkNumbers(where, { x, y, width, height, radius });
+    checkOptionalColorToken(where, "color", color);
     const r = Math.min(radius, width / 2, height / 2);
     if (!(r > 0)) {
       this.fillRect(x, y, width, height, color);
@@ -191,6 +369,9 @@ export class BasicRasterCanvas {
   }
 
   fillRect(x: number, y: number, width: number, height: number, color: string | undefined): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillRect";
+    checkNumbers(where, { x, y, width, height });
+    checkOptionalColorToken(where, "color", color);
     const rgba = parseSvgColor(color);
     if (!rgba || width <= 0 || height <= 0) {
       return;
@@ -206,26 +387,99 @@ export class BasicRasterCanvas {
     }
   }
 
+  /**
+   * Outline a rectangle with four straight edges.
+   *
+   * @param options - Colour and line width.
+   */
+  strokeRect(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    options?: DrawRasterLineOptions
+  ): void;
+  /**
+   * @deprecated Pass `{ color, width }` as one options object. The positional form is removed
+   * in 1.0.
+   */
   strokeRect(
     x: number,
     y: number,
     width: number,
     height: number,
     color: string | undefined,
+    strokeWidth?: number
+  ): void;
+  strokeRect(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    colorOrOptions?: string | DrawRasterLineOptions,
     strokeWidth = 1
   ): void {
-    this.drawLine(x, y, x + width, y, color, strokeWidth);
-    this.drawLine(x + width, y, x + width, y + height, color, strokeWidth);
-    this.drawLine(x + width, y + height, x, y + height, color, strokeWidth);
-    this.drawLine(x, y + height, x, y, color, strokeWidth);
+    const where = "Draw.Backend.BasicRasterCanvas#strokeRect";
+    checkNumbers(where, { x, y, width, height });
+    checkStrokeArguments(where, colorOrOptions, strokeWidth, undefined, undefined, "strokeWidth");
+    const options: DrawRasterLineOptions = isRecordArgument(colorOrOptions)
+      ? colorOrOptions
+      : { color: colorOrOptions, width: strokeWidth };
+    const color = options.color;
+    const lineWidth = options.width ?? 1;
+    this.line(x, y, x + width, y, color, lineWidth);
+    this.line(x + width, y, x + width, y + height, color, lineWidth);
+    this.line(x + width, y + height, x, y + height, color, lineWidth);
+    this.line(x, y + height, x, y, color, lineWidth);
   }
 
+  /**
+   * Stroke a run of points, joining each to the next.
+   *
+   * @param options - Colour, width, dash pattern, join and cap.
+   */
+  drawPolyline(points: readonly RasterPoint[], options?: DrawRasterStrokeOptions): void;
+  /**
+   * @deprecated Pass `{ color, width, dash, join, cap }` as one options object. The
+   * positional form is removed in 1.0.
+   */
   drawPolyline(
-    points: RasterPoint[],
+    points: readonly RasterPoint[],
     color: string | undefined,
+    width?: number,
+    dash?: readonly number[],
+    shape?: Pick<DrawRasterStrokeOptions, "join" | "cap">
+  ): void;
+  drawPolyline(
+    points: readonly RasterPoint[],
+    colorOrOptions?: string | DrawRasterStrokeOptions,
     width = 1,
     dash?: readonly number[],
-    shape: { join?: "miter" | "round" | "bevel"; cap?: "butt" | "round" | "square" } = {}
+    shape: Pick<DrawRasterStrokeOptions, "join" | "cap"> = {}
+  ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#drawPolyline";
+    checkPointList(where, "points", points);
+    checkStrokeArguments(where, colorOrOptions, width, dash, shape);
+    if (isRecordArgument(colorOrOptions)) {
+      this.strokePoints(
+        points,
+        colorOrOptions.color,
+        colorOrOptions.width ?? 1,
+        colorOrOptions.dash,
+        shapeOf(colorOrOptions)
+      );
+      return;
+    }
+    this.strokePoints(points, colorOrOptions, width, dash, shape);
+  }
+
+  /** {@link drawPolyline}, with its options read. */
+  private strokePoints(
+    points: readonly RasterPoint[],
+    color: string | undefined,
+    width: number,
+    dash: readonly number[] | undefined,
+    shape: Pick<DrawRasterStrokeOptions, "join" | "cap">
   ): void {
     if (points.length < 2) {
       return;
@@ -257,7 +511,7 @@ export class BasicRasterCanvas {
       // A hairline has no outline to speak of; the supersampled Bresenham run is
       // both cheaper and smoother than a one-pixel-wide polygon.
       for (let i = 1; i < points.length; i++) {
-        this.drawLine(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y, color, width);
+        this.line(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y, color, width);
       }
       return;
     }
@@ -475,7 +729,7 @@ export class BasicRasterCanvas {
     }
     const period = dash.reduce((sum, part) => sum + part, 0);
     if (period <= 0) {
-      this.drawLine(from.x, from.y, to.x, to.y, color, width);
+      this.line(from.x, from.y, to.x, to.y, color, width);
       return startPhase;
     }
     const dashRgba = parseSvgColor(color);
@@ -507,7 +761,7 @@ export class BasicRasterCanvas {
         const a = { x: from.x + ux * travelled, y: from.y + uy * travelled };
         const b = { x: from.x + ux * (travelled + step), y: from.y + uy * (travelled + step) };
         if (radius <= 0.5) {
-          this.drawLine(a.x, a.y, b.x, b.y, color, width);
+          this.line(a.x, a.y, b.x, b.y, color, width);
         } else {
           // Fill each dash's outline, like a solid stroke. Stamping a square brush
           // extended every dash by half the stroke width at both ends, so a 12-wide
@@ -526,31 +780,90 @@ export class BasicRasterCanvas {
     return startPhase + length;
   }
 
+  /**
+   * Draw a straight line from `(x1, y1)` to `(x2, y2)`.
+   *
+   * @param options - Colour and line width.
+   */
+  drawLine(x1: number, y1: number, x2: number, y2: number, options?: DrawRasterLineOptions): void;
+  /**
+   * @deprecated Pass `{ color, width }` as one options object, as {@link strokeRect} takes it. The
+   * positional form is removed in 1.0.
+   */
   drawLine(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
     color: string | undefined,
+    width?: number
+  ): void;
+  drawLine(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    colorOrOptions?: string | DrawRasterLineOptions,
     width = 1
+  ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#drawLine";
+    checkNumbers(where, { x1, y1, x2, y2 });
+    checkStrokeArguments(where, colorOrOptions, width);
+    if (isRecordArgument(colorOrOptions)) {
+      this.line(x1, y1, x2, y2, colorOrOptions.color, colorOrOptions.width ?? 1);
+      return;
+    }
+    this.line(x1, y1, x2, y2, colorOrOptions, width);
+  }
+
+  /** {@link drawLine}, with its arguments checked. */
+  private line(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    color: string | undefined,
+    width: number
   ): void {
     const rgba = parseSvgColor(color);
     if (!rgba) {
       return;
     }
-    let x0 = Math.round(x1);
-    let y0 = Math.round(y1);
-    const xEnd = Math.round(x2);
-    const yEnd = Math.round(y2);
+    const radius = Math.max(0, Math.floor(width / 2));
+    // The walk below takes one step per pixel of the line's own length, so an end far off
+    // the canvas — or a `NaN`, which never compares equal and so never ends the loop —
+    // used to hang the render. Clip to a box one canvas larger on every side: a line that
+    // stays inside it is walked exactly as before, and the pixels a clipped one draws on the
+    // canvas are the same line.
+    const segment = clipSegment(
+      x1,
+      y1,
+      x2,
+      y2,
+      -this.width - radius,
+      -this.height - radius,
+      2 * this.width + radius,
+      2 * this.height + radius
+    );
+    if (!segment) {
+      return;
+    }
+    let x0 = Math.round(segment[0]);
+    let y0 = Math.round(segment[1]);
+    const xEnd = Math.round(segment[2]);
+    const yEnd = Math.round(segment[3]);
     const dx = Math.abs(xEnd - x0);
     const sx = x0 < xEnd ? 1 : -1;
     const dy = -Math.abs(yEnd - y0);
     const sy = y0 < yEnd ? 1 : -1;
     let err = dx + dy;
-    const radius = Math.max(0, Math.floor(width / 2));
     while (true) {
-      for (let yy = y0 - radius; yy <= y0 + radius; yy++) {
-        for (let xx = x0 - radius; xx <= x0 + radius; xx++) {
+      const top = Math.max(0, y0 - radius);
+      const bottom = Math.min(this.height - 1, y0 + radius);
+      const left = Math.max(0, x0 - radius);
+      const right = Math.min(this.width - 1, x0 + radius);
+      for (let yy = top; yy <= bottom; yy++) {
+        for (let xx = left; xx <= right; xx++) {
           this.setPixel(xx, yy, rgba);
         }
       }
@@ -570,14 +883,19 @@ export class BasicRasterCanvas {
   }
 
   fillCircle(cx: number, cy: number, r: number, color: string | undefined): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillCircle";
+    checkNumbers(where, { cx, cy, r });
+    checkOptionalColorToken(where, "color", color);
     const rgba = parseSvgColor(color);
     if (!rgba || r <= 0) {
       return;
     }
-    const x0 = Math.floor(cx - r);
-    const x1 = Math.ceil(cx + r);
-    const y0 = Math.floor(cy - r);
-    const y1 = Math.ceil(cy + r);
+    // Bounded by the canvas as well as the circle: `setPixel` drops what falls outside, but
+    // only after the loop has visited it, so a large radius cost its whole bounding box.
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(this.width - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(this.height - 1, Math.ceil(cy + r));
     const rr = r * r;
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
@@ -597,12 +915,16 @@ export class BasicRasterCanvas {
    * `fillCircle` and exact.
    */
   fillEllipse(cx: number, cy: number, rx: number, ry: number, color: string | undefined): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillEllipse";
+    checkNumbers(where, { cx, cy, rx, ry });
+    checkOptionalColorToken(where, "color", color);
     const rgba = parseSvgColor(color);
     if (!rgba || rx <= 0 || ry <= 0) {
       return;
     }
-    const y0 = Math.floor(cy - ry);
-    const y1 = Math.ceil(cy + ry);
+    // Bounded by the canvas as well as the ellipse, as `fillCircle` is.
+    const y0 = Math.max(0, Math.floor(cy - ry));
+    const y1 = Math.min(this.height - 1, Math.ceil(cy + ry));
     for (let y = y0; y <= y1; y++) {
       const ny = (y - cy) / ry;
       const nySq = ny * ny;
@@ -612,25 +934,53 @@ export class BasicRasterCanvas {
       // Solve the ellipse equation for x instead of testing every pixel, so a
       // wide ellipse costs its own area rather than its bounding box.
       const span = rx * Math.sqrt(1 - nySq);
-      const from = Math.ceil(cx - span);
-      const to = Math.floor(cx + span);
+      const from = Math.max(0, Math.ceil(cx - span));
+      const to = Math.min(this.width - 1, Math.floor(cx + span));
       for (let x = from; x <= to; x++) {
         this.setPixel(x, y, rgba);
       }
     }
   }
 
-  /** Stroke an axis-aligned ellipse. */
+  /**
+   * Stroke an axis-aligned ellipse.
+   *
+   * @param options - Colour, width, dash pattern, join and cap.
+   */
+  strokeEllipse(
+    cx: number,
+    cy: number,
+    rx: number,
+    ry: number,
+    options?: DrawRasterStrokeOptions
+  ): void;
+  /**
+   * @deprecated Pass `{ color, width, dash, join, cap }` as one options object. The
+   * positional form is removed in 1.0.
+   */
   strokeEllipse(
     cx: number,
     cy: number,
     rx: number,
     ry: number,
     color: string | undefined,
+    width?: number,
+    dash?: readonly number[],
+    shape?: Pick<DrawRasterStrokeOptions, "join" | "cap">
+  ): void;
+  strokeEllipse(
+    cx: number,
+    cy: number,
+    rx: number,
+    ry: number,
+    colorOrOptions?: string | DrawRasterStrokeOptions,
     width = 1,
     dash?: readonly number[],
-    shape: { join?: "miter" | "round" | "bevel"; cap?: "butt" | "round" | "square" } = {}
+    shape: Pick<DrawRasterStrokeOptions, "join" | "cap"> = {}
   ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#strokeEllipse";
+    checkNumbers(where, { cx, cy, rx, ry });
+    checkStrokeArguments(where, colorOrOptions, width, dash, shape);
     const points: RasterPoint[] = [];
     const steps = Math.max(16, Math.ceil((rx + ry) * 1.5));
     for (let i = 0; i <= steps; i++) {
@@ -640,17 +990,50 @@ export class BasicRasterCanvas {
     // The outline is already a closed loop of points, so the dash phase and the join
     // travel with it exactly as they do for any other traced primitive. Not passing
     // them is why a dashed ellipse came out solid while SVG dashed it.
-    this.drawPolyline(points, color, width, dash, shape);
+    this.drawPolyline(
+      points,
+      isRecordArgument(colorOrOptions)
+        ? colorOrOptions
+        : {
+            color: colorOrOptions,
+            width,
+            ...(dash === undefined ? {} : { dash }),
+            ...shape
+          }
+    );
   }
 
-  strokeCircle(cx: number, cy: number, r: number, color: string | undefined, width = 1): void {
+  /**
+   * Stroke a circle.
+   *
+   * @param options - Colour and line width.
+   */
+  strokeCircle(cx: number, cy: number, r: number, options?: DrawRasterLineOptions): void;
+  /**
+   * @deprecated Pass `{ color, width }` as one options object, as {@link strokeEllipse} takes it.
+   * The positional form is removed in 1.0.
+   */
+  strokeCircle(cx: number, cy: number, r: number, color: string | undefined, width?: number): void;
+  strokeCircle(
+    cx: number,
+    cy: number,
+    r: number,
+    colorOrOptions?: string | DrawRasterLineOptions,
+    width = 1
+  ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#strokeCircle";
+    checkNumbers(where, { cx, cy, r });
+    checkStrokeArguments(where, colorOrOptions, width);
+    const options: DrawRasterLineOptions = isRecordArgument(colorOrOptions)
+      ? colorOrOptions
+      : { color: colorOrOptions, width };
     const points: RasterPoint[] = [];
     const steps = Math.max(12, Math.ceil(r * 2));
     for (let i = 0; i <= steps; i++) {
       const a = (i / steps) * Math.PI * 2;
       points.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
     }
-    this.drawPolyline(points, color, width);
+    this.drawPolyline(points, { color: options.color, width: options.width ?? 1 });
   }
 
   /**
@@ -667,6 +1050,9 @@ export class BasicRasterCanvas {
     endAngle: number,
     color: string | undefined
   ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillSector";
+    checkNumbers(where, { cx, cy, outerR, innerR, startAngle, endAngle });
+    checkOptionalColorToken(where, "color", color);
     const rgba = parseSvgColor(color);
     if (!rgba || outerR <= 0) {
       return;
@@ -714,7 +1100,10 @@ export class BasicRasterCanvas {
     }
   }
 
-  fillPolygon(points: RasterPoint[], color: string | undefined): void {
+  fillPolygon(points: readonly RasterPoint[], color: string | undefined): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillPolygon";
+    checkPointList(where, "points", points);
+    checkOptionalColorToken(where, "color", color);
     this.fillRings([points], color, "nonzero");
   }
 
@@ -732,10 +1121,14 @@ export class BasicRasterCanvas {
    * wherever the sum is not zero.
    */
   fillRings(
-    rings: readonly RasterPoint[][],
+    rings: readonly (readonly RasterPoint[])[],
     color: string | undefined,
     fillRule: "nonzero" | "evenodd"
   ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#fillRings";
+    checkArray(where, "rings", rings);
+    rings.forEach((ring, i) => checkPointList(where, `rings[${i}]`, ring));
+    checkOptionalColorToken(where, "color", color);
     const rgba = parseSvgColor(color);
     if (!rgba) {
       return;
@@ -798,6 +1191,16 @@ export class BasicRasterCanvas {
     }
   }
 
+  /**
+   * Draw one line of text with its baseline at `y`.
+   *
+   * @param options - Size, colour, anchor, rotation and the style that chooses the face.
+   */
+  drawText(x: number, y: number, text: string, options: DrawRasterTextOptions): void;
+  /**
+   * @deprecated Pass `{ fontSize, color, anchor, rotation, family, bold, italic }` as one
+   * options object. The positional form is removed in 1.0.
+   */
   drawText(
     x: number,
     y: number,
@@ -805,8 +1208,62 @@ export class BasicRasterCanvas {
     fontSize: number,
     color: string | undefined,
     anchor: string | undefined,
-    rotation?: { angle: number; originX: number; originY: number },
+    rotation?: DrawRasterTextRotation,
+    style?: RasterTextStyle
+  ): void;
+  drawText(
+    x: number,
+    y: number,
+    text: string,
+    fontSizeOrOptions: number | DrawRasterTextOptions,
+    color?: string,
+    anchor?: string,
+    rotation?: DrawRasterTextRotation,
     style: RasterTextStyle = {}
+  ): void {
+    const where = "Draw.Backend.BasicRasterCanvas#drawText";
+    checkNumbers(where, { x, y });
+    checkString(where, "text", text);
+    if (isRecordArgument(fontSizeOrOptions)) {
+      checkNumber(where, "options.fontSize", fontSizeOrOptions.fontSize);
+      checkOptionalColorToken(where, "options.color", fontSizeOrOptions.color);
+      checkOptionalString(where, "options.anchor", fontSizeOrOptions.anchor);
+      checkOptionalRotation(where, "options.rotation", fontSizeOrOptions.rotation);
+      checkRasterTextStyle(where, "options", fontSizeOrOptions);
+    } else {
+      checkNumber(where, "fontSize", fontSizeOrOptions);
+      checkOptionalColorToken(where, "color", color);
+      checkOptionalString(where, "anchor", anchor);
+      checkOptionalRotation(where, "rotation", rotation);
+      checkRasterTextStyle(where, "style", style);
+    }
+    if (isRecordArgument(fontSizeOrOptions)) {
+      const {
+        fontSize,
+        color: ink,
+        anchor: align,
+        rotation: turn,
+        ...faceStyle
+      } = fontSizeOrOptions;
+      this.paintText(x, y, text, fontSize, ink, align, turn, faceStyle);
+      return;
+    }
+    this.paintText(x, y, text, fontSizeOrOptions, color, anchor, rotation, style);
+  }
+
+  /**
+   * {@link drawText}, with its options read. `anchor` stays a string: the deprecated
+   * positional form took any, and treated what was not `"middle"` or `"end"` as `"start"`.
+   */
+  private paintText(
+    x: number,
+    y: number,
+    text: string,
+    fontSize: number,
+    color: string | undefined,
+    anchor: string | undefined,
+    rotation: DrawRasterTextRotation | undefined,
+    style: RasterTextStyle
   ): void {
     if (!text) {
       return;
@@ -891,7 +1348,7 @@ export class BasicRasterCanvas {
 
   /**
    * Every code point this canvas could not draw in any available face, accumulated
-   * across all {@link drawText} calls and never cleared.
+   * across all {@link drawText} calls and never cleared — in ascending order, a copy.
    *
    * Accumulated rather than per-call because the useful question is about the
    * finished picture, not the last label in it: `rasterizeToRgba` builds one canvas
@@ -902,7 +1359,19 @@ export class BasicRasterCanvas {
    * lets a caller act on the gap (supply a font) instead of shipping a picture with
    * holes in it.
    */
-  readonly uncoveredCodePoints = new Set<number>();
+  getUncoveredCodePoints(): number[] {
+    return [...this.uncovered].sort((a, b) => a - b);
+  }
+
+  /**
+   * @deprecated Use {@link getUncoveredCodePoints}. This handed out the canvas's own set, so a
+   * caller could clear it and change what the render reports; it now returns a copy. Removed in 1.0.
+   */
+  get uncoveredCodePoints(): Set<number> {
+    return new Set(this.uncovered);
+  }
+
+  private readonly uncovered = new Set<number>();
 
   /**
    * Scripts and directionality this canvas cannot lay out, accumulated per canvas.
@@ -920,16 +1389,26 @@ export class BasicRasterCanvas {
   private readonly textFeatures = new TextFeatureTally();
 
   /** Warnings about text this canvas drew but could not lay out correctly. */
+  getTextWarnings(): string[] {
+    return [
+      ...this.fontWarnings,
+      ...this.textFeatures.warnings("This rasteriser", {
+        contextualForms: true,
+        visualOrder: true
+      })
+    ];
+  }
+
+  /** @deprecated Use {@link getTextWarnings}. Removed in 1.0. */
   textWarnings(): string[] {
-    return this.textFeatures.warnings("This rasteriser", {
-      contextualForms: true,
-      visualOrder: true
-    });
+    return this.getTextWarnings();
   }
 
   /** Faces this canvas draws with, ahead of anything discovered on the host. */
   private ownFonts: readonly RasterFont[] = [];
   private ownUseSystemFonts = true;
+  /** What {@link setFonts} could not use as given, reported by {@link getTextWarnings}. */
+  private fontWarnings: readonly string[] = [];
 
   /**
    * Use these fonts for this canvas, instead of the process-wide registry.
@@ -947,7 +1426,14 @@ export class BasicRasterCanvas {
     fonts: readonly RasterFontSource[],
     options: { readonly useSystemFonts?: boolean } = {}
   ): void {
-    this.ownFonts = parseInjectedFonts(fonts);
+    const where = "Draw.Backend.BasicRasterCanvas#setFonts";
+    checkArray(where, "fonts", fonts);
+    fonts.forEach((font, i) => checkObject(where, `fonts[${i}]`, font));
+    checkObject(where, "options", options);
+    checkOptionalBoolean(where, "options.useSystemFonts", options.useSystemFonts);
+    const injected = parseInjectedFonts(fonts);
+    this.ownFonts = injected.fonts;
+    this.fontWarnings = injected.warnings;
     this.ownUseSystemFonts = options.useSystemFonts ?? true;
   }
 
@@ -1100,7 +1586,7 @@ export class BasicRasterCanvas {
         // width without ink, and practically no font carries a glyph for it, so
         // reporting it would tell the caller to install a font that cannot help.
         if (code !== TAB) {
-          this.uncoveredCodePoints.add(code);
+          this.uncovered.add(code);
         }
         curX += this.missingAdvance(code, fontSize) * hScale;
         continue;
@@ -1171,7 +1657,7 @@ export class BasicRasterCanvas {
       // caller is told their CJK became punctuation rather than discovering it in
       // the image. Tab is exempt for the same reason as above.
       if (STROKE_FONT[code] === undefined && code !== TAB) {
-        this.uncoveredCodePoints.add(code);
+        this.uncovered.add(code);
       }
       if (code === TAB) {
         totalGlyphW += TAB_EM_WIDTH; // width, no ink
@@ -1201,7 +1687,7 @@ export class BasicRasterCanvas {
               const y1 = y - fontSize * 0.75 + stroke[j - 1][1] * fontSize;
               const x2 = cx + stroke[j][0] * fontSize * scale;
               const y2 = y - fontSize * 0.75 + stroke[j][1] * fontSize;
-              this.drawLine(x1, y1, x2, y2, color, strokeWidth);
+              this.line(x1, y1, x2, y2, color, strokeWidth);
             }
           }
           cx += glyph.w * fontSize * scale;
@@ -1239,7 +1725,7 @@ export class BasicRasterCanvas {
             const py2 = y - fontSize * 0.75 + stroke[j][1] * fontSize;
             const [rx1, ry1] = rotate(px1, py1);
             const [rx2, ry2] = rotate(px2, py2);
-            this.drawLine(rx1, ry1, rx2, ry2, color, strokeWidth);
+            this.line(rx1, ry1, rx2, ry2, color, strokeWidth);
           }
         }
         cx += glyph.w * fontSize * scale;
@@ -1249,6 +1735,7 @@ export class BasicRasterCanvas {
 
   /** Intersect the current clip with a rectangle. */
   pushClip(x: number, y: number, width: number, height: number): void {
+    checkNumbers("Draw.Backend.BasicRasterCanvas#pushClip", { x, y, width, height });
     const next = {
       x0: Math.floor(x),
       y0: Math.floor(y),

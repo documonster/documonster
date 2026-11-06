@@ -6,16 +6,16 @@
  * is "what my Page Setup dialog says is what the PDF does".
  */
 import {
-  cellSetAlignment,
-  cellSetBorder,
-  cellSetFill,
-  cellSetFont,
-  cellSetNote
-} from "@excel/core/cell";
-import { chartsheetPageSetup, chartsheetSetPageSetup } from "@excel/core/chartsheet";
-import { addWorkbookImage } from "@excel/core/workbook-core";
-import { addColumnChart, addImage, getCell, mergeCells } from "@excel/core/worksheet";
-import { Cell, Column, Row, Workbook } from "@excel/index";
+  Cell,
+  Chart,
+  Chartsheet,
+  Column,
+  Image,
+  Note,
+  Row,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { extractTextFromPage } from "@pdf/reader/content-interpreter";
 import { PdfDocument } from "@pdf/reader/pdf-document";
@@ -81,7 +81,7 @@ function markerSheet(cols: number, rows: number, width = 12) {
   for (let c = 1; c <= cols; c++) {
     Column.setWidth(ws, c, width);
     for (let r = 1; r <= rows; r++) {
-      Cell.setValue(ws, r, c, `C${c}R${r}`);
+      Cell.setValue(ws, { row: r, col: c }, `C${c}R${r}`);
     }
   }
   return { wb, ws };
@@ -133,8 +133,8 @@ describe("pageSetup.pageOrder", () => {
     // resolves by scanning that array — the anchor must still win.
     const make = () => {
       const { wb, ws } = markerSheet(20, 60);
-      const id = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
-      addImage(ws, id, { tl: { col: 0, row: 0 }, br: { col: 2, row: 3 } });
+      const id = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
+      Image.place(ws, id, { tl: { col: 0, row: 0 }, br: { col: 2, row: 3 } });
       return wb;
     };
 
@@ -374,7 +374,7 @@ describe("pageSetup scaling", () => {
     // ~300pt unscaled against a 451pt content area: fits at 1.0, overflows at 2.0.
     for (let c = 1; c <= 5; c++) {
       Column.setWidth(ws, c, 10);
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     expect(pageCount(await excelToPdf(wb))).toBe(1);
     // fitToPage means "shrink to one page wide"; `scale` must not break it.
@@ -386,7 +386,7 @@ describe("pageSetup scaling", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let c = 1; c <= 30; c++) {
       Column.setWidth(ws, c, 12);
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     const rightEdge = (b: Uint8Array) => {
       const doc = new PdfDocument(b);
@@ -426,7 +426,7 @@ describe("pageSetup scaling", () => {
     const ws = Workbook.addWorksheet(wb, "Wide");
     for (let c = 1; c <= 3; c++) {
       Column.setWidth(ws, c, 48);
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     expect(pageCount(await excelToPdf(wb, { fitToPage: false }))).toBe(3);
     expect(pageCount(await excelToPdf(wb, { fitToWidth: 2 }))).toBeLessThanOrEqual(2);
@@ -441,7 +441,7 @@ describe("pageSetup scaling", () => {
       Column.setWidth(ws, c, 20);
     }
     for (let c = 1; c <= 9; c++) {
-      Cell.setValue(ws, 1, c, `C${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `C${c}`);
     }
     ws.pageSetup.printTitlesColumn = "A";
     expect(pageCount(await excelToPdf(wb, { fitToWidth: 2 }))).toBeLessThanOrEqual(2);
@@ -481,8 +481,8 @@ describe("pageSetup scaling", () => {
     Column.setWidth(ws, 1, 18);
     const long = "The quick brown fox jumps over the lazy dog and keeps running far away";
     for (let r = 1; r <= 60; r++) {
-      Cell.setValue(ws, r, 1, `${r} ${long}`);
-      cellSetAlignment(getCell(ws, `A${r}`), { wrapText: true });
+      Cell.setValue(ws, { row: r, col: 1 }, `${r} ${long}`);
+      Cell.setAlignment(ws, `A${r}`, { wrapText: true });
     }
 
     expect(pageCount(await excelToPdf(wb))).toBeGreaterThan(1);
@@ -522,10 +522,9 @@ describe("pageSetup.blackAndWhite", () => {
   function coloredSheet() {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Colors");
-    const cell = getCell(ws, "A1");
     Cell.setValue(ws, "A1", "Red text");
-    cellSetFont(cell, { color: { argb: "FFFF0000" } });
-    cellSetFill(cell, { type: "pattern", pattern: "solid", fgColor: { argb: "FF00FF00" } });
+    Cell.setFont(ws, "A1", { color: { argb: "FFFF0000" } });
+    Cell.setFill(ws, "A1", { type: "pattern", pattern: "solid", fgColor: { argb: "FF00FF00" } });
     return { wb, ws };
   }
 
@@ -617,8 +616,8 @@ describe("pageSetup.blackAndWhite", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Pic");
       Cell.setValue(ws, "A1", "x");
-      const id = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
-      addImage(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
+      const id = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
+      Image.place(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
       return wb;
     };
 
@@ -637,8 +636,8 @@ describe("pageSetup.blackAndWhite", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Alpha");
     Cell.setValue(ws, "A1", "x");
-    const id = addWorkbookImage(wb, { buffer: TRANSPARENT_PNG, extension: "png" });
-    addImage(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
+    const id = Image.add(wb, { buffer: TRANSPARENT_PNG, extension: "png" });
+    Image.place(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
 
     const bw = await excelToPdf(wb, { blackAndWhite: true });
     const raw = Buffer.from(bw).toString("latin1");
@@ -654,8 +653,8 @@ describe("pageSetup.blackAndWhite", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Jpg");
       Cell.setValue(ws, "A1", "x");
-      const id = addWorkbookImage(wb, { buffer: MINIMAL_JPEG, extension: "jpeg" });
-      addImage(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
+      const id = Image.add(wb, { buffer: MINIMAL_JPEG, extension: "jpeg" });
+      Image.place(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
       return wb;
     };
 
@@ -677,8 +676,8 @@ describe("pageSetup.blackAndWhite", () => {
     const wb = Workbook.create();
     const a = Workbook.addWorksheet(wb, "A");
     Cell.setValue(a, "A1", "x");
-    const id = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
-    addImage(a, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
+    const id = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
+    Image.place(a, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
 
     const bw = Buffer.from(await excelToPdf(wb, { blackAndWhite: true })).toString("latin1");
     expect(bw).toContain("/ColorSpace /DeviceGray");
@@ -722,8 +721,8 @@ describe("pageSetup.draft", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Pics");
     Cell.setValue(ws, "A1", "content");
-    const id = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
-    addImage(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
+    const id = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
+    Image.place(ws, id, { tl: { col: 1, row: 1 }, br: { col: 3, row: 5 } });
     return { wb, ws };
   }
 
@@ -764,7 +763,7 @@ describe("pageSetup.draft", () => {
         }
       });
       if (draft) {
-        chartsheetSetPageSetup(cs, { ...(chartsheetPageSetup(cs) ?? {}), draft: true });
+        Chartsheet.setPageSetup(cs, { ...(Chartsheet.getPageSetup(cs) ?? {}), draft: true });
       }
       return wb;
     };
@@ -958,7 +957,7 @@ describe("EMU anchor extents", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "cat");
     Cell.setValue(ws, "B1", 5);
-    addColumnChart(
+    Chart.addColumn(
       ws,
       { series: [{ categories: "S!$A$1:$A$1", values: "S!$B$1:$B$1" }] },
       { tl: "D2", ext: { cx: 4 * EMU_PER_INCH, cy: 2 * EMU_PER_INCH } }
@@ -986,7 +985,7 @@ describe("merged cells with print titles", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let c = 1; c <= cols; c++) {
       Column.setWidth(ws, c, 10);
-      Cell.setValue(ws, 1, c, `H${c}`);
+      Cell.setValue(ws, { row: 1, col: c }, `H${c}`);
     }
     return { wb, ws };
   }
@@ -1003,8 +1002,8 @@ describe("merged cells with print titles", () => {
     // ([A, B, E, F, G]). The merge must still start at B and cover only the
     // columns that are actually printed.
     const { wb, ws } = gridSheet();
-    Cell.setValue(ws, 2, 2, "MERGED");
-    mergeCells(ws, "B2:F2");
+    Cell.setValue(ws, { row: 2, col: 2 }, "MERGED");
+    Worksheet.merge(ws, "B2:F2");
     ws.pageSetup.printArea = "E1:G3";
     ws.pageSetup.printTitlesColumn = "A:B";
 
@@ -1020,8 +1019,8 @@ describe("merged cells with print titles", () => {
     // Excel stores the value on the master only, so a master outside the
     // printed range prints nothing — the follower cells are genuinely empty.
     const { wb, ws } = gridSheet();
-    Cell.setValue(ws, 2, 3, "MERGED");
-    mergeCells(ws, "C2:F2");
+    Cell.setValue(ws, { row: 2, col: 3 }, "MERGED");
+    Worksheet.merge(ws, "C2:F2");
     ws.pageSetup.printArea = "E1:G3";
     ws.pageSetup.printTitlesColumn = "A:B";
 
@@ -1036,18 +1035,18 @@ describe("merged cells with print titles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "M");
     Cell.setValue(ws, "A1", "merged");
-    cellSetBorder(getCell(ws, "B1"), {
+    Cell.setBorder(ws, "B1", {
       right: { style: "thick", color: { argb: "FF0000FF" } }
     });
-    mergeCells(ws, "A1:B1");
+    Worksheet.merge(ws, "A1:B1");
 
     expectAllGray(pdfColorOps(await excelToPdf(wb, { blackAndWhite: true })));
   });
 
   it("should repeat a merge that lives inside the title band", async () => {
     const { wb, ws } = gridSheet(20);
-    Cell.setValue(ws, 2, 1, "TITLE-MERGE");
-    mergeCells(ws, "A2:B2");
+    Cell.setValue(ws, { row: 2, col: 1 }, "TITLE-MERGE");
+    Worksheet.merge(ws, "A2:B2");
     ws.pageSetup.printTitlesColumn = "A:B";
 
     const pages = fragmentsOf(await excelToPdf(wb, { fitToPage: false }));
@@ -1067,8 +1066,8 @@ describe("pageSetup.cellComments", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "body");
-    cellSetNote(getCell(ws, "B7"), "Check this number");
-    cellSetNote(getCell(ws, "C9"), "Second remark");
+    Cell.setNote(ws, "B7", "Check this number");
+    Cell.setNote(ws, "C9", "Second remark");
     return { wb, ws };
   }
 
@@ -1119,10 +1118,10 @@ describe("pageSetup.cellComments", () => {
       const ws = Workbook.addWorksheet(wb, "S");
       for (let r = 1; r <= 12; r++) {
         for (let c = 1; c <= 6; c++) {
-          Cell.setValue(ws, r, c, `r${r}c${c}`);
+          Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
         }
       }
-      cellSetNote(getCell(ws, "B6"), "Look here");
+      Cell.setNote(ws, "B6", "Look here");
       return wb;
     };
 
@@ -1142,10 +1141,10 @@ describe("pageSetup.cellComments", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let r = 1; r <= 12; r++) {
       for (let c = 1; c <= 6; c++) {
-        Cell.setValue(ws, r, c, `r${r}c${c}`);
+        Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
       }
     }
-    cellSetNote(getCell(ws, "B6"), "Look here");
+    Cell.setNote(ws, "B6", "Look here");
 
     const pdfBytes = await excelToPdf(wb, { cellComments: "asDisplayed" });
     const content = decompressPdfContent(pdfBytes);
@@ -1169,10 +1168,10 @@ describe("pageSetup.cellComments", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     for (let row = 1; row <= 8; row++) {
       for (let col = 1; col <= 4; col++) {
-        Cell.setValue(ws, row, col, `${row}:${col}`);
+        Cell.setValue(ws, { row, col }, `${row}:${col}`);
       }
     }
-    cellSetNote(getCell(ws, "B6"), "Comment text");
+    Cell.setNote(ws, "B6", "Comment text");
 
     expect(
       pageTexts(
@@ -1190,13 +1189,13 @@ describe("pageSetup.cellComments", () => {
       const ws = Workbook.addWorksheet(wb, "S");
       for (let r = 1; r <= 12; r++) {
         for (let c = 1; c <= 6; c++) {
-          Cell.setValue(ws, r, c, `r${r}c${c}`);
+          Cell.setValue(ws, { row: r, col: c }, `r${r}c${c}`);
         }
       }
       const note = anchor
         ? ({ texts: [{ text: "Anchored" }], anchor } as never)
         : ({ texts: [{ text: "Anchored" }] } as never);
-      cellSetNote(getCell(ws, "B6"), note);
+      Cell.setNote(ws, "B6", note);
       return wb;
     };
 
@@ -1227,10 +1226,7 @@ describe("pageSetup.cellComments", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "body");
-    cellSetNote(getCell(ws, "A2"), { texts: [{ text: "Reviewed" }] });
-    const cell = getCell(ws, "A2");
-    // `noteCreate` stores the author alongside the body.
-    (cell as unknown as { _comment: { author?: string } })._comment.author = "QA";
+    Cell.setComment(ws, "A2", Note.create({ texts: [{ text: "Reviewed" }] }, "QA"));
 
     expect(pageTexts(await excelToPdf(wb, { cellComments: "atEnd" }))[1]).toContain("(QA)");
   });
@@ -1240,7 +1236,7 @@ describe("pageSetup.cellComments", () => {
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "body");
     for (let r = 1; r <= 80; r++) {
-      cellSetNote(getCell(ws, `E${r}`), `Remark number ${r} on this row`);
+      Cell.setNote(ws, `E${r}`, `Remark number ${r} on this row`);
     }
     const pages = pageTexts(await excelToPdf(wb, { cellComments: "atEnd" }));
     // One grid page plus more than one comment page.

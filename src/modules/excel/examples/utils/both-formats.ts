@@ -82,8 +82,7 @@ export async function writeBoth(
     }
     const buffer = await Workbook.toBuffer(workbook, { format, unsupported: "ignore" });
     fs.writeFileSync(file, buffer);
-    const reloaded = Workbook.create();
-    await Workbook.read(reloaded, buffer);
+    const reloaded = await Workbook.read(buffer);
     const parts = [...(await extractAll(buffer)).keys()];
     results.push({ format, file, bytes: buffer.length, reloaded, parts });
   }

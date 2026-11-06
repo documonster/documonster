@@ -30,7 +30,7 @@ import { extractAll } from "@archive/unzip/extract";
  */
 import { createZip } from "@archive/zip/zip-bytes";
 import type { ChartExType, ExcelChartPreset } from "@excel/chart";
-import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
+import { ChartClassic, EXCEL_CHART_PRESETS } from "@excel/chart";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
   addChart,
@@ -39,7 +39,7 @@ import {
   addPivotChart,
   addPivotTable
 } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Row, Workbook } from "@excel/index";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -238,7 +238,7 @@ const SAMPLE_ROWS: Array<Array<string | number>> = [
 
 function seedDataSheet(wb: WorkbookData): void {
   const sheet = Workbook.addWorksheet(wb, "Data");
-  Worksheet.addRows(sheet, SAMPLE_ROWS);
+  Row.addMany(sheet, SAMPLE_ROWS);
 }
 
 /**
@@ -250,7 +250,7 @@ function seedDataSheet(wb: WorkbookData): void {
 export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> {
   const fixtures: SyntheticFixture[] = [];
   for (const preset of EXCEL_CHART_PRESETS as ExcelChartPreset[]) {
-    const presetType = applyChartPreset(preset, { series: [] }).type;
+    const presetType = ChartClassic.applyPreset(preset, { series: [] }).type;
     const noAxis =
       presetType === "ofPie" ||
       presetType === "pie" ||
@@ -321,7 +321,7 @@ export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> 
             ]
           : [baseSeries];
 
-    const options = applyChartPreset(preset, {
+    const options = ChartClassic.applyPreset(preset, {
       series,
       title: `Synthetic ${preset}`,
       valueAxis: noAxis
@@ -649,7 +649,7 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
   {
     const wb = Workbook.create();
     const data = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(data, [
+    Row.addMany(data, [
       ["Region", "Product", "Revenue", "Units"],
       ["West", "A", 10, 1],
       ["West", "B", 20, 2],
@@ -701,13 +701,13 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
   {
     const wb = Workbook.create();
     const sales = Workbook.addWorksheet(wb, "Sales");
-    Worksheet.addRows(sales, [
+    Row.addMany(sales, [
       ["Region", "Revenue"],
       ["West", 10],
       ["East", 20]
     ]);
     const ops = Workbook.addWorksheet(wb, "Ops");
-    Worksheet.addRows(ops, [
+    Row.addMany(ops, [
       ["Team", "Tickets"],
       ["Alpha", 100],
       ["Beta", 200]

@@ -8,15 +8,16 @@
  * but bytes are applied in a specific order derived from the GUID.
  */
 
+import { asPlainBytes } from "@utils/binary";
+import { checkBytes, invalidArgument } from "@word/core/argument-checks";
 import { generateGuid } from "@word/core/internal-utils";
-import { DocxError } from "@word/errors";
 
 /** Parse a GUID string "{8-4-4-4-12}" into 16 bytes in obfuscation-apply order. */
-function parseGuid(guid: string): Uint8Array {
+function parseGuid(guid: unknown, where: string): Uint8Array {
   // Strip braces
-  const hex = guid.replace(/[{}]/g, "").replace(/-/g, "");
-  if (hex.length !== 32) {
-    throw new DocxError(`Invalid GUID: ${guid}`);
+  const hex = typeof guid === "string" ? guid.replace(/[{}]/g, "").replace(/-/g, "") : "";
+  if (!/^[0-9a-f]{32}$/i.test(hex)) {
+    invalidArgument(where, "fontKey", 'a GUID, "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}"', guid);
   }
 
   const bytes = new Uint8Array(16);
@@ -52,8 +53,13 @@ function parseGuid(guid: string): Uint8Array {
  * @param fontKey - The GUID from w:fontKey attribute.
  * @returns The deobfuscated font data (new buffer).
  */
-export function deobfuscateFont(data: Uint8Array, fontKey: string): Uint8Array {
-  const keyBytes = parseGuid(fontKey);
+export function deobfuscateFont(data: Uint8Array, fontKey: string): Uint8Array<ArrayBuffer> {
+  return asPlainBytes(xorFontHeader(data, fontKey, "Font.deobfuscate"));
+}
+
+function xorFontHeader(data: Uint8Array, fontKey: string, where: string): Uint8Array {
+  data = checkBytes(data, "data", where);
+  const keyBytes = parseGuid(fontKey, where);
   const result = new Uint8Array(data.length);
   result.set(data);
   // XOR first 32 bytes with the GUID bytes twice (16 + 16)
@@ -70,9 +76,9 @@ export function deobfuscateFont(data: Uint8Array, fontKey: string): Uint8Array {
  * @param fontKey - The GUID to use for obfuscation (also stored in w:fontKey).
  * @returns The obfuscated font data (new buffer).
  */
-export function obfuscateFont(data: Uint8Array, fontKey: string): Uint8Array {
+export function obfuscateFont(data: Uint8Array, fontKey: string): Uint8Array<ArrayBuffer> {
   // Obfuscation is symmetric with deobfuscation (XOR)
-  return deobfuscateFont(data, fontKey);
+  return asPlainBytes(xorFontHeader(data, fontKey, "Font.obfuscate"));
 }
 
 /**

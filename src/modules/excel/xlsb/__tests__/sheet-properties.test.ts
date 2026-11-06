@@ -84,7 +84,7 @@ describe("tab colour and code name reach the sheets that asked for them", () => 
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const [readAlpha, readBeta] = Workbook.getWorksheets(reopened);
+    const [readAlpha, readBeta] = Workbook.listWorksheets(reopened);
     expect(readAlpha!.properties.tabColor).toEqual({ argb: "FFFF0000" });
     expect(readAlpha!.properties.codeName).toBe("SheetAlpha");
     expect(readBeta!.properties.tabColor).toEqual({ theme: 4 });
@@ -104,7 +104,7 @@ describe("tab colour and code name reach the sheets that asked for them", () => 
     // And it still reports no tab colour and no code name on the way back.
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const properties = Workbook.getWorksheets(reopened)[0]!.properties;
+    const properties = Workbook.listWorksheets(reopened)[0]!.properties;
     expect(properties.codeName).toBeUndefined();
     // An automatic tab colour is the absence of a choice, so nothing is reported for it — the
     // model's own default for a fresh sheet is likewise absent, not an empty object.

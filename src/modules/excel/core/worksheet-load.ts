@@ -4,13 +4,6 @@ import { createDataValidations } from "@excel/core/data-validations";
 import { formCheckboxFromModel } from "@excel/core/form-control";
 import { imageCreate } from "@excel/core/image";
 import { rowCreate } from "@excel/core/row";
-// Chart runtime is imported directly (static). The chart modules depend only
-// on the `*-core` data layer (never on this heavy `worksheet.ts`), so the
-// dependency graph stays acyclic: `worksheet → chart → *-core`. A consumer
-// that never references a chart API gets the entire chart implementation
-// tree-shaken out by the bundler — no host registry / install step required.
-import type { TableData, TableModel } from "@excel/core/table";
-import { adoptLoadedTotals, createTable, tableSetModel } from "@excel/core/table";
 /**
  * Applying a worksheet model — the load half of `getSheetModel` / `setSheetModel`.
  *
@@ -20,31 +13,45 @@ import { adoptLoadedTotals, createTable, tableSetModel } from "@excel/core/table
  * which exports of a module are used across the *whole* build, so while this lived in `worksheet.ts` the
  * reader's use of it kept the chart handle in the entry chunk of a write-only export.
  */
+import { markStoredSpills } from "@excel/core/stored-spills";
+// Chart runtime is imported directly (static). The chart modules depend only
+// on the `*-core` data layer (never on this heavy `worksheet.ts`), so the
+// dependency graph stays acyclic: `worksheet → chart → *-core`. A consumer
+// that never references a chart API gets the entire chart implementation
+// tree-shaken out by the bundler — no host registry / install step required.
+import type { TableData, TableModel } from "@excel/core/table";
+import { adoptLoadedTotals, createTable, tableSetModel } from "@excel/core/table";
+import { releaseMedia } from "@excel/core/workbook-core";
 import type { WorksheetModel } from "@excel/core/worksheet";
-import { mergeCellsWithoutStyle, setSheetName } from "@excel/core/worksheet";
+import { assignSheetName, mergeCellsWithoutStyle } from "@excel/core/worksheet";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import {
+  checkWorksheetAttached,
   columnFromModel,
   getSheetName,
   getSheetWorkbook,
   rowSetModel
 } from "@excel/core/worksheet-core";
 import type { HeaderFooter } from "@excel/types";
+import { excelNameKey } from "@utils/name-key";
 
 // Type for data validation model - maps address to validation
 
 export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
+  checkWorksheetAttached(ws);
   if (value.styledBlankRanges !== undefined) {
     (ws as { _styledBlankRanges?: readonly unknown[] })._styledBlankRanges =
       value.styledBlankRanges;
   }
-  setSheetName(ws, value.name);
+  assignSheetName(ws, value.name);
   ws.state = value.state;
   ws._columns = columnFromModel(ws, value.cols ?? []);
   _parseRows(ws, value);
+  // The cached values of each dynamic array's stored spill are its own, not data blocking it.
+  markStoredSpills(ws);
 
   _parseMergeCells(ws, value);
-  ws.dataValidations = createDataValidations(value.dataValidations);
+  ws.dataValidations = createDataValidations(value.dataValidations, ws);
   ws.properties = value.properties;
   ws.pageSetup = value.pageSetup;
   // Re-apply the OOXML schema defaults: `scaleWithDoc` / `alignWithMargins`
@@ -72,11 +79,19 @@ export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
   ws._autoFilterCriteria = value.autoFilterCriteria;
   ws._sortStateXml = value.sortStateXml;
   ws._opaqueRels = value.opaqueRels;
+  // Copied, so two sheets set from one model share nothing a caller could reach through either.
+  ws._legacyControls = value.legacyControls?.length
+    ? structuredClone(value.legacyControls)
+    : undefined;
   ws._chartsheetPlaceholder = value.chartsheetPlaceholder;
   ws._xlsbDrawingRelationshipId = value.xlsbDrawingRelationshipId;
   ws._worksheetNamespaceAttributes = value.worksheetNamespaceAttributes;
   ws._worksheetMcIgnorable = value.worksheetMcIgnorable;
   ws._sortStateAutoFilterRef = value.sortStateAutoFilterRef;
+  // A model that drops a picture the sheet showed stops using it, as `removeImage` does.
+  for (const medium of ws._media ?? []) {
+    releaseMedia(getSheetWorkbook(ws), medium.imageId);
+  }
   ws._media = value.media.map(medium => imageCreate(ws, medium));
   ws._shapes = value.shapes ? value.shapes.slice() : [];
   // Restore watermark state from media entries
@@ -95,13 +110,17 @@ export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
     }
   }
   ws.sheetProtection = value.sheetProtection;
+  // The model replaces the sheet's tables: the names of the ones it drops are free again.
+  for (const name of Object.keys(ws.tables ?? {})) {
+    getSheetWorkbook(ws)._tableNames.delete(excelNameKey(name));
+  }
   ws.tables = value.tables.reduce((tables: { [key: string]: TableData }, table: TableModel) => {
     // The cells were applied above, so the totals row's cached results are there to carry over.
     adoptLoadedTotals(ws, table, table.tableRef ?? table.ref);
     const t = createTable(ws, table);
     tableSetModel(t, table);
     tables[table.name] = t;
-    getSheetWorkbook(ws)._tableNames.add(table.name.toLowerCase());
+    getSheetWorkbook(ws)._tableNames.add(excelNameKey(table.name));
     return tables;
   }, {});
   ws.pivotTables = value.pivotTables;
@@ -119,7 +138,7 @@ export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
   // whose sparklines had been read correctly and then discarded one step later. Copied rather than aliased so
   // a caller mutating the model it passed in cannot reach inside the sheet.
   ws._sparklineGroups = value.sparklineGroups ? [...value.sparklineGroups] : [];
-  // Rebuild form controls from the serialised model so importSheet() and any
+  // Rebuild form controls from the serialised model so importWorksheet() and any
   // other model round-trip preserves checkbox state, position, and links.
   ws.formControls = (value.formControls ?? []).map(fcModel => formCheckboxFromModel(ws, fcModel));
   // Preserve loaded drawing data (charts, etc.)
@@ -167,6 +186,8 @@ function _parseRows(ws: WorksheetData, model: WorksheetModel): void {
 }
 
 function _parseMergeCells(ws: WorksheetData, model: WorksheetModel): void {
+  // The model replaces the sheet's merges; left in place, the old ones conflicted with a model that carried them.
+  ws._merges = {};
   if (model.mergeCells) {
     model.mergeCells.forEach((merge: string) => {
       // Do not merge styles when importing an Excel file

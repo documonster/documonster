@@ -36,7 +36,7 @@
  *   while keeping the surrounding element well-formed; `"reject"` throws
  *   `DocxRawXmlPolicyError` so the caller can sanitise the model first.
  *   Sites covered: opaqueRun, opaqueParagraphChild, opaqueDrawing,
- *   drawingShape rawXml/_advancedFillXml/_advancedEffectsXml,
+ *   drawingShape rawXml/_advancedFillXml/_advancedEffectsXml/_preserved,
  *   settings.mailMergeRawXml, theme.formatScheme.rawXml, theme.extLstXml,
  *   webSettings.rawXml, numPicBullet.rawVmlXml.
  *
@@ -45,11 +45,15 @@
  * model themselves before serialisation.
  */
 
+import type { SchemaMatches } from "@utils/schema";
+import { checkRecord, invalidArgument } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
+
 // =============================================================================
 // Security Policy Interface
 // =============================================================================
 
-export interface WordSecurityPolicy {
+export interface DocxSecurityPolicy {
   /** Whether to preserve VBA project binary on read/write. Default: true (preserve but don't execute). */
   readonly preserveVbaProject?: boolean;
   /** Whether to preserve OLE embedded objects. Default: true. */
@@ -77,7 +81,7 @@ export interface WordSecurityPolicy {
 // =============================================================================
 
 /** Default security policy: preserve everything, generous limits. */
-export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
+export const DEFAULT_SECURITY_POLICY: Required<DocxSecurityPolicy> = Object.freeze({
   preserveVbaProject: true,
   preserveOleObjects: true,
   preserveAltChunks: true,
@@ -88,10 +92,10 @@ export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
   maxXmlDepth: 256,
   rawXmlPolicy: "preserve",
   allowExternalTargets: true
-};
+});
 
 /** Strict security policy: strip dangerous content, tight limits. */
-export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
+export const STRICT_SECURITY_POLICY: Required<DocxSecurityPolicy> = Object.freeze({
   preserveVbaProject: false,
   preserveOleObjects: false,
   preserveAltChunks: false,
@@ -102,7 +106,7 @@ export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
   maxXmlDepth: 128,
   rawXmlPolicy: "strip",
   allowExternalTargets: false
-};
+});
 
 // =============================================================================
 // Policy Resolution
@@ -116,11 +120,12 @@ export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
  * @returns A fully resolved security policy.
  */
 export function resolveSecurityPolicy(
-  policy?: Partial<WordSecurityPolicy>
-): Required<WordSecurityPolicy> {
+  policy?: Partial<DocxSecurityPolicy>
+): Required<DocxSecurityPolicy> {
   if (!policy) {
     return DEFAULT_SECURITY_POLICY;
   }
+  checkSecurityPolicy(policy, "policy", "Security.resolvePolicy");
   return {
     preserveVbaProject: policy.preserveVbaProject ?? DEFAULT_SECURITY_POLICY.preserveVbaProject,
     preserveOleObjects: policy.preserveOleObjects ?? DEFAULT_SECURITY_POLICY.preserveOleObjects,
@@ -135,4 +140,62 @@ export function resolveSecurityPolicy(
     allowExternalTargets:
       policy.allowExternalTargets ?? DEFAULT_SECURITY_POLICY.allowExternalTargets
   };
+}
+
+const flag = () => w.boolean().optional();
+const limit = () => w.limit().optional();
+
+const policySchema = w.record({
+  preserveVbaProject: flag(),
+  preserveOleObjects: flag(),
+  preserveAltChunks: flag(),
+  dropSignaturesOnModify: flag(),
+  maxPackageSize: limit(),
+  maxPartSize: limit(),
+  maxPartCount: limit(),
+  maxXmlDepth: limit(),
+  rawXmlPolicy: w.oneOf(["preserve", "strip", "reject"]).optional(),
+  allowExternalTargets: flag()
+});
+const _policyMatch: SchemaMatches<typeof policySchema, DocxSecurityPolicy> = true;
+void _policyMatch;
+
+// In the order the refusal of an unknown key lists them.
+const POLICY_KEYS: ReadonlySet<string> = new Set([
+  "preserveVbaProject",
+  "preserveOleObjects",
+  "preserveAltChunks",
+  "dropSignaturesOnModify",
+  "allowExternalTargets",
+  "maxPackageSize",
+  "maxPartSize",
+  "maxPartCount",
+  "maxXmlDepth",
+  "rawXmlPolicy"
+] satisfies (keyof DocxSecurityPolicy)[]);
+
+/**
+ * A policy's values, reported as `field` in the name of `where` — the
+ * `securityPolicy` option of the call that takes it (`options.securityPolicy`
+ * of `Document.read`), or `Security.resolvePolicy`'s own `policy`. A limit is a
+ * number ≥ 0 — `Infinity` lifts it — because `NaN` makes every comparison
+ * false and so switched the limit off.
+ */
+export function checkSecurityPolicy(value: unknown, field: string, where: string): void {
+  checkRecord(value, field, where);
+  const policy = value as Partial<DocxSecurityPolicy>;
+  // Unknown keys are refused here and nowhere else: a misspelt limit
+  // (`maxEntries` for `maxPartCount`) would otherwise leave the real one at
+  // its default, weakening the policy with nothing said.
+  for (const key of Object.keys(policy)) {
+    if (!POLICY_KEYS.has(key)) {
+      invalidArgument(
+        where,
+        `${field}.${key}`,
+        `absent: a policy has ${[...POLICY_KEYS].join(", ")}`,
+        policy[key as keyof typeof policy]
+      );
+    }
+  }
+  checkSchema(policySchema, value, where, field);
 }

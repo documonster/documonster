@@ -14,7 +14,7 @@
  */
 
 export { ConfigError, readMetaFlags, resolveConfig, TOOL_GROUPS, usage } from "./config.js";
-export type { ResolveConfigOptions, ServerConfig, ToolGroup } from "./config.js";
+export type { PdfFontRef, ResolveConfigOptions, ServerConfig, ToolGroup } from "./config.js";
 export { formatToolError, McpToolError, toolError } from "./errors.js";
 export type { McpToolErrorOptions, ToolErrorCode } from "./errors.js";
 export { assertWritable, isInside, resolveInRoot } from "./sandbox.js";

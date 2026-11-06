@@ -38,7 +38,17 @@ import { fileURLToPath } from "node:url";
 
 import type { ChartRichText } from "@excel/chart/index";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Address, Cell, Chart, Column, DefinedNames, Row, Workbook, Worksheet } from "@excel/index";
+import {
+  Address,
+  Cell,
+  Chart,
+  Column,
+  ConditionalFormatting,
+  DefinedNames,
+  Row,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
@@ -90,11 +100,11 @@ async function main(): Promise<void> {
   };
 
   const applyYearHeader = (ws: Worksheet.Handle, row: number): void => {
-    Cell.setValue(ws, row, 1, "Line item");
+    Cell.setValue(ws, { row, col: 1 }, "Line item");
     YEARS.forEach((y, i) => {
-      Cell.setValue(ws, row, 2 + i, y);
+      Cell.setValue(ws, { row, col: 2 + i }, y);
     });
-    Cell.setValue(ws, row, 2 + YEARS.length, "YoY %");
+    Cell.setValue(ws, { row, col: 2 + YEARS.length }, "YoY %");
     Row.setFont(ws, row, { bold: true, color: { argb: "FFFFFFFF" } });
     Row.setFill(ws, row, {
       type: "pattern",
@@ -103,7 +113,7 @@ async function main(): Promise<void> {
     });
     Row.setAlignment(ws, row, { horizontal: "center" });
     Row.setHeight(ws, row, 20);
-    Cell.setStyle(ws, row, 1, { alignment: { horizontal: "left", indent: 1 } });
+    Cell.setStyle(ws, { row, col: 1 }, { alignment: { horizontal: "left", indent: 1 } });
   };
 
   // ---------------------------------------------------------------------------
@@ -155,12 +165,16 @@ async function main(): Promise<void> {
   ];
   execLines.forEach((line, i) => {
     const r = 7 + i;
-    Cell.setValue(cover, r, 2, line[0] as string);
-    Cell.setValue(cover, r, 3, line[1] as number);
-    Cell.setStyle(cover, r, 3, { numFmt: line[2] as string });
-    Cell.setStyle(cover, r, 3, { font: { bold: true, color: { argb: "FF1F3864" } } });
-    Cell.setValue(cover, r, 4, line[3] as string);
-    Cell.setStyle(cover, r, 4, { font: { italic: true, color: { argb: "FF7F7F7F" } } });
+    Cell.setValue(cover, { row: r, col: 2 }, line[0] as string);
+    Cell.setValue(cover, { row: r, col: 3 }, line[1] as number);
+    Cell.setStyle(cover, { row: r, col: 3 }, { numFmt: line[2] as string });
+    Cell.setStyle(cover, { row: r, col: 3 }, { font: { bold: true, color: { argb: "FF1F3864" } } });
+    Cell.setValue(cover, { row: r, col: 4 }, line[3] as string);
+    Cell.setStyle(
+      cover,
+      { row: r, col: 4 },
+      { font: { italic: true, color: { argb: "FF7F7F7F" } } }
+    );
   });
 
   // Signature block
@@ -340,7 +354,7 @@ async function main(): Promise<void> {
   });
 
   // Conditional formatting — red for negative values in the body
-  Worksheet.addConditionalFormatting(income, {
+  ConditionalFormatting.add(income, {
     ref: "B5:D16",
     rules: [
       {
@@ -354,7 +368,7 @@ async function main(): Promise<void> {
   });
 
   // Icon-set variance arrows for the YoY column
-  Worksheet.addConditionalFormatting(income, {
+  ConditionalFormatting.add(income, {
     ref: "E5:E16",
     rules: [
       {
@@ -374,7 +388,7 @@ async function main(): Promise<void> {
   // Waterfall chart — profit bridge from FY24 → FY25
   const bridge = Workbook.addWorksheet(wb, "Aggregates", { state: "hidden" });
   Row.setValues(bridge, 1, ["Step", "Value"]);
-  Worksheet.addRows(bridge, [
+  Row.addMany(bridge, [
     ["FY24 Revenue", 212000],
     ["Δ Revenue", 30000],
     ["Δ COGS", -18000],
@@ -383,54 +397,47 @@ async function main(): Promise<void> {
     ["Δ Tax", -3000],
     ["FY25 Net", 0]
   ]);
-  Chart.addWaterfall(
-    income,
-    {
-      title: "FY24 → FY25 profit bridge (USD thousands)",
-      categories: "Aggregates!$A$2:$A$8",
-      series: [{ name: "Bridge", values: "Aggregates!$B$2:$B$8", subtotals: [0, 6] }],
-      layout: { connectorLines: true }
-    },
-    "A18:E37"
-  );
+  Chart.place(income, "A18:E37", {
+    type: "waterfall",
+    title: "FY24 → FY25 profit bridge (USD thousands)",
+    categories: "Aggregates!$A$2:$A$8",
+    series: [{ name: "Bridge", values: "Aggregates!$B$2:$B$8", subtotals: [0, 6] }],
+    layout: { connectorLines: true }
+  });
 
   // Combo chart — revenue bars + net margin line
-  Chart.addCombo(
-    income,
-    {
-      title: "Revenue vs net margin",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          series: [
-            {
-              name: "Revenue",
-              categories: "'Income Statement'!$B$4:$D$4",
-              values: "'Income Statement'!$B$5:$D$5",
-              fill: "1F3864",
-              dataLabels: { showVal: true, numFmt: '"$"#,##0,"k"' }
-            }
-          ]
-        },
-        {
-          type: "line",
-          useSecondaryAxis: true,
-          series: [
-            {
-              name: "Net margin",
-              categories: "'Income Statement'!$B$4:$D$4",
-              values: "'Income Statement'!$B$16:$D$16",
-              line: "ED7D31",
-              lineWidth: 2.5,
-              marker: { symbol: "circle", size: 8, fill: "ED7D31", border: "FFFFFF" }
-            }
-          ]
-        }
-      ]
-    },
-    "A39:E58"
-  );
+  Chart.place(income, "A39:E58", {
+    title: "Revenue vs net margin",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        series: [
+          {
+            name: "Revenue",
+            categories: "'Income Statement'!$B$4:$D$4",
+            values: "'Income Statement'!$B$5:$D$5",
+            fill: "1F3864",
+            dataLabels: { showVal: true, numFmt: '"$"#,##0,"k"' }
+          }
+        ]
+      },
+      {
+        type: "line",
+        useSecondaryAxis: true,
+        series: [
+          {
+            name: "Net margin",
+            categories: "'Income Statement'!$B$4:$D$4",
+            values: "'Income Statement'!$B$16:$D$16",
+            line: "ED7D31",
+            lineWidth: 2.5,
+            marker: { symbol: "circle", size: 8, fill: "ED7D31", border: "FFFFFF" }
+          }
+        ]
+      }
+    ]
+  });
 
   // ---------------------------------------------------------------------------
   // Sheet 3 — Balance sheet
@@ -538,11 +545,15 @@ async function main(): Promise<void> {
     }
     // YoY column
     if (def.formula) {
-      Cell.setValue(balance, row, 5, {
-        formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
-        result: 0
-      });
-      Cell.setStyle(balance, row, 5, { numFmt: PERCENT });
+      Cell.setValue(
+        balance,
+        { row, col: 5 },
+        {
+          formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
+          result: 0
+        }
+      );
+      Cell.setStyle(balance, { row, col: 5 }, { numFmt: PERCENT });
     }
   });
 
@@ -550,47 +561,47 @@ async function main(): Promise<void> {
   Cell.setValue(balance, "A28", "Debt ratio (total liabilities ÷ total assets)");
   Cell.setStyle(balance, "A28", { font: { italic: true } });
   ["B", "C", "D"].forEach((col, i) => {
-    Cell.setValue(balance, 28, 2 + i, {
-      formula: `=${col}19/${col}12`,
-      result: 0
-    });
-    Cell.setStyle(balance, 28, 2 + i, { numFmt: PERCENT });
+    Cell.setValue(
+      balance,
+      { row: 28, col: 2 + i },
+      {
+        formula: `=${col}19/${col}12`,
+        result: 0
+      }
+    );
+    Cell.setStyle(balance, { row: 28, col: 2 + i }, { numFmt: PERCENT });
   });
 
   DefinedNames.add(Workbook.getDefinedNames(wb), "'Balance Sheet'!$D$28", "CurrentDebtRatio");
 
   // Segment breakdown pie chart
   const segSheet = Workbook.addWorksheet(wb, "Segments", { state: "hidden" });
-  Worksheet.addRow(segSheet, ["Segment", "Revenue", "Operating income"]);
-  Worksheet.addRows(segSheet, [
+  Row.add(segSheet, ["Segment", "Revenue", "Operating income"]);
+  Row.addMany(segSheet, [
     ["Consumer", 98000, 22000],
     ["Enterprise", 82000, 31000],
     ["Services", 42000, 9500],
     ["Other", 20000, 2500]
   ]);
 
-  Chart.add(
-    balance,
-    {
-      type: "pie",
-      title: "FY25 revenue by segment",
-      varyColors: true,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Segments!$A$2:$A$5",
-          values: "Segments!$B$2:$B$5",
-          dataLabels: {
-            showPercent: true,
-            showCatName: true,
-            position: "outEnd",
-            separator: " • "
-          }
+  Chart.place(balance, "A30:E48", {
+    type: "pie",
+    title: "FY25 revenue by segment",
+    varyColors: true,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Segments!$A$2:$A$5",
+        values: "Segments!$B$2:$B$5",
+        dataLabels: {
+          showPercent: true,
+          showCatName: true,
+          position: "outEnd",
+          separator: " • "
         }
-      ]
-    },
-    "A30:E48"
-  );
+      }
+    ]
+  });
 
   // ---------------------------------------------------------------------------
   // Sheet 4 — Cash flow statement
@@ -690,7 +701,7 @@ async function main(): Promise<void> {
   });
 
   // Conditional formatting — red for negative values
-  Worksheet.addConditionalFormatting(cashFlow, {
+  ConditionalFormatting.add(cashFlow, {
     ref: "B5:D23",
     rules: [
       {
@@ -780,13 +791,17 @@ async function main(): Promise<void> {
 
   assumptions.forEach((a, i) => {
     const row = 5 + i;
-    Cell.setValue(forecast, row, 1, a.label);
-    Cell.setValue(forecast, row, 2, a.actual);
-    Cell.setValue(forecast, row, 3, a.plan1);
-    Cell.setValue(forecast, row, 4, a.plan2);
-    Cell.setValue(forecast, row, 5, a.notes);
-    Cell.setStyle(forecast, row, 5, { font: { italic: true, color: { argb: "FF595959" } } });
-    [2, 3, 4].forEach(c => Cell.setStyle(forecast, row, c, { numFmt: a.fmt }));
+    Cell.setValue(forecast, { row, col: 1 }, a.label);
+    Cell.setValue(forecast, { row, col: 2 }, a.actual);
+    Cell.setValue(forecast, { row, col: 3 }, a.plan1);
+    Cell.setValue(forecast, { row, col: 4 }, a.plan2);
+    Cell.setValue(forecast, { row, col: 5 }, a.notes);
+    Cell.setStyle(
+      forecast,
+      { row, col: 5 },
+      { font: { italic: true, color: { argb: "FF595959" } } }
+    );
+    [2, 3, 4].forEach(c => Cell.setStyle(forecast, { row, col: c }, { numFmt: a.fmt }));
 
     // Data validation on the FY26/FY27 plan cells
     [3, 4].forEach(c => {
@@ -798,12 +813,13 @@ async function main(): Promise<void> {
         error: "Plan values must be between -50% and +100%",
         showErrorMessage: true
       });
-      Cell.setStyle(forecast, row, c, { protection: { locked: false } });
+      Cell.setStyle(forecast, { row, col: c }, { protection: { locked: false } });
     });
   });
 
   // Protect the sheet — only FY26/FY27 assumption cells editable
-  await Worksheet.protect(forecast, "fy25-board-review", {
+  await Worksheet.protect(forecast, {
+    password: "fy25-board-review",
     selectLockedCells: true,
     selectUnlockedCells: true,
     sort: false,
@@ -912,10 +928,10 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets      : ${Workbook.getWorksheets(wb).length}`);
-  console.log(`  chartsheets : ${Workbook.getChartsheets(wb).length}`);
+  console.log(`  sheets      : ${Workbook.listWorksheets(wb).length}`);
+  console.log(`  chartsheets : ${Workbook.listChartsheets(wb).length}`);
   console.log(
-    `  charts      : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
+    `  charts      : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Chart.list(ws).length, 0)}`
   );
   console.log(`  PDF bytes   : enc=${encryptedPdf.byteLength}, plain=${publicPdf.byteLength}`);
 }

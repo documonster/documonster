@@ -8,9 +8,11 @@ import {
   getCell,
   getColumn,
   getRow,
-  rowSplice
+  rowSplice,
+  duplicateRow
 } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getRow as coreGetRow } from "@excel/core/worksheet-core";
+import { Cell, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Style fixes", () => {
@@ -136,7 +138,7 @@ describe("Style fixes", () => {
         }
       });
 
-      Worksheet.duplicateRow(ws, 1, 1, true);
+      duplicateRow(ws, 1, 1, true);
 
       // Values should match
       expect(Cell.getStyle(ws, "A2").font).toEqual(Cell.getStyle(ws, "A1").font);
@@ -166,7 +168,7 @@ describe("Style fixes", () => {
         }
       });
 
-      Worksheet.duplicateRow(ws, 1, 1, true);
+      duplicateRow(ws, 1, 1, true);
 
       expect(Cell.getStyle(ws, "A2").fill).toEqual(Cell.getStyle(ws, "A1").fill);
       expect(Cell.getStyle(ws, "A2").fill).not.toBe(Cell.getStyle(ws, "A1").fill);
@@ -190,7 +192,7 @@ describe("Style fixes", () => {
       });
 
       // Insert 1 empty row at position 2 — pushes old row 2 down to row 3
-      Worksheet.spliceRows(ws, 2, 0, []);
+      Row.splice(ws, 2, 0, []);
 
       expect(Cell.getStyle(ws, "A3").font!.name).toBe("Georgia");
       expect(Cell.getStyle(ws, "A3").border!.left!.style).toBe("thin");
@@ -219,7 +221,7 @@ describe("Style fixes", () => {
       });
 
       // Remove row 2 — row 3 shifts up to row 2
-      Worksheet.spliceRows(ws, 2, 1);
+      Row.splice(ws, 2, 1);
 
       expect(Cell.getStyle(ws, "A2").font!.name).toBe("Impact");
       expect((Cell.getStyle(ws, "A2").fill as any).fgColor.argb).toBe("FF00FFFF");
@@ -242,7 +244,7 @@ describe("Style fixes", () => {
       Cell.setStyle(ws, "B1", { font: { name: "Arial", size: 12, bold: true } });
 
       // Insert one cell at B, pushing B1 to C1
-      rowSplice(Worksheet.getRow(ws, 1), 2, 0, "inserted");
+      rowSplice(coreGetRow(ws, 1), 2, 0, "inserted");
 
       expect(Cell.getStyle(ws, "C1").font!.name).toBe("Arial");
       expect(Cell.getStyle(ws, "C1").font!.bold).toBe(true);
@@ -265,7 +267,7 @@ describe("Style fixes", () => {
       Cell.setStyle(ws, "C1", { border: { top: { style: "thin" as const } } });
 
       // Remove A1 — B1 shifts to A1, C1 shifts to B1
-      rowSplice(Worksheet.getRow(ws, 1), 1, 1);
+      rowSplice(coreGetRow(ws, 1), 1, 1);
 
       expect(Cell.getStyle(ws, "A1").font!.name).toBe("Georgia");
       expect(Cell.getStyle(ws, "B1").border!.top!.style).toBe("thin");

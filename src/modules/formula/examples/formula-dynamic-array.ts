@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -32,9 +32,9 @@ const rows: [string, string, number][] = [
   ["West", "Widget", 110]
 ];
 rows.forEach((row, i) => {
-  Cell.setValue(ws, i + 2, 1, row[0]);
-  Cell.setValue(ws, i + 2, 2, row[1]);
-  Cell.setValue(ws, i + 2, 3, row[2]);
+  Cell.setValue(ws, { row: i + 2, col: 1 }, row[0]);
+  Cell.setValue(ws, { row: i + 2, col: 2 }, row[1]);
+  Cell.setValue(ws, { row: i + 2, col: 3 }, row[2]);
 });
 
 // FILTER — rows where Sales ≥ 100
@@ -74,7 +74,7 @@ Cell.setValue(ws, "T5", {
   formula: "SCAN(0, SEQUENCE(5), LAMBDA(acc,x, acc + x))"
 });
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 // Dynamic array sources print their scalar top-left; the full spill
 // lives in surrounding cells.
@@ -93,18 +93,20 @@ console.log("\nFILTER spill E1:G?");
 for (let rn = 1; rn <= 6; rn++) {
   const row: unknown[] = [];
   for (let cn = 5; cn <= 7; cn++) {
-    // `Cell.find` rather than any `Cell.get*` reader: the latter resolve their
-    // address through `getCell`, which would *create* every cell probed here and
-    // so manufacture the very ghost cells this loop is trying to observe.
-    const cell = Cell.find(ws, rn, cn);
-    if (!cell) {
+    // `Cell.has` first: it creates nothing, so probing does not manufacture the
+    // very ghost cells this loop is trying to observe.
+    if (!Cell.has(ws, { row: rn, col: cn })) {
       row.push(null);
       continue;
     }
     // For the source cell, the spilled value is carried in `result`;
     // ghost cells carry it in `value`. The cell is known to exist by now, so
     // addressing it again is safe.
-    row.push(rn === 1 && cn === 5 ? Cell.getResult(ws, rn, cn) : Cell.view(cell).value);
+    row.push(
+      rn === 1 && cn === 5
+        ? Cell.getResult(ws, { row: rn, col: cn })
+        : Cell.getValue(ws, { row: rn, col: cn })
+    );
   }
   if (row.some(v => v !== null)) {
     console.log(`  row ${rn}: ${JSON.stringify(row)}`);

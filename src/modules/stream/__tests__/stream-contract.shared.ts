@@ -612,8 +612,14 @@ export function runStreamContractTests(S: Api): void {
 
     it("rejects a negative or fractional size", async () => {
       const s = new S.PullStream();
-      await expect(s.pull(-1)).rejects.toThrow(RangeError);
-      await expect(s.pull(1.5)).rejects.toThrow(RangeError);
+      await expect(s.pull(-1)).rejects.toMatchObject({
+        name: "StreamArgumentError",
+        field: "size"
+      });
+      await expect(s.pull(1.5)).rejects.toMatchObject({
+        name: "StreamArgumentError",
+        field: "size"
+      });
     });
   });
 

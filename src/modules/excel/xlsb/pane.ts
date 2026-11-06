@@ -29,8 +29,8 @@
  * validation: clamping a twip position to 1,048,575 rows, or truncating it to an integer, applies a row rule
  * to something that is not a row count.
  */
-import { XLSB_MAX_COLUMNS, XLSB_MAX_ROWS } from "@excel/xlsb/binary";
-import { BinaryReader, BinaryWriter } from "@utils/binary";
+import { XLSB_MAX_COLUMNS, XLSB_MAX_ROWS, XlsbReader } from "@excel/xlsb/binary";
+import { BinaryWriter } from "@utils/binary";
 
 /** `Pnn`, MS-XLSB 2.5.108: which pane Excel puts the cursor in. */
 export const PANE = { bottomRight: 0, topRight: 1, bottomLeft: 2, topLeft: 3 } as const;
@@ -144,7 +144,7 @@ export function encodePane(pane: SheetPane): Uint8Array {
 /** Read a `BrtPane`, or `undefined` when the payload is short. */
 export function readPane(payload: Uint8Array, part: string): SheetPane | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     // Columns first, then rows — see the note at the top. Both this reader and the writer had it the other way
     // round, so they agreed with each other and a round trip could not see it.
     const columns = reader.readFloat64();

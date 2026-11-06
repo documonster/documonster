@@ -15,25 +15,54 @@
  * page.drawRect({ x: 72, y: 700, width: 200, height: 30 });
  * page.drawCircle({ cx: 300, cy: 400, r: 50, fill: { r: 1, g: 0, b: 0 } });
  *
- * const bytes = await doc.build();
+ * const bytes = await doc.toBuffer();
  * ```
  */
 
-import { writeImageXObject } from "@pdf/builder/image-utils";
+import { discoverDrawnTextFonts, withDrawnTextFontBuild } from "@pdf/builder/drawn-text-fonts";
+import { assertImageFormat, checkImageData, writeImageXObject } from "@pdf/builder/image-utils";
+import {
+  at,
+  checkFinite,
+  checkFontOptionNames,
+  fontOptionsShape,
+  readFontSourceArgument,
+  checkOptionalBoolean,
+  checkPdfFontConfig,
+  checkOptionalColor,
+  checkOptionalDashPattern,
+  checkOptionalEnum,
+  checkOptionalFinite,
+  checkOptionalInteger,
+  checkOptionalNonNegative,
+  checkOptionalObject,
+  checkOptionalPositive,
+  checkOptionalString,
+  checkEncryptionOptions,
+  checkDocumentMetadata,
+  checkRectTuple,
+  checkString,
+  checkStringList,
+  CJK_LANGUAGES,
+  isByteArray
+} from "@pdf/core/arguments";
+import { checkSigningMaterial } from "@pdf/core/asn1";
 import { initEncryption } from "@pdf/core/encryption";
-import { PdfDict, pdfRef, pdfString, pdfNumber } from "@pdf/core/pdf-object";
+import { PdfDict, pdfRef, pdfString, pdfNumber, pdfName } from "@pdf/core/pdf-object";
 import { PdfContentStream } from "@pdf/core/pdf-stream";
 import { PdfWriter } from "@pdf/core/pdf-writer";
 import { writePdfAMetadata, writePdfAOutputIntent } from "@pdf/core/pdfa";
-import { PdfError } from "@pdf/errors";
+import { PdfArgumentError, PdfError } from "@pdf/errors";
 import { compilePdfFontConfig } from "@pdf/font/font-config";
-import type { PdfFontConfig } from "@pdf/font/font-config";
+import type { PdfFontConfig, PdfFontSource } from "@pdf/font/font-config";
 import { FontManager } from "@pdf/font/font-manager";
-import { findSystemFontForCodePoints } from "@pdf/font/system-fonts";
 import { parseTtf } from "@pdf/font/ttf-parser";
 import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
-import type { PdfColor, PdfExportOptions } from "@pdf/types";
+import type { PdfColor, PdfEncryptionOptions, PdfExportOptions } from "@pdf/types";
+import { asPlainBytes } from "@utils/binary";
 import type { CjkLanguage } from "@utils/cjk";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import {
   parseCssColor,
   parseSvgAttributes,
@@ -171,7 +200,7 @@ export interface DrawLineOptions extends StrokeShapeOptions {
   /** Line width. Default: 1. */
   lineWidth?: number;
   /** Dash pattern. Default: solid. */
-  dashPattern?: number[];
+  dashPattern?: readonly number[];
 }
 
 /**
@@ -204,7 +233,7 @@ export interface DrawPathOptions extends StrokeShapeOptions {
    * polyline of three or more points — a chart's connector lines, a leader — came out
    * solid in a PDF while SVG and the rasteriser dashed it.
    */
-  dashPattern?: number[];
+  dashPattern?: readonly number[];
   /** Fill color. Omit for no fill. */
   fill?: PdfColor;
   /** Stroke color. Omit for no stroke. */
@@ -282,14 +311,48 @@ export interface DocumentMetadata {
   title?: string;
   author?: string;
   subject?: string;
+  /**
+   * Keywords, as one string (`/Keywords`, and `pdf:Keywords` in XMP) — what `Pdf.extract`
+   * reads back as `metadata.keywords`.
+   */
+  keywords?: string;
   creator?: string;
   /**
+   * The application that produced the PDF (`/Producer`, and `pdf:Producer` in XMP). The
+   * builder writes `documonster` when this is not given; the editor keeps the document's own.
+   */
+  producer?: string;
+  /**
    * Written as /CreationDate (and the XMP create date for PDF/A). Defaults to
-   * the time of `build()`; supply a fixed date for byte-reproducible output.
+   * the time of `toBuffer()`; supply a fixed date for byte-reproducible output.
    */
   creationDate?: Date;
   /** Written as /ModDate (and the XMP modify date for PDF/A). */
   modDate?: Date;
+}
+
+/**
+ * A checked {@link DocumentMetadata}, copied down to its dates, keeping only the fields the
+ * type has.
+ *
+ * @internal
+ */
+export function copyDocumentMetadata(metadata: DocumentMetadata): DocumentMetadata {
+  const copy: {
+    -readonly [K in keyof DocumentMetadata]: DocumentMetadata[K];
+  } = {};
+  for (const field of ["title", "author", "subject", "keywords", "creator", "producer"] as const) {
+    if (metadata[field] !== undefined) {
+      copy[field] = metadata[field];
+    }
+  }
+  if (metadata.creationDate !== undefined) {
+    copy.creationDate = new Date(metadata.creationDate.getTime());
+  }
+  if (metadata.modDate !== undefined) {
+    copy.modDate = new Date(metadata.modDate.getTime());
+  }
+  return copy;
 }
 
 /** Document-wide options. Fonts are compiled before any page text is drawn. */
@@ -302,7 +365,8 @@ export interface PdfDocumentBuilderOptions {
 
   /**
    * System font families auto-discovery should prefer, in order, when `fonts`
-   * is not given. Equivalent to calling `preferSystemFonts()`.
+   * is not given. Equivalent to calling `preferSystemFonts()`. No effect in a browser,
+   * which has no system fonts to search.
    *
    * @see {@link PdfDocumentBuilder.preferSystemFonts}
    */
@@ -310,15 +374,16 @@ export interface PdfDocumentBuilderOptions {
 
   /**
    * The East Asian written language of the document, so auto-discovery picks a
-   * face drawn in that regional hand. Equivalent to calling `textLanguage()`.
+   * face drawn in that regional hand. Equivalent to calling `setTextLanguage()`. No effect
+   * in a browser, which has no system fonts to search.
    *
-   * @see {@link PdfDocumentBuilder.textLanguage}
+   * @see {@link PdfDocumentBuilder.setTextLanguage}
    */
   readonly textLanguage?: CjkLanguage;
 
   /**
    * Turn off the host font scan entirely. Equivalent to calling
-   * `disableFontAutoDiscovery()`.
+   * `disableFontAutoDiscovery()`. No effect in a browser, which has no such scan.
    *
    * Accepted here as well as through the method so a bridge can forward the
    * caller's `PdfExportOptions` in one object, rather than reaching for a chained
@@ -333,7 +398,7 @@ export interface PdfDocumentBuilderOptions {
    * A font engine to adopt instead of creating one.
    *
    * Exists so a pipeline that has already **measured** with a particular set of
-   * faces can hand them over, rather than having `build()` discover fonts a
+   * faces can hand them over, rather than having `toBuffer()` discover fonts a
    * second time and possibly land on different ones. The Word bridge lays a
    * document out against the face it discovered; without sharing the engine, the
    * builder repeated the search from its own code points and its own language
@@ -395,7 +460,7 @@ export interface TextMarkupAnnotationOptions {
   /** Annotation subtype. */
   type: "Highlight" | "Underline" | "StrikeOut" | "Squiggly";
   /** Bounding rectangle [x1, y1, x2, y2]. */
-  rect: [number, number, number, number];
+  rect: readonly [number, number, number, number];
   /**
    * QuadPoints — four pairs of (x,y) defining the marked text region.
    * Must be groups of 8 numbers (4 corners per quad). Order per PDF spec:
@@ -403,7 +468,7 @@ export interface TextMarkupAnnotationOptions {
    * top-left, top-right, bottom-left, bottom-right — the spec is ambiguous).
    * If omitted, defaults to the corners of `rect`.
    */
-  quadPoints?: number[];
+  quadPoints?: readonly number[];
   /** Annotation color (RGB, 0–1). Default: yellow for highlight, red for others. */
   color?: PdfColor;
   /** Text contents (e.g., comment text). */
@@ -416,7 +481,7 @@ export interface TextMarkupAnnotationOptions {
 export interface TextAnnotationOptions {
   type: "Text";
   /** Position — the icon appears at this point. */
-  rect: [number, number, number, number];
+  rect: readonly [number, number, number, number];
   /** Comment text. */
   contents?: string;
   /** Author. */
@@ -433,7 +498,7 @@ export interface TextAnnotationOptions {
 export interface FreeTextAnnotationOptions {
   type: "FreeText";
   /** Bounding rectangle [x1, y1, x2, y2]. */
-  rect: [number, number, number, number];
+  rect: readonly [number, number, number, number];
   /** The displayed text. */
   contents: string;
   /** Font size. Default: 12. */
@@ -450,7 +515,7 @@ export interface FreeTextAnnotationOptions {
 export interface StampAnnotationOptions {
   type: "Stamp";
   /** Bounding rectangle [x1, y1, x2, y2]. */
-  rect: [number, number, number, number];
+  rect: readonly [number, number, number, number];
   /** Standard stamp name. */
   stampName?:
     | "Approved"
@@ -483,7 +548,7 @@ export type AnnotationOptions =
   | StampAnnotationOptions;
 
 /** @internal Stored annotation for build-time serialization. */
-interface BuilderAnnotation {
+export interface BuilderAnnotation {
   subtype: string;
   rect: [number, number, number, number];
   entries: Array<[string, string]>;
@@ -498,7 +563,7 @@ interface FormFieldBaseOptions {
   /** Fully qualified field name (e.g., "form.name"). */
   name: string;
   /** Bounding rectangle [x1, y1, x2, y2]. */
-  rect: [number, number, number, number];
+  rect: readonly [number, number, number, number];
   /** Default value. */
   value?: string;
   /** Read-only. Default: false. */
@@ -529,7 +594,7 @@ export interface CheckboxOptions extends FormFieldBaseOptions {
 export interface DropdownOptions extends FormFieldBaseOptions {
   type: "dropdown";
   /** Available options. */
-  options: string[];
+  options: readonly string[];
   /** Allow typing a custom value. Default: false. */
   editable?: boolean;
 }
@@ -540,9 +605,9 @@ export interface RadioGroupOptions {
   /** Fully qualified field name for the group. */
   name: string;
   /** Individual radio buttons. */
-  buttons: Array<{
+  buttons: ReadonlyArray<{
     /** Bounding rectangle. */
-    rect: [number, number, number, number];
+    rect: readonly [number, number, number, number];
     /** Export value for this button. */
     value: string;
   }>;
@@ -597,6 +662,337 @@ const DEFAULT_LINE_HEIGHT = 1.2;
 const BLACK: PdfColor = { r: 0, g: 0, b: 0 };
 
 // =============================================================================
+// Argument checks
+// =============================================================================
+
+const LINE_JOINS = ["miter", "round", "bevel"] as const;
+const LINE_CAPS = ["butt", "round", "square"] as const;
+const FILL_RULES = ["nonzero", "evenodd"] as const;
+const TEXT_ANCHORS = ["start", "middle", "end"] as const;
+const MARKUP_TYPES = ["Highlight", "Underline", "StrikeOut", "Squiggly"] as const;
+const ANNOTATION_TYPES = [...MARKUP_TYPES, "Text", "FreeText", "Stamp"] as const;
+const TEXT_ICONS = ["Comment", "Key", "Note", "Help", "NewParagraph", "Paragraph", "Insert"];
+const STAMP_NAMES = [
+  "Approved",
+  "Experimental",
+  "NotApproved",
+  "AsIs",
+  "Expired",
+  "NotForPublicRelease",
+  "Confidential",
+  "Final",
+  "Sold",
+  "Departmental",
+  "ForComment",
+  "TopSecret",
+  "Draft",
+  "ForPublicRelease"
+];
+const FORM_FIELD_TYPES = ["text", "checkbox", "dropdown", "radio"] as const;
+
+/**
+ * Every bookmark has to name a page the document has. Checked when the document is written,
+ * because a page may be added after the bookmark that points at it; a bookmark to no page used
+ * to be left out of the outline without a word.
+ */
+function checkBookmarkTargets(bookmarks: readonly BookmarkNode[], pageCount: number): void {
+  for (const node of bookmarks) {
+    if (node.pageIndex >= pageCount) {
+      throw new PdfArgumentError(
+        "pageIndex",
+        `Pdf.Builder#toBuffer: bookmark ${JSON.stringify(node.title)} points at page index ${node.pageIndex}, ` +
+          `but the document has ${pageCount} page${pageCount === 1 ? "" : "s"}`
+      );
+    }
+    checkBookmarkTargets(node.children, pageCount);
+  }
+}
+
+/**
+ * Throw {@link PdfArgumentError} when a form-field name is used twice. A fully qualified name
+ * identifies one field: two fields written with the same `/T` are read as one by some
+ * viewers and as two by others, and filling one filled both — a text value landed in a
+ * checkbox. Checked when the document is written, because the fields are added page by page.
+ *
+ * @internal
+ */
+export function checkUniqueFieldNames(where: string, names: readonly string[]): void {
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) {
+      throw new PdfArgumentError(
+        "name",
+        `${where}: two form fields are named ${JSON.stringify(name)} — a fully qualified name identifies one field`
+      );
+    }
+    seen.add(name);
+  }
+}
+
+const derBytes = () => s.custom<Uint8Array>(isByteArray, "a Uint8Array of DER bytes");
+
+const signatureOptionsSchema = s.object(
+  {
+    certificate: derBytes(),
+    privateKey: derBytes(),
+    name: s.string().optional(),
+    reason: s.string().optional(),
+    location: s.string().optional(),
+    contactInfo: s.string().optional()
+  },
+  { expected: "an options object" }
+);
+const _signatureOptionsMatch: SchemaMatches<typeof signatureOptionsSchema, PdfSignatureOptions> =
+  true;
+void _signatureOptionsMatch;
+
+const pageOptionsSchema = s.object(
+  {
+    width: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional(),
+    height: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional()
+  },
+  { expected: "an options object" }
+);
+const _pageOptionsMatch: SchemaMatches<typeof pageOptionsSchema, PageOptions> = true;
+void _pageOptionsMatch;
+
+/** Page options: `width` and `height`, each finite and `> 0` when given. */
+export function checkPageOptions(where: string, options: PageOptions | undefined): void {
+  check(pageOptionsSchema.optional(), options, at(where, "options"));
+}
+
+const builderOptionsSchema = s.object(
+  {
+    fonts: fontOptionsShape.fonts,
+    preferSystemFonts: fontOptionsShape.preferSystemFonts,
+    textLanguage: fontOptionsShape.textLanguage,
+    disableFontAutoDiscovery: fontOptionsShape.disableFontAutoDiscovery,
+    fontManager: s.unknown<FontManager>().optional()
+  },
+  { expected: "an options object" }
+);
+const _builderOptionsMatch: SchemaMatches<
+  typeof builderOptionsSchema,
+  { -readonly [K in keyof PdfDocumentBuilderOptions]: PdfDocumentBuilderOptions[K] }
+> = true;
+void _builderOptionsMatch;
+
+const tocOptionsSchema = s.object(
+  {
+    title: s.string().optional(),
+    fontSize: s
+      .number({ finite: true, expected: "a finite number > 0" })
+      .refine(v => v > 0, "a finite number > 0")
+      .optional(),
+    indent: s.number({ finite: true, min: 0 }).optional()
+  },
+  { expected: "an options object" }
+);
+const _tocOptionsMatch: SchemaMatches<typeof tocOptionsSchema, TocOptions> = true;
+void _tocOptionsMatch;
+
+/** Certificate and key bytes, and the optional signer strings. */
+export function checkSignatureOptions(where: string, options: PdfSignatureOptions): void {
+  check(signatureOptionsSchema, options, at(where, "options"));
+  checkSigningMaterial(where, options.certificate, options.privateKey);
+}
+
+function checkOptions(where: string, options: unknown, field = "options"): void {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new PdfArgumentError(
+      field,
+      `${where}: ${field} must be an options object, got ${options === null ? "null" : typeof options}`
+    );
+  }
+}
+
+function checkStrokeShape(where: string, options: StrokeShapeOptions): void {
+  checkOptionalEnum(where, "options.lineJoin", options.lineJoin, LINE_JOINS);
+  checkOptionalEnum(where, "options.lineCap", options.lineCap, LINE_CAPS);
+}
+
+function checkPaint(
+  where: string,
+  options: { fill?: PdfColor; stroke?: PdfColor; lineWidth?: number }
+): void {
+  checkOptionalColor(where, "options.fill", options.fill);
+  checkOptionalColor(where, "options.stroke", options.stroke);
+  checkOptionalNonNegative(where, "options.lineWidth", options.lineWidth);
+}
+
+function checkDrawTextOptions(where: string, options: DrawTextOptions): void {
+  checkOptions(where, options);
+  checkFinite(where, "options.x", options.x);
+  checkFinite(where, "options.y", options.y);
+  checkOptionalPositive(where, "options.fontSize", options.fontSize);
+  checkOptionalString(where, "options.fontFamily", options.fontFamily);
+  checkOptionalColor(where, "options.color", options.color);
+  checkOptionalPositive(where, "options.maxWidth", options.maxWidth);
+  checkOptionalPositive(where, "options.lineHeight", options.lineHeight);
+  checkOptionalFinite(where, "options.charSpacing", options.charSpacing);
+  checkOptionalFinite(where, "options.wordSpacing", options.wordSpacing);
+  checkOptionalFinite(where, "options.rotation", options.rotation);
+  checkOptionalEnum(where, "options.anchor", options.anchor, TEXT_ANCHORS);
+  for (const field of ["bold", "italic"] as const) {
+    if (options[field] !== undefined && typeof options[field] !== "boolean") {
+      throw new PdfArgumentError(
+        `options.${field}`,
+        `${where}: options.${field} must be a boolean, got ${typeof options[field]}`
+      );
+    }
+  }
+}
+
+function checkDrawPathOptions(where: string, options: DrawPathOptions | undefined): void {
+  if (options === undefined) {
+    return;
+  }
+  checkOptions(where, options);
+  checkPaint(where, options);
+  checkOptionalEnum(where, "options.fillRule", options.fillRule, FILL_RULES);
+  checkOptionalDashPattern(where, "options.dashPattern", options.dashPattern);
+  checkStrokeShape(where, options);
+}
+
+function checkPathOps(where: string, ops: unknown): void {
+  if (!Array.isArray(ops)) {
+    throw new PdfArgumentError("ops", `${where}: ops must be an array of path operations`);
+  }
+  ops.forEach((op: Partial<Record<string, unknown>> | null, i) => {
+    const kind = typeof op === "object" && op !== null ? op.op : undefined;
+    const fields =
+      kind === "move" || kind === "line"
+        ? ["x", "y"]
+        : kind === "curve"
+          ? ["x1", "y1", "x2", "y2", "x3", "y3"]
+          : kind === "close"
+            ? []
+            : undefined;
+    if (fields === undefined) {
+      throw new PdfArgumentError(
+        `ops[${i}].op`,
+        `${where}: ops[${i}].op must be one of "move", "line", "curve", "close", got ${JSON.stringify(kind)}`
+      );
+    }
+    for (const field of fields) {
+      checkFinite(where, `ops[${i}].${field}`, op![field]);
+    }
+  });
+}
+
+function checkAnnotationOptions(where: string, options: AnnotationOptions): void {
+  checkOptions(where, options);
+  checkOptionalEnum(where, "options.type", options.type, ANNOTATION_TYPES);
+  if (options.type === undefined) {
+    throw new PdfArgumentError("options.type", `${where}: options.type is required`);
+  }
+  checkRectTuple(where, "options.rect", options.rect);
+  checkOptionalColor(where, "options.color", options.color);
+  checkOptionalString(where, "options.author", options.author);
+  if (options.type === "FreeText") {
+    checkString(where, "options.contents", options.contents);
+    checkOptionalPositive(where, "options.fontSize", options.fontSize);
+    checkOptionalColor(where, "options.borderColor", options.borderColor);
+  } else {
+    checkOptionalString(where, "options.contents", options.contents);
+  }
+  if (options.type === "Text") {
+    checkOptionalEnum(where, "options.iconName", options.iconName, TEXT_ICONS);
+  } else if (options.type === "Stamp") {
+    checkOptionalEnum(where, "options.stampName", options.stampName, STAMP_NAMES);
+  } else if (options.type !== "FreeText" && options.quadPoints !== undefined) {
+    const qp: unknown = options.quadPoints;
+    if (!Array.isArray(qp) || qp.length === 0 || qp.length % 8 !== 0) {
+      throw new PdfArgumentError(
+        "options.quadPoints",
+        `${where}: options.quadPoints must be a non-empty array of groups of 8 numbers`
+      );
+    }
+    qp.forEach((v, i) => checkFinite(where, `options.quadPoints[${i}]`, v));
+  }
+}
+
+function checkFormFieldOptions(where: string, options: FormFieldOptions): void {
+  checkOptions(where, options);
+  checkOptionalEnum(where, "options.type", options.type, FORM_FIELD_TYPES);
+  if (options.type === undefined) {
+    throw new PdfArgumentError("options.type", `${where}: options.type is required`);
+  }
+  checkString(where, "options.name", options.name);
+  if (options.name === "") {
+    throw new PdfArgumentError("options.name", `${where}: options.name must not be empty`);
+  }
+  if (options.type === "radio") {
+    if (!Array.isArray(options.buttons) || options.buttons.length === 0) {
+      throw new PdfArgumentError(
+        "options.buttons",
+        `${where}: options.buttons must be a non-empty array`
+      );
+    }
+    options.buttons.forEach((button, i) => {
+      checkOptions(where, button, `options.buttons[${i}]`);
+      checkRectTuple(where, `options.buttons[${i}].rect`, button.rect);
+      checkString(where, `options.buttons[${i}].value`, button.value);
+      if (button.value === "" || button.value.includes("\0")) {
+        // The value is written as a name, and a name cannot hold a NUL even escaped (§7.3.5).
+        throw new PdfArgumentError(
+          `options.buttons[${i}].value`,
+          `${where}: options.buttons[${i}].value must be non-empty and contain no NUL character`
+        );
+      }
+    });
+    checkOptionalString(where, "options.selected", options.selected);
+    if (
+      options.selected !== undefined &&
+      options.selected !== "" &&
+      !options.buttons.some(button => button.value === options.selected)
+    ) {
+      throw new PdfArgumentError(
+        "options.selected",
+        `${where}: options.selected must be the value of one of the buttons, got ${JSON.stringify(options.selected)}`
+      );
+    }
+    return;
+  }
+  checkRectTuple(where, "options.rect", options.rect);
+  checkOptionalString(where, "options.value", options.value);
+  if (options.type === "text") {
+    checkOptionalInteger(where, "options.maxLength", options.maxLength, 0);
+  } else if (options.type === "dropdown") {
+    if (!Array.isArray(options.options)) {
+      throw new PdfArgumentError(
+        "options.options",
+        `${where}: options.options must be an array of strings`
+      );
+    }
+    options.options.forEach((option, i) => checkString(where, `options.options[${i}]`, option));
+  }
+}
+
+/** A copy of checked form-field options, down to the arrays inside them. */
+function copyFormFieldOptions(options: FormFieldOptions): FormFieldOptions {
+  if (options.type === "radio") {
+    return {
+      ...options,
+      buttons: options.buttons.map(button => ({
+        ...button,
+        rect: [...button.rect] as [number, number, number, number]
+      }))
+    };
+  }
+  const rect = [...options.rect] as [number, number, number, number];
+  return options.type === "dropdown"
+    ? { ...options, rect, options: [...options.options] }
+    : { ...options, rect };
+}
+
+// =============================================================================
 // PdfPageBuilder
 // =============================================================================
 
@@ -636,13 +1032,65 @@ export class PdfPageBuilder {
   readonly _alphaValues = new Set<number>();
   /** @internal — isolates resources when this page is overlaid onto another PDF. */
   readonly _resourcePrefix: string;
+  /**
+   * @internal — set by the document that owns the page: throws when a field name is already
+   * used elsewhere in it, so `addFormField` refuses a clash at the call rather than at write.
+   */
+  readonly _checkFieldName: ((name: string) => void) | undefined;
+  /**
+   * @internal — the public name of the object a caller holds (`Pdf.PageBuilder`, or
+   * `Pdf.EditorPage` for an editor page's overlay), which argument errors start with.
+   */
+  readonly _api: string;
 
-  /** @internal */
-  constructor(width: number, height: number, fontManager: FontManager, resourcePrefix = "") {
+  // Private, and not `@internal`: an `@internal` constructor is stripped from the declarations,
+  // which then show TypeScript's implicit public `constructor()` — and `new Pdf.PageBuilder()`
+  // type-checked into a page with no size and no fonts, attached to no document. A page comes
+  // from `Pdf.Builder#addPage` or `Pdf.Editor#addPage`.
+  private constructor(
+    width: number,
+    height: number,
+    fontManager: FontManager,
+    resourcePrefix: string,
+    checkFieldName: ((name: string) => void) | undefined,
+    api: string
+  ) {
     this._width = width;
     this._height = height;
     this._fontManager = fontManager;
     this._resourcePrefix = resourcePrefix;
+    this._checkFieldName = checkFieldName;
+    this._api = api;
+  }
+
+  /** @internal - The one way to make a page: by a builder or editor that owns it. */
+  static _create(
+    width: number,
+    height: number,
+    fontManager: FontManager,
+    resourcePrefix = "",
+    checkFieldName?: (name: string) => void,
+    api = "Pdf.PageBuilder"
+  ): PdfPageBuilder {
+    return new PdfPageBuilder(width, height, fontManager, resourcePrefix, checkFieldName, api);
+  }
+
+  /** @internal - `Pdf.PageBuilder#drawText`: the call as the caller wrote it. */
+  _where(method: string): string {
+    return `${this._api}#${method}`;
+  }
+
+  /**
+   * @internal - Set by an editor on a page it added: throws when the page has been removed
+   * (`Pdf.Editor#removePage`), so what is drawn on it is refused instead of written nowhere.
+   */
+  _liveCheck: ((where: string) => void) | undefined = undefined;
+
+  /** @internal - {@link _where} for a call that adds to the page, after {@link _liveCheck}. */
+  _edit(method: string): string {
+    const where = this._where(method);
+    this._liveCheck?.(where);
+    return where;
   }
 
   /** Page width in points. */
@@ -666,6 +1114,9 @@ export class PdfPageBuilder {
    * @param options - Position, font, color, etc.
    */
   drawText(text: string, options: DrawTextOptions): this {
+    const where = this._edit("drawText");
+    checkString(where, "text", text);
+    checkDrawTextOptions(where, options);
     if (text.length === 0) {
       return this;
     }
@@ -723,6 +1174,13 @@ export class PdfPageBuilder {
       italic?: boolean;
     }
   ): number {
+    const where = this._where("measureText");
+    checkString(where, "text", text);
+    checkOptionalObject(where, "options", options);
+    checkOptionalPositive(where, "options.fontSize", options?.fontSize);
+    checkOptionalString(where, "options.fontFamily", options?.fontFamily);
+    checkOptionalBoolean(where, "options.bold", options?.bold);
+    checkOptionalBoolean(where, "options.italic", options?.italic);
     const fontSize = options?.fontSize ?? DEFAULT_FONT_SIZE;
     const fontFamily = options?.fontFamily ?? "Helvetica";
     const bold = options?.bold ?? false;
@@ -738,6 +1196,13 @@ export class PdfPageBuilder {
    * Draw a rectangle (filled and/or stroked).
    */
   drawRect(options: DrawRectOptions): this {
+    const where = this._edit("drawRect");
+    checkOptions(where, options);
+    for (const field of ["x", "y", "width", "height"] as const) {
+      checkFinite(where, `options.${field}`, options[field]);
+    }
+    checkOptionalNonNegative(where, "options.borderRadius", options.borderRadius);
+    checkPaint(where, options);
     this._stream.save();
     const buildPath = (): void => {
       if (options.borderRadius && options.borderRadius > 0) {
@@ -762,6 +1227,13 @@ export class PdfPageBuilder {
    * Draw a circle (filled and/or stroked).
    */
   drawCircle(options: DrawCircleOptions): this {
+    const where = this._edit("drawCircle");
+    checkOptions(where, options);
+    checkFinite(where, "options.cx", options.cx);
+    checkFinite(where, "options.cy", options.cy);
+    checkFinite(where, "options.r", options.r);
+    checkOptionalNonNegative(where, "options.r", options.r);
+    checkPaint(where, options);
     this._stream.save();
     const buildCircle = (): void => {
       this._stream.circle(options.cx, options.cy, options.r);
@@ -776,6 +1248,15 @@ export class PdfPageBuilder {
    * Draw an ellipse (filled and/or stroked).
    */
   drawEllipse(options: DrawEllipseOptions): this {
+    const where = this._edit("drawEllipse");
+    checkOptions(where, options);
+    checkFinite(where, "options.cx", options.cx);
+    checkFinite(where, "options.cy", options.cy);
+    for (const field of ["rx", "ry"] as const) {
+      checkFinite(where, `options.${field}`, options[field]);
+      checkOptionalNonNegative(where, `options.${field}`, options[field]);
+    }
+    checkPaint(where, options);
     this._stream.save();
     const buildEllipse = (): void => {
       this._stream.ellipse(options.cx, options.cy, options.rx, options.ry);
@@ -790,6 +1271,15 @@ export class PdfPageBuilder {
    * Draw a straight line.
    */
   drawLine(options: DrawLineOptions): this {
+    const where = this._edit("drawLine");
+    checkOptions(where, options);
+    for (const field of ["x1", "y1", "x2", "y2"] as const) {
+      checkFinite(where, `options.${field}`, options[field]);
+    }
+    checkOptionalColor(where, "options.color", options.color);
+    checkOptionalNonNegative(where, "options.lineWidth", options.lineWidth);
+    checkOptionalDashPattern(where, "options.dashPattern", options.dashPattern);
+    checkStrokeShape(where, options);
     const color = options.color ?? BLACK;
     const lineWidth = options.lineWidth ?? 1;
 
@@ -811,7 +1301,10 @@ export class PdfPageBuilder {
   /**
    * Draw a complex path from a list of path operations.
    */
-  drawPath(ops: PathOp[], options?: DrawPathOptions): this {
+  drawPath(ops: readonly PathOp[], options?: DrawPathOptions): this {
+    const where = this._edit("drawPath");
+    checkPathOps(where, ops);
+    checkDrawPathOptions(where, options);
     this._stream.save();
 
     const applyPathState = (): void => {
@@ -874,7 +1367,30 @@ export class PdfPageBuilder {
    * Draw an image at a specific position.
    */
   drawImage(options: DrawImageOptions): this {
-    this._images.push(options);
+    const where = this._edit("drawImage");
+    checkOptions(where, options);
+    assertImageFormat(options.format, where, "options.format");
+    if (!isByteArray(options.data)) {
+      throw new PdfArgumentError(
+        "options.data",
+        `${where}: options.data must be a Uint8Array of image bytes, got ${typeof options.data}`
+      );
+    }
+    for (const field of ["x", "y", "width", "height"] as const) {
+      checkFinite(where, `options.${field}`, options[field]);
+    }
+    checkImageData(where, "options.data", options.data, options.format);
+    // A copy of what was checked: the caller's object changing afterwards must not reach the
+    // file past these checks. The bytes are shared, as they always were.
+    const image: DrawImageOptions = {
+      data: options.data,
+      format: options.format,
+      x: options.x,
+      y: options.y,
+      width: options.width,
+      height: options.height
+    };
+    this._images.push(image);
     // Image drawing is deferred to build time (needs object allocation)
     // We record a placeholder name based on index
     const imgName = `${this._resourcePrefix}Im${this._images.length}`;
@@ -893,6 +1409,7 @@ export class PdfPageBuilder {
    * FreeText (inline text), and Stamp.
    */
   addAnnotation(options: AnnotationOptions): this {
+    checkAnnotationOptions(this._edit("addAnnotation"), options);
     const entries: Array<[string, string]> = [];
 
     switch (options.type) {
@@ -976,7 +1493,7 @@ export class PdfPageBuilder {
 
     this._builderAnnotations.push({
       subtype: options.type,
-      rect: options.rect,
+      rect: [...options.rect] as [number, number, number, number],
       entries
     });
     return this;
@@ -990,9 +1507,24 @@ export class PdfPageBuilder {
    * Add a form field to this page.
    *
    * Supports: text input, checkbox, dropdown (combo box), and radio button groups.
+   *
+   * @throws {PdfArgumentError} The options are invalid, or the document already has a field
+   *   of this name — on this page or another; for a page of `Pdf.Editor`, also a field the
+   *   document was read with or one a copied page brought (a fully qualified name identifies
+   *   one field). Nothing is added.
    */
   addFormField(options: FormFieldOptions): this {
-    this._formFields.push({ options });
+    const where = this._edit("addFormField");
+    checkFormFieldOptions(where, options);
+    if (this._formFields.some(field => field.options.name === options.name)) {
+      throw new PdfArgumentError(
+        "options.name",
+        `${where}: a field named ${JSON.stringify(options.name)} is already on this page — a fully qualified name identifies one field`
+      );
+    }
+    this._checkFieldName?.(options.name);
+    // A copy of what was checked: rects and option lists are arrays the caller keeps.
+    this._formFields.push({ options: copyFormFieldOptions(options) });
     return this;
   }
 
@@ -1010,6 +1542,9 @@ export class PdfPageBuilder {
    * @param options - Fill/stroke options
    */
   drawSvgPath(d: string, options?: DrawPathOptions): this {
+    const where = this._edit("drawSvgPath");
+    checkString(where, "d", d);
+    checkDrawPathOptions(where, options);
     const ops = parseSvgPath(d);
     return this.drawPath(ops, options);
   }
@@ -1021,6 +1556,13 @@ export class PdfPageBuilder {
    * `rect`, `line`, `circle`, `polyline`, `polygon`, `path`, and `text`.
    */
   drawSvg(options: DrawSvgOptions): this {
+    const where = this._edit("drawSvg");
+    checkOptions(where, options);
+    checkString(where, "options.svg", options.svg);
+    checkFinite(where, "options.x", options.x);
+    checkFinite(where, "options.y", options.y);
+    checkOptionalNonNegative(where, "options.width", options.width);
+    checkOptionalNonNegative(where, "options.height", options.height);
     const parsed = parseSimpleSvg(options.svg);
     const destWidth = options.width ?? parsed.width;
     const destHeight = options.height ?? parsed.height;
@@ -1105,6 +1647,10 @@ export class PdfPageBuilder {
         // and overflowed the destination box on the narrow axis.
         const rx = element.name === "circle" ? numAttr(element, "r", 0) : numAttr(element, "rx", 0);
         const ry = element.name === "circle" ? numAttr(element, "r", 0) : numAttr(element, "ry", 0);
+        if (rx < 0 || ry < 0) {
+          // A negative radius is an error in SVG, which disables the element's rendering.
+          continue;
+        }
         this.drawEllipse({
           cx: mapX(numAttr(element, "cx", 0)),
           cy: mapY(numAttr(element, "cy", 0)),
@@ -1171,6 +1717,10 @@ export class PdfPageBuilder {
     const originX = numAttr(element, "x", 0);
     const originY = numAttr(element, "y", 0);
     const fontSize = numAttr(element, "font-size", 12) * Math.max(scaleX, scaleY);
+    if (!(fontSize > 0)) {
+      // `font-size="0"` draws nothing in SVG, and a negative size is an error there.
+      return;
+    }
     const anchorAttr = element.attrs["text-anchor"];
     const anchor =
       anchorAttr === "middle" ? "middle" : anchorAttr === "end" ? "end" : ("start" as const);
@@ -1231,6 +1781,7 @@ export class PdfPageBuilder {
    * Use this when the high-level API doesn't cover your use case.
    */
   getContentStream(): PdfContentStream {
+    this._edit("getContentStream");
     return this._stream;
   }
 
@@ -1325,7 +1876,7 @@ export class PdfPageBuilder {
   }
 
   /**
-   * Register a colour alpha on this page so `build()` can emit the
+   * Register a colour alpha on this page so `toBuffer()` can emit the
    * matching `<< /Type /ExtGState /ca n /CA n >>` resource, and issue
    * the content-stream `gs` operator pointing at that resource. `alpha
    * === undefined` or `alpha >= 1` is a no-op, so opaque draws produce
@@ -1351,7 +1902,11 @@ export class PdfPageBuilder {
 // PdfDocumentBuilder
 // =============================================================================
 
-interface BuilderPageSnapshot {
+/**
+ * @internal - A page's content frozen for one build: later drawing on the page builder
+ * belongs to the next build, even when this one is still queued.
+ */
+export interface PdfPageSnapshot {
   readonly _stream: PdfContentStream;
   readonly _width: number;
   readonly _height: number;
@@ -1363,8 +1918,23 @@ interface BuilderPageSnapshot {
   readonly _resourcePrefix: string;
 }
 
+/** @internal - Freeze a page builder's content (see {@link PdfPageSnapshot}). */
+export function snapshotPage(page: PdfPageBuilder): PdfPageSnapshot {
+  return {
+    _stream: page._stream.snapshot(),
+    _width: page._width,
+    _height: page._height,
+    _images: [...page._images],
+    _annotations: [...page._annotations],
+    _builderAnnotations: [...page._builderAnnotations],
+    _formFields: [...page._formFields],
+    _alphaValues: new Set(page._alphaValues),
+    _resourcePrefix: page._resourcePrefix
+  };
+}
+
 interface BuilderSnapshot {
-  readonly pages: readonly BuilderPageSnapshot[];
+  readonly pages: readonly PdfPageSnapshot[];
   readonly bookmarks: readonly BookmarkNode[];
   readonly metadata: DocumentMetadata;
   readonly encryption: PdfExportOptions["encryption"];
@@ -1391,7 +1961,7 @@ export class PdfDocumentBuilder {
   private _pdfA = false;
   private _signatureOptions: PdfSignatureOptions | null = null;
   /**
-   * Sink for non-fatal diagnostics produced during `build()`. Populated by
+   * Sink for non-fatal diagnostics produced during `toBuffer()`. Populated by
    * {@link onWarning}; defaults to undefined so unaware consumers see
    * pre-diagnostic behaviour unchanged. Fires for every warning in a
    * single build, not just the first.
@@ -1399,7 +1969,7 @@ export class PdfDocumentBuilder {
   private _onWarning: ((message: string) => void) | undefined;
   /**
    * Set via {@link disableFontAutoDiscovery} — opts out of the system-font
-   * auto-embed path in `build()`. Authors who need byte-stable output
+   * auto-embed path in `toBuffer()`. Authors who need byte-stable output
    * across machines (golden tests, reproducible build pipelines) should
    * enable this so a host-only CJK font doesn't sneak into one run but
    * not another.
@@ -1418,6 +1988,8 @@ export class PdfDocumentBuilder {
   private _buildQueue: Promise<void> = Promise.resolve();
 
   constructor(options: PdfDocumentBuilderOptions = {}) {
+    check(builderOptionsSchema, options, at("new Pdf.Builder", "options"));
+    checkFontOptionNames("new Pdf.Builder", "options.", options);
     this._fontManager =
       options.fontManager ??
       (options.fonts ? new FontManager(compilePdfFontConfig(options.fonts)) : new FontManager());
@@ -1435,9 +2007,17 @@ export class PdfDocumentBuilder {
    * @returns A PdfPageBuilder for the new page.
    */
   addPage(options?: PageOptions): PdfPageBuilder {
+    checkPageOptions("Pdf.Builder#addPage", options);
     const width = options?.width ?? DEFAULT_PAGE_WIDTH;
     const height = options?.height ?? DEFAULT_PAGE_HEIGHT;
-    const page = new PdfPageBuilder(width, height, this._fontManager);
+    const page = PdfPageBuilder._create(width, height, this._fontManager, "", name => {
+      if (this._pages.some(other => other._formFields.some(f => f.options.name === name))) {
+        throw new PdfArgumentError(
+          "options.name",
+          `Pdf.PageBuilder#addFormField: another page of this document has a field named ${JSON.stringify(name)} — a fully qualified name identifies one field`
+        );
+      }
+    });
     this._pages.push(page);
     return page;
   }
@@ -1446,15 +2026,28 @@ export class PdfDocumentBuilder {
    * Set document metadata (title, author, etc.).
    */
   setMetadata(metadata: DocumentMetadata): this {
-    this._metadata = metadata;
+    checkDocumentMetadata("Pdf.Builder#setMetadata", metadata);
+    // A copy of what was checked, dates included: a later write to the caller's object used
+    // to reach `toBuffer` unchecked and fail there with a `TypeError`.
+    this._metadata = copyDocumentMetadata(metadata);
     return this;
   }
 
   /**
    * Set encryption options (AES-256).
    */
-  setEncryption(encryption: PdfExportOptions["encryption"]): this {
-    this._encryption = encryption;
+  setEncryption(encryption: PdfEncryptionOptions | undefined): this {
+    checkEncryptionOptions("Pdf.Builder#setEncryption", "encryption", encryption);
+    // A copy of what was checked, as for every other setting.
+    this._encryption =
+      encryption === undefined
+        ? undefined
+        : {
+            ...encryption,
+            ...(encryption.permissions === undefined
+              ? {}
+              : { permissions: { ...encryption.permissions } })
+          };
     return this;
   }
 
@@ -1466,15 +2059,23 @@ export class PdfDocumentBuilder {
    * and must be called before the first `drawText()` command. Pages may already
    * have been added if no text has been drawn yet.
    *
-   * @param fontBytes - Raw .ttf or .ttc file bytes
-   * @param collectionIndex - Which face, for a `.ttc`. Defaults to 0, which is rarely the
-   *   one wanted: macOS `Songti.ttc` runs Black, Bold, TC-Bold, Light, …, so face 0 sets
-   *   body text in the family's heaviest weight. Ignored for a single-face `.ttf`.
+   * @param source - Raw .ttf or .ttc file bytes, or `{ data, collectionIndex }` to pick a
+   *   face of a `.ttc`. The index defaults to 0, which is rarely the one wanted: macOS
+   *   `Songti.ttc` runs Black, Bold, TC-Bold, Light, …, so face 0 sets body text in the
+   *   family's heaviest weight. Ignored for a single-face `.ttf`.
+   * @throws {PdfArgumentError} `source` is not font bytes or `{ data, collectionIndex }`.
    */
-  embedFont(fontBytes: Uint8Array, collectionIndex?: number): this {
+  embedFont(source: PdfFontSource): this;
+  /**
+   * @deprecated Pass `{ data: fontBytes, collectionIndex }` as one {@link PdfFontSource}. The
+   * positional `collectionIndex` is removed in 1.0.
+   */
+  embedFont(fontBytes: Uint8Array, collectionIndex: number | undefined): this;
+  embedFont(source: PdfFontSource, collectionIndex?: number): this {
+    const face = readFontSourceArgument("Pdf.Builder#embedFont", source, collectionIndex);
     this._assertFontsMutable();
     const manager = new FontManager();
-    manager.registerEmbeddedFont(parseTtf(fontBytes, collectionIndex));
+    manager.registerEmbeddedFont(parseTtf(face.data, face.collectionIndex));
     this._replaceFontManager(manager);
     return this;
   }
@@ -1487,6 +2088,7 @@ export class PdfDocumentBuilder {
    * have been added if no text has been drawn yet.
    */
   embedFonts(config: PdfFontConfig): this {
+    checkPdfFontConfig("Pdf.Builder#embedFonts", "config", config);
     this._assertFontsMutable();
     this._replaceFontManager(new FontManager(compilePdfFontConfig(config)));
     return this;
@@ -1494,25 +2096,34 @@ export class PdfDocumentBuilder {
 
   /**
    * Register a callback invoked once per non-fatal diagnostic during
-   * `build()`. Currently raised for:
+   * `toBuffer()`. Currently raised for:
    *
    * - auto-embedded system fonts (`'Auto-embedded system font ...'`)
    * - non-WinAnsi characters with no covering font (`'...non-WinAnsi character(s) present...'`)
    *
-   * The callback is synchronous and runs inside `build()`; throwing
+   * The callback is synchronous and runs inside `toBuffer()`; throwing
    * from it will abort the build. Return value is ignored.
    */
   onWarning(handler: (message: string) => void): this {
+    if (typeof handler !== "function") {
+      throw new PdfArgumentError(
+        "handler",
+        `Pdf.Builder#onWarning: handler must be a function, got ${handler === null ? "null" : typeof handler}`
+      );
+    }
     this._onWarning = handler;
     return this;
   }
 
   /**
-   * Opt out of the best-effort system-font auto-discovery that `build()`
+   * Opt out of the best-effort system-font auto-discovery that `toBuffer()`
    * performs when the document contains non-WinAnsi characters and no
    * font was explicitly embedded. Use this to keep output byte-stable
    * across hosts: one machine may have SimSun installed while another
    * does not.
+   *
+   * No effect in a browser, which has no system font scan to disable: there, the output
+   * never depends on the host's fonts.
    */
   disableFontAutoDiscovery(): this {
     this._disableFontAutoDiscovery = true;
@@ -1540,10 +2151,11 @@ export class PdfDocumentBuilder {
    * {@link embedFonts} when a specific face is a requirement rather than a
    * preference.
    *
-   * Node-only, and ignored when a font is embedded explicitly or
-   * {@link disableFontAutoDiscovery} is set.
+   * No effect in a browser, which has no system fonts to search; ignored as well when a
+   * font is embedded explicitly or {@link disableFontAutoDiscovery} is set.
    */
   preferSystemFonts(families: readonly string[]): this {
+    checkStringList("Pdf.Builder#preferSystemFonts", "families", families);
     this._preferSystemFonts = [...families];
     return this;
   }
@@ -1559,7 +2171,7 @@ export class PdfDocumentBuilder {
    * that a Chinese reader sees as malformed.
    *
    * ```typescript
-   * new Pdf.Builder().textLanguage("zh-Hans");   // Simplified Chinese
+   * new Pdf.Builder().setTextLanguage("zh-Hans");   // Simplified Chinese
    * ```
    *
    * Left unset, the language is inferred from the document's own characters:
@@ -1569,12 +2181,18 @@ export class PdfDocumentBuilder {
    * in that case — which is a default, not a detection, and the reason to state
    * the language when you know it.
    *
-   * Node-only, and ignored when a font is embedded explicitly or
-   * {@link disableFontAutoDiscovery} is set.
+   * No effect in a browser, which has no system fonts to search; ignored as well when a
+   * font is embedded explicitly or {@link disableFontAutoDiscovery} is set.
    */
-  textLanguage(language: CjkLanguage): this {
+  setTextLanguage(language: CjkLanguage): this {
+    checkOptionalEnum("Pdf.Builder#setTextLanguage", "language", language, CJK_LANGUAGES);
     this._textLanguage = language;
     return this;
+  }
+
+  /** @deprecated Use {@link PdfDocumentBuilder.setTextLanguage}. Removed in 1.0. */
+  textLanguage(language: CjkLanguage): this {
+    return this.setTextLanguage(language);
   }
 
   /** @internal */
@@ -1586,31 +2204,42 @@ export class PdfDocumentBuilder {
    * Enable PDF/A compliance output.
    *
    * Currently supports PDF/A-1b (ISO 19005-1, Level B — visual appearance
-   * preservation). When enabled, `build()` will:
+   * preservation). When enabled, `toBuffer()` will:
    *
    * - Set PDF version to 1.4
    * - Write XMP metadata with `pdfaid:part=1` and `pdfaid:conformance=B`
    * - Write OutputIntents with an embedded sRGB ICC profile
    * - Add `/MarkInfo << /Marked true >>` to the catalog
    *
-   * **Limitation:** Type1 base fonts (Helvetica, Times-Roman, Courier, etc.)
-   * are not embedded. For strict PDF/A-1b font compliance, use `embedFont()`
-   * to embed a TrueType font.
+   * This writes what PDF/A-1b requires of the file's structure; it does not validate the content. Two things are
+   * the caller's:
    *
-   * @param _level - Conformance level. Currently only "1b" is supported.
+   * - Type1 base fonts (Helvetica, Times-Roman, Courier, etc.) are not embedded. For strict PDF/A-1b font
+   *   compliance, use `embedFont()` to embed a TrueType font.
+   * - Encryption is forbidden by PDF/A, so `toBuffer()` refuses a document that also has `setEncryption`.
+   *
+   * @param level - Conformance level. Currently only "1b" is supported, and is the default.
+   * @throws {PdfArgumentError} `level` is given and is not `"1b"`.
    */
-  setPdfACompliance(_level?: "1b"): this {
+  setPdfACompliance(level?: "1b"): this {
+    checkOptionalEnum("Pdf.Builder#setPdfACompliance", "level", level, ["1b"]);
     this._pdfA = true;
     return this;
   }
 
   /**
-   * Digitally sign the PDF during `build()`.
+   * Digitally sign the PDF during `toBuffer()`.
    *
-   * When set, `build()` will:
+   * When set, `toBuffer()` will:
    * 1. Embed a signature dictionary with placeholder in the PDF
    * 2. Compute the byte ranges and sign with RSA PKCS#1 v1.5 + SHA-256
    * 3. Return the fully signed PDF bytes
+   *
+   * This only records the signature and returns the builder; nothing is signed until
+   * `toBuffer()`. `Pdf.Editor#sign`, with the same options, is different in kind: it
+   * performs the write itself and resolves to the signed bytes. The builder defers because
+   * a signature covers the finished file, and a builder's file does not exist until
+   * `toBuffer()` assembles it; an editor's document already does.
    *
    * @param options - Certificate, private key, and optional signer metadata
    *
@@ -1622,11 +2251,12 @@ export class PdfDocumentBuilder {
    *   name: "John Doe",
    *   reason: "Document approval"
    * });
-   * const signedPdf = await doc.build();
+   * const signedPdf = await doc.toBuffer();
    * ```
    */
   sign(options: PdfSignatureOptions): this {
-    this._signatureOptions = options;
+    checkSignatureOptions("Pdf.Builder#sign", options);
+    this._signatureOptions = { ...options };
     return this;
   }
 
@@ -1641,13 +2271,28 @@ export class PdfDocumentBuilder {
    * @param pageIndex - Zero-based page index
    * @param parent - Index of a previously added top-level bookmark to nest under (zero-based in insertion order). Omit for top-level.
    * @returns this for chaining
+   * @throws {PdfArgumentError} An argument is not of its type, or `parent` names no top-level
+   *   bookmark (field `parent`).
    */
   addBookmark(title: string, pageIndex: number, parent?: number): this {
+    const where = "Pdf.Builder#addBookmark";
+    checkString(where, "title", title);
+    checkFinite(where, "pageIndex", pageIndex);
+    checkOptionalInteger(where, "pageIndex", pageIndex, 0);
+    if (parent !== undefined && !Number.isInteger(parent)) {
+      checkOptionalInteger(where, "parent", parent, 0);
+    }
     const node: BookmarkNode = { title, pageIndex, children: [] };
     if (parent !== undefined) {
       if (parent < 0 || parent >= this._bookmarks.length) {
-        throw new RangeError(
-          `Bookmark parent index ${parent} is out of range (0..${this._bookmarks.length - 1})`
+        // A `PdfArgumentError` like every other argument this call refuses; it was a
+        // `RangeError`. The message used to read "out of range (0..-1)" when there was no
+        // bookmark yet.
+        throw new PdfArgumentError(
+          "parent",
+          this._bookmarks.length === 0
+            ? `Pdf.Builder#addBookmark: parent ${parent} names no bookmark — none has been added yet`
+            : `Pdf.Builder#addBookmark: parent ${parent} is out of range (0..${this._bookmarks.length - 1}) — it is the index of a top-level bookmark`
         );
       }
       this._bookmarks[parent].children.push(node);
@@ -1667,6 +2312,8 @@ export class PdfDocumentBuilder {
    * @returns The created PdfPageBuilder for further customization
    */
   generateTableOfContents(options?: TocOptions): PdfPageBuilder {
+    const where = "Pdf.Builder#generateTableOfContents";
+    check(tocOptionsSchema.optional(), options, at(where, "options"));
     const tocTitle = options?.title ?? "Table of Contents";
     const fontSize = options?.fontSize ?? DEFAULT_FONT_SIZE;
     const indent = options?.indent ?? 20;
@@ -1782,12 +2429,19 @@ export class PdfDocumentBuilder {
   }
 
   /**
-   * Build the final PDF document.
+   * Serialize the document to PDF bytes.
    *
    * @returns The PDF file as Uint8Array.
    */
-  async build(): Promise<Uint8Array> {
-    // Capture synchronously: modifications made after build() returns belong to
+  async toBuffer(): Promise<Uint8Array<ArrayBuffer>> {
+    // PDF/A forbids encryption (ISO 19005-1, 6.1.3); writing both produced a file that claims a conformance it breaks.
+    if (this._pdfA && this._encryption) {
+      throw new PdfArgumentError(
+        "encryption",
+        "Pdf.Builder#toBuffer: a PDF/A document cannot be encrypted — remove setEncryption or setPdfACompliance."
+      );
+    }
+    // Capture synchronously: modifications made after toBuffer() returns belong to
     // the next build even when this build is queued behind another one.
     const snapshot = this._snapshot();
     let release!: () => void;
@@ -1797,29 +2451,30 @@ export class PdfDocumentBuilder {
     });
     await previous;
     try {
-      return await this._build(snapshot);
+      return asPlainBytes(await this._build(snapshot));
     } finally {
       release();
     }
   }
 
+  /** @deprecated Use {@link PdfDocumentBuilder.toBuffer}. Removed in 1.0. */
+  async build(): Promise<Uint8Array<ArrayBuffer>> {
+    return this.toBuffer();
+  }
+
   private async _build(snapshot: BuilderSnapshot): Promise<Uint8Array> {
+    checkBookmarkTargets(snapshot.bookmarks, snapshot.pages.length);
+    // `addFormField` refuses a clash when it is made; no public sequence of calls reaches
+    // this. It is an invariant check, so a page filled by some other path can never write
+    // two fields of one name.
+    checkUniqueFieldNames(
+      "Pdf.Builder#toBuffer",
+      snapshot.pages.flatMap(page => page._formFields.map(field => field.options.name))
+    );
     for (const page of snapshot.pages) {
-      page._stream.preflight();
+      page._stream.runPreflight();
     }
-    const hadEmbeddedFont = this._fontManager.hasEmbeddedFont();
-    this._fontManager.beginBuild();
-    try {
-      return await this._buildWithFontSession(snapshot);
-    } finally {
-      // Auto-discovery is a decision for this immutable build snapshot, not a
-      // mutation of the authoring model. A later build may contain characters
-      // that require a different (broader) system font.
-      if (!hadEmbeddedFont && this._fontManager.hasEmbeddedFont()) {
-        this._fontManager.clearAutoDiscoveredFont();
-      }
-      this._fontManager.endBuild();
-    }
+    return withDrawnTextFontBuild(this._fontManager, () => this._buildWithFontSession(snapshot));
   }
 
   private async _buildWithFontSession(snapshot: BuilderSnapshot): Promise<Uint8Array> {
@@ -1830,94 +2485,7 @@ export class PdfDocumentBuilder {
       writer.setVersion("1.4");
     }
 
-    // Discovery runs when nothing is embedded yet, and *also* when a fallback face
-    // is present but cannot draw everything the document ended up containing.
-    //
-    // The second case arises when a caller shares a font engine it already
-    // configured. The Word bridge measures a document against the face it chose and
-    // then hands the engine over — but a chart paints its own axis and category
-    // labels straight onto the page, and those strings are not in the layout model
-    // the bridge inspected. `hasEmbeddedFont()` answers "is a face registered",
-    // when the question is "can every character be drawn": a document pinned to
-    // Kaiti SC lost `龦` to a `.notdef` box although Heiti SC, equally installed,
-    // has it. Re-running discovery over the complete repertoire finds a face that
-    // covers all of it.
-    //
-    // A face the caller embedded explicitly (`embedFont`) is never reconsidered:
-    // that is a statement about the document, not a best-effort guess.
-    const uncoveredByFallback = this._fontManager.hasFallbackFont()
-      ? this._fontManager.getUncoveredFallbackCodePoints()
-      : null;
-
-    if (!this._fontManager.hasEmbeddedFont() || (uncoveredByFallback?.size ?? 0) > 0) {
-      // Auto-discover a system font when the document contains non-WinAnsi
-      // characters (CJK, accented code points beyond WinAnsi, etc.) and
-      // the caller did not supply one via `embedFont`. Mirrors the
-      // `pdf-exporter` pipeline so `drawChartPdf`-style overlays, ad-hoc
-      // `drawText` usage, and the spreadsheet exporter all reach for the
-      // same system fonts before falling back to Type3 NOTDEF glyphs.
-      // Failures are non-fatal: discovery is best-effort and users who
-      // need guaranteed rendering should still call `embedFont` with a
-      // font they control.
-      //
-      // It is registered as a *fallback*, not as the document font: it only
-      // lends glyphs for the code points WinAnsi cannot encode. Registering it
-      // as the document font would route every run through one regular face,
-      // so a single `→` would strip bold, italic and monospace from the whole
-      // document and desynchronise the widths already measured during layout.
-      const nonWinAnsi = this._fontManager.getType3CodePoints();
-      if (nonWinAnsi.size > 0) {
-        // Try auto-discovery unless the caller opted out.
-        if (!snapshot.disableFontAutoDiscovery) {
-          const discovered = findSystemFontForCodePoints(
-            nonWinAnsi,
-            snapshot.preferSystemFonts,
-            // Counted as the text was tracked, not derived from `nonWinAnsi`:
-            // that is a Set, and a Set cannot say that `国` outnumbers `國`.
-            snapshot.textLanguage ?? this._fontManager.getTextLanguage()
-          );
-          if (discovered) {
-            // `widenFallbackFont` rather than `registerFallbackFont`: this runs after
-            // the caller has drawn (and measured) text, and replacing the face outright
-            // changes the advance of every non-Latin-1 code point the two faces share —
-            // 345 of them between `Kaiti SC` and `Heiti SC`. It refuses the swap when
-            // that would happen and keeps the measured face.
-            if (this._fontManager.widenFallbackFont(discovered)) {
-              // Noted rather than warned here: `reportDiagnostics` below raises it, and
-              // it is the one path every pipeline shares. Raising it at each discovery
-              // site is what left three of the five entry points silent.
-              this._fontManager.noteAutoDiscoveredFont(discovered.familyName, nonWinAnsi.size);
-            }
-          }
-        }
-        // The "nothing covers these" warning is not raised here. It is the same
-        // condition `PdfExportOptions.onWarning` documents, and the spreadsheet
-        // exporter is a separate pipeline that never reached this block — so
-        // `Pdf.create` and `Pdf.fromExcel` emitted tofu boxes silently. It now
-        // lives in `FontManager.reportDiagnostics`, called below and by every
-        // other pipeline, and is evaluated after the discovery attempt above.
-      }
-    }
-
-    if (snapshot.onWarning) {
-      this._fontManager.reportDiagnostics(snapshot.onWarning);
-    }
-
-    // Surface any unknown font families the FontManager saw during
-    // resolveFont (one diagnostic per distinct family, independent of
-    // how many text runs used it). An embedded font shadows everything
-    // anyway, so skip the warning in that case to avoid noise.
-    if (!this._fontManager.hasEmbeddedFont()) {
-      const unknown = this._fontManager.getUnknownFontFamilies();
-      if (unknown.size > 0) {
-        const list = [...unknown].slice(0, 5).join(", ");
-        const more = unknown.size > 5 ? ` (and ${unknown.size - 5} more)` : "";
-        snapshot.onWarning?.(
-          `Font family ${unknown.size > 1 ? "names" : "name"} '${list}'${more} not recognised; ` +
-            `falling back to Helvetica metrics. Add the typeface to the font-family map or call embedFont(bytes).`
-        );
-      }
-    }
+    discoverDrawnTextFonts(this._fontManager, snapshot);
 
     // Write font resources
     const fontObjectMap = await this._fontManager.writeFontResources(writer);
@@ -2018,24 +2586,11 @@ export class PdfDocumentBuilder {
       }
 
       // Write builder-created annotations (Highlight, Text, FreeText, Stamp, etc.)
-      for (const annot of page._builderAnnotations) {
-        const annotObjNum = writer.allocObject();
-        const rect = `[${pdfNumber(annot.rect[0])} ${pdfNumber(annot.rect[1])} ${pdfNumber(annot.rect[2])} ${pdfNumber(annot.rect[3])}]`;
-        const annotDict = new PdfDict()
-          .set("Type", "/Annot")
-          .set("Subtype", `/${annot.subtype}`)
-          .set("Rect", rect)
-          .set("F", "4"); // Print flag — annotation is printable
-        for (const [key, value] of annot.entries) {
-          annotDict.set(key, value);
-        }
-        writer.addObject(annotObjNum, annotDict);
-        annotRefs.push(annotObjNum);
-      }
+      annotRefs.push(...writeBuilderAnnotations(writer, page._builderAnnotations));
 
       // Write form field widget annotations
       for (const field of page._formFields) {
-        const { fieldRefs, annotRefs: fieldAnnotRefs } = this._writeFormFieldAnnotation(
+        const { fieldRefs, annotRefs: fieldAnnotRefs } = writeFormFieldObjects(
           writer,
           field.options,
           pageObjNums[i]
@@ -2146,7 +2701,9 @@ export class PdfDocumentBuilder {
       snapshot.metadata.title ||
       snapshot.metadata.author ||
       snapshot.metadata.subject ||
+      snapshot.metadata.keywords ||
       snapshot.metadata.creator ||
+      snapshot.metadata.producer ||
       snapshot.metadata.creationDate ||
       snapshot.metadata.modDate
     ) {
@@ -2260,17 +2817,7 @@ export class PdfDocumentBuilder {
 
   private _snapshot(): BuilderSnapshot {
     return {
-      pages: this._pages.map(page => ({
-        _stream: page._stream.snapshot(),
-        _width: page._width,
-        _height: page._height,
-        _images: [...page._images],
-        _annotations: [...page._annotations],
-        _builderAnnotations: [...page._builderAnnotations],
-        _formFields: [...page._formFields],
-        _alphaValues: new Set(page._alphaValues),
-        _resourcePrefix: page._resourcePrefix
-      })),
+      pages: this._pages.map(snapshotPage),
       bookmarks: [...this._bookmarks],
       metadata: { ...this._metadata },
       encryption: this._encryption,
@@ -2387,136 +2934,6 @@ export class PdfDocumentBuilder {
     writer.addObject(outlinesObjNum, outlinesDict);
 
     return outlinesObjNum;
-  }
-
-  /**
-   * Write form field annotation(s) as indirect objects.
-   * @internal
-   */
-  private _writeFormFieldAnnotation(
-    writer: PdfWriter,
-    options: FormFieldOptions,
-    pageObjNum: number
-  ): { fieldRefs: number[]; annotRefs: number[] } {
-    const fieldRefs: number[] = [];
-    const annotRefs: number[] = [];
-
-    if (options.type === "radio") {
-      // Radio group: one parent field + one widget per button
-      const parentObjNum = writer.allocObject();
-      const childRefs: number[] = [];
-      let ff = 1 << 15; // /Ff bit 16 = Radio
-      ff |= 1 << 14; // /Ff bit 15 = NoToggleToOff
-      if (options.readOnly) {
-        ff |= 1;
-      }
-      if (options.required) {
-        ff |= 1 << 1;
-      }
-
-      for (const btn of options.buttons) {
-        const childObjNum = writer.allocObject();
-        const rect = `[${btn.rect.map(v => pdfNumber(v)).join(" ")}]`;
-        const isSelected = options.selected === btn.value;
-        const apState = isSelected ? `/${btn.value}` : "/Off";
-
-        const childDict = new PdfDict()
-          .set("Type", "/Annot")
-          .set("Subtype", "/Widget")
-          .set("Rect", rect)
-          .set("Parent", pdfRef(parentObjNum))
-          .set("AS", apState)
-          .set("AP", `<< /N << /${btn.value} null /Off null >> >>`);
-        writer.addObject(childObjNum, childDict);
-        childRefs.push(childObjNum);
-      }
-
-      const parentDict = new PdfDict()
-        .set("FT", "/Btn")
-        .set("T", pdfString(options.name))
-        .set("Ff", String(ff))
-        .set("Kids", `[${childRefs.map(r => pdfRef(r)).join(" ")}]`);
-      if (options.selected) {
-        parentDict.set("V", `/${options.selected}`);
-      }
-      writer.addObject(parentObjNum, parentDict);
-      // Parent goes into AcroForm /Fields; children go into page /Annots
-      fieldRefs.push(parentObjNum);
-      annotRefs.push(...childRefs);
-      return { fieldRefs, annotRefs };
-    }
-
-    // Single-widget fields: text, checkbox, dropdown
-    const objNum = writer.allocObject();
-    const r = options.rect;
-    const rect = `[${pdfNumber(r[0])} ${pdfNumber(r[1])} ${pdfNumber(r[2])} ${pdfNumber(r[3])}]`;
-
-    const dict = new PdfDict()
-      .set("Type", "/Annot")
-      .set("Subtype", "/Widget")
-      .set("Rect", rect)
-      .set("T", pdfString(options.name))
-      .set("P", pdfRef(pageObjNum));
-
-    let ff = 0;
-    if (options.readOnly) {
-      ff |= 1;
-    }
-    if (options.required) {
-      ff |= 1 << 1;
-    }
-
-    switch (options.type) {
-      case "text": {
-        dict.set("FT", "/Tx");
-        if (options.multiline) {
-          ff |= 1 << 12;
-        }
-        if (options.password) {
-          ff |= 1 << 13;
-        }
-        if (options.maxLength !== undefined) {
-          dict.set("MaxLen", String(options.maxLength));
-        }
-        if (options.value) {
-          dict.set("V", pdfString(options.value));
-        }
-        // Default appearance
-        dict.set("DA", pdfString("/Helv 12 Tf 0 g"));
-        break;
-      }
-      case "checkbox": {
-        dict.set("FT", "/Btn");
-        const checked = options.checked ?? false;
-        dict.set("V", checked ? "/Yes" : "/Off");
-        dict.set("AS", checked ? "/Yes" : "/Off");
-        break;
-      }
-      case "dropdown": {
-        dict.set("FT", "/Ch");
-        ff |= 1 << 17; // Combo flag
-        if (options.editable) {
-          ff |= 1 << 18;
-        }
-        const optStr = options.options.map(o => pdfString(o)).join(" ");
-        dict.set("Opt", `[${optStr}]`);
-        if (options.value) {
-          dict.set("V", pdfString(options.value));
-        }
-        dict.set("DA", pdfString("/Helv 12 Tf 0 g"));
-        break;
-      }
-    }
-
-    if (ff !== 0) {
-      dict.set("Ff", String(ff));
-    }
-
-    writer.addObject(objNum, dict);
-    // Single-widget fields go into both /Annots and /Fields
-    fieldRefs.push(objNum);
-    annotRefs.push(objNum);
-    return { fieldRefs, annotRefs };
   }
 }
 
@@ -3256,4 +3673,167 @@ function arcToCurves(
       y3: sinPhi * ep2x + cosPhi * ep2y + cyr
     });
   }
+}
+
+/**
+ * Write a form field — its field dictionary and widget annotation(s) — as indirect objects.
+ * Shared by the builder and the editor, so a field added through either is the same field.
+ * `pageObjNum` is the widgets' `/P`, when the page's number is known.
+ *
+ * @internal
+ */
+export function writeFormFieldObjects(
+  writer: PdfWriter,
+  options: FormFieldOptions,
+  pageObjNum: number | undefined
+): { fieldRefs: number[]; annotRefs: number[] } {
+  const fieldRefs: number[] = [];
+  const annotRefs: number[] = [];
+
+  if (options.type === "radio") {
+    // Radio group: one parent field + one widget per button
+    const parentObjNum = writer.allocObject();
+    const childRefs: number[] = [];
+    let ff = 1 << 15; // /Ff bit 16 = Radio
+    ff |= 1 << 14; // /Ff bit 15 = NoToggleToOff
+    if (options.readOnly) {
+      ff |= 1;
+    }
+    if (options.required) {
+      ff |= 1 << 1;
+    }
+
+    for (const btn of options.buttons) {
+      const childObjNum = writer.allocObject();
+      const rect = `[${btn.rect.map(v => pdfNumber(v)).join(" ")}]`;
+      const isSelected = options.selected === btn.value;
+      const apState = isSelected ? pdfName(btn.value) : "/Off";
+
+      const childDict = new PdfDict()
+        .set("Type", "/Annot")
+        .set("Subtype", "/Widget")
+        .set("Rect", rect)
+        .set("Parent", pdfRef(parentObjNum))
+        .set("AS", apState)
+        .set("AP", `<< /N << ${pdfName(btn.value)} null /Off null >> >>`);
+      writer.addObject(childObjNum, childDict);
+      childRefs.push(childObjNum);
+    }
+
+    const parentDict = new PdfDict()
+      .set("FT", "/Btn")
+      .set("T", pdfString(options.name))
+      .set("Ff", String(ff))
+      .set("Kids", `[${childRefs.map(r => pdfRef(r)).join(" ")}]`);
+    if (options.selected) {
+      parentDict.set("V", pdfName(options.selected));
+    }
+    writer.addObject(parentObjNum, parentDict);
+    // Parent goes into AcroForm /Fields; children go into page /Annots
+    fieldRefs.push(parentObjNum);
+    annotRefs.push(...childRefs);
+    return { fieldRefs, annotRefs };
+  }
+
+  // Single-widget fields: text, checkbox, dropdown
+  const objNum = writer.allocObject();
+  const r = options.rect;
+  const rect = `[${pdfNumber(r[0])} ${pdfNumber(r[1])} ${pdfNumber(r[2])} ${pdfNumber(r[3])}]`;
+
+  const dict = new PdfDict()
+    .set("Type", "/Annot")
+    .set("Subtype", "/Widget")
+    .set("Rect", rect)
+    .set("T", pdfString(options.name));
+  if (pageObjNum !== undefined) {
+    dict.set("P", pdfRef(pageObjNum));
+  }
+
+  let ff = 0;
+  if (options.readOnly) {
+    ff |= 1;
+  }
+  if (options.required) {
+    ff |= 1 << 1;
+  }
+
+  switch (options.type) {
+    case "text": {
+      dict.set("FT", "/Tx");
+      if (options.multiline) {
+        ff |= 1 << 12;
+      }
+      if (options.password) {
+        ff |= 1 << 13;
+      }
+      if (options.maxLength !== undefined) {
+        dict.set("MaxLen", String(options.maxLength));
+      }
+      if (options.value) {
+        dict.set("V", pdfString(options.value));
+      }
+      // Default appearance
+      dict.set("DA", pdfString("/Helv 12 Tf 0 g"));
+      break;
+    }
+    case "checkbox": {
+      dict.set("FT", "/Btn");
+      const checked = options.checked ?? false;
+      dict.set("V", checked ? "/Yes" : "/Off");
+      dict.set("AS", checked ? "/Yes" : "/Off");
+      break;
+    }
+    case "dropdown": {
+      dict.set("FT", "/Ch");
+      ff |= 1 << 17; // Combo flag
+      if (options.editable) {
+        ff |= 1 << 18;
+      }
+      const optStr = options.options.map(o => pdfString(o)).join(" ");
+      dict.set("Opt", `[${optStr}]`);
+      if (options.value) {
+        dict.set("V", pdfString(options.value));
+      }
+      dict.set("DA", pdfString("/Helv 12 Tf 0 g"));
+      break;
+    }
+  }
+
+  if (ff !== 0) {
+    dict.set("Ff", String(ff));
+  }
+
+  writer.addObject(objNum, dict);
+  // Single-widget fields go into both /Annots and /Fields
+  fieldRefs.push(objNum);
+  annotRefs.push(objNum);
+  return { fieldRefs, annotRefs };
+}
+
+/**
+ * Write the annotations `addAnnotation` recorded (Highlight, Text, FreeText, Stamp, …) as
+ * indirect objects, returning their numbers. Shared by the builder and the editor.
+ *
+ * @internal
+ */
+export function writeBuilderAnnotations(
+  writer: PdfWriter,
+  annotations: readonly BuilderAnnotation[]
+): number[] {
+  const refs: number[] = [];
+  for (const annot of annotations) {
+    const annotObjNum = writer.allocObject();
+    const rect = `[${pdfNumber(annot.rect[0])} ${pdfNumber(annot.rect[1])} ${pdfNumber(annot.rect[2])} ${pdfNumber(annot.rect[3])}]`;
+    const annotDict = new PdfDict()
+      .set("Type", "/Annot")
+      .set("Subtype", `/${annot.subtype}`)
+      .set("Rect", rect)
+      .set("F", "4"); // Print flag — annotation is printable
+    for (const [key, value] of annot.entries) {
+      annotDict.set(key, value);
+    }
+    writer.addObject(annotObjNum, annotDict);
+    refs.push(annotObjNum);
+  }
+  return refs;
 }

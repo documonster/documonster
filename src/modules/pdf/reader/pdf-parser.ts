@@ -242,8 +242,10 @@ export function parseObjectFromToken(tokenizer: PdfTokenizer, token: Token, dept
           return { type: "ref", objNum: num, gen } as PdfRef;
         }
 
-        if (next2.type === TokenType.Keyword && next2.strValue === "obj") {
-          // Indirect object definition: N gen obj ... endobj
+        // Indirect object definition: N gen obj ... endobj. Only at the top: inside an
+        // array or dictionary it is the next object of a file whose container was never
+        // closed, and parsing it as a nested value nested every later object in turn.
+        if (next2.type === TokenType.Keyword && next2.strValue === "obj" && depth === 0) {
           const obj = parseObject(tokenizer, depth);
           // Check if it's a stream
           if (isPdfDict(obj)) {
@@ -320,6 +322,8 @@ function enterNesting(depth: number, token: Token): number {
   const next = depth + 1;
   if (next > MAX_PDF_NESTING_DEPTH) {
     throw new PdfLimitExceededError(
+      "depth",
+      MAX_PDF_NESTING_DEPTH,
       `PDF objects nested deeper than ${MAX_PDF_NESTING_DEPTH} levels at offset ${token.offset}`
     );
   }
@@ -337,17 +341,66 @@ function parseDictionary(tokenizer: PdfTokenizer, depth: number): PdfDictValue {
     if (keyToken.type === TokenType.EOF) {
       throw new PdfStructureError("Unexpected EOF in dictionary");
     }
+    if (endsObject(tokenizer, keyToken)) {
+      break;
+    }
     if (keyToken.type !== TokenType.Name) {
       // Some malformed PDFs have non-name keys — skip and try again
       continue;
     }
 
     const key = keyToken.strValue!;
-    const value = parseObject(tokenizer, depth);
-    dict.set(key, value);
+    const valueToken = tokenizer.next();
+    if (endsObject(tokenizer, valueToken)) {
+      break;
+    }
+    if (valueToken.type === TokenType.DictEnd) {
+      // A key with no value: the `>>` still closes this dictionary rather than being taken
+      // as the value, which left the dictionary open to swallow whatever followed it.
+      break;
+    }
+    dict.set(key, parseObjectFromToken(tokenizer, valueToken, depth));
   }
 
   return dict;
+}
+
+/**
+ * Whether `token` is the `endobj` of an object whose array or dictionary was never closed.
+ * The container ends there, and the keyword is left for the object parser to consume:
+ * reading on would take every later object in the file as members of this one.
+ *
+ * Only an `endobj` that the file visibly continues past — the next `N G obj`, a
+ * cross-reference section, a trailer, or the end of the data — ends the object. A stray one
+ * inside a dictionary that goes on to close properly (`<<endobj /Root 1 0 R >>`) is
+ * damage inside the object, not its end, and is read past as any other stray token.
+ */
+function endsObject(tokenizer: PdfTokenizer, token: Token): boolean {
+  if (token.type !== TokenType.Keyword || token.strValue !== "endobj") {
+    return false;
+  }
+  const after = tokenizer.pos;
+  const boundary = atObjectBoundary(tokenizer);
+  tokenizer.pos = boundary ? token.offset : after;
+  return boundary;
+}
+
+/** Whether the tokens at the current position begin what may follow an object. */
+function atObjectBoundary(tokenizer: PdfTokenizer): boolean {
+  const first = tokenizer.next();
+  if (first.type === TokenType.EOF) {
+    return true;
+  }
+  if (first.type === TokenType.Keyword) {
+    return (
+      first.strValue === "xref" || first.strValue === "trailer" || first.strValue === "startxref"
+    );
+  }
+  if (first.type !== TokenType.Number || tokenizer.next().type !== TokenType.Number) {
+    return false;
+  }
+  const keyword = tokenizer.next();
+  return keyword.type === TokenType.Keyword && keyword.strValue === "obj";
 }
 
 /**
@@ -363,6 +416,9 @@ function parseArray(tokenizer: PdfTokenizer, depth: number): PdfArrayValue {
     }
     if (token.type === TokenType.EOF) {
       throw new PdfStructureError("Unexpected EOF in array");
+    }
+    if (endsObject(tokenizer, token)) {
+      break;
     }
     arr.push(parseObjectFromToken(tokenizer, token, depth));
   }

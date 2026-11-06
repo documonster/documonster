@@ -7,8 +7,18 @@
  * @stability experimental
  */
 
-import { DocxError } from "@word/errors";
-import { fillTemplate } from "@word/template/template-engine";
+import { isRecordArgument } from "@utils/object";
+import type { SchemaMatches } from "@utils/schema";
+import {
+  checkArray,
+  checkHandle,
+  checkRecord,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
+import { DocxArgumentError } from "@word/errors";
+import { fillDocument, fillTemplate, templateOptionsShape } from "@word/template/template-engine";
 import type { TemplateOptions } from "@word/template/template-engine";
 import type { DocxDocument } from "@word/types";
 import { parseXml } from "@xml/dom";
@@ -39,11 +49,31 @@ export interface DataSource {
 // Options
 // =============================================================================
 
-/** Options for `fillTemplateFromSource`. */
+/**
+ * Options for the deprecated `fillTemplateFromSource`.
+ *
+ * @deprecated `Template.fillFromSource` takes {@link TemplateOptions}.
+ * Removed in 1.0.
+ */
 export interface FillFromSourceOptions extends TemplateOptions {
-  /** If true, merge arrays with the same key across composite sources (default: false). */
+  /**
+   * @deprecated Has no effect: arrays of composite sources are merged by the
+   * source — pass `{ mergeArrays: true }` to `createCompositeDataSource`.
+   * Removed in 1.0.
+   */
   readonly mergeArrays?: boolean;
 }
+
+const mergeArraysShape = { mergeArrays: w.boolean().optional() };
+
+const fillFromSourceOptionsSchema = w.record({ ...templateOptionsShape, ...mergeArraysShape });
+const _fillFromSourceOptionsMatch: SchemaMatches<
+  typeof fillFromSourceOptionsSchema,
+  FillFromSourceOptions
+> = true;
+void _fillFromSourceOptionsMatch;
+
+const compositeOptionsSchema = w.record(mergeArraysShape).optional();
 
 // =============================================================================
 // Internal: shared path resolution
@@ -89,24 +119,25 @@ function dataSourceFromRecord(data: Record<string, unknown>): DataSource {
  * @stability experimental
  */
 export function createJsonDataSource(input: string | Record<string, unknown>): DataSource {
+  const where = "Template.createJsonDataSource";
   let data: Record<string, unknown>;
   if (typeof input === "string") {
     let parsed: unknown;
     try {
       parsed = JSON.parse(input);
     } catch (cause) {
-      throw new DocxError(
-        `createJsonDataSource: failed to parse input as JSON (${(cause as Error).message})`,
+      throw new DocxArgumentError(
+        "input",
+        `${where}: input must be JSON text, got text that is not (${(cause as Error).message})`,
         { cause }
       );
     }
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new DocxError(
-        "createJsonDataSource: input must parse to a JSON object (not array or null)"
-      );
+    if (!isRecordArgument(parsed)) {
+      invalidArgument(where, "input", "JSON text of an object (not an array or null)", parsed);
     }
     data = parsed as Record<string, unknown>;
   } else {
+    checkRecord(input, "input", where);
     data = input;
   }
   return dataSourceFromRecord(data);
@@ -133,12 +164,19 @@ export function createJsonDataSource(input: string | Record<string, unknown>): D
  * ```
  * Produces: `{ name: "John", "address.city": "NY", address: { city: "NY" }, item: ["A", "B"] }`
  *
- * @param xml - An XML string to parse.
- * @param rootTag - Optional root element name to skip. If not provided, the first element is used.
+ * @param xml - An XML string to parse. An empty string is no data.
+ * @param rootTag - The element whose content is the data: the document
+ * element when it has this name, otherwise the first element below it that
+ * does. If not provided, or no element has this name, the document element is
+ * used.
+ * @throws {DocxArgumentError} If `xml` is not well-formed.
  * @stability experimental
  */
 export function createXmlDataSource(xml: string, rootTag?: string): DataSource {
-  return dataSourceFromRecord(parseXmlToRecord(xml, rootTag));
+  const where = "Template.createXmlDataSource";
+  checkString(xml, "xml", where);
+  checkString(rootTag, "rootTag", where, { optional: true });
+  return dataSourceFromRecord(parseXmlToRecord(xml, rootTag, where));
 }
 
 // =============================================================================
@@ -182,6 +220,14 @@ export function createCsvDataSource(
     readonly rowsKey?: string;
   }
 ): DataSource {
+  const where = "Template.createCsvDataSource";
+  checkString(csv, "csv", where);
+  checkRecord(options, "options", where, { optional: true });
+  checkString(options?.delimiter, "options.delimiter", where, { optional: true });
+  if (options?.delimiter !== undefined && [...options.delimiter].length !== 1) {
+    invalidArgument(where, "options.delimiter", "one character", options.delimiter);
+  }
+  checkString(options?.rowsKey, "options.rowsKey", where, { optional: true });
   const delimiter = options?.delimiter ?? ",";
   const rowsKey = options?.rowsKey ?? "rows";
   return dataSourceFromRecord(parseCsvToRecord(csv, delimiter, rowsKey));
@@ -205,6 +251,24 @@ export function createCompositeDataSource(
   sources: readonly DataSource[],
   options?: { readonly mergeArrays?: boolean }
 ): DataSource {
+  const where = "Template.createCompositeDataSource";
+  checkArray(sources, "sources", where);
+  sources.forEach((source, i) => {
+    if (
+      !isRecordArgument(source) ||
+      typeof source.getData !== "function" ||
+      typeof source.getArray !== "function" ||
+      typeof source.getValue !== "function"
+    ) {
+      invalidArgument(
+        where,
+        `sources[${i}]`,
+        "a data source (getData, getArray, getValue)",
+        source
+      );
+    }
+  });
+  checkSchema(compositeOptionsSchema, options, where);
   const mergeArrays = options?.mergeArrays ?? false;
 
   return {
@@ -274,10 +338,39 @@ export function createCompositeDataSource(
 export function fillTemplateFromSource(
   doc: DocxDocument,
   source: DataSource,
-  options?: FillFromSourceOptions
+  options?: Omit<FillFromSourceOptions, "richPlaceholders">
 ): DocxDocument {
-  const data = source.getData();
-  return fillTemplate(doc, data, options);
+  return fillTemplate(doc, source.getData(), options);
+}
+
+/**
+ * Fill a DOCX template with the data a {@link DataSource} provides — the
+ * {@link fill} counterpart for data sources, honouring every `fill` option
+ * including `richPlaceholders`.
+ *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
+ * @param doc - The parsed DocxDocument model.
+ * @param source - A DataSource implementation.
+ * @param options - Template settings, as for `fill`.
+ * @returns The filled document (see `fill` for when it is a new object).
+ */
+export function fillFromSource(
+  doc: DocxDocument,
+  source: DataSource,
+  options?: TemplateOptions
+): DocxDocument {
+  checkHandle(doc, "document", "doc", "Template.fillFromSource");
+  if (typeof (source as { getData?: unknown } | null)?.getData !== "function") {
+    invalidArgument(
+      "Template.fillFromSource",
+      "source",
+      "a DataSource (an object with getData())",
+      source
+    );
+  }
+  return fillDocument(doc, source.getData(), options, "Template.fillFromSource");
 }
 
 // =============================================================================
@@ -299,22 +392,34 @@ interface XmlNode {
  * with no depth limit and no protection against billion-laughs / nested
  * element bombs.
  */
-function parseXmlToRecord(xml: string, rootTag?: string): Record<string, unknown> {
+function parseXmlToRecord(
+  xml: string,
+  rootTag: string | undefined,
+  where: string
+): Record<string, unknown> {
+  if (xml.trim() === "") {
+    return {};
+  }
   let parsed: { root: XmlElement } | undefined;
   try {
     parsed = parseXml(xml);
-  } catch {
-    return {};
+  } catch (cause) {
+    // A malformed document used to read as no data, so every placeholder
+    // was left unresolved with nothing saying why.
+    throw new DocxArgumentError(
+      "xml",
+      `${where}: xml must be well-formed XML (${(cause as Error).message})`,
+      { cause }
+    );
   }
   const root = parsed.root;
   if (!root) {
     return {};
   }
-  // The previous regex parser ignored rootTag too; we keep that behaviour
-  // for compatibility — converting from `root` directly works regardless
-  // of whether the caller named the expected root.
-  void rootTag;
-  return xmlElementToRecord(root);
+  // A rootTag naming no element is ignored, as it always was: the document
+  // element is the data.
+  const element = (rootTag === undefined ? undefined : findElementNamed(root, rootTag)) ?? root;
+  return xmlElementToRecord(element);
 }
 
 /** Adapter from XmlElement (DOM) to the legacy XmlNode shape. */
@@ -334,6 +439,22 @@ function elementToXmlNode(el: XmlElement): XmlNode {
     children,
     text
   };
+}
+
+/** `el` itself when it is named `name`, else the first element below it that is. */
+function findElementNamed(el: XmlElement, name: string): XmlElement | undefined {
+  if (el.name === name) {
+    return el;
+  }
+  for (const child of el.children) {
+    if (child.type === "element") {
+      const found = findElementNamed(child, name);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return undefined;
 }
 
 function xmlElementToRecord(el: XmlElement): Record<string, unknown> {

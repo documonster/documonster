@@ -69,11 +69,11 @@ import type {
   LayoutBorder,
   LayoutRichTextRun,
   PdfBordersData,
-  PdfRect
+  PdfLayoutRect
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
 import { emuToPt, charWidthToPixel } from "@utils/units";
-import { yieldToEventLoop } from "@utils/utils.base";
+import { createYieldBudget } from "@utils/yield";
 
 // =============================================================================
 // Constants
@@ -136,7 +136,8 @@ function resolveHorizontalAlign(
 
 /**
  * Compute the layout for a sheet across one or more PDF pages.
- * Yields to the event loop between each output page.
+ * Yields to the event loop between output pages, whenever about 10 ms of work have passed
+ * since the last yield.
  */
 export async function layoutSheet(
   sheet: PdfSheetData,
@@ -159,6 +160,7 @@ export async function layoutSheet(
   const outer: number[][] = overThenDown ? ctx.rowPages : ctx.colGroups;
   const inner: number[][] = overThenDown ? ctx.colGroups : ctx.rowPages;
 
+  const yieldIfDue = createYieldBudget();
   for (const outerTracks of outer) {
     for (const innerTracks of inner) {
       const rowPage = overThenDown ? outerTracks : innerTracks;
@@ -167,7 +169,7 @@ export async function layoutSheet(
         buildPageLayout(ctx, rowPage, colGroup, layoutPages.length, sheet, options, fontManager)
       );
       if (layoutPages.length < totalOutputPages) {
-        await yieldToEventLoop();
+        await yieldIfDue();
       }
     }
   }
@@ -1846,7 +1848,7 @@ interface LayoutCellInput {
   styleCell: PdfCellData | undefined;
   /** Supplies text, rich text and the hyperlink. */
   valueCell: PdfCellData | undefined;
-  rect: PdfRect;
+  rect: PdfLayoutRect;
   colSpan: number;
   rowSpan: number;
   /**

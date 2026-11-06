@@ -3,7 +3,7 @@
  * with dated core properties produces identical bytes on every save.
  */
 
-import { Build, Document, Io, Streaming } from "@word/index";
+import { Build, Document, Io, Stream } from "@word/index";
 import { afterEach, describe, it, expect, vi } from "vitest";
 
 const MODIFIED = new Date("2024-03-05T06:07:08Z");
@@ -12,7 +12,7 @@ const CREATED = new Date("2023-01-02T03:04:06Z");
 function buildDoc(coreProperties?: { created?: Date; modified?: Date }) {
   const h = Document.create();
   Document.addParagraph(h, "hello");
-  const doc = Document.build(h);
+  const doc = h;
   return coreProperties ? { ...doc, coreProperties } : doc;
 }
 
@@ -50,9 +50,9 @@ describe("DOCX deterministic ZIP timestamps", () => {
   async function packageAtTwoTimes(doc: ReturnType<typeof buildDoc>) {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2025-01-01T10:00:00Z"));
-    const a = await Io.package(doc);
+    const a = await Io.toBuffer(doc);
     vi.setSystemTime(new Date("2025-01-01T11:00:00Z"));
-    const b = await Io.package(doc);
+    const b = await Io.toBuffer(doc);
     return { a, b };
   }
 
@@ -71,18 +71,18 @@ describe("DOCX deterministic ZIP timestamps", () => {
   });
 
   it("falls back to created, and an explicit modTime wins", async () => {
-    const created = await entryTimes(await Io.package(buildDoc({ created: CREATED })));
+    const created = await entryTimes(await Io.toBuffer(buildDoc({ created: CREATED })));
     expect(new Set(created)).toEqual(new Set([dosApprox(CREATED)]));
 
     const explicit = new Date("2020-06-07T08:09:10Z");
     const times = await entryTimes(
-      await Io.package(buildDoc({ modified: MODIFIED }), { modTime: explicit })
+      await Io.toBuffer(buildDoc({ modified: MODIFIED }), { modTime: explicit })
     );
     expect(new Set(times)).toEqual(new Set([dosApprox(explicit)]));
   });
 
   it("streaming writer uses the same default", async () => {
-    const stream = Streaming.createDocxStream({ coreProperties: { modified: MODIFIED } });
+    const stream = new Stream.DocumentWriter({ coreProperties: { modified: MODIFIED } });
     stream.add(Build.textParagraph("x"));
     const times = await entryTimes(await stream.finalize());
     expect(new Set(times)).toEqual(new Set([dosApprox(MODIFIED)]));

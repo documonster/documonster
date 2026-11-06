@@ -1,4 +1,4 @@
-import { ExcelError, InvalidAddressError } from "@excel/errors";
+import { ExcelInvalidAddressError, ExcelRowOutOfBoundsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 
 /**
@@ -35,7 +35,11 @@ export function readRowNumber(r: string | undefined, previousRow: number): numbe
     }
   }
   if (row < 1 || row > MAX_ROW) {
-    throw new ExcelError(`Invalid row number "${r ?? row}": expected 1 to ${MAX_ROW}`);
+    // A position error like the column's, so the reader's part boundary reports it as the part's parse error.
+    throw new ExcelRowOutOfBoundsError(
+      row,
+      `Invalid row number "${r ?? row}": expected 1 to ${MAX_ROW}`
+    );
   }
   return row;
 }
@@ -58,14 +62,17 @@ export function readCellColumn(r: string | undefined, row: number, previousCol: 
       col = decoded.col;
       refRow = decoded.row;
     } else {
-      throw new InvalidAddressError(r);
+      throw new ExcelInvalidAddressError(r);
     }
     if (refRow !== row) {
-      throw new InvalidAddressError(r, `cell ${r} is written inside row ${row}`);
+      throw new ExcelInvalidAddressError(r, `cell ${r} is written inside row ${row}`);
     }
   }
   if (col < 1 || col > MAX_COL) {
-    throw new InvalidAddressError(r ?? String(col), `column ${col} is outside 1 to ${MAX_COL}`);
+    throw new ExcelInvalidAddressError(
+      r ?? String(col),
+      `column ${col} is outside 1 to ${MAX_COL}`
+    );
   }
   return col;
 }

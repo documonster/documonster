@@ -7,19 +7,18 @@ import { Workbook, Worksheet } from "@excel/index";
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
 const filename = process.argv[2] ?? path.join(exampleDir, "data/table.xlsx");
-const wb = Workbook.create();
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
-Workbook.readFile(wb, filename)
-  .then(() => {
+Workbook.readFile(filename)
+  .then(wb => {
     const micros = stopwatch.microseconds;
 
     console.log("Loaded", filename);
     console.log("Time taken:", micros / 1000000);
 
-    Workbook.eachSheet(wb, (sheet, id) => {
+    Workbook.eachWorksheet(wb, (sheet, id) => {
       console.log(id, Worksheet.getName(sheet));
     });
   })

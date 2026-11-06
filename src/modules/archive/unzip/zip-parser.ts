@@ -3,9 +3,9 @@
  * Works in both Node.js and browser environments
  * No dependency on Node.js stream module
  */
-
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { ArchiveLimitError, FileTooLargeError } from "@archive/core/errors";
+import { DEFAULT_MAX_ENTRY_SIZE } from "@archive/core/defaults";
+import { ArchiveLimitExceededError, ArchiveFileTooLargeError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import {
   processEntryData,
@@ -25,16 +25,22 @@ function assertEntryExtractableInMemory(entry: ZipEntryRecord): void {
     entry.uncompressedSize64 !== undefined &&
     entry.uncompressedSize64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1");
+    throw new ArchiveFileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
+      allowed: Number.MAX_SAFE_INTEGER
+    });
   }
   if (entry.compressedSize64 !== undefined && entry.compressedSize64 > MAX_SAFE_INTEGER_BIGINT) {
-    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1");
+    throw new ArchiveFileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
+      allowed: Number.MAX_SAFE_INTEGER
+    });
   }
   if (
     entry.localHeaderOffset64 !== undefined &&
     entry.localHeaderOffset64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new FileTooLargeError(entry.path, "ZIP64 offset > 2^53-1");
+    throw new ArchiveFileTooLargeError(entry.path, "ZIP64 offset > 2^53-1", {
+      allowed: Number.MAX_SAFE_INTEGER
+    });
   }
 }
 
@@ -56,14 +62,14 @@ export interface ZipParseOptions {
   /**
    * Largest uncompressed size, in bytes, of a single entry extracted into memory.
    * An entry declaring more is rejected before inflation; an entry that inflates
-   * past its declared size is stopped at that size (`EntrySizeMismatchError`).
+   * past its declared size is stopped at that size (`ZipEntrySizeMismatchError`).
    * @default 536870912 (512 MiB)
    */
   maxEntrySize?: number;
 
   /**
    * Largest combined uncompressed size, in bytes, that `extractAll` /
-   * `extractAllSync` / `forEach` may produce (`ArchiveLimitError`). Each entry is
+   * `extractAllSync` / `forEach` may produce (`ArchiveLimitExceededError`). Each entry is
    * already bounded by `maxEntrySize`; this bounds many entries together.
    *
    * Unbounded by default: what a process can afford to hold depends on the
@@ -73,11 +79,20 @@ export interface ZipParseOptions {
   maxTotalUncompressedSize?: number;
 
   /**
-   * Most entries the archive may contain (`ArchiveLimitError`, limit
+   * Most entries the archive may contain (`ArchiveLimitExceededError`, limit
    * `"maxEntries"`), checked before entry records are allocated. Unbounded by
    * default; a 46-byte-per-record sanity check only rules out impossible counts.
    */
   maxEntries?: number;
+
+  /**
+   * Whether to verify each extracted entry against its recorded CRC-32, throwing
+   * `ZipCrc32MismatchError` on a mismatch. Set `false` to read damaged archives as far as
+   * they go. AES entries carry an HMAC instead and are always authenticated; ZipCrypto
+   * entries are always verified.
+   * @default true
+   */
+  checkCrc32?: boolean;
 }
 
 /**
@@ -107,6 +122,8 @@ export interface ExtractOptions {
   password?: string | Uint8Array;
   /** See {@link ZipParseOptions.maxEntrySize}. */
   maxEntrySize?: number;
+  /** See {@link ZipParseOptions.checkCrc32}. */
+  checkCrc32?: boolean;
 }
 
 /**
@@ -128,7 +145,7 @@ async function extractEntryData(
     entry,
     compressedData,
     options.password,
-    false,
+    options.checkCrc32 ?? true,
     true,
     options.maxEntrySize
   );
@@ -149,7 +166,14 @@ function extractEntryDataSync(
   assertEntryExtractableInMemory(entry);
 
   const compressedData = readEntryCompressedData(data, entry);
-  return processEntryDataSync(entry, compressedData, options.password, true, options.maxEntrySize);
+  return processEntryDataSync(
+    entry,
+    compressedData,
+    options.password,
+    true,
+    options.maxEntrySize,
+    options.checkCrc32 ?? true
+  );
 }
 
 /**
@@ -162,6 +186,7 @@ export class ZipParser {
   private password?: string | Uint8Array;
   private archiveComment: string;
   private maxEntrySize: number | undefined;
+  private checkCrc32: boolean;
   private maxTotalUncompressedSize: number;
 
   constructor(data: Uint8Array | ArrayBuffer, options: ZipParseOptions = {}) {
@@ -174,6 +199,7 @@ export class ZipParser {
     this.entryMap = new Map(this.entries.map(e => [e.path, e]));
     this.password = options.password;
     this.maxEntrySize = options.maxEntrySize;
+    this.checkCrc32 = options.checkCrc32 ?? true;
     this.maxTotalUncompressedSize = options.maxTotalUncompressedSize ?? Infinity;
   }
 
@@ -190,7 +216,10 @@ export class ZipParser {
       }
     }
     if (total > this.maxTotalUncompressedSize) {
-      throw new ArchiveLimitError("maxTotalUncompressedSize", this.maxTotalUncompressedSize);
+      throw new ArchiveLimitExceededError(
+        "maxTotalUncompressedSize",
+        this.maxTotalUncompressedSize
+      );
     }
   }
 
@@ -323,7 +352,8 @@ export class ZipParser {
     }
     return extractEntryData(this.data, entry, {
       password: password ?? this.password,
-      maxEntrySize: this.maxEntrySize
+      maxEntrySize: this.maxEntrySize,
+      checkCrc32: this.checkCrc32
     });
   }
 
@@ -343,7 +373,8 @@ export class ZipParser {
     }
     return extractEntryDataSync(this.data, entry, {
       password: password ?? this.password,
-      maxEntrySize: this.maxEntrySize
+      maxEntrySize: this.maxEntrySize,
+      checkCrc32: this.checkCrc32
     });
   }
 
@@ -358,7 +389,8 @@ export class ZipParser {
     for (const entry of this.entries) {
       const data = await extractEntryData(this.data, entry, {
         password: pw,
-        maxEntrySize: this.maxEntrySize
+        maxEntrySize: this.maxEntrySize,
+        checkCrc32: this.checkCrc32
       });
       result.set(entry.path, data);
     }
@@ -381,7 +413,8 @@ export class ZipParser {
     for (const entry of this.entries) {
       result[entry.path] = extractEntryDataSync(this.data, entry, {
         password: pw,
-        maxEntrySize: this.maxEntrySize
+        maxEntrySize: this.maxEntrySize,
+        checkCrc32: this.checkCrc32
       });
     }
     return result;
@@ -405,19 +438,42 @@ export class ZipParser {
       let dataPromise: Promise<Uint8Array> | null = null;
       const getData = () => {
         if (!dataPromise) {
+          // The rest of the total budget bounds this entry as it inflates, so a total past it is stopped then rather
+          // than after a whole entry has been held; a refusal on that bound is the total's, not the entry's. The
+          // entry's own bound is the effective one — its default included — so a total never widens it.
+          const entryBound = this.maxEntrySize ?? DEFAULT_MAX_ENTRY_SIZE;
+          const remaining = this.maxTotalUncompressedSize - produced;
+          const byTotal = remaining < entryBound;
           dataPromise = extractEntryData(this.data, entry, {
             password: pw,
-            maxEntrySize: this.maxEntrySize
-          }).then(bytes => {
-            produced += bytes.length;
-            if (produced > this.maxTotalUncompressedSize) {
-              throw new ArchiveLimitError(
-                "maxTotalUncompressedSize",
-                this.maxTotalUncompressedSize
-              );
+            maxEntrySize: byTotal ? remaining : entryBound,
+            checkCrc32: this.checkCrc32
+          }).then(
+            bytes => {
+              produced += bytes.length;
+              if (produced > this.maxTotalUncompressedSize) {
+                throw new ArchiveLimitExceededError(
+                  "maxTotalUncompressedSize",
+                  this.maxTotalUncompressedSize
+                );
+              }
+              return bytes;
+            },
+            (error: unknown) => {
+              if (
+                byTotal &&
+                error instanceof ArchiveFileTooLargeError &&
+                error.allowed === remaining
+              ) {
+                throw new ArchiveLimitExceededError(
+                  "maxTotalUncompressedSize",
+                  this.maxTotalUncompressedSize,
+                  { cause: error }
+                );
+              }
+              throw error;
             }
-            return bytes;
-          });
+          );
         }
         return dataPromise;
       };

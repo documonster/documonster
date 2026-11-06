@@ -1,3 +1,4 @@
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 /**
  * `Stream` namespace surface — Node entry.
  *
@@ -15,41 +16,18 @@
  *   `Stream.setRowFont(row, { bold: true });`
  *   `Stream.commitRow(row);`
  */
-export { WorkbookWriter } from "@excel/stream/workbook-writer";
+import type { WorksheetWriter as WorksheetWriterOf } from "@excel/stream/worksheet-writer";
+
+export { WorkbookWriter };
 export { WorkbookReader } from "@excel/stream/workbook-reader";
 
-// --- streaming cell handle operations (operate on a `CellData`) ---
-export {
-  cellGetValue as getCellValue,
-  cellSetValue as setCellValue,
-  cellSetFont as setCellFont,
-  cellSetFill as setCellFill,
-  cellSetBorder as setCellBorder,
-  cellSetAlignment as setCellAlignment,
-  cellSetNumFmt as setCellNumFmt,
-  cellSetNote as setCellNote,
-  cellSetComment as setCellComment
-} from "@excel/core/cell";
+export * from "@excel/surface/stream-handles";
 
-// --- streaming row handle operations (operate on a `RowData`) ---
-export {
-  rowValues,
-  rowAddPageBreak as addRowPageBreak,
-  rowSetFont as setRowFont,
-  rowSetFill as setRowFill,
-  rowSetBorder as setRowBorder,
-  rowSetAlignment as setRowAlignment
-} from "@excel/core/row";
-export { rowGetCell as rowCell, rowCommit as commitRow } from "@excel/core/worksheet-core";
-
-// --- streaming types ---
-/** A streaming cell handle. */
-export type { CellData as CellHandle } from "@excel/core/cell";
-/** A streaming row handle. */
-export type { RowData as RowHandle } from "@excel/core/row";
-
-/** The worksheet writer handed out by `WorkbookWriter.addWorksheet`. */
-export type { WorksheetWriter } from "@excel/stream/worksheet-writer";
+/**
+ * The worksheet writer handed out by `WorkbookWriter.addWorksheet`; its `workbook` is that
+ * {@link WorkbookWriter}.
+ */
+export type WorksheetWriter = WorksheetWriterOf<WorkbookWriter>;
 /** The worksheet reader yielded by `WorkbookReader.read`. */
 export type { WorksheetReader } from "@excel/stream/worksheet-reader";
 /** The hyperlink reader yielded by `WorkbookReader.read`. */
@@ -80,3 +58,9 @@ export type {
   HyperlinkEvent
 } from "@excel/stream/worksheet-reader";
 export type { Hyperlink, HyperlinkReaderOptions } from "@excel/stream/hyperlink-reader";
+/** An image placed on a streamed sheet, as `WorksheetWriter#getImages` lists it. */
+export type { WriterImageModel } from "@excel/stream/worksheet-writer";
+/** What the deprecated `WorkbookWriter#packageSink` returns. */
+export type { PackageSink } from "@excel/utils/package-sink";
+/** A listener of the streaming readers' events (`on`, `once`, `addListener`, …). */
+export type { EventListener } from "@utils/event-emitter";

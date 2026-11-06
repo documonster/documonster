@@ -1,3 +1,4 @@
+import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { xmlEncode } from "@xml/encode";
 
 /**
@@ -35,6 +36,8 @@ class RawXmlCollector {
   private buffer: string[] = [];
   /** Index of the last open-tag entry in the buffer (for self-closing collapse). */
   private lastOpenIndex = -1;
+  /** The fragment's text views and the declarations it needs — see `fragment-namespaces.ts`. */
+  private namespaces = new FragmentNamespaces();
 
   constructor(rootTag: string) {
     this.rootTag = rootTag;
@@ -53,8 +56,8 @@ class RawXmlCollector {
   start(attributes?: Record<string, unknown> | null): void {
     this.active = true;
     this.depth = 0;
-    const attrsStr = serializeAttributes(attributes);
-    this.buffer = [`<${this.rootTag}${attrsStr ? " " + attrsStr : ""}>`];
+    this.namespaces = new FragmentNamespaces();
+    this.buffer = [this.openTag(this.rootTag, attributes)];
   }
 
   /**
@@ -75,6 +78,7 @@ class RawXmlCollector {
     this.depth = 0;
     this.buffer.length = 0;
     this.lastOpenIndex = -1;
+    this.namespaces = new FragmentNamespaces();
   }
 
   // ---------------------------------------------------------------------------
@@ -85,8 +89,7 @@ class RawXmlCollector {
    * Feed an open-tag event.  Must only be called while `active` is true.
    */
   feedOpen(name: string, attributes?: Record<string, unknown> | null): void {
-    const attrsStr = serializeAttributes(attributes);
-    this.buffer.push(`<${name}${attrsStr ? " " + attrsStr : ""}>`);
+    this.buffer.push(this.openTag(name, attributes));
     this.depth++;
     this.lastOpenIndex = this.buffer.length - 1;
   }
@@ -107,8 +110,9 @@ class RawXmlCollector {
    *          nested close tag.
    */
   feedClose(name: string): boolean {
+    const written = this.namespaces.close(name);
     if (name === this.rootTag && this.depth === 0) {
-      this.buffer.push(`</${name}>`);
+      this.buffer.push(`</${written}>`);
       this.active = false;
       this.lastOpenIndex = -1;
       return true;
@@ -127,7 +131,7 @@ class RawXmlCollector {
       return false;
     }
     this.lastOpenIndex = -1;
-    this.buffer.push(`</${name}>`);
+    this.buffer.push(`</${written}>`);
     return false;
   }
 
@@ -137,7 +141,18 @@ class RawXmlCollector {
 
   /** The collected XML string.  Only meaningful after `feedClose` returns true. */
   get result(): string {
-    return this.buffer.join("");
+    return this.namespaces.finish(this.buffer.join(""));
+  }
+
+  /** `<name …>`, as the fragment's text must write the element just opened. */
+  private openTag(name: string, attributes?: Record<string, unknown> | null): string {
+    const tag = this.namespaces.open({
+      name,
+      attributes: (attributes ?? {}) as Record<string, string>,
+      isSelfClosing: false
+    });
+    const attrsStr = serializeAttributes(tag.attributes);
+    return `<${tag.name}${attrsStr ? " " + attrsStr : ""}>`;
   }
 }
 

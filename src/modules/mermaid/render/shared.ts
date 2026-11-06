@@ -101,7 +101,7 @@ export function layoutTitleBlock(
  * rasteriser. Vertical centring is therefore arithmetic a producer does, and doing it in one
  * place is what keeps eight renderers agreeing about where the middle of a box is.
  */
-export function centredText(
+export function centeredText(
   box: { x: number; y: number; width: number; height: number },
   lines: readonly string[],
   fontSize: number,

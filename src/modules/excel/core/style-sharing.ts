@@ -34,7 +34,7 @@ const snapshots = new WeakMap<Partial<Style>, Partial<Style>>();
  * hands out private copies, and this guarantees anything that skipped it fails loudly
  * instead of corrupting a neighbour.
  *
- * `Cell.view` is the case that needs it most: it is documented as a read-only
+ * `Stream.getCellView` is the case that needs it most: it is documented as a read-only
  * projection and its `font`/`alignment` are the shared objects, deliberately not
  * materialised so that iterating a row stays allocation-free.
  *

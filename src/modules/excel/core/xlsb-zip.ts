@@ -11,6 +11,7 @@
  * would be a second set of those to get wrong.
  */
 import type { StreamingZipDriver } from "@excel/core/xlsb-stream";
+import type { ZipWriterOptions } from "@excel/xlsx/types";
 
 /**
  * A streaming zip writer, from the adapter the XLSX path already uses.
@@ -18,8 +19,8 @@ import type { StreamingZipDriver } from "@excel/core/xlsb-stream";
  * Imported dynamically for the same reason every other cross-module reach in `core/` is: the XLSX module is
  * large and a binary-only caller should not pull it in until it actually writes something.
  */
-export async function createXlsbZipWriter(): Promise<StreamingZipDriver> {
+export async function createXlsbZipWriter(options?: ZipWriterOptions): Promise<StreamingZipDriver> {
   // The module's own factory rather than the adapter class, which is deliberately not exported.
   const { createZipWriterAdapter } = await import("@excel/xlsx/zip-writer");
-  return createZipWriterAdapter() as unknown as StreamingZipDriver;
+  return createZipWriterAdapter(options) as unknown as StreamingZipDriver;
 }

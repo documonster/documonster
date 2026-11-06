@@ -12,13 +12,13 @@ Documonster is a zero-dependency TypeScript toolkit for spreadsheets and documen
 
 - **AI-Friendly** — Clean, consistent API designed for AI coding agents. Every module has comprehensive documentation and runnable examples for AI to learn from. An [MCP server](packages/mcp/README.md) is available for AI clients that need to work on real files
 - **Zero Runtime Dependencies** — Pure TypeScript, no external packages
-- **Nine Modules** — Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream
+- **Standalone Modules** — Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream, Draw, Mermaid
 - **Cross-Platform** — Node.js LTS + Current (22, 24, 26), Bun latest, Chrome 98+, Firefox 102+, Safari 15.4+
 - **ESM only** — Native ES Modules with full tree-shaking; CommonJS consumers `require()` it unchanged on Node >= 22.13
 
 ## Modules
 
-Documonster is organized into nine standalone modules. Each module has its own documentation and runnable examples.
+Documonster is organized into standalone modules. Each module has its own documentation and runnable examples.
 
 ### Excel — XLSX/JSON Workbook Manager
 
@@ -36,7 +36,7 @@ Read, write, and manipulate DOCX files with a full builder, reader, and converte
 
 ### Formula — Excel-Compatible Calculation Engine
 
-448-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Recalculate workbooks with `calculateFormulas()` from `documonster/excel/formula`; tokenize and parse syntax with `Formula` from `documonster/formula`. There is no install step, and the engine stays out of bundles that only read/write XLSX.
+467-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Recalculate workbooks with `ExcelFormula.calculate()` from `documonster/excel/formula`; tokenize and parse syntax with `Formula` from `documonster/formula`. There is no install step, and the engine stays out of bundles that only read/write XLSX.
 
 - [Documentation](src/modules/formula/README.md) | [中文](src/modules/formula/README_zh.md)
 - [Examples](src/modules/formula/examples/)
@@ -71,7 +71,7 @@ Streaming and buffered XML processing with query engine, namespace support, and 
 
 ### Archive — Create/Read/Edit Archives
 
-ZIP and TAR archive creation, reading, editing, streaming, encryption, and compression utilities — plus `encodePng`, since a PNG is a DEFLATE stream with CRC-32-checked chunks and this is where both primitives live.
+ZIP and TAR archive creation, reading, editing, streaming, encryption, and compression utilities — plus `Archive.encodePng`, since a PNG is a DEFLATE stream with CRC-32-checked chunks and this is where both primitives live.
 
 - [Documentation](src/modules/archive/README.md) | [中文](src/modules/archive/README_zh.md)
 - [Examples](src/modules/archive/examples/)
@@ -113,35 +113,34 @@ pnpm add documonster
 bun add documonster
 ```
 
-Each module is available as a standalone subpath export. All subpaths support `browser`, `import` (ESM), and `require` (CJS) conditions.
+Each module is available as a standalone subpath export. Every subpath carries a `browser` condition beside the default ESM build; there is no separate CommonJS build — CommonJS consumers `require()` the same files on Node >= 22.13.
 
 ## Quick Start
 
 ```typescript
-import { Workbook, Worksheet, Row } from "documonster/excel";
+import { Workbook, Row } from "documonster/excel";
 
 // Create
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Sheet1");
-Worksheet.addRow(sheet, ["Name", "Age"]);
-Worksheet.addRow(sheet, ["Alice", 30]);
+Row.add(sheet, ["Name", "Age"]);
+Row.add(sheet, ["Alice", 30]);
 await Workbook.writeFile(workbook, "output.xlsx");
 
 // Read
-const wb = Workbook.create();
-await Workbook.readFile(wb, "output.xlsx");
-const readSheet = Workbook.getWorksheet(wb, 1);
-Worksheet.eachRow(readSheet, (_row, n) => console.log(n, Row.getValues(readSheet, n)));
+const wb = await Workbook.readFile("output.xlsx");
+const readSheet = Workbook.getWorksheet(wb, 1); // undefined when the workbook has no such sheet
+if (readSheet) Row.each(readSheet, n => console.log(n, Row.getValues(readSheet, n)));
 
 // PDF — generate from data, no Workbook needed
 import { Pdf } from "documonster/pdf";
-const pdfBytes = await Pdf.create([
+const pdfBytes = await Pdf.fromTable([
   ["Product", "Revenue"],
   ["Widget", 1000]
 ]);
 
 // PDF — read text, images, and metadata from any PDF
-const result = await Pdf.read(pdfBytes);
+const result = await Pdf.extract(pdfBytes);
 console.log(result.text); // extracted text
 console.log(result.metadata); // title, author, etc.
 
@@ -153,7 +152,7 @@ page.drawSvgPath("M10 10 L90 10 L50 80 Z", { fill: { r: 1, g: 0, b: 0 } });
 page.addAnnotation({ type: "Highlight", rect: [72, 765, 150, 785] });
 
 // PDF — edit existing PDFs (overlay, merge, fill forms)
-const editor = Pdf.Editor.load(existingPdf);
+const editor = Pdf.Editor.read(existingPdf);
 editor.getPage(0).drawText("Stamp", { x: 200, y: 400, fontSize: 36 });
 editor.setFormField("name", "Jane");
 editor.copyPagesFrom(otherPdf);
@@ -169,30 +168,30 @@ const titles = Xml.queryAll(Xml.parse(xmlString).root, "book/title");
 
 // ZIP — create and extract
 import { Archive } from "documonster/archive";
-const archive = await Archive.zip().add("hello.txt", "Hello!").bytes();
+const archive = await Archive.createZip().add("hello.txt", "Hello!").toBuffer();
 
 // Markdown — parse and format tables
 import { Markdown } from "documonster/markdown";
 const table = Markdown.parse("| A | B |\n|---|---|\n| 1 | 2 |");
 
 // Word — create, read, and convert DOCX
-import { Document, Io } from "documonster/word";
+import { Document } from "documonster/word";
 const wdoc = Document.create();
 Document.addHeading(wdoc, "Report", 1);
 Document.addParagraph(wdoc, "Generated by Documonster.");
-const docxBytes = await Io.toBuffer(Document.build(wdoc));
-const parsedDocx = await Io.read(docxBytes); // round-trip read
+const docxBytes = await Document.toBuffer(wdoc);
+const parsedDocx = await Document.read(docxBytes); // round-trip read
 
 // Formula — opt-in calculation engine (kept out of the base bundle)
 // Recalculate an excel workbook via the excel/formula subpath.
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Cell } from "documonster/excel";
 Cell.setValue(sheet, "A4", { formula: "SUM(A1:A3)" });
-calculateFormulas(workbook); // now populates cell results
+ExcelFormula.calculate(workbook); // now populates cell results
 
 // Syntax inspection is available separately
 import { Formula } from "documonster/formula";
-const ast = Formula.parse(Formula.tokenize("SUM(A1:A3)"));
+const ast = Formula.parse("SUM(A1:A3)");
 ```
 
 ## Browser Support
@@ -314,6 +313,8 @@ Vitest needs no configuration.
 - 🏠 [GitHub Repository](https://github.com/documonster/documonster)
 - 🐛 [Issue Tracker](https://github.com/documonster/documonster/issues)
 - 📋 [Changelog](CHANGELOG.md)
-- 🔄 [Migration Guide](MIGRATION.md)
+- 🔄 [Migration Guide](MIGRATION.md) — upgrading between documonster releases
+- 🔀 [Migrating from exceljs](MIGRATION_EXCELJS_TO_DOCUMONSTER.md) ·
+  [Migrating from @cj-tech-master/excelts](MIGRATION_EXCELTS_TO_DOCUMONSTER.md)
 - 📄 [License (Apache-2.0)](LICENSE)
 - 📦 [Third-Party Notices](THIRD_PARTY_NOTICES.md)

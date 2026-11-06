@@ -15,7 +15,7 @@
  * rather than fail it.
  */
 import { hasDeflateRawCompressionStream } from "@archive/compression/compress.base";
-import { createDeflateStream } from "@archive/index.browser";
+import { Compression } from "@archive/index.browser";
 import { describe, it, expect } from "vitest";
 
 describe("AsyncStreamCodec backpressure (browser path)", () => {
@@ -27,7 +27,7 @@ describe("AsyncStreamCodec backpressure (browser path)", () => {
       return;
     }
 
-    const codec = createDeflateStream({ level: 6 });
+    const codec = Compression.createDeflateStream({ level: 6 });
 
     // Soak up data so backend doesn't refuse early.
     const sink: Uint8Array[] = [];

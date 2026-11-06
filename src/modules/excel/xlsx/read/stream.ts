@@ -7,6 +7,12 @@
 import type { ZipEntry } from "@archive/unzip/stream";
 import { Parse } from "@archive/unzip/stream";
 import type { Workbook } from "@excel/core/workbook";
+import {
+  CompoundFileSniffer,
+  containerReadError,
+  createContainerBudget,
+  decryptionOf
+} from "@excel/utils/container-errors";
 import { readXlsxEntriesInto } from "@excel/xlsx/read/package";
 import type { XlsxReadOptions } from "@excel/xlsx/types";
 import { Writable, pipeline } from "@stream";
@@ -18,7 +24,7 @@ export async function readXlsxStreamInto(
   stream: ReadableLike,
   options?: XlsxReadOptions
 ): Promise<Workbook> {
-  const parser = new Parse();
+  const parser = new Parse({ checkCrc32: options?.zip?.checkCrc32 });
 
   const swallowError = () => {
     // Prevent unhandled 'error' events from crashing the process.
@@ -36,26 +42,47 @@ export async function readXlsxStreamInto(
   // Node treat it like a transform and surface `Premature close` errors.
   // We instead pipeline the input stream into a Writable sink that forwards
   // chunks into the parser with backpressure.
+  // An OLE compound file — an encrypted workbook, a legacy .xls — is kept away from the parser: once read, an encrypted
+  // workbook is decrypted with `options.password` and its package parsed, and anything else is reported as what it is
+  // (`ExcelEncryptedError`, a legacy .xls), not as a ZIP without a central directory.
+  const sniffer = new CompoundFileSniffer(decryptionOf(options));
+  const forward = (
+    chunks: (Uint8Array | string)[],
+    callback: (error?: Error | null) => void
+  ): void => {
+    let ok = true;
+    for (const chunk of chunks) {
+      ok = parser.write(chunk) && ok;
+    }
+    if (ok) {
+      callback();
+    } else {
+      parser.once("drain", () => callback());
+    }
+  };
   const sink = new Writable({
     write(chunk: Uint8Array | string, _encoding: string, callback: (error?: Error | null) => void) {
       try {
-        const ok = parser.write(chunk);
-        if (ok) {
-          callback();
-        } else {
-          parser.once("drain", () => callback());
-        }
+        forward(sniffer.push(chunk), callback);
       } catch (e) {
         callback(toError(e));
       }
     },
     final(callback: (error?: Error | null) => void) {
-      try {
-        parser.end();
-        callback();
-      } catch (e) {
-        callback(toError(e));
-      }
+      sniffer.end().then(
+        chunks => {
+          try {
+            for (const chunk of chunks) {
+              parser.write(chunk);
+            }
+            parser.end();
+            callback();
+          } catch (e) {
+            callback(toError(e));
+          }
+        },
+        (e: unknown) => callback(toError(e))
+      );
     }
   });
 
@@ -69,21 +96,38 @@ export async function readXlsxStreamInto(
   parser.on("error", onParserError);
 
   const pump = pipeline(stream, sink);
+  // A pipeline that fails before the parser has finished — a source that errors, a destroyed input — must stop the
+  // entry iteration too: the parser never ends, so the read waited for entries that could not come and the failure
+  // surfaced only as an unhandled rejection.
+  let pumpError: unknown;
+  pump.catch((err: unknown) => {
+    pumpError = err;
+    try {
+      parser.destroy(toError(err));
+    } catch {
+      // ignore
+    }
+  });
 
+  const budget = createContainerBudget(options?.zip);
   const entries = (async function* () {
     for await (const entry of iterateZipEntries(parser)) {
       entry.on("error", swallowError);
+      // The container limits a buffered read applies, held as the package streams: parts counted as they
+      // arrive, bytes as they inflate — parsed or drained, every byte goes through the part's meter.
+      const meter = budget.enter(entry.path);
       const drain = async () => {
         if (entry.readableEnded || entry.destroyed) {
           return;
         }
-        const draining = entry.autodrain();
-        await draining.promise();
+        for await (const chunk of entry as AsyncIterable<Uint8Array | string>) {
+          meter(chunk);
+        }
       };
       yield {
         name: entry.path,
         type: entry.type,
-        stream: entry,
+        stream: metered(entry, meter),
         drain
       };
     }
@@ -94,6 +138,8 @@ export async function readXlsxStreamInto(
     await pump;
     return result;
   } catch (err) {
+    // Taken before the parser is stopped below, which fails the pipeline in turn.
+    const sourceError = pumpError;
     // Stop the ZIP parser so pipeline() can unwind promptly.
     try {
       parser.destroy();
@@ -105,9 +151,11 @@ export async function readXlsxStreamInto(
     try {
       await pump;
     } catch {
-      // ignore pump failures; the original parse error is more useful
+      // Settled here so it is never unhandled; reported below when it is what stopped the parser.
     }
-    throw err;
+    // A failure of the source is the cause of whatever the parser then reported about the truncated input. A
+    // package that is damaged or not one is reported as the buffered read reports it.
+    throw sourceError ?? containerReadError(err);
   } finally {
     try {
       parser.off("error", onParserError);
@@ -126,6 +174,16 @@ export async function readXlsxStreamInto(
         // ignore
       }
     }
+  }
+}
+
+async function* metered(
+  source: AsyncIterable<Uint8Array | string>,
+  meter: (chunk: Uint8Array | string) => void
+): AsyncGenerator<Uint8Array | string> {
+  for await (const chunk of source) {
+    meter(chunk);
+    yield chunk;
   }
 }
 
@@ -174,5 +232,10 @@ async function* iterateZipEntries(parser: Parse): AsyncGenerator<ZipEntry> {
     await new Promise<void>(resolve => {
       notify = resolve;
     });
+  }
+  // The parser reports a failure and then closes; both can land before this resumes, and the failure must not be
+  // mistaken for the end of a complete package.
+  if (error) {
+    throw toError(error);
   }
 }

@@ -23,11 +23,11 @@
  * apart again without a failure.
  */
 
-import { cssColour, translucent } from "@draw/colour";
+import { cssColor, translucent } from "@draw/colour";
 import { rectNode } from "@draw/types";
 import type { DrawNode, DrawPaint, DrawPoint } from "@draw/types";
-import { COLORS, formatNumber, valueToY } from "@excel/chart/shared/chart-utils";
-import type { ChartRect } from "@excel/chart/shared/chart-utils";
+import { automaticSeriesColor, formatNumber, valueToY } from "@excel/chart/shared/chart-utils";
+import type { ChartRect, ChartThemeColors } from "@excel/chart/shared/chart-utils";
 
 /**
  * A rectangle in the chart's own Y-down user space.
@@ -48,17 +48,17 @@ const WHITE = "#fff";
 
 /** A filled shape. */
 function fill(token: string): DrawPaint {
-  return { fill: cssColour(token) };
+  return { fill: cssColor(token) };
 }
 
 /** A filled shape with a white separator stroke, as every ChartEx layout uses. */
 function fillOutlined(token: string): DrawPaint {
-  return { fill: cssColour(token), stroke: cssColour(WHITE), strokeWidth: 1 };
+  return { fill: cssColor(token), stroke: cssColor(WHITE), strokeWidth: 1 };
 }
 
 /** A stroke-only paint. */
 function stroke(token: string, width = 1): DrawPaint {
-  return { stroke: cssColour(token), strokeWidth: width };
+  return { stroke: cssColor(token), strokeWidth: width };
 }
 
 /** A two-point line node. */
@@ -93,7 +93,7 @@ export function textNode(
     x,
     y,
     lines: [{ text, dy: 0 }],
-    style: { size, fill: cssColour(colour), anchor, family: "Arial" }
+    style: { size, fill: cssColor(colour), anchor, family: "Arial" }
   };
 }
 
@@ -283,8 +283,8 @@ export function funnelNodes(
 }
 
 /** Re-exported so the layouts can share one palette lookup. */
-export function paletteColour(index: number): string {
-  return COLORS[index % COLORS.length];
+export function paletteColour(colors: ChartThemeColors | undefined, index: number): string {
+  return automaticSeriesColor(index, colors);
 }
 
 /** One resolved waterfall column. */
@@ -350,7 +350,7 @@ export function waterfallConnectorNodes(
   for (let index = 0; index < tops.length - 1; index++) {
     nodes.push(
       lineNode(tops[index].x, tops[index].y, tops[index + 1].x - barWidth, tops[index].y, {
-        stroke: cssColour("#888"),
+        stroke: cssColor("#888"),
         strokeWidth: 1,
         dash: [3, 3]
       })
@@ -368,7 +368,11 @@ export function waterfallConnectorNodes(
  * not set — so that variant drew the line with no caption in SVG while PDF drew
  * both.
  */
-export function paretoOverlayNodes(sortedValues: readonly number[], plot: ChartExRect): DrawNode[] {
+export function paretoOverlayNodes(
+  colors: ChartThemeColors | undefined,
+  sortedValues: readonly number[],
+  plot: ChartExRect
+): DrawNode[] {
   // Non-finite slots contribute nothing. `Math.max(0, NaN)` is `NaN`, and a single
   // blank cell used to suppress the whole overlay.
   const total = sortedValues.reduce(
@@ -388,7 +392,7 @@ export function paretoOverlayNodes(sortedValues: readonly number[], plot: ChartE
       y: plot.y + plot.height - (cumulative / total) * plot.height
     };
   });
-  const colour = paletteColour(1);
+  const colour = paletteColour(colors, 1);
   const nodes: DrawNode[] = [
     { kind: "polyline", points, paint: stroke(colour, 2) },
     ...points.map((point): DrawNode => ({
@@ -426,6 +430,7 @@ export interface BoxOptions {
 
 /** One box-and-whisker group: whisker, box, median, and the optional extras. */
 export function boxWhiskerNodes(
+  colors: ChartThemeColors | undefined,
   groups: readonly { key: string; stats: BoxStats }[],
   plot: ChartExRect,
   range: { min: number; max: number },
@@ -438,7 +443,7 @@ export function boxWhiskerNodes(
   groups.forEach(({ key, stats }, index) => {
     const cx = plot.x + index * groupWidth + groupWidth / 2;
     const w = groupWidth * 0.38;
-    const colour = paletteColour(index);
+    const colour = paletteColour(colors, index);
     const q1 = at(stats.q1);
     const q3 = at(stats.q3);
 
@@ -446,7 +451,7 @@ export function boxWhiskerNodes(
     nodes.push(
       rectNode(
         { x: cx - w / 2, y: Math.min(q1, q3), width: w, height: Math.abs(q3 - q1) },
-        { fill: translucent(colour, 0.35), stroke: cssColour(colour), strokeWidth: 1 }
+        { fill: translucent(colour, 0.35), stroke: cssColor(colour), strokeWidth: 1 }
       )
     );
     const median = at(stats.median);
@@ -466,7 +471,7 @@ export function boxWhiskerNodes(
       const mean = at(stats.mean);
       nodes.push(
         lineNode(cx - w / 2, mean, cx + w / 2, mean, {
-          stroke: cssColour("#333"),
+          stroke: cssColor("#333"),
           strokeWidth: 1,
           dash: [3, 2]
         })
@@ -532,6 +537,6 @@ export function multilineTextNode(
     x,
     y,
     lines: texts.map((text, index) => ({ text, dy: index * lineHeight })),
-    style: { size, fill: cssColour(colour), anchor, family: "Arial" }
+    style: { size, fill: cssColor(colour), anchor, family: "Arial" }
   };
 }

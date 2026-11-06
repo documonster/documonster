@@ -1,5 +1,5 @@
 import { getSheetModel } from "@excel/core/worksheet";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 /**
@@ -124,7 +124,7 @@ describe("Worksheet", () => {
       const ws = sheet();
 
       for (let col = 1; col <= 10; col++) {
-        Cell.setValue(ws, 1, col, `Col ${col}`);
+        Cell.setValue(ws, { row: 1, col }, `Col ${col}`);
       }
 
       Column.addPageBreak(ws, 3);
@@ -155,7 +155,7 @@ describe("Worksheet", () => {
     it("resolves a column key to its number", () => {
       const ws = sheet();
 
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "Total", key: "total", width: 12 }
       ]);

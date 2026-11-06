@@ -12,7 +12,7 @@
  */
 
 import { pdfMd5, pdfSha256, pdfSha384, pdfSha512 } from "@pdf/core/pdf-kdf";
-import { PdfStructureError } from "@pdf/errors";
+import { PdfStructureError, PdfUnsupportedFeatureError } from "@pdf/errors";
 import type { PdfCryptKind, PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfDictValue } from "@pdf/reader/pdf-parser";
 import {
@@ -65,7 +65,7 @@ export function initDecryption(doc: PdfDocument, password = ""): boolean {
 
   const filter = dictGetName(encryptDict, "Filter");
   if (filter !== "Standard") {
-    throw new PdfStructureError(`Unsupported encryption filter: ${filter}`);
+    throw new PdfUnsupportedFeatureError(`Unsupported encryption filter: ${filter}`);
   }
 
   const v = dictGetNumber(encryptDict, "V") ?? 0;
@@ -182,7 +182,7 @@ function initDecryptionV5(
   _fileId: Uint8Array
 ): boolean {
   if (revision !== 5 && revision !== 6) {
-    throw new PdfStructureError(`Unsupported revision ${revision} for V=5 encryption`);
+    throw new PdfUnsupportedFeatureError(`Unsupported revision ${revision} for V=5 encryption`);
   }
 
   const oeValue = dictGetBytes(encryptDict, "OE");
@@ -275,7 +275,7 @@ function tryUserPasswordV5(
 
   // Decrypt UE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
-  return aesCbcDecryptRaw(ueValue.subarray(0, 32), keyHash, zeroIv);
+  return aesCbcDecryptRaw(fileKeyBlocks(ueValue, "UE"), keyHash, zeroIv);
 }
 
 /**
@@ -308,7 +308,20 @@ function tryOwnerPasswordV5(
 
   // Decrypt OE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
-  return aesCbcDecryptRaw(oeValue.subarray(0, 32), keyHash, zeroIv);
+  return aesCbcDecryptRaw(fileKeyBlocks(oeValue, "OE"), keyHash, zeroIv);
+}
+
+/**
+ * The two AES blocks of `/UE` or `/OE` that hold the 32-byte file key. Checked only once the
+ * password has matched the hash that leads to it: a user password never reads `/OE`, so a
+ * damaged `/OE` must not stop a file the user password opens. A shorter value is not a whole
+ * number of blocks, which the AES decryptor would reject with a platform error.
+ */
+function fileKeyBlocks(value: Uint8Array, key: "UE" | "OE"): Uint8Array {
+  if (value.length < 32) {
+    throw new PdfStructureError(`Invalid /${key} length for V=5 encryption`);
+  }
+  return value.subarray(0, 32);
 }
 
 /** Password hash of Algorithm 2.A: `hash(password, salt, userData)`. */
@@ -694,7 +707,7 @@ function cryptFilterMethod(
     case "AESV3":
       return "aesv3";
     default:
-      throw new PdfStructureError(`Unsupported crypt filter method: ${String(cfm)}`);
+      throw new PdfUnsupportedFeatureError(`Unsupported crypt filter method: ${String(cfm)}`);
   }
 }
 

@@ -65,6 +65,29 @@ function isWhitespace(b: number): boolean {
 }
 
 /** Delimiter bytes per PDF spec §3.1 */
+/** Characters per `String.fromCharCode` call: spreading more overflows the argument limit. */
+const CHAR_CODE_CHUNK = 0x2000;
+
+/** `String.fromCharCode` over any number of codes; a token can be as long as the file. */
+function charCodesToString(codes: Uint8Array | number[]): string {
+  if (codes.length <= 32) {
+    // Keywords and names are a few characters; a loop beats spreading an iterator.
+    let out = "";
+    for (let i = 0; i < codes.length; i++) {
+      out += String.fromCharCode(codes[i]);
+    }
+    return out;
+  }
+  if (codes.length <= CHAR_CODE_CHUNK) {
+    return String.fromCharCode(...codes);
+  }
+  let out = "";
+  for (let i = 0; i < codes.length; i += CHAR_CODE_CHUNK) {
+    out += String.fromCharCode(...codes.slice(i, i + CHAR_CODE_CHUNK));
+  }
+  return out;
+}
+
 function isDelimiter(b: number): boolean {
   return (
     b === 0x28 || // (
@@ -408,7 +431,7 @@ export class PdfTokenizer {
       this.pos++;
     }
 
-    const name = String.fromCharCode(...chars);
+    const name = charCodesToString(chars);
     return { type: TokenType.Name, strValue: name, offset: startPos };
   }
 
@@ -460,18 +483,23 @@ export class PdfTokenizer {
   // ===========================================================================
 
   private readKeyword(startPos: number): Token {
-    const chars: number[] = [];
-
+    const wordStart = this.pos;
     while (this.pos < this.data.length) {
       const b = this.data[this.pos];
       if (isWhitespace(b) || isDelimiter(b)) {
         break;
       }
-      chars.push(b);
+      this.pos++;
+    }
+    // `next()` dispatches every delimiter it gives meaning to before reaching here, so a
+    // delimiter left at the start — `)`, `{` or `}` outside any string or function — is
+    // stray. Consume it as a one-character keyword: returning an empty token without
+    // advancing would hand every caller's token loop the same token forever.
+    if (this.pos === wordStart && startPos === wordStart && this.pos < this.data.length) {
       this.pos++;
     }
 
-    const word = String.fromCharCode(...chars);
+    const word = charCodesToString(this.data.subarray(wordStart, this.pos));
 
     if (word === "true") {
       return { type: TokenType.Boolean, boolValue: true, strValue: "true", offset: startPos };
@@ -557,7 +585,7 @@ export class PdfTokenizer {
       }
       chars.push(b);
     }
-    return String.fromCharCode(...chars);
+    return charCodesToString(chars);
   }
 
   /**

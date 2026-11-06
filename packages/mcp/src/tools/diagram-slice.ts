@@ -34,7 +34,7 @@ import type {
   DrawTextLine,
   DrawTextStyle
 } from "documonster/draw";
-import { measureText, renderDrawList } from "documonster/draw";
+import { Draw } from "documonster/draw";
 
 /** A closed interval along the flow axis that a cut must not fall inside. */
 interface Band {
@@ -132,7 +132,7 @@ class BandCollector implements DrawSurface {
     const cos = Math.cos(angle);
     const ys: number[] = [];
     for (const line of lines) {
-      const width = measureText(line.text, style);
+      const width = Draw.measureText(line.text, style);
       const lineX = line.x ?? x;
       const left =
         style.anchor === "middle"
@@ -216,7 +216,7 @@ export function planSlices(
     first.height === list.height
       ? 0
       : -1;
-  renderDrawList(
+  Draw.render(
     background === -1
       ? list
       : { ...list, children: list.children.filter((_, index) => index !== background) },

@@ -2,6 +2,7 @@ import {
   cellFont,
   cellGetStyle,
   cellOwnStyle,
+  cellView,
   mergeCellStyle,
   setFacetShared
 } from "@excel/core/cell";
@@ -87,7 +88,7 @@ describe("style sharing", () => {
       expect(Cell.getStyle(ws, "A2").font!.bold).toBe(true);
     });
 
-    it("isolates through each facet reader", () => {
+    it("facet readers hand out copies, so editing one reaches no cell", () => {
       const ws = sheet();
       Cell.setValue(ws, "A1", 1);
       Cell.setValue(ws, "A2", 2);
@@ -104,6 +105,10 @@ describe("style sharing", () => {
       Cell.getBorder(ws, "A1")!.top = { style: "thick" };
       Cell.getProtection(ws, "A1")!.locked = false;
 
+      expect(Cell.getFont(ws, "A1")!.bold).toBe(true);
+      expect(Cell.getAlignment(ws, "A1")!.horizontal).toBe("left");
+      expect(Cell.getBorder(ws, "A1")!.top).toEqual({ style: "thin" });
+      expect(Cell.getProtection(ws, "A1")!.locked).toBe(true);
       expect(Cell.getFont(ws, "A2")!.bold).toBe(true);
       expect(Cell.getAlignment(ws, "A2")!.horizontal).toBe("left");
       expect(Cell.getBorder(ws, "A2")!.top).toEqual({ style: "thin" });
@@ -337,7 +342,7 @@ describe("style sharing", () => {
       expect(Object.isFrozen(header)).toBe(true);
     });
 
-    it("re-snapshots after Table.columnStyle is mutated in place", () => {
+    it("re-snapshots after the deprecated Table.columnStyle is mutated in place", () => {
       const ws = sheet();
       const table = Table.add(ws, {
         name: "t",
@@ -349,25 +354,39 @@ describe("style sharing", () => {
       });
       expect(Cell.getStyle(ws, "A2").font!.bold).toBe(true);
 
-      // Handing the style out drops the snapshot, so a later store() applies what
-      // the column says now.
-      Table.columnStyle(Table.column(table, 0))!.font!.bold = false;
+      // The deprecated name hands out the column's own object; the table's next edit
+      // applies what the column says then, to every cell of the column.
+      Table.columnStyle(Table.getColumn(table, 0)!)!.font!.bold = false;
       Table.addRow(table, [2]);
-      Table.commit(table);
 
+      expect(Cell.getStyle(ws, "A2").font!.bold).toBe(false);
       expect(Cell.getStyle(ws, "A3").font!.bold).toBe(false);
+    });
+
+    it("Table.getColumnStyle hands out a copy; setColumnStyle is what changes the column", () => {
+      const ws = sheet();
+      const table = Table.add(ws, {
+        name: "t",
+        ref: "A1",
+        columns: [{ name: "A", style: { font: { bold: true } } }],
+        rows: [[1]]
+      });
+      Table.getColumnStyle(Table.getColumn(table, 0)!)!.font!.bold = false;
+      Table.addRow(table, [2]);
+      expect(Cell.getStyle(ws, "A3").font!.bold).toBe(true);
+      expect(Table.getColumnStyle(Table.getColumn(table, 0)!)!.font!.bold).toBe(true);
     });
   });
 
-  describe("Cell.view hands out the shared facet", () => {
+  describe("cellView hands out the shared facet", () => {
     it("is frozen, and rejects a nested write at compile time", () => {
       const ws = sheet();
       Cell.setValue(ws, "A1", 1);
       Cell.setValue(ws, "A2", 2);
       Column.setStyle(ws, 1, { font: { bold: true } });
 
-      const view = Cell.view(getCell(ws, 1, 1));
-      // Deliberately not materialised: `Cell.view` is a read-only projection, and
+      const view = cellView(getCell(ws, 1, 1));
+      // Deliberately not materialised: `cellView` is a read-only projection, and
       // copying here would make iterating a sheet allocate per cell.
       expect(view.font).toBe(cellGetStyle(getCell(ws, 2, 1)).font);
       expect(Object.isFrozen(view.font)).toBe(true);
@@ -389,7 +408,7 @@ describe("style sharing", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "S");
       for (let r = 1; r <= 4; r++) {
-        Cell.setValue(ws, r, 1, r);
+        Cell.setValue(ws, { row: r, col: 1 }, r);
       }
       Column.setStyle(ws, 1, { font: { bold: true, size: 13 } });
       const bytes = new Uint8Array(await Workbook.toBuffer(wb));
@@ -449,14 +468,14 @@ describe("style sharing", () => {
         const wb = Workbook.create();
         const ws = Workbook.addWorksheet(wb, "S");
         for (let r = 1; r <= 4; r++) {
-          Cell.setValue(ws, r, 1, r);
+          Cell.setValue(ws, { row: r, col: 1 }, r);
         }
         Column.setStyle(ws, 1, { font: { bold: true }, numFmt: "0.00" });
         if (separate) {
           // Materialise every cell; the content is identical, so the written
           // stylesheet must be too.
           for (let r = 1; r <= 4; r++) {
-            Cell.getStyle(ws, r, 1);
+            Cell.getStyle(ws, { row: r, col: 1 });
           }
         }
         return wb;

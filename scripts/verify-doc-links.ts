@@ -57,7 +57,7 @@ function markdownFiles(dir: string): string[] {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!SKIP_DIRS.has(entry.name)) found.push(...markdownFiles(full));
-    } else if (entry.name.endsWith(".md")) {
+    } else if (entry.name.endsWith(".md") || entry.name === "llms.txt") {
       found.push(full);
     }
   }

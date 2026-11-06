@@ -6,7 +6,7 @@
  *
  * @example
  * ```ts
- * import { renderToMarkdown, markdownToDocx, markdownToDocxBody } from "documonster/word/markdown";
+ * import { WordMarkdown } from "documonster/word/markdown";
  * ```
  */
 

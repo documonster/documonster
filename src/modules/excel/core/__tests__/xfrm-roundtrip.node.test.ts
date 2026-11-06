@@ -32,7 +32,7 @@ describe("picture xfrm geometry round-trip (real non-zero geometry)", () => {
     for (const [name, entry] of entries) {
       archive.add(name, entry.data);
     }
-    const tampered = await archive.bytes();
+    const tampered = await archive.toBuffer();
 
     // 3. Read it back and write it out again.
     const wb = Workbook.create();

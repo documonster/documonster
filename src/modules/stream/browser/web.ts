@@ -5,7 +5,11 @@
  * side of the kernel in a bundle.
  */
 
-import { makeReadableFromWeb, makeWritableFromWeb } from "@stream/core/web-conversions";
+import {
+  checkWritableLike,
+  makeReadableFromWeb,
+  makeWritableFromWeb
+} from "@stream/core/web-conversions";
 import type { ReadableFromWeb, WritableFromWeb } from "@stream/core/web-conversions";
 import { Readable } from "@stream/kernel/classes";
 import { isWritableStream } from "@stream/kernel/stream-utils";
@@ -28,5 +32,5 @@ export function toWritable<T = Uint8Array>(stream: WritableLike | WritableStream
   if (isWritableStream(stream)) {
     return writableFromWeb(stream as WritableStream<T>) as unknown as WritableLike;
   }
-  return stream as WritableLike;
+  return checkWritableLike(stream);
 }

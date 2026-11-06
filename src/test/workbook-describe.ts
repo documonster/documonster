@@ -24,7 +24,7 @@
  * mistake, and the fix is to say so rather than to widen the describer.
  */
 
-import { Address, Cell, Workbook, Worksheet } from "@excel";
+import { Address, Cell, Row, Workbook, Worksheet } from "@excel";
 import type { WorkbookData } from "@excel/core/workbook-core";
 
 export interface DescribeWorkbookOptions {
@@ -49,15 +49,15 @@ export function describeWorkbook(
   options: DescribeWorkbookOptions = {}
 ): string {
   const lines: string[] = [];
-  for (const worksheet of Workbook.getWorksheets(workbook)) {
+  for (const worksheet of Workbook.listWorksheets(workbook)) {
     const name = Worksheet.getName(worksheet);
     const described: { row: number; column: number; text: string }[] = [];
 
-    Worksheet.eachRow(worksheet, row => {
-      for (const { address } of rowCells(row)) {
+    Row.each(worksheet, rowNumber => {
+      Row.eachAddress(worksheet, rowNumber, address => {
         const value = Cell.getValue(worksheet, address);
         if (value === null || value === undefined || value === "") {
-          continue;
+          return;
         }
         const { r: rowIndex, c: col } = Address.decodeCell(address);
         described.push({
@@ -65,7 +65,7 @@ export function describeWorkbook(
           column: col,
           text: `${name}!${address} ${describeValue(value, options)}`
         });
-      }
+      });
     });
 
     described.sort((left, right) => left.row - right.row || left.column - right.column);
@@ -78,32 +78,6 @@ export function describeWorkbook(
     }
   }
   return lines.join("\n");
-}
-
-/**
- * The cells a row actually holds, with their addresses.
- *
- * Read from the row's own cell list rather than by scanning the sheet's declared dimensions:
- * a used range is allowed to be wider than the cells present, and scanning it would describe
- * blanks the two encodings are entitled to disagree about.
- */
-function rowCells(row: unknown): readonly { address: string; value: unknown }[] {
-  const cells = (row as { cells?: readonly unknown[] }).cells;
-  if (!Array.isArray(cells)) {
-    return [];
-  }
-  const out: { address: string; value: unknown }[] = [];
-  for (const cell of cells) {
-    // A row's cell array is sparse: unset columns are holes.
-    if (cell === undefined || cell === null) {
-      continue;
-    }
-    const address = (cell as { address?: string }).address;
-    if (typeof address === "string") {
-      out.push({ address, value: undefined });
-    }
-  }
-  return out;
 }
 
 function describeValue(value: unknown, options: DescribeWorkbookOptions): string {

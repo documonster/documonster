@@ -6,12 +6,21 @@
  * headings, comments, footnotes/endnotes, and more.
  */
 
+import { isRecordArgument } from "@utils/object";
+import type { SchemaMatches } from "@utils/schema";
+import { s } from "@utils/schema";
+import { finalizeDocument } from "@word/builder/document-finalize";
+import { checkHandle } from "@word/core/argument-checks";
 import { resolveThemeColor } from "@word/core/color-utils";
+import { withDisplayFields } from "@word/core/field-view";
+import { indexImagesByKey } from "@word/core/image-keys";
 import { bytesToBase64, sanitizeUrl } from "@word/core/internal-utils";
-import { extractMathText, isRun, symbolText } from "@word/core/text-utils";
+import { checkSchema, w } from "@word/core/option-schema";
+import { extractMathText, hyperlinkContent, isRun, symbolText } from "@word/core/text-utils";
 import { isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
 import type { NumberingCounter } from "@word/query/numbering-counter";
+import type { StyleResolveContext } from "@word/query/style-resolve";
 import { createStyleResolver } from "@word/query/style-resolver";
 import type { StyleResolver } from "@word/query/style-resolver";
 import type {
@@ -21,6 +30,7 @@ import type {
   RunContent,
   RunProperties,
   ParagraphChild,
+  RangeMarker,
   Table,
   TableCell,
   TableRow,
@@ -74,6 +84,28 @@ export interface HtmlRenderOptions {
   readonly chartExRenderer?: (chartEx: ChartExContent) => string;
 }
 
+const htmlRenderOptionsSchema = w.record({
+  includeStyles: w.boolean().optional(),
+  fullDocument: w.boolean().optional(),
+  title: w.string().optional(),
+  imageMode: w.oneOf(["dataUrl", "filename", "none"]).optional(),
+  includeComments: w.boolean().optional(),
+  includeRevisions: w.boolean().optional(),
+  includeNotes: w.boolean().optional(),
+  classPrefix: w.string().optional(),
+  styleMap: s
+    .custom<ReadonlyMap<string, string> | Record<string, string>>(
+      v => v instanceof Map || isRecordArgument(v),
+      "a Map or an object"
+    )
+    .optional(),
+  chartRenderer: w.function<NonNullable<HtmlRenderOptions["chartRenderer"]>>().optional(),
+  chartExRenderer: w.function<NonNullable<HtmlRenderOptions["chartExRenderer"]>>().optional()
+});
+const _htmlRenderOptionsMatch: SchemaMatches<typeof htmlRenderOptionsSchema, HtmlRenderOptions> =
+  true;
+void _htmlRenderOptionsMatch;
+
 /** The result of HTML rendering. */
 export interface HtmlRenderResult {
   /** Generated HTML string. */
@@ -101,6 +133,8 @@ interface RenderState {
   listStack: Array<{ numId: number; level: number; format: string }>;
   /** Style resolution bound to `doc` for this render. */
   readonly styles: StyleResolver;
+  /** The table cell whose content is being written, for its table style. */
+  cellContext?: StyleResolveContext;
   /** Real number of each list item, per numbering instance and level. */
   readonly numbering: NumberingCounter;
   /** HTML output buffer. */
@@ -114,8 +148,17 @@ interface RenderState {
   commentMap: Map<number, CommentDef>;
   /** Track active comment ranges (IDs of comments whose range is currently open). */
   activeCommentIds: Set<number>;
+  /** Closing tags of the bidirectional spans open in the current paragraph, innermost last. */
+  openBidiSpans: string[];
   /** Collected aside comments to render at the end of the document. */
   asideComments: Array<{ id: number; def: CommentDef }>;
+  /**
+   * Names of bookmarks that start between blocks (in the body, or between the
+   * rows and cells of a table). HTML has no valid place for an anchor there —
+   * between two list items or two table rows — so each is written at the start
+   * of the next paragraph, which is where the range it marks begins.
+   */
+  pendingAnchors: string[];
   /** Run properties the paragraph being rendered passes down to its runs. */
   paragraphRunProperties?: RunProperties;
   /**
@@ -144,6 +187,9 @@ interface RunDefaultsCss {
  * Convert a DocxDocument to HTML.
  */
 export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): HtmlRenderResult {
+  checkHandle(doc, "document", "doc", "WordHtml.fromDocx");
+  checkSchema(htmlRenderOptionsSchema.optional(), options, "WordHtml.fromDocx");
+  doc = withDisplayFields(finalizeDocument(doc));
   const opts: ResolvedHtmlRenderOptions = {
     includeStyles: options?.includeStyles ?? true,
     fullDocument: options?.fullDocument ?? true,
@@ -195,7 +241,9 @@ export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): Ht
     styleMap: resolvedStyleMap,
     commentMap,
     activeCommentIds: new Set(),
+    openBidiSpans: [],
     asideComments: [],
+    pendingAnchors: [],
     runDefaults: runDefaultsCss(doc),
     defaultSizeInherited: true,
     omittedRunDefaults: {}
@@ -203,10 +251,11 @@ export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): Ht
 
   // Build image map
   if (doc.images) {
+    // By every key: content in a header or note may name a picture by an alias.
+    for (const [key, img] of indexImagesByKey(doc.images)) {
+      state.rIdToImage.set(key, img);
+    }
     for (const img of doc.images) {
-      if (img.rId) {
-        state.rIdToImage.set(img.rId, img);
-      }
       if (opts.imageMode === "dataUrl") {
         state.imageMap.set(img.fileName, imageToDataUrl(img));
       } else if (opts.imageMode === "filename") {
@@ -251,7 +300,9 @@ export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): Ht
   for (const item of doc.body) {
     renderBodyContent(state, item);
   }
+  takeBlockRangeMarkers(state, doc.bodyRangeMarkersAfter);
   closeOpenLists(state);
+  flushPendingAnchors(state);
 
   // Render default footer
   if (doc.footers && doc.footers.size > 0) {
@@ -349,6 +400,7 @@ function renderBodyContent(state: RenderState, item: BodyContent): void {
   if (!("type" in item)) {
     return;
   }
+  takeBlockRangeMarkers(state, item.rangeMarkersBefore);
   switch (item.type) {
     case "paragraph":
       renderParagraph(state, item);
@@ -443,6 +495,42 @@ function renderBodyContent(state: RenderState, item: BodyContent): void {
       break;
     }
   }
+}
+
+/** Note a range marker met between blocks (see `RenderState.pendingAnchors`). */
+function takeBlockRangeMarker(state: RenderState, marker: RangeMarker): void {
+  if (marker.type === "bookmarkStart") {
+    state.pendingAnchors.push(marker.name);
+  } else if (marker.type === "commentRangeEnd" && state.options.includeComments) {
+    // A highlight cannot span blocks, but the comment itself is still listed.
+    const def = state.commentMap.get(marker.id);
+    if (def) {
+      state.asideComments.push({ id: marker.id, def });
+    }
+  }
+}
+
+function takeBlockRangeMarkers(
+  state: RenderState,
+  markers: readonly RangeMarker[] | undefined
+): void {
+  for (const marker of markers ?? []) {
+    takeBlockRangeMarker(state, marker);
+  }
+}
+
+function bookmarkAnchor(name: string): string {
+  // Keyed by name, as internal hyperlinks (`href="#bookmark-<anchor>"`) and
+  // fields refer to it; the numeric id only pairs start and end, and need
+  // not be unique in the model.
+  return `<a id="bookmark-${escapeHtml(name)}" data-name="${escapeHtml(name)}"></a>`;
+}
+
+function flushPendingAnchors(state: RenderState): void {
+  for (const name of state.pendingAnchors) {
+    state.html.push(bookmarkAnchor(name));
+  }
+  state.pendingAnchors = [];
 }
 
 // =============================================================================
@@ -602,23 +690,57 @@ function renderParagraphInline(
 ): void {
   const outer = state.paragraphRunProperties;
   const outerOmitted = state.omittedRunDefaults;
-  state.paragraphRunProperties = state.styles.paragraph(para).runProperties;
+  state.paragraphRunProperties = state.styles.paragraph(para, state.cellContext).runProperties;
   state.omittedRunDefaults = omittedRunDefaults;
+  flushPendingAnchors(state);
+  const openSpans = state.openBidiSpans;
+  state.openBidiSpans = [];
   for (const child of para.children) {
     renderParagraphChild(state, child);
   }
+  renderSpanMarkers(state, para.rangeMarkersAfter);
+  closeBidiSpans(state);
+  state.openBidiSpans = openSpans;
   state.paragraphRunProperties = outer;
   state.omittedRunDefaults = outerOmitted;
 }
 
+/** Close the bidirectional spans still open (the source left one unpaired). */
+function closeBidiSpans(state: RenderState): void {
+  while (state.openBidiSpans.length > 0) {
+    state.html.push(state.openBidiSpans.pop()!);
+  }
+}
+
+/**
+ * Open and close the bidirectional spans among range markers: an embedding
+ * (`w:dir`) is a span with its own direction, an override (`w:bdo`) forces the
+ * direction of every character, which is what `<bdo>` does.
+ */
+function renderSpanMarkers(state: RenderState, markers: readonly RangeMarker[] | undefined): void {
+  for (const marker of markers ?? []) {
+    if (marker.type === "bidiStart") {
+      const tag = marker.kind === "override" ? "bdo" : "span";
+      state.html.push(`<${tag} dir="${marker.direction}">`);
+      state.openBidiSpans.push(`</${tag}>`);
+    } else if (marker.type === "bidiEnd") {
+      const close = state.openBidiSpans.pop();
+      if (close) {
+        state.html.push(close);
+      }
+    }
+  }
+}
+
 function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
+  renderSpanMarkers(state, child.rangeMarkersBefore);
   if ("type" in child) {
     switch (child.type) {
       case "hyperlink":
         renderHyperlinkHtml(state, child);
         return;
       case "bookmarkStart":
-        state.html.push(`<a id="bookmark-${child.id}" data-name="${escapeHtml(child.name)}"></a>`);
+        state.html.push(bookmarkAnchor(child.name));
         return;
       case "bookmarkEnd":
         return;
@@ -712,9 +834,14 @@ function renderHyperlinkHtml(state: RenderState, link: Hyperlink): void {
     attrs.push(`title="${escapeHtml(link.tooltip)}"`);
   }
   state.html.push(`<a ${attrs.join(" ")}>`);
-  for (const ch of link.children) {
+  const openSpans = state.openBidiSpans;
+  state.openBidiSpans = [];
+  for (const ch of hyperlinkContent(link)) {
     renderParagraphChild(state, ch);
   }
+  renderSpanMarkers(state, link.rangeMarkersAfter);
+  closeBidiSpans(state);
+  state.openBidiSpans = openSpans;
   state.html.push("</a>");
 }
 
@@ -1008,10 +1135,15 @@ function renderTableContent(state: RenderState, table: Table): void {
     }
   }
 
+  const totalCols = Math.max(
+    0,
+    ...table.rows.map(r => r.cells.reduce((n, c) => n + (c.properties?.gridSpan ?? 1), 0))
+  );
   for (let rowIdx = 0; rowIdx < table.rows.length; rowIdx++) {
-    renderTableRowWithMerge(state, table.rows[rowIdx], rowIdx, rowspanMap, skipCells);
+    renderTableRowWithMerge(state, table, rowIdx, totalCols, rowspanMap, skipCells);
   }
   state.html.push("</table>");
+  takeBlockRangeMarkers(state, table.rangeMarkersAfter);
 }
 
 /** Get the cell at a specific grid column index within a row. */
@@ -1028,15 +1160,19 @@ function getCellAtGridCol(row: TableRow, targetCol: number): TableCell | undefin
 
 function renderTableRowWithMerge(
   state: RenderState,
-  row: TableRow,
+  table: Table,
   rowIdx: number,
+  totalCols: number,
   rowspanMap: Map<string, number>,
   skipCells: Set<string>
 ): void {
+  const row = table.rows[rowIdx]!;
   const isHeader = row.properties?.tableHeader;
+  takeBlockRangeMarkers(state, row.rangeMarkersBefore);
   state.html.push(`<tr>`);
   let colIdx = 0;
   for (const cell of row.cells) {
+    takeBlockRangeMarkers(state, cell.rangeMarkersBefore);
     // Skip columns occupied by previous rowspan
     while (skipCells.has(`${rowIdx},${colIdx}`)) {
       colIdx++;
@@ -1048,9 +1184,16 @@ function renderTableRowWithMerge(
       continue;
     }
     const rowspan = rowspanMap.get(`${rowIdx},${colIdx}`);
-    renderTableCellWithRowspan(state, cell, isHeader ?? false, rowspan);
+    renderTableCellWithRowspan(
+      state,
+      cell,
+      isHeader ?? false,
+      rowspan,
+      state.styles.cellContext(table, rowIdx, colIdx, totalCols)
+    );
     colIdx += gridSpan;
   }
+  takeBlockRangeMarkers(state, row.rangeMarkersAfter);
   state.html.push("</tr>");
 }
 
@@ -1058,7 +1201,8 @@ function renderTableCellWithRowspan(
   state: RenderState,
   cell: TableCell,
   isHeader: boolean,
-  rowspan?: number
+  rowspan: number | undefined,
+  context: StyleResolveContext
 ): void {
   const tag = isHeader ? "th" : "td";
   const attrs: string[] = [];
@@ -1110,9 +1254,12 @@ function renderTableCellWithRowspan(
   }
 
   state.html.push(`<${tag}${attrs.length > 0 ? " " + attrs.join(" ") : ""}>`);
+  const outer = state.cellContext;
+  state.cellContext = context;
   for (const item of cell.content) {
     renderBodyContent(state, item as BodyContent);
   }
+  state.cellContext = outer;
   closeOpenLists(state);
   state.html.push(`</${tag}>`);
 }
@@ -1123,9 +1270,13 @@ function renderTableCellWithRowspan(
 
 function renderTextBoxHtml(state: RenderState, textBox: TextBox): void {
   state.html.push(`<div class="textbox">`);
+  // A text box's paragraphs are not in the table it may sit in.
+  const outer = state.cellContext;
+  state.cellContext = undefined;
   for (const p of textBox.content) {
     renderParagraph(state, p);
   }
+  state.cellContext = outer;
   state.html.push("</div>");
 }
 
@@ -1304,7 +1455,7 @@ function imageToDataUrl(img: ImageDef): string {
     webp: "image/webp",
     tiff: "image/tiff"
   };
-  const mediaType = mime[img.mediaType] ?? "application/octet-stream";
+  const mediaType = img.contentType ?? mime[img.mediaType] ?? "application/octet-stream";
   const base64 = bytesToBase64(img.data);
   return `data:${mediaType};base64,${base64}`;
 }

@@ -72,7 +72,7 @@ describe("XmlWriter", () => {
 
     xmlStream.openNode("root");
     xmlStream.addAttribute("in", "1");
-    xmlStream.save();
+    xmlStream.snapshot();
     xmlStream.addAttribute("not", "1");
     xmlStream.openNode("invalid");
     xmlStream.rollback();

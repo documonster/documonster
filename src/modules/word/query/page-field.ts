@@ -124,19 +124,33 @@ export interface PageSectionSlot {
  *   is wrong and the section restarts numbering, Word skips a number instead
  *   of a page; when it continues numbering, Word inserts a blank page, which
  *   takes the skipped number.
+ * - with facing pages (`w:mirrorMargins` or `w:evenAndOddHeaders`) left and
+ *   right pages alternate by displayed number, so a section opening on a new
+ *   page whose number has the parity of the page before it gets a blank page
+ *   between them — a restart from page "ii" to "10" included.
  */
 export function openSection(
   previousShown: number,
-  props: SectionProperties | undefined
+  props: SectionProperties | undefined,
+  facingPages = false
 ): { readonly blankPage: boolean; readonly firstShown: number } {
   const start = props?.pageNumbering?.start;
   const candidate = start ?? previousShown + 1;
-  const parity =
-    props?.breakType === "oddPage" ? 1 : props?.breakType === "evenPage" ? 0 : undefined;
-  if (parity === undefined || candidate % 2 === parity) {
-    return { blankPage: false, firstShown: candidate };
-  }
-  return { blankPage: start === undefined, firstShown: candidate + 1 };
+  const breakType = props?.breakType ?? "nextPage";
+  const parity = breakType === "oddPage" ? 1 : breakType === "evenPage" ? 0 : undefined;
+  const firstShown = parity === undefined || candidate % 2 === parity ? candidate : candidate + 1;
+  const blankPage =
+    (firstShown !== candidate && start === undefined) ||
+    (facingPages &&
+      breakType !== "continuous" &&
+      breakType !== "nextColumn" &&
+      firstShown % 2 === previousShown % 2);
+  return { blankPage, firstShown };
+}
+
+/** Whether Word lays the document out as facing left and right pages (see {@link openSection}). */
+export function hasFacingPages(doc: DocxDocument): boolean {
+  return doc.settings?.mirrorMargins === true || doc.settings?.evenAndOddHeaders === true;
 }
 
 /**

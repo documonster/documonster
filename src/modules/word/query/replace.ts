@@ -23,7 +23,9 @@
  *   The returned count equals the number of matches actually replaced.
  */
 
-import { isHyperlink, isRun } from "@word/core/text-utils";
+import { checkHandle, checkString, invalidArgument } from "@word/core/argument-checks";
+import { ownTree } from "@word/core/ownership";
+import { hyperlinkContent, isHyperlink, isRun } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type {
   DocxDocument,
@@ -45,7 +47,9 @@ import type {
  * runs; the formatting of each run that survives the replacement is preserved.
  *
  * Traverses body, headers, footers, footnotes, endnotes, comments, tables, and
- * SDTs using the unified document walker. SDTs may carry inline runs without
+ * SDTs using the unified document walker. That is wider than
+ * `Query.searchText` and `Query.getText`, which leave comments out: text
+ * inside a comment is replaced too. SDTs may carry inline runs without
  * an enclosing paragraph (content controls wrapping a single Run); those
  * inline runs are treated as a single virtual paragraph for replacement.
  *
@@ -63,6 +67,13 @@ export function replaceText(
   search: string | RegExp,
   replacement: string
 ): number {
+  checkHandle(doc, "document", "doc", "Document.replaceText");
+  const where = "Document.replaceText";
+  if (typeof search !== "string" && !(search instanceof RegExp)) {
+    invalidArgument(where, "search", "a string or a RegExp", search);
+  }
+  checkString(replacement, "replacement", where);
+  ownTree(doc);
   let totalCount = 0;
 
   walkDocument(
@@ -152,7 +163,7 @@ function replaceInParagraph(para: Paragraph, search: string | RegExp, replacemen
     for (const child of children) {
       // Hyperlink: recurse into its children.
       if (isHyperlink(child)) {
-        visit(child.children as readonly ParagraphChild[]);
+        visit(hyperlinkContent(child));
         continue;
       }
       // Track-change wrappers around a single run: descend through the

@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,7 +30,7 @@ const PRODUCTS = ["Widget", "Gadget", "Doohickey", "Thingamajig"] as const;
 function build(): ReturnType<typeof Workbook.create> {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "Transactions");
-  Worksheet.addRow(ws, ["Date", "Region", "Product", "Units", "Unit price", "Revenue"]);
+  Row.add(ws, ["Date", "Region", "Product", "Units", "Unit price", "Revenue"]);
   Cell.setStyle(ws, "A1", { font: { bold: true } });
   Column.setWidth(ws, 1, 12);
   Column.setWidth(ws, 5, 12);
@@ -79,10 +79,9 @@ console.log(
 
 // Read it back and check a row in the middle, so the assertion is not about the edges.
 stopwatch.start();
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, `${prefix}.xlsb`);
+const reopened = await Workbook.readFile(`${prefix}.xlsb`);
 const readMicros = stopwatch.microseconds;
-const read = Workbook.getWorksheets(reopened)[0]!;
+const read = Workbook.listWorksheets(reopened)[0]!;
 console.log(`read back in ${(readMicros / 1000).toFixed(0)} ms`);
 console.log(
   `  row 10000: ${["B", "C", "D", "E", "F"].map(column => JSON.stringify(Cell.getValue(read, `${column}10000`))).join(" ")}`

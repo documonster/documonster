@@ -22,11 +22,11 @@ import { xmlEncode, xmlDecode } from "@xml/encode";
 import { query, queryAll } from "@xml/query";
 import { SaxParser, parseSax } from "@xml/sax";
 import { XmlStreamWriter } from "@xml/stream-writer";
-import type { SaxTag, WritableTarget } from "@xml/types";
+import type { XmlSaxTag, XmlWritableTarget } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
-function capture(): WritableTarget & { output(): string } {
+function capture(): XmlWritableTarget & { output(): string } {
   const chunks: string[] = [];
   return {
     write: (c: string | Uint8Array) => chunks.push(String(c)),
@@ -817,7 +817,7 @@ describe("Namespace — extended", () => {
   it("should handle xmlns as tag name", () => {
     // Edge case: using "xmlns" as an actual tag name
     const parser = new SaxParser({ xmlns: true });
-    const tags: SaxTag[] = [];
+    const tags: XmlSaxTag[] = [];
     parser.on("opentag", tag => tags.push({ ...tag }));
     parser.on("error", () => {});
     parser.write("<root><xmlns>text</xmlns></root>");
@@ -827,7 +827,7 @@ describe("Namespace — extended", () => {
 
   it("should handle namespace prefix rebinding on nested elements", () => {
     const parser = new SaxParser({ xmlns: true });
-    const tags: SaxTag[] = [];
+    const tags: XmlSaxTag[] = [];
     parser.on("opentag", tag => tags.push({ ...tag }));
     parser.write(
       '<root xmlns:a="http://v1"><a:child xmlns:a="http://v2"><a:inner/></a:child></root>'
@@ -840,7 +840,7 @@ describe("Namespace — extended", () => {
 
   it("should handle default XML namespace (xml prefix always bound)", () => {
     const parser = new SaxParser({ xmlns: true });
-    const tags: SaxTag[] = [];
+    const tags: XmlSaxTag[] = [];
     parser.on("opentag", tag => tags.push({ ...tag }));
     parser.write('<root xml:lang="en"/>');
     parser.close();

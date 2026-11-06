@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Font, Io } from "../index";
+import { Document, Build, Font } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -83,10 +83,9 @@ for (const w of words) {
   console.log(`    ${w.padEnd(28)} points=${JSON.stringify(hyph(w))}`);
 }
 
-console.log("\n  hyphenateWord (default soft hyphen):");
+console.log('\n  hyphenateWord (a visible "·" instead of the default soft hyphen):');
 for (const w of words) {
-  // Print with visible "·" instead of soft hyphen so the result is readable
-  const result = Font.hyphenateWord(w, hyph).replace(/\u00AD/g, "·");
+  const result = Font.hyphenateWord(w, hyph, { hyphenChar: "·" });
   console.log(`    ${w.padEnd(28)} → ${result}`);
 }
 
@@ -103,10 +102,10 @@ console.log(`    visible: ${hyphenated.replace(/\u00AD/g, "·")}`);
 const doc = Document.create();
 Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Hyphenated paragraph (with soft hyphens)", 1);
-Document.addParagraphElement(doc, Build.paragraph([Build.text(hyphenated)]));
+Document.addParagraph(doc, Build.paragraph([Build.text(hyphenated)]));
 Document.addHeading(doc, "Same paragraph without hyphenation", 2);
-Document.addParagraphElement(doc, Build.paragraph([Build.text(sample)]));
+Document.addParagraph(doc, Build.paragraph([Build.text(sample)]));
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "36-shaping.docx"), buf);
 console.log(`\n  → 36-shaping.docx (${buf.length} bytes)`);

@@ -26,7 +26,7 @@ export {
   type ZipCryptoState
 } from "@archive/crypto/zip-crypto";
 
-// AES (WinZip AE-1 / AE-2)
+// AES (WinZip AE-1 / AE-2): the format, and the cipher that needs PBKDF2 and HMAC
 export {
   AES_VENDOR_ID,
   AES_VERSION_AE1,
@@ -38,17 +38,15 @@ export {
   AES_PASSWORD_VERIFY_LENGTH,
   COMPRESSION_METHOD_AES,
   AES_STRENGTH_FROM_BYTE,
-  aesDecrypt,
-  aesEncrypt,
   aesEncryptedSize,
-  aesVerifyPassword,
   buildAesExtraField,
   type AesKeyStrength,
   type AesExtraFieldInfo
-} from "@archive/crypto/aes";
+} from "@archive/crypto/aes-format";
+export { aesDecrypt, aesEncrypt, aesVerifyPassword } from "@archive/crypto/aes";
 
-// Random bytes — from shared @utils/crypto
-export { randomBytes } from "@utils/crypto";
+// Random bytes
+export { randomBytes } from "@archive/crypto/random-bytes";
 
 // Types
 export {

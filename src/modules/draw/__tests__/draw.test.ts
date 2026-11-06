@@ -1,19 +1,5 @@
 import { relativeLuminance } from "@draw/colour";
-import {
-  IDENTITY,
-  apply,
-  arcToCubics,
-  flattenPath,
-  multiply,
-  renderDrawList,
-  rotate,
-  rotationOf,
-  scale,
-  SvgSurface,
-  toSvg,
-  translate,
-  uniformScale
-} from "@draw/index";
+import { Matrix, Draw } from "@draw/index";
 import type {
   DrawList,
   DrawMatrix,
@@ -68,48 +54,48 @@ const fill = (paint: Partial<DrawPaint> = {}): DrawPaint => ({ fill: BLUE, ...pa
 
 describe("matrix helpers", () => {
   it("composes outer after inner", () => {
-    const m = multiply(translate(10, 20), scale(2));
-    expect(apply(m, 3, 4)).toEqual({ x: 16, y: 28 });
+    const m = Matrix.multiply(Matrix.translate(10, 20), Matrix.scale(2));
+    expect(Matrix.apply(m, 3, 4)).toEqual({ x: 16, y: 28 });
   });
 
   it("rotates clockwise about a centre in Y-down space", () => {
-    const point = apply(rotate(90, 0, 0), 1, 0);
+    const point = Matrix.apply(Matrix.rotate(90, 0, 0), 1, 0);
     expect(point.x).toBeCloseTo(0, 9);
     expect(point.y).toBeCloseTo(1, 9);
   });
 
   it("keeps a rotation centre fixed", () => {
-    const point = apply(rotate(37, 5, -3), 5, -3);
+    const point = Matrix.apply(Matrix.rotate(37, 5, -3), 5, -3);
     expect(point.x).toBeCloseTo(5, 9);
     expect(point.y).toBeCloseTo(-3, 9);
   });
 
   it("reports the uniform-equivalent scale", () => {
-    expect(uniformScale(scale(3))).toBeCloseTo(3, 9);
-    expect(uniformScale(scale(4, 1))).toBeCloseTo(2, 9);
-    expect(uniformScale(IDENTITY)).toBe(1);
+    expect(Matrix.getUniformScale(Matrix.scale(3))).toBeCloseTo(3, 9);
+    expect(Matrix.getUniformScale(Matrix.scale(4, 1))).toBeCloseTo(2, 9);
+    expect(Matrix.getUniformScale(Matrix.IDENTITY)).toBe(1);
     // A degenerate transform must not report a zero factor and collapse strokes.
-    expect(uniformScale(scale(0))).toBe(1);
+    expect(Matrix.getUniformScale(Matrix.scale(0))).toBe(1);
   });
 
   it("recovers a rotation angle", () => {
-    expect(rotationOf(rotate(-90))).toBeCloseTo(-90, 6);
-    expect(rotationOf(IDENTITY)).toBe(0);
+    expect(Matrix.getRotation(Matrix.rotate(-90))).toBeCloseTo(-90, 6);
+    expect(Matrix.getRotation(Matrix.IDENTITY)).toBe(0);
   });
 });
 
 describe("the walker folds transforms into geometry", () => {
   it("flattens nested groups", () => {
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: translate(10, 10),
+          transform: Matrix.translate(10, 10),
           children: [
             {
               kind: "group",
-              transform: scale(2),
+              transform: Matrix.scale(2),
               children: [{ kind: "rect", x: 1, y: 2, width: 3, height: 4, paint: fill() }]
             }
           ]
@@ -131,11 +117,11 @@ describe("the walker folds transforms into geometry", () => {
       path: () => {},
       text: () => {}
     };
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: scale(3),
+          transform: Matrix.scale(3),
           children: [
             {
               kind: "rect",
@@ -156,11 +142,11 @@ describe("the walker folds transforms into geometry", () => {
 
   it("turns a rotated rect into a polygon so corners cannot land wrong", () => {
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: rotate(90, 0, 0),
+          transform: Matrix.rotate(90, 0, 0),
           children: [{ kind: "rect", x: 0, y: 0, width: 2, height: 4, paint: fill() }]
         }
       ]),
@@ -172,11 +158,11 @@ describe("the walker folds transforms into geometry", () => {
 
   it("keeps an axis-aligned rect a rect and scales its corner radius", () => {
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: scale(2),
+          transform: Matrix.scale(2),
           children: [{ kind: "rect", x: 0, y: 0, width: 5, height: 5, rx: 1, paint: fill() }]
         }
       ]),
@@ -187,11 +173,11 @@ describe("the walker folds transforms into geometry", () => {
 
   it("normalises a mirrored rect to a positive extent", () => {
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: scale(-1, 1),
+          transform: Matrix.scale(-1, 1),
           children: [{ kind: "rect", x: 1, y: 0, width: 4, height: 2, paint: fill() }]
         }
       ]),
@@ -202,11 +188,11 @@ describe("the walker folds transforms into geometry", () => {
 
   it("lowers a rotated ellipse to a path", () => {
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: rotate(30),
+          transform: Matrix.rotate(30),
           children: [{ kind: "ellipse", cx: 0, cy: 0, rx: 4, ry: 2, paint: fill() }]
         }
       ]),
@@ -218,11 +204,11 @@ describe("the walker folds transforms into geometry", () => {
 
   it("hands text an absolute origin, a scaled size and a combined rotation", () => {
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: multiply(translate(5, 5), scale(2)),
+          transform: Matrix.multiply(Matrix.translate(5, 5), Matrix.scale(2)),
           children: [
             {
               kind: "text",
@@ -281,9 +267,14 @@ describe("a sector under a transform it cannot survive", () => {
   it("stays a sector under rotation and uniform scale", () => {
     // The whole reason the primitive exists: the backends each draw a circular
     // sector better than they draw an approximation of one.
-    for (const transform of [IDENTITY, rotate(30), scale(2, 2), translate(10, 5)]) {
+    for (const transform of [
+      Matrix.IDENTITY,
+      Matrix.rotate(30),
+      Matrix.scale(2, 2),
+      Matrix.translate(10, 5)
+    ]) {
       const { surface, calls } = recorder();
-      renderDrawList(list([quarter(transform)]), surface);
+      Draw.render(list([quarter(transform)]), surface);
       expect(calls[0].startsWith("sector "), `${JSON.stringify(transform)}`).toBe(true);
     }
   });
@@ -294,7 +285,7 @@ describe("a sector under a transform it cannot survive", () => {
     // because a reflection reverses the direction the arc sweeps and the angles
     // were only being shifted by `rotationOf`, which cannot express that.
     const { surface, calls } = recorder();
-    renderDrawList(list([quarter(scale(-1, 1))]), surface);
+    Draw.render(list([quarter(Matrix.scale(-1, 1))]), surface);
     expect(calls[0].startsWith("path ")).toBe(true);
     const end = endsAt(calls);
     expect(end.x).toBeCloseTo(0, 6);
@@ -309,7 +300,7 @@ describe("a sector under a transform it cannot survive", () => {
     // arc of radius sqrt(2)*50 ending at (0, 70.71) — a point the transform never
     // maps anything to.
     const { surface, calls } = recorder();
-    renderDrawList(list([quarter(scale(2, 1))]), surface);
+    Draw.render(list([quarter(Matrix.scale(2, 1))]), surface);
     expect(calls[0].startsWith("path ")).toBe(true);
     expect(calls[0]).toContain("L100,0");
     const end = endsAt(calls);
@@ -321,11 +312,11 @@ describe("a sector under a transform it cannot survive", () => {
     // The inner arc has to reflect with the outer one, or the ring is drawn with
     // its hole on the wrong side.
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: scale(-1, 1),
+          transform: Matrix.scale(-1, 1),
           children: [
             {
               kind: "sector",
@@ -363,7 +354,7 @@ describe("flattening a path for a backend that has none", () => {
     // subpaths. Collecting every command into a single point list drew a connector
     // from the end of the first ring to the start of the second — on a region map,
     // a line across the ocean — and dropped both closing edges.
-    const runs = flattenPath([...square(0, 0), ...square(20, 20)]);
+    const runs = Draw.Geometry.flattenPath([...square(0, 0), ...square(20, 20)]);
     expect(runs).toHaveLength(2);
     expect(runs.every(run => run.closed)).toBe(true);
     expect(runs[0].points).toEqual([
@@ -375,7 +366,7 @@ describe("flattening a path for a backend that has none", () => {
   });
 
   it("marks a run that never closed as open", () => {
-    const runs = flattenPath([
+    const runs = Draw.Geometry.flattenPath([
       { op: "move", x: 0, y: 0 },
       { op: "line", x: 5, y: 5 }
     ]);
@@ -386,15 +377,17 @@ describe("flattening a path for a backend that has none", () => {
   it("drops a subpath with nothing to draw", () => {
     // A lone `move` has no length; emitting it as a run would make backends guard
     // against one-point polylines.
-    expect(flattenPath([{ op: "move", x: 1, y: 1 }, { op: "close" }])).toHaveLength(0);
+    expect(Draw.Geometry.flattenPath([{ op: "move", x: 1, y: 1 }, { op: "close" }])).toHaveLength(
+      0
+    );
   });
 
   it("subdivides a cubic by its own size", () => {
-    const short = flattenPath([
+    const short = Draw.Geometry.flattenPath([
       { op: "move", x: 0, y: 0 },
       { op: "cubic", x1: 1, y1: 0, x2: 2, y2: 0, x: 3, y: 0 }
     ]);
-    const long = flattenPath([
+    const long = Draw.Geometry.flattenPath([
       { op: "move", x: 0, y: 0 },
       { op: "cubic", x1: 100, y1: 0, x2: 200, y2: 0, x: 300, y: 0 }
     ]);
@@ -404,13 +397,16 @@ describe("flattening a path for a backend that has none", () => {
 
 describe("arc lowering", () => {
   it("degrades a zero-radius arc to a line", () => {
-    expect(arcToCubics({ x: 0, y: 0 }, 0, 5, 0, false, true, { x: 10, y: 0 })).toEqual([
-      { op: "line", x: 10, y: 0 }
-    ]);
+    expect(
+      Draw.Geometry.arcToCubics({ x: 0, y: 0 }, 0, 5, 0, false, true, { x: 10, y: 0 })
+    ).toEqual([{ op: "line", x: 10, y: 0 }]);
   });
 
   it("ends a semicircle at the requested point", () => {
-    const commands = arcToCubics({ x: -5, y: 0 }, 5, 5, 0, false, true, { x: 5, y: 0 });
+    const commands = Draw.Geometry.arcToCubics({ x: -5, y: 0 }, 5, 5, 0, false, true, {
+      x: 5,
+      y: 0
+    });
     expect(commands.length).toBeGreaterThan(0);
     const last = commands.at(-1)!;
     expect(last.op).toBe("cubic");
@@ -423,7 +419,10 @@ describe("arc lowering", () => {
   it("stays on the circle at the midpoint of a sweep", () => {
     // Sampling the lowered curve is the only real check that the approximation is
     // the arc and not merely a curve with the right endpoints.
-    const commands = arcToCubics({ x: 10, y: 0 }, 10, 10, 0, false, true, { x: 0, y: 10 });
+    const commands = Draw.Geometry.arcToCubics({ x: 10, y: 0 }, 10, 10, 0, false, true, {
+      x: 0,
+      y: 10
+    });
     const first = commands[0];
     expect(first.op).toBe("cubic");
     if (first.op === "cubic") {
@@ -438,9 +437,9 @@ describe("arc lowering", () => {
   });
 
   it("respects the sweep flag", () => {
-    const cw = arcToCubics({ x: 0, y: -5 }, 5, 5, 0, false, true, { x: 0, y: 5 });
-    const ccw = arcToCubics({ x: 0, y: -5 }, 5, 5, 0, false, false, { x: 0, y: 5 });
-    const midX = (commands: ReturnType<typeof arcToCubics>): number => {
+    const cw = Draw.Geometry.arcToCubics({ x: 0, y: -5 }, 5, 5, 0, false, true, { x: 0, y: 5 });
+    const ccw = Draw.Geometry.arcToCubics({ x: 0, y: -5 }, 5, 5, 0, false, false, { x: 0, y: 5 });
+    const midX = (commands: ReturnType<typeof Draw.Geometry.arcToCubics>): number => {
       const c = commands[0];
       return c.op === "cubic" ? c.x1 : 0;
     };
@@ -449,7 +448,10 @@ describe("arc lowering", () => {
 
   it("enlarges radii that cannot span the chord", () => {
     // rx=1 cannot reach from (0,0) to (10,0); the spec says scale it up, not fail.
-    const commands = arcToCubics({ x: 0, y: 0 }, 1, 1, 0, false, true, { x: 10, y: 0 });
+    const commands = Draw.Geometry.arcToCubics({ x: 0, y: 0 }, 1, 1, 0, false, true, {
+      x: 10,
+      y: 0
+    });
     const last = commands.at(-1)!;
     if (last.op === "cubic") {
       expect(last.x).toBeCloseTo(10, 6);
@@ -460,14 +462,14 @@ describe("arc lowering", () => {
 
 describe("SVG output", () => {
   it("emits a viewBox so a different output size scales", () => {
-    const svg = toSvg(list([]), { width: 200, height: 200 });
+    const svg = Draw.toSvg(list([]), { width: 200, height: 200 });
     expect(svg).toContain('width="200" height="200"');
     expect(svg).toContain('viewBox="0 0 100 100"');
   });
 
   it("writes fill:none for an open polyline", () => {
     // SVG's initial fill is black, so omitting this fills the area under a line.
-    const svg = toSvg(
+    const svg = Draw.toSvg(
       list([
         {
           kind: "polyline",
@@ -486,16 +488,16 @@ describe("SVG output", () => {
   it("emits a circle rather than an ellipse when the radii match", () => {
     // The Excel raster fallback understands `<circle>` but not `<ellipse>`, so
     // staying in the shared subset keeps this output consumable everywhere.
-    expect(toSvg(list([{ kind: "ellipse", cx: 5, cy: 5, rx: 3, ry: 3, paint: fill() }]))).toContain(
-      "<circle"
-    );
-    expect(toSvg(list([{ kind: "ellipse", cx: 5, cy: 5, rx: 3, ry: 2, paint: fill() }]))).toContain(
-      "<ellipse"
-    );
+    expect(
+      Draw.toSvg(list([{ kind: "ellipse", cx: 5, cy: 5, rx: 3, ry: 3, paint: fill() }]))
+    ).toContain("<circle");
+    expect(
+      Draw.toSvg(list([{ kind: "ellipse", cx: 5, cy: 5, rx: 3, ry: 2, paint: fill() }]))
+    ).toContain("<ellipse");
   });
 
   it("carries alpha as a separate opacity attribute", () => {
-    const svg = toSvg(
+    const svg = Draw.toSvg(
       list([
         {
           kind: "rect",
@@ -512,7 +514,7 @@ describe("SVG output", () => {
   });
 
   it("emits dash and stroke width only when meaningful", () => {
-    const svg = toSvg(
+    const svg = Draw.toSvg(
       list([
         {
           kind: "line",
@@ -529,7 +531,7 @@ describe("SVG output", () => {
   });
 
   it("escapes text content and attribute values", () => {
-    const svg = toSvg(
+    const svg = Draw.toSvg(
       list([
         {
           kind: "text",
@@ -546,7 +548,7 @@ describe("SVG output", () => {
 
   it("positions multi-line text with absolute tspans", () => {
     // Absolute rather than `dy`, so no consumer has to resolve `em` units.
-    const svg = toSvg(
+    const svg = Draw.toSvg(
       list([
         {
           kind: "text",
@@ -567,14 +569,16 @@ describe("SVG output", () => {
 
   it("omits text with no fill rather than defaulting it to black", () => {
     expect(
-      toSvg(
+      Draw.toSvg(
         list([{ kind: "text", x: 0, y: 0, lines: [{ text: "x", dy: 0 }], style: { size: 10 } }])
       )
     ).not.toContain("<text");
   });
 
   it("never emits exponent notation for tiny coordinates", () => {
-    const svg = toSvg(list([{ kind: "rect", x: 1e-8, y: 0, width: 1, height: 1, paint: fill() }]));
+    const svg = Draw.toSvg(
+      list([{ kind: "rect", x: 1e-8, y: 0, width: 1, height: 1, paint: fill() }])
+    );
     expect(svg).not.toMatch(/e-\d/);
   });
 });
@@ -592,7 +596,7 @@ describe("clip rectangles", () => {
       pushClip: clip => events.push(`push ${clip.x},${clip.y},${clip.width},${clip.height}`),
       popClip: () => events.push("pop")
     };
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
@@ -610,7 +614,7 @@ describe("clip rectangles", () => {
     // A backend may omit pushClip/popClip entirely; losing the content would be
     // the worse failure.
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
@@ -638,11 +642,11 @@ describe("clip rectangles", () => {
         ),
       popClip: () => {}
     };
-    renderDrawList(
+    Draw.render(
       list([
         {
           kind: "group",
-          transform: rotate(45),
+          transform: Matrix.rotate(45),
           clip: { x: 0, y: 0, width: 10, height: 10 },
           children: []
         }
@@ -661,28 +665,28 @@ describe("SvgSurface used directly", () => {
     // The walker always balances its own pushes, but `SvgSurface` is public, so a
     // caller can leave one open. Emitting unbalanced markup would be worse than
     // closing it here.
-    const surface = new SvgSurface();
+    const surface = new Draw.Backend.SvgSurface();
     surface.pushClip({ x: 0, y: 0, width: 5, height: 5 });
     surface.rect(0, 0, 9, 9, 0, { fill: BLUE });
-    const markup = surface.markup();
+    const markup = surface.format();
     expect((markup.match(/<g /g) ?? []).length).toBe(1);
     expect((markup.match(/<\/g>/g) ?? []).length).toBe(1);
   });
 
   it("ignores an unmatched popClip", () => {
-    const surface = new SvgSurface();
+    const surface = new Draw.Backend.SvgSurface();
     surface.popClip();
     surface.rect(0, 0, 1, 1, 0, { fill: BLUE });
-    expect(surface.markup()).not.toContain("</g>");
+    expect(surface.format()).not.toContain("</g>");
   });
 
   it("gives each clip its own id", () => {
-    const surface = new SvgSurface();
+    const surface = new Draw.Backend.SvgSurface();
     surface.pushClip({ x: 0, y: 0, width: 5, height: 5 });
     surface.popClip();
     surface.pushClip({ x: 1, y: 1, width: 5, height: 5 });
     surface.popClip();
-    const markup = surface.markup();
+    const markup = surface.format();
     expect(markup).toContain('id="dc0"');
     expect(markup).toContain('id="dc1"');
   });
@@ -690,7 +694,7 @@ describe("SvgSurface used directly", () => {
 
 describe("the SVG-only filter channel", () => {
   it("emits defs and wraps the group in a filter reference", () => {
-    const svg = toSvg({
+    const svg = Draw.toSvg({
       width: 10,
       height: 10,
       svgDefs: ['<filter id="f1"><feGaussianBlur stdDeviation="2"/></filter>'],
@@ -711,7 +715,7 @@ describe("the SVG-only filter channel", () => {
     // Every non-SVG backend simply draws the content unfiltered, which is what
     // the old per-backend renderers did.
     const { surface, calls } = recorder();
-    renderDrawList(
+    Draw.render(
       {
         width: 10,
         height: 10,
@@ -742,7 +746,7 @@ describe("the SVG-only filter channel", () => {
       pushFilter: id => events.push(`filter ${id}`),
       popFilter: () => events.push("unfilter")
     };
-    renderDrawList(
+    Draw.render(
       {
         width: 10,
         height: 10,
@@ -761,10 +765,10 @@ describe("the SVG-only filter channel", () => {
   });
 
   it("escapes a filter id used as an attribute value", () => {
-    const surface = new SvgSurface();
+    const surface = new Draw.Backend.SvgSurface();
     surface.pushFilter('a"b');
     surface.popFilter();
-    expect(surface.markup()).toContain("&quot;");
+    expect(surface.format()).toContain("&quot;");
   });
 });
 

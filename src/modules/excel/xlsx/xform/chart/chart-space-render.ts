@@ -90,6 +90,10 @@ import {
   themeIndexToName,
   tickMarkToOoxml
 } from "@excel/chart/shared/chart-utils";
+import {
+  chartColorTransformList,
+  colorTransformElements
+} from "@excel/chart/shared/color-transforms";
 import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
 import {
   C14_PIVOT_OPTIONS_EXT_URI,
@@ -99,6 +103,7 @@ import {
   C15_DATA_LABELS_RANGE_EXT_URI,
   C15_CHART_NAMESPACE
 } from "@excel/xlsx/xform/chart/chart-space-constants";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
@@ -114,7 +119,7 @@ import { StdDocAttributes } from "@xml/writer";
 const escapeXmlText = escapeXml;
 
 // chartSpace root namespace declarations.
-const CHART_SPACE_ATTRIBUTES = {
+export const CHART_SPACE_ATTRIBUTES = {
   "xmlns:c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
   "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
   "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -149,7 +154,7 @@ export function renderChartSpace(xml: XmlSink, m: ChartModel): void {
   if (m.alternateContentStyle) {
     xml.writeRaw(m.alternateContentStyle);
   } else if (m.style !== undefined) {
-    xml.leafNode("c:style", { val: String(m.style) });
+    xml.leafNode("c:style", { val: xmlValue(m.style, "val") });
   }
   // ECMA-376 §21.2.2.29 `CT_ChartSpace` child order:
   //   date1904, lang, roundedCorners, (AlternateContent | style),
@@ -356,7 +361,7 @@ export function renderChart(xml: XmlSink, chart: ChartData): void {
     xml.openNode("c:pivotFmts");
     for (const pf of chart.pivotFormats) {
       xml.openNode("c:pivotFmt");
-      xml.leafNode("c:idx", { val: String(pf.index) });
+      xml.leafNode("c:idx", { val: xmlValue(pf.index, "val") });
       // CT_PivotFmt child order: `idx, spPr?, txPr?, marker?, dLbl?`.
       // Previously `txPr` was never written out; any pivotFmt-level
       // typography set on the model would vanish on round-trip.
@@ -434,22 +439,22 @@ export function renderView3D(xml: XmlSink, v: View3D): void {
   // implementation placed it after `rAngAx`, which strict schema
   // validators rejected.
   if (v.rotX !== undefined) {
-    xml.leafNode("c:rotX", { val: String(v.rotX) });
+    xml.leafNode("c:rotX", { val: xmlValue(v.rotX, "val") });
   }
   if (v.hPercent !== undefined) {
-    xml.leafNode("c:hPercent", { val: String(v.hPercent) });
+    xml.leafNode("c:hPercent", { val: xmlValue(v.hPercent, "val") });
   }
   if (v.rotY !== undefined) {
-    xml.leafNode("c:rotY", { val: String(v.rotY) });
+    xml.leafNode("c:rotY", { val: xmlValue(v.rotY, "val") });
   }
   if (v.depthPercent !== undefined) {
-    xml.leafNode("c:depthPercent", { val: String(v.depthPercent) });
+    xml.leafNode("c:depthPercent", { val: xmlValue(v.depthPercent, "val") });
   }
   if (v.rAngAx !== undefined) {
     xml.leafNode("c:rAngAx", { val: v.rAngAx ? "1" : "0" });
   }
   if (v.perspective !== undefined) {
-    xml.leafNode("c:perspective", { val: String(v.perspective) });
+    xml.leafNode("c:perspective", { val: xmlValue(v.perspective, "val") });
   }
   if (v.extLst) {
     xml.writeRaw(v.extLst);
@@ -619,10 +624,10 @@ export function renderBarChart(xml: XmlSink, g: BarChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   if (g.gapWidth !== undefined) {
-    xml.leafNode("c:gapWidth", { val: String(g.gapWidth) });
+    xml.leafNode("c:gapWidth", { val: xmlValue(g.gapWidth, "val") });
   }
   if (g.overlap !== undefined) {
-    xml.leafNode("c:overlap", { val: String(g.overlap) });
+    xml.leafNode("c:overlap", { val: xmlValue(g.overlap, "val") });
   }
   if (g.serLines) {
     xml.openNode("c:serLines");
@@ -630,7 +635,7 @@ export function renderBarChart(xml: XmlSink, g: BarChartGroup): void {
     xml.closeNode();
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -658,16 +663,16 @@ export function renderBar3DChart(xml: XmlSink, g: BarChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   if (g.gapWidth !== undefined) {
-    xml.leafNode("c:gapWidth", { val: String(g.gapWidth) });
+    xml.leafNode("c:gapWidth", { val: xmlValue(g.gapWidth, "val") });
   }
   if (g.gapDepth !== undefined) {
-    xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
+    xml.leafNode("c:gapDepth", { val: xmlValue(g.gapDepth, "val") });
   }
   if (g.shape) {
     xml.leafNode("c:shape", { val: g.shape });
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -706,7 +711,7 @@ export function renderLineChart(xml: XmlSink, g: LineChartGroup): void {
     xml.leafNode("c:smooth", { val: g.smooth ? "1" : "0" });
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -740,10 +745,10 @@ export function renderLine3DChart(xml: XmlSink, g: LineChartGroup): void {
     xml.closeNode();
   }
   if (g.gapDepth !== undefined) {
-    xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
+    xml.leafNode("c:gapDepth", { val: xmlValue(g.gapDepth, "val") });
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -756,7 +761,7 @@ export function renderPieChart(xml: XmlSink, g: PieChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   if (g.firstSliceAng !== undefined) {
-    xml.leafNode("c:firstSliceAng", { val: String(g.firstSliceAng) });
+    xml.leafNode("c:firstSliceAng", { val: xmlValue(g.firstSliceAng, "val") });
   }
 }
 
@@ -795,10 +800,10 @@ export function renderDoughnutChart(xml: XmlSink, g: DoughnutChartGroup): void {
     renderDataLabels(xml, g.dataLabels, { suppressDLblPos: true });
   }
   if (g.firstSliceAng !== undefined) {
-    xml.leafNode("c:firstSliceAng", { val: String(g.firstSliceAng) });
+    xml.leafNode("c:firstSliceAng", { val: xmlValue(g.firstSliceAng, "val") });
   }
   if (g.holeSize !== undefined) {
-    xml.leafNode("c:holeSize", { val: String(g.holeSize) });
+    xml.leafNode("c:holeSize", { val: xmlValue(g.holeSize, "val") });
   }
 }
 
@@ -825,10 +830,10 @@ export function renderAreaChart(xml: XmlSink, g: AreaChartGroup): void {
   // rejects that. Gate on the group type so only `area3D` emits
   // the element.
   if (g.type === "area3D" && g.gapDepth !== undefined) {
-    xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
+    xml.leafNode("c:gapDepth", { val: xmlValue(g.gapDepth, "val") });
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -844,7 +849,7 @@ export function renderScatterChart(xml: XmlSink, g: ScatterChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -857,7 +862,7 @@ export function renderBubbleChart(xml: XmlSink, g: BubbleChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   if (g.bubbleScale !== undefined) {
-    xml.leafNode("c:bubbleScale", { val: String(g.bubbleScale) });
+    xml.leafNode("c:bubbleScale", { val: xmlValue(g.bubbleScale, "val") });
   }
   if (g.showNegBubbles !== undefined) {
     xml.leafNode("c:showNegBubbles", { val: g.showNegBubbles ? "1" : "0" });
@@ -866,7 +871,7 @@ export function renderBubbleChart(xml: XmlSink, g: BubbleChartGroup): void {
     xml.leafNode("c:sizeRepresents", { val: g.sizeRepresents });
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -882,7 +887,7 @@ export function renderRadarChart(xml: XmlSink, g: RadarChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -918,7 +923,7 @@ export function renderStockChart(xml: XmlSink, g: StockChartGroup): void {
     renderUpDownBars(xml, g.upDownBars);
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
   // NOTE: `extLst` is intentionally omitted here — the caller
   // (`_renderChartTypeGroup`) emits `ctg.extLst` for every group
@@ -941,7 +946,7 @@ export function renderSurfaceChart(xml: XmlSink, g: SurfaceChartGroup): void {
     xml.openNode("c:bandFmts");
     for (const bf of g.bandFormats) {
       xml.openNode("c:bandFmt");
-      xml.leafNode("c:idx", { val: String(bf.index) });
+      xml.leafNode("c:idx", { val: xmlValue(bf.index, "val") });
       if (bf.spPr) {
         renderSpPr(xml, bf.spPr);
       }
@@ -950,7 +955,7 @@ export function renderSurfaceChart(xml: XmlSink, g: SurfaceChartGroup): void {
     xml.closeNode();
   }
   for (const id of g.axisIds) {
-    xml.leafNode("c:axId", { val: String(id) });
+    xml.leafNode("c:axId", { val: xmlValue(id, "val") });
   }
 }
 
@@ -966,23 +971,23 @@ export function renderOfPieChart(xml: XmlSink, g: OfPieChartGroup): void {
     renderDataLabels(xml, g.dataLabels);
   }
   if (g.gapWidth !== undefined) {
-    xml.leafNode("c:gapWidth", { val: String(g.gapWidth) });
+    xml.leafNode("c:gapWidth", { val: xmlValue(g.gapWidth, "val") });
   }
   if (g.splitType) {
     xml.leafNode("c:splitType", { val: g.splitType });
   }
   if (g.splitPos !== undefined) {
-    xml.leafNode("c:splitPos", { val: String(g.splitPos) });
+    xml.leafNode("c:splitPos", { val: xmlValue(g.splitPos, "val") });
   }
   if (g.custSplit && g.custSplit.length > 0) {
     xml.openNode("c:custSplit");
     for (const idx of g.custSplit) {
-      xml.leafNode("c:secondPiePt", { val: String(idx) });
+      xml.leafNode("c:secondPiePt", { val: xmlValue(idx, "val") });
     }
     xml.closeNode();
   }
   if (g.secondPieSize !== undefined) {
-    xml.leafNode("c:secondPieSize", { val: String(g.secondPieSize) });
+    xml.leafNode("c:secondPieSize", { val: xmlValue(g.secondPieSize, "val") });
   }
   if (g.serLines) {
     xml.openNode("c:serLines");
@@ -994,8 +999,8 @@ export function renderOfPieChart(xml: XmlSink, g: OfPieChartGroup): void {
 // ---- Series rendering ----
 
 export function renderSeriesBase(xml: XmlSink, s: SeriesBase): void {
-  xml.leafNode("c:idx", { val: String(s.index) });
-  xml.leafNode("c:order", { val: String(s.order) });
+  xml.leafNode("c:idx", { val: xmlValue(s.index, "val") });
+  xml.leafNode("c:order", { val: xmlValue(s.order, "val") });
   if (s.tx) {
     renderSeriesTx(xml, s.tx);
   }
@@ -1085,7 +1090,7 @@ export function renderPieSeries(xml: XmlSink, s: PieSeries, opts?: DataLabelRend
   xml.openNode("c:ser");
   renderSeriesBase(xml, s);
   if (s.explosion !== undefined) {
-    xml.leafNode("c:explosion", { val: String(s.explosion) });
+    xml.leafNode("c:explosion", { val: xmlValue(s.explosion, "val") });
   }
   if (s.dataPoints) {
     for (const dp of s.dataPoints) {
@@ -1346,7 +1351,7 @@ export function renderNumCache(xml: XmlSink, cache: NumberCache): void {
   // hand-authored caches never emit a cache missing the required
   // `c:ptCount` element.
   const ptCount = cache.pointCount ?? cache.points.length;
-  xml.leafNode("c:ptCount", { val: String(ptCount) });
+  xml.leafNode("c:ptCount", { val: xmlValue(ptCount, "val") });
   for (const pt of cache.points) {
     // `!= null` catches both `null` (sparse slot sentinel) AND
     // `undefined` (uninitialised points on hand-built caches).
@@ -1354,13 +1359,13 @@ export function renderNumCache(xml: XmlSink, cache: NumberCache): void {
     // `<c:v>undefined</c:v>` — Excel parses that as a string "undefined"
     // on a numeric cache, corrupting the series on reopen.
     if (pt.value != null) {
-      const attrs: Record<string, string> = { idx: String(pt.index) };
+      const attrs: Record<string, string> = { idx: xmlValue(pt.index, "idx") };
       if (pt.formatCode) {
         attrs.formatCode = pt.formatCode;
       }
       xml.openNode("c:pt", attrs);
       xml.openNode("c:v");
-      xml.writeText(String(pt.value));
+      xml.writeText(xmlValue(pt.value, "c:v"));
       xml.closeNode();
       xml.closeNode();
     }
@@ -1371,9 +1376,9 @@ export function renderNumCache(xml: XmlSink, cache: NumberCache): void {
 export function renderStrCache(xml: XmlSink, cache: StringCache): void {
   xml.openNode("c:strCache");
   const ptCount = cache.pointCount ?? cache.points.length;
-  xml.leafNode("c:ptCount", { val: String(ptCount) });
+  xml.leafNode("c:ptCount", { val: xmlValue(ptCount, "val") });
   for (const pt of cache.points) {
-    xml.openNode("c:pt", { idx: String(pt.index) });
+    xml.openNode("c:pt", { idx: xmlValue(pt.index, "idx") });
     xml.openNode("c:v");
     xml.writeText(pt.value);
     xml.closeNode();
@@ -1395,14 +1400,14 @@ export function renderNumLit(xml: XmlSink, lit: NumberLiteral): void {
   // produced schema-invalid XML that both validators and Excel's
   // strict open path rejected.
   const ptCount = lit.pointCount ?? lit.points.length;
-  xml.leafNode("c:ptCount", { val: String(ptCount) });
+  xml.leafNode("c:ptCount", { val: xmlValue(ptCount, "val") });
   for (const pt of lit.points) {
     // `!= null` rather than `!== null` so `undefined` also skips
     // emission — see `_renderNumCache` for the rationale.
     if (pt.value != null) {
-      xml.openNode("c:pt", { idx: String(pt.index) });
+      xml.openNode("c:pt", { idx: xmlValue(pt.index, "idx") });
       xml.openNode("c:v");
-      xml.writeText(String(pt.value));
+      xml.writeText(xmlValue(pt.value, "c:v"));
       xml.closeNode();
       xml.closeNode();
     }
@@ -1416,9 +1421,9 @@ export function renderStrLit(xml: XmlSink, lit: StringLiteral): void {
   // fallback rather than silently omitting the element when
   // `lit.pointCount` is unset.
   const ptCount = lit.pointCount ?? lit.points.length;
-  xml.leafNode("c:ptCount", { val: String(ptCount) });
+  xml.leafNode("c:ptCount", { val: xmlValue(ptCount, "val") });
   for (const pt of lit.points) {
-    xml.openNode("c:pt", { idx: String(pt.index) });
+    xml.openNode("c:pt", { idx: xmlValue(pt.index, "idx") });
     xml.openNode("c:v");
     xml.writeText(pt.value);
     xml.closeNode();
@@ -1435,12 +1440,12 @@ export function renderMultiLvlStrRef(xml: XmlSink, ref: MultiLevelStringReferenc
   if (ref.cache) {
     xml.openNode("c:multiLvlStrCache");
     if (ref.cache.pointCount !== undefined) {
-      xml.leafNode("c:ptCount", { val: String(ref.cache.pointCount) });
+      xml.leafNode("c:ptCount", { val: xmlValue(ref.cache.pointCount, "val") });
     }
     for (const level of ref.cache.levels) {
       xml.openNode("c:lvl");
       for (const pt of level.points) {
-        xml.openNode("c:pt", { idx: String(pt.index) });
+        xml.openNode("c:pt", { idx: xmlValue(pt.index, "idx") });
         xml.openNode("c:v");
         xml.writeText(pt.value);
         xml.closeNode();
@@ -1461,7 +1466,7 @@ export function renderMarker(xml: XmlSink, m: ChartMarker): void {
     xml.leafNode("c:symbol", { val: m.symbol });
   }
   if (m.size !== undefined) {
-    xml.leafNode("c:size", { val: String(m.size) });
+    xml.leafNode("c:size", { val: xmlValue(m.size, "val") });
   }
   if (m.spPr) {
     renderSpPr(xml, m.spPr);
@@ -1474,7 +1479,7 @@ export function renderMarker(xml: XmlSink, m: ChartMarker): void {
 
 export function renderDataPoint(xml: XmlSink, dp: DataPoint): void {
   xml.openNode("c:dPt");
-  xml.leafNode("c:idx", { val: String(dp.index) });
+  xml.leafNode("c:idx", { val: xmlValue(dp.index, "val") });
   if (dp.invertIfNegative !== undefined) {
     xml.leafNode("c:invertIfNegative", { val: dp.invertIfNegative ? "1" : "0" });
   }
@@ -1485,7 +1490,7 @@ export function renderDataPoint(xml: XmlSink, dp: DataPoint): void {
     xml.leafNode("c:bubble3D", { val: dp.bubble3D ? "1" : "0" });
   }
   if (dp.explosion !== undefined) {
-    xml.leafNode("c:explosion", { val: String(dp.explosion) });
+    xml.leafNode("c:explosion", { val: xmlValue(dp.explosion, "val") });
   }
   if (dp.spPr) {
     renderSpPr(xml, dp.spPr);
@@ -1511,7 +1516,7 @@ export function renderDataLabelEntry(
   opts?: DataLabelRenderOptions
 ): void {
   xml.openNode("c:dLbl");
-  xml.leafNode("c:idx", { val: String(e.index) });
+  xml.leafNode("c:idx", { val: xmlValue(e.index, "val") });
   // ECMA-376 CT_DLbl is `idx, choice(delete | (layout, tx, numFmt, spPr,
   // txPr, dLblPos, showLegendKey, showVal, showCatName, showSerName,
   // showPercent, showBubbleSize, separator), extLst)`. When `delete` is
@@ -1745,19 +1750,19 @@ export function renderTrendline(xml: XmlSink, t: Trendline): void {
   }
   xml.leafNode("c:trendlineType", { val: t.type });
   if (t.order !== undefined) {
-    xml.leafNode("c:order", { val: String(t.order) });
+    xml.leafNode("c:order", { val: xmlValue(t.order, "val") });
   }
   if (t.period !== undefined) {
-    xml.leafNode("c:period", { val: String(t.period) });
+    xml.leafNode("c:period", { val: xmlValue(t.period, "val") });
   }
   if (t.forward !== undefined) {
-    xml.leafNode("c:forward", { val: String(t.forward) });
+    xml.leafNode("c:forward", { val: xmlValue(t.forward, "val") });
   }
   if (t.backward !== undefined) {
-    xml.leafNode("c:backward", { val: String(t.backward) });
+    xml.leafNode("c:backward", { val: xmlValue(t.backward, "val") });
   }
   if (t.intercept !== undefined) {
-    xml.leafNode("c:intercept", { val: String(t.intercept) });
+    xml.leafNode("c:intercept", { val: xmlValue(t.intercept, "val") });
   }
   if (t.displayRSqr !== undefined) {
     xml.leafNode("c:dispRSqr", { val: t.displayRSqr ? "1" : "0" });
@@ -1823,7 +1828,7 @@ export function renderErrorBars(xml: XmlSink, eb: ErrorBars): void {
     renderValData(xml, eb.minus, "c:minus");
   }
   if (eb.val !== undefined) {
-    xml.leafNode("c:val", { val: String(eb.val) });
+    xml.leafNode("c:val", { val: xmlValue(eb.val, "val") });
   }
   if (eb.spPr) {
     renderSpPr(xml, eb.spPr);
@@ -1849,7 +1854,7 @@ export function renderPictureOptions(xml: XmlSink, po: PictureOptions): void {
     xml.leafNode("c:pictureFormat", { val: po.pictureFormat });
   }
   if (po.pictureStackUnit !== undefined) {
-    xml.leafNode("c:pictureStackUnit", { val: String(po.pictureStackUnit) });
+    xml.leafNode("c:pictureStackUnit", { val: xmlValue(po.pictureStackUnit, "val") });
   }
   xml.closeNode();
 }
@@ -1857,7 +1862,7 @@ export function renderPictureOptions(xml: XmlSink, po: PictureOptions): void {
 export function renderUpDownBars(xml: XmlSink, udb: UpDownBars): void {
   xml.openNode("c:upDownBars");
   if (udb.gapWidth !== undefined) {
-    xml.leafNode("c:gapWidth", { val: String(udb.gapWidth) });
+    xml.leafNode("c:gapWidth", { val: xmlValue(udb.gapWidth, "val") });
   }
   if (udb.upBars) {
     xml.openNode("c:upBars");
@@ -1890,7 +1895,7 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
   }
 
   xml.openNode(tag);
-  xml.leafNode("c:axId", { val: String(ax.axId) });
+  xml.leafNode("c:axId", { val: xmlValue(ax.axId, "val") });
 
   // Scaling — per ECMA-376 `CT_Scaling` sequence: `logBase?`,
   // `orientation?`, `max?`, `min?`, `extLst?` (see Microsoft
@@ -1903,16 +1908,16 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
   // the document outright.
   xml.openNode("c:scaling");
   if (ax.scaling?.logBase !== undefined) {
-    xml.leafNode("c:logBase", { val: String(ax.scaling.logBase) });
+    xml.leafNode("c:logBase", { val: xmlValue(ax.scaling.logBase, "val") });
   }
   if (ax.scaling?.orientation) {
     xml.leafNode("c:orientation", { val: ax.scaling.orientation });
   }
   if (ax.scaling?.max !== undefined) {
-    xml.leafNode("c:max", { val: String(ax.scaling.max) });
+    xml.leafNode("c:max", { val: xmlValue(ax.scaling.max, "val") });
   }
   if (ax.scaling?.min !== undefined) {
-    xml.leafNode("c:min", { val: String(ax.scaling.min) });
+    xml.leafNode("c:min", { val: xmlValue(ax.scaling.min, "val") });
   }
   xml.closeNode();
 
@@ -1974,13 +1979,13 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
   // that's better surfaced as a validation error from Excel than
   // silently corrupted XML.
   if (typeof ax.crossAx === "number" && Number.isFinite(ax.crossAx)) {
-    xml.leafNode("c:crossAx", { val: String(ax.crossAx) });
+    xml.leafNode("c:crossAx", { val: xmlValue(ax.crossAx, "val") });
   }
   if (ax.crosses) {
     xml.leafNode("c:crosses", { val: ax.crosses });
   }
   if (ax.crossesAt !== undefined) {
-    xml.leafNode("c:crossesAt", { val: String(ax.crossesAt) });
+    xml.leafNode("c:crossesAt", { val: xmlValue(ax.crossesAt, "val") });
   }
 
   // Type-specific properties
@@ -1993,13 +1998,13 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
       xml.leafNode("c:lblAlgn", { val: ca.lblAlgn });
     }
     if (ca.lblOffset !== undefined) {
-      xml.leafNode("c:lblOffset", { val: String(ca.lblOffset) });
+      xml.leafNode("c:lblOffset", { val: xmlValue(ca.lblOffset, "val") });
     }
     if (ca.tickLblSkip !== undefined) {
-      xml.leafNode("c:tickLblSkip", { val: String(ca.tickLblSkip) });
+      xml.leafNode("c:tickLblSkip", { val: xmlValue(ca.tickLblSkip, "val") });
     }
     if (ca.tickMarkSkip !== undefined) {
-      xml.leafNode("c:tickMarkSkip", { val: String(ca.tickMarkSkip) });
+      xml.leafNode("c:tickMarkSkip", { val: xmlValue(ca.tickMarkSkip, "val") });
     }
     if (ca.noMultiLvlLbl !== undefined) {
       xml.leafNode("c:noMultiLvlLbl", { val: ca.noMultiLvlLbl ? "1" : "0" });
@@ -2010,10 +2015,10 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
       xml.leafNode("c:crossBetween", { val: va.crossBetween });
     }
     if (va.majorUnit !== undefined) {
-      xml.leafNode("c:majorUnit", { val: String(va.majorUnit) });
+      xml.leafNode("c:majorUnit", { val: xmlValue(va.majorUnit, "val") });
     }
     if (va.minorUnit !== undefined) {
-      xml.leafNode("c:minorUnit", { val: String(va.minorUnit) });
+      xml.leafNode("c:minorUnit", { val: xmlValue(va.minorUnit, "val") });
     }
     if (va.dispUnits) {
       xml.openNode("c:dispUnits");
@@ -2023,7 +2028,7 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
       if (va.dispUnits.builtInUnit) {
         xml.leafNode("c:builtInUnit", { val: va.dispUnits.builtInUnit });
       } else if (va.dispUnits.custUnit !== undefined) {
-        xml.leafNode("c:custUnit", { val: String(va.dispUnits.custUnit) });
+        xml.leafNode("c:custUnit", { val: xmlValue(va.dispUnits.custUnit, "val") });
       }
       if (va.dispUnits.label) {
         renderDispUnitsLbl(xml, va.dispUnits.label);
@@ -2039,19 +2044,19 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
       xml.leafNode("c:auto", { val: da.auto ? "1" : "0" });
     }
     if (da.lblOffset !== undefined) {
-      xml.leafNode("c:lblOffset", { val: String(da.lblOffset) });
+      xml.leafNode("c:lblOffset", { val: xmlValue(da.lblOffset, "val") });
     }
     if (da.baseTimeUnit) {
       xml.leafNode("c:baseTimeUnit", { val: da.baseTimeUnit });
     }
     if (da.majorUnit !== undefined) {
-      xml.leafNode("c:majorUnit", { val: String(da.majorUnit) });
+      xml.leafNode("c:majorUnit", { val: xmlValue(da.majorUnit, "val") });
     }
     if (da.majorTimeUnit) {
       xml.leafNode("c:majorTimeUnit", { val: da.majorTimeUnit });
     }
     if (da.minorUnit !== undefined) {
-      xml.leafNode("c:minorUnit", { val: String(da.minorUnit) });
+      xml.leafNode("c:minorUnit", { val: xmlValue(da.minorUnit, "val") });
     }
     if (da.minorTimeUnit) {
       xml.leafNode("c:minorTimeUnit", { val: da.minorTimeUnit });
@@ -2059,10 +2064,10 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
   } else if (ax.axisType === "ser") {
     const sa = ax as SeriesAxis;
     if (sa.tickLblSkip !== undefined) {
-      xml.leafNode("c:tickLblSkip", { val: String(sa.tickLblSkip) });
+      xml.leafNode("c:tickLblSkip", { val: xmlValue(sa.tickLblSkip, "val") });
     }
     if (sa.tickMarkSkip !== undefined) {
-      xml.leafNode("c:tickMarkSkip", { val: String(sa.tickMarkSkip) });
+      xml.leafNode("c:tickMarkSkip", { val: xmlValue(sa.tickMarkSkip, "val") });
     }
   }
 
@@ -2158,7 +2163,7 @@ export function renderLegend(xml: XmlSink, legend: ChartLegend): void {
   if (legend.legendEntries) {
     for (const e of legend.legendEntries) {
       xml.openNode("c:legendEntry");
-      xml.leafNode("c:idx", { val: String(e.index) });
+      xml.leafNode("c:idx", { val: xmlValue(e.index, "val") });
       if (e.delete !== undefined) {
         xml.leafNode("c:delete", { val: e.delete ? "1" : "0" });
       }
@@ -2218,16 +2223,16 @@ export function renderLayout(xml: XmlSink, layout?: ChartLayout): void {
       xml.leafNode("c:hMode", { val: ml.hMode });
     }
     if (ml.x !== undefined) {
-      xml.leafNode("c:x", { val: String(ml.x) });
+      xml.leafNode("c:x", { val: xmlValue(ml.x, "val") });
     }
     if (ml.y !== undefined) {
-      xml.leafNode("c:y", { val: String(ml.y) });
+      xml.leafNode("c:y", { val: xmlValue(ml.y, "val") });
     }
     if (ml.w !== undefined) {
-      xml.leafNode("c:w", { val: String(ml.w) });
+      xml.leafNode("c:w", { val: xmlValue(ml.w, "val") });
     }
     if (ml.h !== undefined) {
-      xml.leafNode("c:h", { val: String(ml.h) });
+      xml.leafNode("c:h", { val: xmlValue(ml.h, "val") });
     }
     xml.closeNode();
   }
@@ -2318,7 +2323,7 @@ export function renderRichText(xml: XmlSink, rt: ChartRichText, tag: string): vo
 export function renderBodyProperties(xml: XmlSink, bp: ChartBodyProperties): void {
   const attrs: Record<string, string> = {};
   if (bp.rotation !== undefined) {
-    attrs.rot = String(bp.rotation);
+    attrs.rot = xmlValue(bp.rotation, "rot");
   }
   if (bp.horizontalOverflow) {
     attrs.horzOverflow = bp.horizontalOverflow;
@@ -2345,16 +2350,16 @@ export function renderParagraphProperties(
     attrs.algn = pPr.alignment;
   }
   if (pPr?.indent !== undefined) {
-    attrs.indent = String(pPr.indent);
+    attrs.indent = xmlValue(pPr.indent, "indent");
   }
   if (pPr?.marginLeft !== undefined) {
-    attrs.marL = String(pPr.marginLeft);
+    attrs.marL = xmlValue(pPr.marginLeft, "marL");
   }
   if (pPr?.marginRight !== undefined) {
-    attrs.marR = String(pPr.marginRight);
+    attrs.marR = xmlValue(pPr.marginRight, "marR");
   }
   if (pPr?.level !== undefined) {
-    attrs.lvl = String(pPr.level);
+    attrs.lvl = xmlValue(pPr.level, "lvl");
   }
 
   const defRPr = pPr?.defaultRunProperties ?? legacyDefRPr;
@@ -2396,7 +2401,7 @@ export function renderParagraphProperties(
     } else if (b.type === "autoNum") {
       const bAttrs: Record<string, string> = { type: b.scheme };
       if (b.startAt !== undefined) {
-        bAttrs.startAt = String(b.startAt);
+        bAttrs.startAt = xmlValue(b.startAt, "startAt");
       }
       xml.leafNode("a:buAutoNum", bAttrs);
     }
@@ -2409,9 +2414,9 @@ export function renderParagraphProperties(
 
 export function renderSpacing(xml: XmlSink, s: ChartLineSpacing): void {
   if (s.type === "percentage") {
-    xml.leafNode("a:spcPct", { val: String(s.value) });
+    xml.leafNode("a:spcPct", { val: xmlValue(s.value, "val") });
   } else {
-    xml.leafNode("a:spcPts", { val: String(s.value) });
+    xml.leafNode("a:spcPts", { val: xmlValue(s.value, "val") });
   }
 }
 
@@ -2454,7 +2459,7 @@ export function renderRunProperties(xml: XmlSink, props: ChartTextProperties, ta
   }
   const attrs: Record<string, string> = {};
   if (props.size !== undefined) {
-    attrs.sz = String(props.size);
+    attrs.sz = xmlValue(props.size, "sz");
   }
   if (props.bold !== undefined) {
     attrs.b = props.bold ? "1" : "0";
@@ -2483,13 +2488,13 @@ export function renderRunProperties(xml: XmlSink, props: ChartTextProperties, ta
   // (no repair dialog). `_renderTxPr` already writes rotation to
   // the correct element on the enclosing `<a:bodyPr>`.
   if (props.baseline !== undefined) {
-    attrs.baseline = String(props.baseline);
+    attrs.baseline = xmlValue(props.baseline, "baseline");
   }
   if (props.kern !== undefined) {
-    attrs.kern = String(props.kern);
+    attrs.kern = xmlValue(props.kern, "kern");
   }
   if (props.spacing !== undefined) {
-    attrs.spc = String(props.spacing);
+    attrs.spc = xmlValue(props.spacing, "spc");
   }
   if (props.cap) {
     attrs.cap = props.cap;
@@ -2533,7 +2538,7 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
   // Emit raw XML only when the model is a pure raw-capture — i.e.
   // `_rawXml` is present AND no structured field has been set. If
   // the caller assigned `spPr.fill = {...}` directly (without going
-  // through `setSpPrFill`, which clears `_rawXml`), the stale raw
+  // through `withSpPrFill`, which clears `_rawXml`), the stale raw
   // bytes are stale and the structured writer must win. Previously
   // this check was `if (spPr._rawXml)` — so any direct mutation of
   // a loaded chart's spPr was silently dropped on save.
@@ -2575,7 +2580,7 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
           // in `chart-ex-renderer.ts` and the gradient parser in
           // `shape-properties.ts`.
           const encoded = Math.max(0, Math.min(100000, Math.round(stop.position * 100000)));
-          xml.openNode("a:gs", { pos: String(encoded) });
+          xml.openNode("a:gs", { pos: xmlValue(encoded, "pos") });
           renderColor(xml, stop.color);
           xml.closeNode();
         }
@@ -2592,7 +2597,7 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
           // on round-trip, silently toggling whether the angle
           // scales with the shape's aspect ratio.
           const angleEmu = Math.round((g.angle ?? 0) * 60000);
-          const linAttrs: Record<string, string> = { ang: String(angleEmu) };
+          const linAttrs: Record<string, string> = { ang: xmlValue(angleEmu, "ang") };
           if (g.scaled !== undefined) {
             linAttrs.scaled = g.scaled ? "1" : "0";
           }
@@ -2613,10 +2618,10 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
           };
           xml.openNode("a:path", { path: g.type });
           xml.leafNode("a:fillToRect", {
-            l: String(pct(rect?.left, 50000)),
-            t: String(pct(rect?.top, 50000)),
-            r: String(pct(rect?.right, 50000)),
-            b: String(pct(rect?.bottom, 50000))
+            l: xmlValue(pct(rect?.left, 50000), "l"),
+            t: xmlValue(pct(rect?.top, 50000), "t"),
+            r: xmlValue(pct(rect?.right, 50000), "r"),
+            b: xmlValue(pct(rect?.bottom, 50000), "b")
           });
           xml.closeNode();
         }
@@ -2649,7 +2654,7 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
   if (spPr.line) {
     const lnAttrs: Record<string, string> = {};
     if (spPr.line.width) {
-      lnAttrs.w = String(spPr.line.width);
+      lnAttrs.w = xmlValue(spPr.line.width, "w");
     }
     if (spPr.line.cap) {
       lnAttrs.cap = spPr.line.cap;
@@ -2699,7 +2704,7 @@ export function renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
 export function renderShapeTransform(xml: XmlSink, transform: ShapeTransform): void {
   const attrs: Record<string, string> = {};
   if (transform.rotation !== undefined && transform.rotation !== 0) {
-    attrs.rot = String(transform.rotation);
+    attrs.rot = xmlValue(transform.rotation, "rot");
   }
   if (transform.flipHorizontal) {
     attrs.flipH = "1";
@@ -2720,14 +2725,14 @@ export function renderShapeTransform(xml: XmlSink, transform: ShapeTransform): v
   xml.openNode("a:xfrm", Object.keys(attrs).length > 0 ? attrs : undefined);
   if (hasOff) {
     xml.leafNode("a:off", {
-      x: String(transform.offsetX ?? 0),
-      y: String(transform.offsetY ?? 0)
+      x: xmlValue(transform.offsetX ?? 0, "x"),
+      y: xmlValue(transform.offsetY ?? 0, "y")
     });
   }
   if (hasExt) {
     xml.leafNode("a:ext", {
-      cx: String(transform.width ?? 0),
-      cy: String(transform.height ?? 0)
+      cx: xmlValue(transform.width ?? 0, "cx"),
+      cy: xmlValue(transform.height ?? 0, "cy")
     });
   }
   xml.closeNode();
@@ -2769,10 +2774,10 @@ export function renderCustomGeometry(xml: XmlSink, geom: CustomGeometry): void {
   for (const path of geom.paths ?? []) {
     const pathAttrs: Record<string, string> = {};
     if (path.w !== undefined) {
-      pathAttrs.w = String(path.w);
+      pathAttrs.w = xmlValue(path.w, "w");
     }
     if (path.h !== undefined) {
-      pathAttrs.h = String(path.h);
+      pathAttrs.h = xmlValue(path.h, "h");
     }
     if (path.fill !== undefined) {
       pathAttrs.fill = path.fill;
@@ -2801,10 +2806,10 @@ export function renderCustomGeometryCommand(xml: XmlSink, cmd: CustomGeometryCom
       return;
     }
     xml.leafNode("a:arcTo", {
-      wR: String(p.wR),
-      hR: String(p.hR),
-      stAng: String(p.stAng),
-      swAng: String(p.swAng)
+      wR: xmlValue(p.wR, "wR"),
+      hR: xmlValue(p.hR, "hR"),
+      stAng: xmlValue(p.stAng, "stAng"),
+      swAng: xmlValue(p.swAng, "swAng")
     });
     return;
   }
@@ -2818,7 +2823,7 @@ export function renderCustomGeometryCommand(xml: XmlSink, cmd: CustomGeometryCom
           : "a:quadBezTo";
   xml.openNode(tag);
   for (const point of cmd.points ?? []) {
-    xml.leafNode("a:pt", { x: String(point.x), y: String(point.y) });
+    xml.leafNode("a:pt", { x: xmlValue(point.x, "x"), y: xmlValue(point.y, "y") });
   }
   xml.closeNode();
 }
@@ -2840,16 +2845,16 @@ export function renderBlipFill(xml: XmlSink, blip: ChartBlipFill): void {
     const sr = blip.sourceRectangle;
     const attrs: Record<string, string> = {};
     if (sr.left !== undefined) {
-      attrs.l = String(sr.left);
+      attrs.l = xmlValue(sr.left, "l");
     }
     if (sr.top !== undefined) {
-      attrs.t = String(sr.top);
+      attrs.t = xmlValue(sr.top, "t");
     }
     if (sr.right !== undefined) {
-      attrs.r = String(sr.right);
+      attrs.r = xmlValue(sr.right, "r");
     }
     if (sr.bottom !== undefined) {
-      attrs.b = String(sr.bottom);
+      attrs.b = xmlValue(sr.bottom, "b");
     }
     xml.leafNode("a:srcRect", Object.keys(attrs).length > 0 ? attrs : undefined);
   }
@@ -2857,16 +2862,16 @@ export function renderBlipFill(xml: XmlSink, blip: ChartBlipFill): void {
     const t = blip.tile ?? {};
     const tileAttrs: Record<string, string> = {};
     if (t.tx !== undefined) {
-      tileAttrs.tx = String(t.tx);
+      tileAttrs.tx = xmlValue(t.tx, "tx");
     }
     if (t.ty !== undefined) {
-      tileAttrs.ty = String(t.ty);
+      tileAttrs.ty = xmlValue(t.ty, "ty");
     }
     if (t.sx !== undefined) {
-      tileAttrs.sx = String(t.sx);
+      tileAttrs.sx = xmlValue(t.sx, "sx");
     }
     if (t.sy !== undefined) {
-      tileAttrs.sy = String(t.sy);
+      tileAttrs.sy = xmlValue(t.sy, "sy");
     }
     if (t.flip) {
       tileAttrs.flip = t.flip;
@@ -2898,7 +2903,7 @@ export function renderEffectList(xml: XmlSink, effects: EffectList): void {
   if (effects.blur) {
     const attrs: Record<string, string> = {};
     if (effects.blur.radius !== undefined) {
-      attrs.rad = String(effects.blur.radius);
+      attrs.rad = xmlValue(effects.blur.radius, "rad");
     }
     if (effects.blur.grow) {
       attrs.grow = "1";
@@ -2907,7 +2912,7 @@ export function renderEffectList(xml: XmlSink, effects: EffectList): void {
   }
   // fillOverlay — reserved slot per schema, not currently modelled.
   if (effects.glow) {
-    xml.openNode("a:glow", { rad: String(effects.glow.radius) });
+    xml.openNode("a:glow", { rad: xmlValue(effects.glow.radius, "rad") });
     renderColor(xml, effects.glow.color);
     xml.closeNode();
   }
@@ -2921,10 +2926,10 @@ export function renderEffectList(xml: XmlSink, effects: EffectList): void {
     const ps = effects.presetShadow;
     const attrs: Record<string, string> = { prst: ps.preset };
     if (ps.distance !== undefined) {
-      attrs.dist = String(ps.distance);
+      attrs.dist = xmlValue(ps.distance, "dist");
     }
     if (ps.direction !== undefined) {
-      attrs.dir = String(ps.direction);
+      attrs.dir = xmlValue(ps.direction, "dir");
     }
     xml.openNode("a:prstShdw", attrs);
     if (ps.color) {
@@ -2936,40 +2941,40 @@ export function renderEffectList(xml: XmlSink, effects: EffectList): void {
     const r = effects.reflection;
     const attrs: Record<string, string> = {};
     if (r.blurRadius !== undefined) {
-      attrs.blurRad = String(r.blurRadius);
+      attrs.blurRad = xmlValue(r.blurRadius, "blurRad");
     }
     if (r.startOpacity !== undefined) {
-      attrs.stA = String(r.startOpacity);
+      attrs.stA = xmlValue(r.startOpacity, "stA");
     }
     if (r.startPosition !== undefined) {
-      attrs.stPos = String(r.startPosition);
+      attrs.stPos = xmlValue(r.startPosition, "stPos");
     }
     if (r.endOpacity !== undefined) {
-      attrs.endA = String(r.endOpacity);
+      attrs.endA = xmlValue(r.endOpacity, "endA");
     }
     if (r.endPosition !== undefined) {
-      attrs.endPos = String(r.endPosition);
+      attrs.endPos = xmlValue(r.endPosition, "endPos");
     }
     if (r.distance !== undefined) {
-      attrs.dist = String(r.distance);
+      attrs.dist = xmlValue(r.distance, "dist");
     }
     if (r.direction !== undefined) {
-      attrs.dir = String(r.direction);
+      attrs.dir = xmlValue(r.direction, "dir");
     }
     if (r.fadeDirection !== undefined) {
-      attrs.fadeDir = String(r.fadeDirection);
+      attrs.fadeDir = xmlValue(r.fadeDirection, "fadeDir");
     }
     if (r.scaleHorizontal !== undefined) {
-      attrs.sx = String(r.scaleHorizontal);
+      attrs.sx = xmlValue(r.scaleHorizontal, "sx");
     }
     if (r.scaleVertical !== undefined) {
-      attrs.sy = String(r.scaleVertical);
+      attrs.sy = xmlValue(r.scaleVertical, "sy");
     }
     if (r.skewHorizontal !== undefined) {
-      attrs.kx = String(r.skewHorizontal);
+      attrs.kx = xmlValue(r.skewHorizontal, "kx");
     }
     if (r.skewVertical !== undefined) {
-      attrs.ky = String(r.skewVertical);
+      attrs.ky = xmlValue(r.skewVertical, "ky");
     }
     if (r.alignment) {
       attrs.algn = r.alignment;
@@ -2980,7 +2985,7 @@ export function renderEffectList(xml: XmlSink, effects: EffectList): void {
     xml.leafNode("a:reflection", attrs);
   }
   if (effects.softEdge) {
-    xml.leafNode("a:softEdge", { rad: String(effects.softEdge.radius) });
+    xml.leafNode("a:softEdge", { rad: xmlValue(effects.softEdge.radius, "rad") });
   }
   xml.closeNode();
 }
@@ -2988,13 +2993,13 @@ export function renderEffectList(xml: XmlSink, effects: EffectList): void {
 export function renderShadowElement(xml: XmlSink, tag: string, shadow: Shadow): void {
   const attrs: Record<string, string> = {};
   if (shadow.blurRadius !== undefined) {
-    attrs.blurRad = String(shadow.blurRadius);
+    attrs.blurRad = xmlValue(shadow.blurRadius, "blurRad");
   }
   if (shadow.distance !== undefined) {
-    attrs.dist = String(shadow.distance);
+    attrs.dist = xmlValue(shadow.distance, "dist");
   }
   if (shadow.direction !== undefined) {
-    attrs.dir = String(shadow.direction);
+    attrs.dir = xmlValue(shadow.direction, "dir");
   }
   if (shadow.alignment) {
     attrs.algn = shadow.alignment;
@@ -3003,16 +3008,16 @@ export function renderShadowElement(xml: XmlSink, tag: string, shadow: Shadow): 
     attrs.rotWithShape = "1";
   }
   if (shadow.scaleHorizontal !== undefined) {
-    attrs.sx = String(shadow.scaleHorizontal);
+    attrs.sx = xmlValue(shadow.scaleHorizontal, "sx");
   }
   if (shadow.scaleVertical !== undefined) {
-    attrs.sy = String(shadow.scaleVertical);
+    attrs.sy = xmlValue(shadow.scaleVertical, "sy");
   }
   if (shadow.skewHorizontal !== undefined) {
-    attrs.kx = String(shadow.skewHorizontal);
+    attrs.kx = xmlValue(shadow.skewHorizontal, "kx");
   }
   if (shadow.skewVertical !== undefined) {
-    attrs.ky = String(shadow.skewVertical);
+    attrs.ky = xmlValue(shadow.skewVertical, "ky");
   }
   xml.openNode(tag, attrs);
   renderColor(xml, shadow.color);
@@ -3025,17 +3030,17 @@ export function renderScene3D(xml: XmlSink, scene: Scene3D): void {
     const cam = scene.camera;
     const attrs: Record<string, string> = { prst: cam.preset };
     if (cam.fov !== undefined) {
-      attrs.fov = String(cam.fov);
+      attrs.fov = xmlValue(cam.fov, "fov");
     }
     if (cam.zoom !== undefined) {
-      attrs.zoom = String(cam.zoom);
+      attrs.zoom = xmlValue(cam.zoom, "zoom");
     }
     if (cam.rotation) {
       xml.openNode("a:camera", attrs);
       xml.leafNode("a:rot", {
-        lat: String(cam.rotation.lat),
-        lon: String(cam.rotation.lon),
-        rev: String(cam.rotation.rev)
+        lat: xmlValue(cam.rotation.lat, "lat"),
+        lon: xmlValue(cam.rotation.lon, "lon"),
+        rev: xmlValue(cam.rotation.rev, "rev")
       });
       xml.closeNode();
     } else {
@@ -3048,9 +3053,9 @@ export function renderScene3D(xml: XmlSink, scene: Scene3D): void {
     if (lr.rotation) {
       xml.openNode("a:lightRig", attrs);
       xml.leafNode("a:rot", {
-        lat: String(lr.rotation.lat),
-        lon: String(lr.rotation.lon),
-        rev: String(lr.rotation.rev)
+        lat: xmlValue(lr.rotation.lat, "lat"),
+        lon: xmlValue(lr.rotation.lon, "lon"),
+        rev: xmlValue(lr.rotation.rev, "rev")
       });
       xml.closeNode();
     } else {
@@ -3063,13 +3068,13 @@ export function renderScene3D(xml: XmlSink, scene: Scene3D): void {
 export function renderSp3D(xml: XmlSink, sp3d: ShapeProperties3D): void {
   const attrs: Record<string, string> = {};
   if (sp3d.z !== undefined) {
-    attrs.z = String(sp3d.z);
+    attrs.z = xmlValue(sp3d.z, "z");
   }
   if (sp3d.extrusionHeight !== undefined) {
-    attrs.extrusionH = String(sp3d.extrusionHeight);
+    attrs.extrusionH = xmlValue(sp3d.extrusionHeight, "extrusionH");
   }
   if (sp3d.contourWidth !== undefined) {
-    attrs.contourW = String(sp3d.contourWidth);
+    attrs.contourW = xmlValue(sp3d.contourWidth, "contourW");
   }
   if (sp3d.material) {
     attrs.prstMaterial = sp3d.material;
@@ -3089,10 +3094,10 @@ export function renderSp3D(xml: XmlSink, sp3d: ShapeProperties3D): void {
     const b = sp3d.bevelTop;
     const bAttrs: Record<string, string> = {};
     if (b.width !== undefined) {
-      bAttrs.w = String(b.width);
+      bAttrs.w = xmlValue(b.width, "w");
     }
     if (b.height !== undefined) {
-      bAttrs.h = String(b.height);
+      bAttrs.h = xmlValue(b.height, "h");
     }
     if (b.preset) {
       bAttrs.prst = b.preset;
@@ -3103,10 +3108,10 @@ export function renderSp3D(xml: XmlSink, sp3d: ShapeProperties3D): void {
     const b = sp3d.bevelBottom;
     const bAttrs: Record<string, string> = {};
     if (b.width !== undefined) {
-      bAttrs.w = String(b.width);
+      bAttrs.w = xmlValue(b.width, "w");
     }
     if (b.height !== undefined) {
-      bAttrs.h = String(b.height);
+      bAttrs.h = xmlValue(b.height, "h");
     }
     if (b.preset) {
       bAttrs.prst = b.preset;
@@ -3146,7 +3151,7 @@ export function renderTxPr(xml: XmlSink, txPr: ChartTextProperties): void {
   // writer is byte-compatible with Excel's own output and survives
   // the strict-loader's "drawing shape" integrity check.
   const bodyPrAttrs: Record<string, string> = {
-    rot: String(txPr.rotation ?? 0),
+    rot: xmlValue(txPr.rotation ?? 0, "rot"),
     spcFirstLastPara: "1",
     vertOverflow: "ellipsis",
     wrap: "square",
@@ -3186,20 +3191,31 @@ export function renderColor(xml: XmlSink, color: ChartColor): void {
   //      multiply by 100000. Negative `tint` on `schemeClr` is a
   //      known Excel-UI convention for "darken by |tint|"; map to
   //      `<a:shade>` exactly as the existing code did.
+  // The ordered list, when the colour carries one (`ChartColor.transforms`); the named fields otherwise.
+  const list = chartColorTransformList(color);
+  const elements = list === undefined ? undefined : colorTransformElements(list);
   const hasModifiers = (c: ChartColor): boolean =>
-    c.alpha !== undefined ||
-    c.tint !== undefined ||
-    c.lumMod !== undefined ||
-    c.lumOff !== undefined ||
-    c.shade !== undefined ||
-    c.satMod !== undefined;
+    elements !== undefined
+      ? elements.length > 0
+      : c.alpha !== undefined ||
+        c.tint !== undefined ||
+        c.lumMod !== undefined ||
+        c.lumOff !== undefined ||
+        c.shade !== undefined ||
+        c.satMod !== undefined;
   const emitInt = (tag: string, value: number | undefined): void => {
     if (value === undefined || !Number.isFinite(value)) {
       return;
     }
-    xml.leafNode(tag, { val: String(Math.round(value)) });
+    xml.leafNode(tag, { val: xmlValue(Math.round(value), "val") });
   };
   const emitModifiers = (c: ChartColor, tintAsShade: boolean = false): void => {
+    if (elements !== undefined) {
+      for (const [name, val] of elements) {
+        xml.leafNode(`a:${name}`, val === undefined ? {} : { val: xmlValue(val, "val") });
+      }
+      return;
+    }
     emitInt("a:alpha", c.alpha);
     let tintEmittedShade = false;
     if (c.tint !== undefined && Number.isFinite(c.tint)) {
@@ -3207,10 +3223,10 @@ export function renderColor(xml: XmlSink, color: ChartColor): void {
         // Legacy scheme-colour convention: negative tint → equivalent
         // shade. `(1 + tint) * 100000` lives on the 0..100000 range
         // for tint ∈ [-1, 0].
-        xml.leafNode("a:shade", { val: String(Math.round((1 + c.tint) * 100000)) });
+        xml.leafNode("a:shade", { val: xmlValue(Math.round((1 + c.tint) * 100000), "val") });
         tintEmittedShade = true;
       } else {
-        xml.leafNode("a:tint", { val: String(Math.round(c.tint * 100000)) });
+        xml.leafNode("a:tint", { val: xmlValue(Math.round(c.tint * 100000), "val") });
       }
     }
     emitInt("a:lumMod", c.lumMod);
@@ -3287,12 +3303,12 @@ export function renderPrintSettings(xml: XmlSink, ps: PrintSettings): void {
   }
   if (ps.pageMargins) {
     xml.leafNode("c:pageMargins", {
-      b: String(ps.pageMargins.b),
-      l: String(ps.pageMargins.l),
-      r: String(ps.pageMargins.r),
-      t: String(ps.pageMargins.t),
-      header: String(ps.pageMargins.header),
-      footer: String(ps.pageMargins.footer)
+      b: xmlValue(ps.pageMargins.b, "b"),
+      l: xmlValue(ps.pageMargins.l, "l"),
+      r: xmlValue(ps.pageMargins.r, "r"),
+      t: xmlValue(ps.pageMargins.t, "t"),
+      header: xmlValue(ps.pageMargins.header, "header"),
+      footer: xmlValue(ps.pageMargins.footer, "footer")
     });
   }
   if (ps.pageSetup) {
@@ -3301,7 +3317,7 @@ export function renderPrintSettings(xml: XmlSink, ps: PrintSettings): void {
       attrs.orientation = ps.pageSetup.orientation;
     }
     if (ps.pageSetup.paperSize !== undefined) {
-      attrs.paperSize = String(ps.pageSetup.paperSize);
+      attrs.paperSize = xmlValue(ps.pageSetup.paperSize, "paperSize");
     }
     xml.leafNode("c:pageSetup", Object.keys(attrs).length > 0 ? attrs : undefined);
   }

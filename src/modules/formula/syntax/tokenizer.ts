@@ -7,9 +7,11 @@
  * numbers, strings, booleans, and error literals.
  */
 
+import { formulaArgument } from "@formula/arguments";
 import { FormulaParseError } from "@formula/errors";
 import type { Token } from "@formula/syntax/token-types";
-import { TokenType } from "@formula/syntax/token-types";
+import { isSpillOperator, SPILL_OPERATOR, TokenType } from "@formula/syntax/token-types";
+import { check, s } from "@utils/schema";
 
 // ============================================================================
 // Character Helpers
@@ -42,8 +44,18 @@ function isAlpha(ch: string): boolean {
   return UNICODE_LETTER.test(ch);
 }
 
+// A combining mark continues a name: `e` + U+0301 is how a decomposed `é` is typed, and the name keys equate it with
+// the precomposed form, so the tokenizer must not end the name before the accent.
+const UNICODE_MARK = /\p{M}/u;
+
 function isAlphaNumOrUnderscore(ch: string): boolean {
-  return isAlpha(ch) || isDigit(ch) || ch === "_" || ch === ".";
+  return (
+    isAlpha(ch) ||
+    isDigit(ch) ||
+    ch === "_" ||
+    ch === "." ||
+    (ch.charCodeAt(0) >= 0x300 && UNICODE_MARK.test(ch))
+  );
 }
 
 /**
@@ -141,6 +153,19 @@ const ERROR_LITERALS = [
   "#NUM!",
   "#N/A"
 ].sort((a, b) => b.length - a.length);
+
+function isWhitespace(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+/** The text of an unrecognised `#…` at `pos`, up to the next character that ends an operand — for the error message. */
+function unknownErrorText(formula: string, pos: number): string {
+  let end = pos + 1;
+  while (end < formula.length && !" ,)+-*/^&=<>};(".includes(formula[end]!)) {
+    end++;
+  }
+  return formula.slice(pos, end);
+}
 
 /**
  * Try to match a known Excel error literal at `pos` (which must point at `#`).
@@ -265,16 +290,23 @@ function parseStructuredRefBrackets(
       const colName = readBracketedItem(formula, i);
       columns.push(colName.value);
       i = colName.end; // after inner ]
+      // [@[Col1]:[Col2]] — a span of columns in this row
+      const afterFirst = skipHorizontalWhitespace(formula, i, len);
+      if (afterFirst < len && formula[afterFirst] === ":") {
+        const second = skipHorizontalWhitespace(formula, afterFirst + 1, len);
+        if (second < len && formula[second] === "[") {
+          const colName2 = readBracketedItem(formula, second + 1);
+          columns.push(colName2.value);
+          i = colName2.end;
+        }
+      }
     } else if (i < len && formula[i] !== "]") {
-      // [@Column] form — unbracketed column name until ]
-      const start = i;
-      while (i < len && formula[i] !== "]") {
-        i++;
+      // [@Column] form — unbracketed column name until an unescaped ]
+      const item = readEscapedItem(formula, i);
+      if (item.value.length > 0) {
+        columns.push(item.value);
       }
-      const name = formula.slice(start, i).trim();
-      if (name.length > 0) {
-        columns.push(name);
-      }
+      i = item.close;
     }
     // Skip whitespace before closing ]
     i = skipHorizontalWhitespace(formula, i, len);
@@ -353,19 +385,13 @@ function parseStructuredRefBrackets(
     return { specials, columns, end: i };
   }
 
-  // Simple column reference: [Column]
-  const start = i;
-  while (i < len && formula[i] !== "]") {
-    i++;
+  // Simple column reference: [Column]. `'` escapes the next character, as in the bracketed
+  // forms — `Tbl[a']b]` is the column `a]b`.
+  const item = readBracketedItem(formula, i);
+  if (item.value.length > 0) {
+    columns.push(item.value);
   }
-  const name = formula.slice(start, i).trim();
-  if (name.length > 0) {
-    columns.push(name);
-  }
-  if (i < len && formula[i] === "]") {
-    i++; // skip closing ]
-  }
-  return { specials, columns, end: i };
+  return { specials, columns, end: item.end };
 }
 
 /**
@@ -375,6 +401,12 @@ function parseStructuredRefBrackets(
  * special chars like `]`, `[`, `#` inside column names — but this is rare).
  */
 function readBracketedItem(formula: string, pos: number): { value: string; end: number } {
+  const { value, close } = readEscapedItem(formula, pos);
+  return { value, end: close < formula.length ? close + 1 : close };
+}
+
+/** The text up to the next unescaped `]`, and the index of that `]` (or the end). */
+function readEscapedItem(formula: string, pos: number): { value: string; close: number } {
   const len = formula.length;
   let i = pos;
   let result = "";
@@ -388,10 +420,7 @@ function readBracketedItem(formula: string, pos: number): { value: string; end: 
       i++;
     }
   }
-  if (i < len && formula[i] === "]") {
-    i++; // skip ]
-  }
-  return { value: result.trim(), end: i };
+  return { value: result.trim(), close: i };
 }
 
 // ============================================================================
@@ -412,12 +441,62 @@ function readBracketedItem(formula: string, pos: number): { value: string; end: 
  * the tokeniser rather than at each call site is what stops the next consumer from rediscovering it.
  */
 export function tokenize(formula: string): Token[] {
+  check(s.string(), formula, formulaArgument("Formula.tokenize", "formula"));
+  return tokenizeInto(formula, undefined);
+}
+
+/**
+ * Tokenise, and also report the whitespace in front of every token.
+ *
+ * `gaps[i]` is the whitespace written immediately before `tokens[i]`, and `gaps[tokens.length]` is what trails the
+ * last one. An intersection token's gap is the whole run that forms it. This is the input `parseWithLayout` needs
+ * to keep a formula's spacing; see `syntax/layout.ts`. Whitespace before the leading `=` is not reported.
+ */
+export function tokenizeWithGaps(formula: string): { tokens: Token[]; gaps: string[] } {
+  const gaps: string[] = [];
+  const tokens = tokenizeInto(formula, gaps);
+  for (let index = 0; index <= tokens.length; index++) {
+    gaps[index] ??= "";
+  }
+  return { tokens, gaps };
+}
+
+/**
+ * Tokenise, and also report where in `formula` every token was written.
+ *
+ * `spans[i]` is the `[start, end)` offsets of the text `tokens[i]` was read from. A token is a decoded reading of its
+ * text — a string loses its quotes, an external reference becomes `#REF!` — so a caller that rewrites some tokens and
+ * must keep everything else verbatim splices the replacements into `formula` at these offsets instead of printing
+ * the tokens back.
+ */
+export function tokenizeWithSpans(formula: string): {
+  tokens: Token[];
+  spans: Array<readonly [number, number]>;
+} {
+  const spans: Array<readonly [number, number]> = [];
+  const tokens = tokenizeInto(formula, undefined, spans);
+  return { tokens, spans };
+}
+
+function tokenizeInto(
+  formula: string,
+  gaps: string[] | undefined,
+  spans?: Array<readonly [number, number]>
+): Token[] {
   const tokens: Token[] = [];
   // Leading whitespace then an optional `=`, which is notation rather than an operator: nothing in
   // the grammar below can begin with one, so there is no ambiguity to resolve.
   const start = /^\s*=/.exec(formula);
   let i = start === null ? 0 : start[0].length;
   const len = formula.length;
+  // Every pass of the loop below emits at most one token, so a token's text runs from where the pass began to where
+  // the next one does.
+  let passStart = i;
+  const closeSpans = (): void => {
+    while (spans!.length < tokens.length) {
+      spans!.push([passStart, i]);
+    }
+  };
 
   // Track whether previous token could produce a value
   // (used to distinguish unary vs binary +/-)
@@ -439,7 +518,8 @@ export function tokenize(formula: string): Token[] {
       last.type === TokenType.Error ||
       last.type === TokenType.ColRange ||
       last.type === TokenType.RowRange ||
-      last.type === TokenType.StructuredRef
+      last.type === TokenType.StructuredRef ||
+      isSpillOperator(last)
     );
   }
 
@@ -464,7 +544,8 @@ export function tokenize(formula: string): Token[] {
       last.type === TokenType.RowRange ||
       last.type === TokenType.StructuredRef ||
       last.type === TokenType.CloseParen ||
-      last.type === TokenType.Name
+      last.type === TokenType.Name ||
+      isSpillOperator(last)
     );
   }
 
@@ -478,11 +559,16 @@ export function tokenize(formula: string): Token[] {
   }
 
   while (i < len) {
+    if (spans !== undefined) {
+      closeSpans();
+      passStart = i;
+    }
     const ch = formula[i];
 
     // Whitespace — normally ignored, but between two refs it is Excel's
     // intersection operator (e.g. `A1:A10 B1:B10` → intersection of areas).
     if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+      const runStart = i;
       // Consume every consecutive whitespace character in one go.
       while (i < len) {
         const c = formula[i];
@@ -491,6 +577,10 @@ export function tokenize(formula: string): Token[] {
         } else {
           break;
         }
+      }
+      if (gaps !== undefined) {
+        // Keyed by the index of the token this run precedes — the intersection token itself, when one is emitted.
+        gaps[tokens.length] = (gaps[tokens.length] ?? "") + formula.slice(runStart, i);
       }
       // Emit an intersection token only when the previous token is a ref
       // AND the next character can start another ref. Emits at most one
@@ -564,39 +654,30 @@ export function tokenize(formula: string): Token[] {
     // Match greedily against the known Excel error literals (case-insensitive),
     // preferring the longest match so that "#N/A" isn't parsed as "#N" + "/A".
     if (ch === "#") {
+      // `A1#` — Excel's spill-range operator, written straight after a cell reference. A file stores it as
+      // `_xlfn.ANCHORARRAY(A1)`; the UI form is an operator token, so both read back as they were written.
+      const previous = tokens[tokens.length - 1];
+      if (
+        previous !== undefined &&
+        previous.type === TokenType.CellRef &&
+        !isWhitespace(formula[i - 1]!)
+      ) {
+        tokens.push({ type: TokenType.Operator, value: SPILL_OPERATOR });
+        i++;
+        continue;
+      }
       const matched = matchErrorLiteral(formula, i);
       if (matched) {
         tokens.push({ type: TokenType.Error, value: matched.value });
         i = matched.end;
         continue;
       }
-      // Fallback: consume through any unknown `#...` token and emit it
-      // as a #NAME? error. Unknown error literals (`#FOOBAR!`) are what
-      // Excel itself surfaces as #NAME?, and consumers downstream
-      // whitelist a fixed set of error codes — letting arbitrary strings
-      // like `#FOOBAR!` or bare `#` leak through breaks their enum
-      // checks. Normalising to #NAME? here keeps error propagation safe.
-      i++;
-      while (
-        i < len &&
-        formula[i] !== " " &&
-        formula[i] !== "," &&
-        formula[i] !== ")" &&
-        formula[i] !== "+" &&
-        formula[i] !== "-" &&
-        formula[i] !== "*" &&
-        formula[i] !== "/" &&
-        formula[i] !== "^" &&
-        formula[i] !== "&" &&
-        formula[i] !== "=" &&
-        formula[i] !== "<" &&
-        formula[i] !== ">" &&
-        formula[i] !== "}"
-      ) {
-        i++;
-      }
-      tokens.push({ type: TokenType.Error, value: "#NAME?" });
-      continue;
+      // Not an error value Excel has. It used to be read as `#NAME?`, so the formula a caller got back was not the
+      // one they wrote; Excel refuses such a formula when it is typed.
+      throw new FormulaParseError(
+        `Unknown error value ${JSON.stringify(unknownErrorText(formula, i))}`,
+        i
+      );
     }
 
     // External workbook reference: [Book.xlsx]Sheet!A1
@@ -663,6 +744,7 @@ export function tokenize(formula: string): Token[] {
         }
 
         if (isExternal) {
+          const externalStart = i;
           // External workbook references are unsupported — consume the full
           // ref syntax (including any `:CELL` range suffix) so downstream
           // tokens aren't polluted, then emit a single `#REF!` error token.
@@ -718,7 +800,11 @@ export function tokenize(formula: string): Token[] {
               }
             }
           }
-          tokens.push({ type: TokenType.Error, value: "#REF!" });
+          tokens.push({
+            type: TokenType.Error,
+            value: "#REF!",
+            externalReference: formula.slice(externalStart, i)
+          });
           continue;
         }
         // Not an external ref — fall through to the structured-reference
@@ -897,9 +983,13 @@ export function tokenize(formula: string): Token[] {
       continue;
     }
 
-    // Identifiers: cell refs, function names, booleans, named ranges, sheet refs
-    if (isAlpha(ch) || ch === "$" || ch === "_") {
+    // Identifiers: cell refs, function names, booleans, named ranges, sheet refs. A defined
+    // name may also start with a backslash (Excel: "a letter, an underscore or a backslash").
+    if (isAlpha(ch) || ch === "$" || ch === "_" || ch === "\\") {
       const start = i;
+      if (ch === "\\") {
+        i++;
+      }
 
       // Collect $-prefixed or alpha-numeric identifier
       while (i < len && (isAlphaNumOrUnderscore(formula[i]) || formula[i] === "$")) {
@@ -932,7 +1022,9 @@ export function tokenize(formula: string): Token[] {
       // The fallback path below (RangeRef for `A1:B2`-shaped inputs)
       // still fires when there is NO `!` — the lookahead disambiguates
       // the two cases cleanly.
-      if (i < len && formula[i] === ":") {
+      // A word that follows a sheet prefix is a cell (`Data!$B$2:Data!B4`), never the start of a sheet range.
+      const qualified = tokens[tokens.length - 1]?.type === TokenType.SheetRef;
+      if (!qualified && i < len && formula[i] === ":") {
         const colonPos3D = i;
         let j = i + 1;
         // Collect the second sheet name (alphanumeric + underscore + .)
@@ -1201,8 +1293,19 @@ export function tokenize(formula: string): Token[] {
       continue;
     }
 
-    // Unknown character — skip
-    i++;
+    // `!$A$1` in a defined name: "the sheet the name is used on". It is read as the
+    // unqualified reference, which is how every consumer here resolves it.
+    if (ch === "!" && i + 1 < len && looksLikeCellRefStart(formula, i + 1)) {
+      i++;
+      continue;
+    }
+
+    // A character no formula token starts with. It used to be skipped, so `=1~2` read as two
+    // numbers and `=\\Name` as a different name.
+    throw new FormulaParseError(`Unexpected character ${JSON.stringify(ch)}`, i);
+  }
+  if (spans !== undefined) {
+    closeSpans();
   }
 
   return tokens;

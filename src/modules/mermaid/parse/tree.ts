@@ -7,7 +7,7 @@
  * columns line up again.
  */
 
-import { decodeLabel, splitStatements, linesOf } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, linesOf, splitStatementsAt } from "@mermaid/parse/lex";
 import type {
   GitCommit,
   GitGraphDiagram,
@@ -129,7 +129,9 @@ export function parseGitGraph(source: string): GitGraphDiagram {
     }
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^gitGraph\b/i.test(text)) {
       continue;
     }
@@ -179,7 +181,12 @@ export function parseGitGraph(source: string): GitGraphDiagram {
       });
       continue;
     }
-    // `cherry-pick`, `%%{init}%%` and the accessibility statements carry no geometry here.
+    // The accessibility statements carry no geometry. Anything else — `cherry-pick`
+    // included, which this renderer does not draw — is reported as left out.
+    if (/^(accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
@@ -187,7 +194,8 @@ export function parseGitGraph(source: string): GitGraphDiagram {
     ...(title === undefined ? {} : { title }),
     // A branch nobody committed to would draw an empty lane.
     branches: branches.filter(name => commits.some(commit => commit.branch === name)),
-    commits
+    commits,
+    ...skipped.report()
   };
 }
 

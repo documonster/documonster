@@ -14,7 +14,7 @@
  * - Error handling
  */
 
-import { CsvError } from "@csv/errors";
+import { CsvError, CsvLimitExceededError } from "@csv/errors";
 import { Csv } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
 import type { ChunkMeta, Row } from "@csv/types";
@@ -655,14 +655,14 @@ describe("CsvParserStream - Error Handling", () => {
 });
 
 // =============================================================================
-// Csv.parseRows Streaming Options
+// Csv.parseStream Streaming Options
 // =============================================================================
 
 describe("parseCsvRows - Streaming Options", () => {
   it("should support ltrim in streaming", async () => {
     const input = "  a,  b\n  1,  2";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, { ltrim: true })) {
+    for await (const row of Csv.parseStream(input, { ltrim: true })) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -674,7 +674,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should support rtrim in streaming", async () => {
     const input = "a  ,b  \n1  ,2  ";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, { rtrim: true })) {
+    for await (const row of Csv.parseStream(input, { rtrim: true })) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -686,7 +686,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should support skipRows in streaming", async () => {
     const input = "a,b\n1,2\n3,4\n5,6";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, { headers: true, skipRows: 1 })) {
+    for await (const row of Csv.parseStream(input, { headers: true, skipRows: 1 })) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -698,7 +698,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should support skipEmptyLines in streaming", async () => {
     const input = "a,b\n\n1,2\n\n3,4";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, { skipEmptyLines: true })) {
+    for await (const row of Csv.parseStream(input, { skipEmptyLines: true })) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -711,7 +711,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should support columnMismatch truncate in streaming", async () => {
     const input = "a,b\n1,2,extra";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, {
+    for await (const row of Csv.parseStream(input, {
       headers: true,
       columnMismatch: { less: "error", more: "truncate" }
     })) {
@@ -723,7 +723,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should support dynamicTyping in streaming", async () => {
     const input = "name,age,active\nAlice,30,true\nBob,25,false";
     const rows: Record<string, unknown>[] = [];
-    for await (const row of Csv.parseRows(input, {
+    for await (const row of Csv.parseStream(input, {
       headers: true,
       dynamicTyping: true
     })) {
@@ -738,7 +738,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should handle comment lines in streaming", async () => {
     const input = "a,b\n# comment\n1,2\n# another\n3,4";
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(input, { comment: "#" })) {
+    for await (const row of Csv.parseStream(input, { comment: "#" })) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -751,7 +751,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should handle multiline quoted field in stream", async () => {
     const input = '"line1\nline2\nline3",value\nnormal,row';
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(input)) {
+    for await (const row of Csv.parseStream(input)) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -763,7 +763,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should handle skipEmptyLines greedy mode in streaming", async () => {
     const input = "a,b\n   \t  \nc,d\n\ne,f";
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(input, { skipEmptyLines: "greedy" })) {
+    for await (const row of Csv.parseStream(input, { skipEmptyLines: "greedy" })) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -776,7 +776,7 @@ describe("parseCsvRows - Streaming Options", () => {
   it("should handle maxRowBytes in streaming exactly at limit", async () => {
     const input = "abc,def\n123,456";
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(input, { maxRowBytes: 7 })) {
+    for await (const row of Csv.parseStream(input, { maxRowBytes: 7 })) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -789,7 +789,7 @@ describe("parseCsvRows - Streaming Options", () => {
     const input = "short\nthis_is_a_very_long_row_that_exceeds_limit";
 
     await expect(async () => {
-      for await (const _row of Csv.parseRows(input, { maxRowBytes: 20 })) {
+      for await (const _row of Csv.parseStream(input, { maxRowBytes: 20 })) {
         // Consume the stream
       }
     }).rejects.toThrow("Row exceeds the maximum size of 20 bytes");
@@ -808,11 +808,12 @@ describe("parseCsvRows - Streaming Options", () => {
         }
       }
       const error = await (async () => {
-        for await (const _row of Csv.parseRows(endless(), { maxRowBytes: 100, fastMode })) {
+        for await (const _row of Csv.parseStream(endless(), { maxRowBytes: 100, fastMode })) {
           // consume
         }
       })().catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(CsvError);
+      expect(error).toBeInstanceOf(CsvLimitExceededError);
+      expect(error).toMatchObject({ limit: "maxRowBytes", allowed: 100 });
       expect((error as Error).message).toBe("Row exceeds the maximum size of 100 bytes");
       expect(fed).toBeLessThan(10);
     }
@@ -823,7 +824,7 @@ describe("parseCsvRows - Streaming Options", () => {
     async fastMode => {
       const rows: unknown[] = [];
       const error = await (async () => {
-        for await (const row of Csv.parseRows(
+        for await (const row of Csv.parseStream(
           (async function* () {
             yield `a,b\nc,d\n${fastMode ? "" : '"'}${"x".repeat(200)}`;
           })(),
@@ -842,7 +843,7 @@ describe("parseCsvRows - Streaming Options", () => {
 
   it("keeps a row whose line ending straddles chunks at the limit", async () => {
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(
+    for await (const row of Csv.parseStream(
       (async function* () {
         yield "abcdefg\r";
         yield "\nxy";
@@ -870,7 +871,7 @@ describe("parseCsvRows - Async Iterable Input", () => {
       yield "c\n1,2,3";
     }
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(chunks())) {
+    for await (const row of Csv.parseStream(chunks())) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -886,7 +887,7 @@ describe("parseCsvRows - Async Iterable Input", () => {
       yield "ld\n";
     }
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(chunks())) {
+    for await (const row of Csv.parseStream(chunks())) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([["hello", "world"]]);
@@ -898,7 +899,7 @@ describe("parseCsvRows - Async Iterable Input", () => {
       yield 'world",test\n';
     }
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(chunks())) {
+    for await (const row of Csv.parseStream(chunks())) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([["hello, world", "test"]]);
@@ -910,7 +911,7 @@ describe("parseCsvRows - Async Iterable Input", () => {
       yield 'world""",test\n';
     }
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(chunks())) {
+    for await (const row of Csv.parseStream(chunks())) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([['hello "world"', "test"]]);
@@ -923,7 +924,7 @@ describe("parseCsvRows - Async Iterable Input", () => {
       yield "e,f";
     }
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(chunks())) {
+    for await (const row of Csv.parseStream(chunks())) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -940,7 +941,7 @@ describe("parseCsvRows - Async Iterable Input", () => {
       yield "c,d,e";
     }
     const rows: string[][] = [];
-    for await (const row of Csv.parseRows(chunks())) {
+    for await (const row of Csv.parseStream(chunks())) {
       rows.push(row as string[]);
     }
     expect(rows).toEqual([
@@ -959,7 +960,7 @@ describe("CsvParserStream - info.offset", () => {
     // "a,€\n" is 4 JS characters but 6 UTF-8 bytes.
     const input = "a,€\n1,2\n";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, { info: true })) {
+    for await (const row of Csv.parseStream(input, { info: true })) {
       rows.push(row);
     }
     expect(rows[0].info.offset).toBe(0);
@@ -969,7 +970,7 @@ describe("CsvParserStream - info.offset", () => {
   it("should account for custom lineEnding in fastMode", async () => {
     const input = "a,b||1,2||3,4";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, {
+    for await (const row of Csv.parseStream(input, {
       info: true,
       fastMode: true,
       lineEnding: "||"

@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  *   - browser: `surface/workbook.browser.ts`
  *
  * Regression (#185 follow-up): the named-cell-style functions were added to the
- * Node surface only, so `Workbook.defineCellStyle` was `undefined` at runtime in
+ * Node surface only, so `Workbook.addCellStyle` was `undefined` at runtime in
  * browser/bundler builds even though the types resolved. This test locks the two
  * surfaces together so they can never silently drift again.
  *
@@ -63,11 +63,11 @@ describe("Workbook surface node/browser parity", () => {
 
   it("exposes the full named-cell-style API on both entries", () => {
     for (const fn of [
-      "defineCellStyle",
+      "addCellStyle",
       "getCellStyle",
       "listCellStyles",
       "removeCellStyle",
-      "useBuiltinCellStyle"
+      "useBuiltInCellStyle"
     ]) {
       expect(nodeNames.has(fn), `Node Workbook surface missing "${fn}"`).toBe(true);
       expect(browserNames.has(fn), `browser Workbook surface missing "${fn}"`).toBe(true);

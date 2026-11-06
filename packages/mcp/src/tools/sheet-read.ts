@@ -76,9 +76,9 @@ export const sheetReadTool = defineTool({
     const resolved = await resolveInRoot(config, args.path, { mustExist: true });
     await assertReadableSize(config, resolved, args.path);
 
-    const wb = Workbook.create();
+    let wb: Workbook.Handle;
     try {
-      await Workbook.readFile(wb, resolved);
+      wb = await Workbook.readFile(resolved);
     } catch (cause) {
       throw toolError.unsupported(
         `could not read ${args.path} as a workbook`,
@@ -141,7 +141,7 @@ export const sheetReadTool = defineTool({
       `- mode: ${args.mode ?? "values"}`
     ];
 
-    const merges = Worksheet.mergedRegions(ws);
+    const merges = Worksheet.getMergedRegions(ws);
     if (merges.length > 0) {
       // Merged cells report their value only in the top-left cell, so a model
       // reading a blank neighbour would otherwise conclude the data is missing.

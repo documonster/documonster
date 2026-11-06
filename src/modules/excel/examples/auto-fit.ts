@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 /**
- * Auto-Fit Example: Demonstrates autoFitColumns() and autoFitRows()
+ * Auto-Fit Example: Demonstrates Column.autoFit() and Row.autoFit()
  *
  * Generates 3 xlsx files showcasing different auto-fit scenarios:
- * 1. auto-fit-basic.xlsx      — Mixed content types with autoFitColumns
+ * 1. auto-fit-basic.xlsx      — Mixed content types with Column.autoFit
  * 2. auto-fit-fonts.xlsx      — Different fonts and sizes
  * 3. auto-fit-advanced.xlsx   — Wrap text, multi-line, rich text, merged cells, indent
  */
@@ -28,12 +28,12 @@ async function generateBasic() {
 
   // Header row (bold)
   const headers = ["ID", "Name", "Description", "Amount", "Date", "Active"];
-  const headerRow = Worksheet.addRow(ws, headers);
-  Row.setFont(ws, headerRow.number, { bold: true });
+  const headerRow = Row.add(ws, headers);
+  Row.setFont(ws, headerRow, { bold: true });
 
   // Data rows
-  Worksheet.addRow(ws, [1, "Alice", "Software Engineer", 95000.5, new Date(2024, 0, 15), true]);
-  Worksheet.addRow(ws, [
+  Row.add(ws, [1, "Alice", "Software Engineer", 95000.5, new Date(2024, 0, 15), true]);
+  Row.add(ws, [
     2,
     "Bob",
     "Senior Product Manager with a very long title",
@@ -41,8 +41,8 @@ async function generateBasic() {
     new Date(2024, 5, 1),
     false
   ]);
-  Worksheet.addRow(ws, [3, "Charlie", "QA", 78000.99, new Date(2023, 11, 20), true]);
-  Worksheet.addRow(ws, [
+  Row.add(ws, [3, "Charlie", "QA", 78000.99, new Date(2023, 11, 20), true]);
+  Row.add(ws, [
     4,
     "Diana",
     "VP of Engineering and Operations",
@@ -50,7 +50,7 @@ async function generateBasic() {
     new Date(2024, 2, 10),
     true
   ]);
-  Worksheet.addRow(ws, [5, "Eve", "Intern", 45000, new Date(2024, 8, 1), false]);
+  Row.add(ws, [5, "Eve", "Intern", 45000, new Date(2024, 8, 1), false]);
 
   // Apply number format to Amount column
   Column.setStyle(ws, "D", { numFmt: "#,##0.00" });
@@ -58,7 +58,8 @@ async function generateBasic() {
   Column.setStyle(ws, "E", { numFmt: "yyyy-mm-dd" });
 
   // Auto-fit all columns then all rows
-  Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
+  Column.autoFit(ws);
+  Row.autoFit(ws);
 
   const filePath = `${outDir}/auto-fit-basic.xlsx`;
   await writeBothFormats(wb, filePath);
@@ -110,7 +111,8 @@ async function generateFonts() {
     Cell.setStyle(ws, `B${i}`, { font: Cell.getFont(ws, `A${i}`) });
   }
 
-  Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
+  Column.autoFit(ws);
+  Row.autoFit(ws);
 
   const filePath = `${outDir}/auto-fit-fonts.xlsx`;
   await writeBothFormats(wb, filePath);
@@ -201,11 +203,11 @@ async function generateAdvanced() {
   Column.setWidth(ws, "B", 30);
 
   // Auto-fit columns A and C (skip B since we set it manually for wrap demo)
-  Worksheet.autoFitColumn(ws, "A");
-  Worksheet.autoFitColumn(ws, "C");
+  Column.autoFit(ws, "A");
+  Column.autoFit(ws, "C");
 
   // Auto-fit all rows (this will use column B's width for wrap calculation)
-  Worksheet.autoFitRows(ws);
+  Row.autoFit(ws);
 
   const filePath = `${outDir}/auto-fit-advanced.xlsx`;
   await writeBothFormats(wb, filePath);

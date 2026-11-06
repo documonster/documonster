@@ -243,7 +243,9 @@ describe("formatCsv - RowHashArray Support", () => {
       ]
     ];
     const result = Csv.format(data);
-    expect(result).toBe("Alice,30\nBob,25");
+    // Keyed rows write their keys as the header row by default (this test pinned the old
+    // header-less output, which also read every row in its own key order).
+    expect(result).toBe("name,age\nAlice,30\nBob,25");
   });
 
   it("should format RowHashArray with headers: true", () => {
@@ -312,7 +314,7 @@ describe("formatCsv - RowHashArray Support", () => {
       ]
     ];
     const result = Csv.format(data);
-    expect(result).toBe('"Hello, World","He said ""hi"""');
+    expect(result).toBe('message,note\n"Hello, World","He said ""hi"""');
   });
 
   it("should format empty RowHashArray with writeHeaders: true", () => {

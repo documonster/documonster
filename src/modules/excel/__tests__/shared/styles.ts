@@ -53,7 +53,7 @@ export const borders = {
     top: { style: "double", color: { argb: "FFFF00FF" } },
     left: { style: "double", color: { argb: "FF00FFFF" } },
     bottom: { style: "double", color: { argb: "FF00FF00" } },
-    right: { style: "double", color: { argb: "FF00FF" } },
+    right: { style: "double", color: { argb: "FFFF00FF" } },
     diagonal: { style: "double", color: { argb: "FFFFFF00" }, up: true, down: true }
   }
 };

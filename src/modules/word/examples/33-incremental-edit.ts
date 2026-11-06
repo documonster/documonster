@@ -2,9 +2,9 @@
  * Word Example 33 — Incremental editing
  *
  * Covers:
- *   - listDocxParts — enumerate every part in a .docx without parsing
- *   - readDocxPart — extract one part as raw bytes
- *   - editDocxIncremental with each edit type:
+ *   - Package.listParts — enumerate every part in a .docx without parsing
+ *   - Package.readPart — extract one part as raw bytes
+ *   - Package.edit with each edit type:
  *     · replaceBody (most common) — keeps section properties, swaps body
  *     · replacePart — replace one binary part (e.g. an embedded image)
  *     · replacePartText — replace one XML part (e.g. core props)
@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Build, Document, Package } from "../index";
 import type { BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -40,27 +40,27 @@ Document.addParagraph(seed, "Second paragraph.");
 Document.setHeader(seed, "default", { children: [Build.textParagraph("Header v1")] });
 Document.setFooter(seed, "default", { children: [Build.textParagraph("Footer v1")] });
 Document.setCoreProperties(seed, { title: "Original", creator: "OpenCode" });
-const baseBytes = await Io.toBuffer(Document.build(seed));
+const baseBytes = await Document.toBuffer(seed);
 fs.writeFileSync(path.join(outDir, "00-base.docx"), baseBytes);
 console.log(`  base.docx: ${baseBytes.length} bytes`);
 
 // ---------------------------------------------------------------------------
-// 2. listDocxParts — peek at the package without parsing
+// 2. Package.listParts — peek at the package without parsing
 // ---------------------------------------------------------------------------
-const parts = await Io.listDocxParts(baseBytes);
+const parts = await Package.listParts(baseBytes);
 console.log(`  ${parts.length} parts:`);
 for (const p of parts) {
   console.log(`    · ${p}`);
 }
 
 // ---------------------------------------------------------------------------
-// 3. readDocxPart — read one part's bytes
+// 3. Package.readPart — read one part's bytes
 // ---------------------------------------------------------------------------
-const docXmlBytes = await Io.readDocxPart(baseBytes, "word/document.xml");
+const docXmlBytes = await Package.readPart(baseBytes, "word/document.xml");
 console.log(`  word/document.xml: ${docXmlBytes?.length ?? 0} bytes`);
-const headerBytes = await Io.readDocxPart(baseBytes, "word/header1.xml");
+const headerBytes = await Package.readPart(baseBytes, "word/header1.xml");
 console.log(`  word/header1.xml:  ${headerBytes?.length ?? 0} bytes`);
-const missing = await Io.readDocxPart(baseBytes, "word/no-such-part.xml");
+const missing = await Package.readPart(baseBytes, "word/no-such-part.xml");
 console.log(`  no-such-part:      ${missing === undefined ? "undefined ✓" : "unexpected"}`);
 
 // ---------------------------------------------------------------------------
@@ -71,14 +71,14 @@ const newBody: BodyContent[] = [
   Build.textParagraph("Brand-new first paragraph."),
   Build.textParagraph("Brand-new second paragraph.")
 ];
-const edited1 = await Io.editDocxIncremental(baseBytes, [{ type: "replaceBody", body: newBody }]);
+const edited1 = await Package.edit(baseBytes, [{ type: "replaceBody", body: newBody }]);
 fs.writeFileSync(path.join(outDir, "01-replaced-body.docx"), edited1);
 console.log(`  → 01-replaced-body.docx (${edited1.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // 5. Replace header & footer simultaneously
 // ---------------------------------------------------------------------------
-const edited2 = await Io.editDocxIncremental(baseBytes, [
+const edited2 = await Package.edit(baseBytes, [
   {
     type: "replaceHeader",
     path: "word/header1.xml",
@@ -106,7 +106,7 @@ const newCoreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <dc:creator>Patched creator</dc:creator>
   <cp:lastModifiedBy>Patched modifier</cp:lastModifiedBy>
 </cp:coreProperties>`;
-const edited3 = await Io.editDocxIncremental(baseBytes, [
+const edited3 = await Package.edit(baseBytes, [
   { type: "replacePartText", path: "docProps/core.xml", text: newCoreXml }
 ]);
 fs.writeFileSync(path.join(outDir, "03-replaced-core-props.docx"), edited3);
@@ -115,7 +115,7 @@ console.log(`  → 03-replaced-core-props.docx (${edited3.length} bytes)`);
 // ---------------------------------------------------------------------------
 // 7. Combine multiple edits in one round-trip
 // ---------------------------------------------------------------------------
-const edited4 = await Io.editDocxIncremental(baseBytes, [
+const edited4 = await Package.edit(baseBytes, [
   { type: "replaceBody", body: newBody },
   {
     type: "replaceHeader",
@@ -133,7 +133,7 @@ console.log(`  → 04-combined.docx (${edited4.length} bytes)`);
 //    keeping the part's existing content type so [Content_Types].xml
 //    stays consistent.
 //
-//    NOTE: editDocxIncremental does NOT update [Content_Types].xml for
+//    NOTE: Package.edit does NOT update [Content_Types].xml for
 //    you. Adding a brand-new part type (e.g. injecting docProps/custom.xml
 //    when the base doc has none) requires the caller to also patch the
 //    Content Types — typically easier with the bulk packager workflow.
@@ -142,7 +142,7 @@ const newSettingsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:zoom w:percent="125"/>
 </w:settings>`;
-const edited5 = await Io.editDocxIncremental(baseBytes, [
+const edited5 = await Package.edit(baseBytes, [
   {
     type: "replacePartText",
     path: "word/settings.xml",
@@ -153,5 +153,5 @@ fs.writeFileSync(path.join(outDir, "05-replaced-settings.docx"), edited5);
 console.log(`  → 05-replaced-settings.docx (${edited5.length} bytes)`);
 
 // Edge case: list every part to confirm no new file types were added
-const after = await Io.listDocxParts(edited5);
+const after = await Package.listParts(edited5);
 console.log(`  parts after edit: ${after.length}`);

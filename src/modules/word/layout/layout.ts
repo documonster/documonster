@@ -27,7 +27,10 @@ import {
   isFullWidthCodePoint,
   styledFontVariant
 } from "@utils/font-metrics";
+import { finalizeDocument } from "@word/builder/document-finalize";
+import { withDisplayFields } from "@word/core/field-view";
 import { symbolText } from "@word/core/text-utils";
+import { faceExtents, faceLineHeight } from "@word/layout/font-face";
 import {
   DEFAULT_FONT_SIZE_HALF_PT,
   DEFAULT_PAGE_HEIGHT_TWIPS,
@@ -38,13 +41,17 @@ import {
   SCRIPT_BASELINE_SHIFT_FACTOR,
   SCRIPT_FONT_SIZE_RATIO,
   minimumRowHeightPt,
+  isCellEndAfterNestedTable,
+  nestedTableWidthTwips,
   resolveCellMarginsTwips,
+  gridColumnCount,
   resolveColumnWidthsTwips,
   resolveHeadingScale
 } from "@word/layout/layout-constants";
 import { resolveWordLineMetrics } from "@word/layout/line-metrics";
 import { finalViewRuns, isHiddenRun } from "@word/query/final-view";
-import { openSection } from "@word/query/page-field";
+import { hasFacingPages, openSection } from "@word/query/page-field";
+import type { StyleResolveContext } from "@word/query/style-resolve";
 import { createStyleResolver } from "@word/query/style-resolver";
 import type { StyleResolver } from "@word/query/style-resolver";
 import type {
@@ -57,6 +64,7 @@ import type {
   Paragraph,
   ParagraphChild,
   ParagraphProperties,
+  RangeMarker,
   Run,
   RunProperties,
   SectionColumns,
@@ -83,8 +91,11 @@ export interface LayoutResult {
   /**
    * Whether each body-content item must start a new page regardless of fit.
    *
-   * Set by an explicit page break (`w:pageBreakBefore`, a `w:br` of type
-   * `page`) or a section break. The positioner re-flows content to its own
+   * Set by `w:pageBreakBefore` and a leading `w:br` of type `page`. A paragraph
+   * holding nothing but a page break is not set: Word keeps its mark with the
+   * break, so it ends its page and the next item starts the next one (the
+   * positioner sees the break on its last line). A section break shows in
+   * `contentSections`. The positioner re-flows content to its own
    * measurements, so it needs to tell "the estimate ran out of room here" —
    * which it may legitimately disagree with — from "the document demands a
    * break here", which it must honour.
@@ -94,15 +105,19 @@ export interface LayoutResult {
 
 /** Layout options. */
 export interface LayoutOptions {
-  /** Default font size in half-points; defaults to 22 (= 11pt, Word's default). */
+  /**
+   * Default font size in **half-points**; defaults to 22 (= 11pt, Word's
+   * default). Note the unit: `Pdf.fromDocx`'s `defaultFontSize` is in points.
+   */
   readonly defaultFontSize?: number;
   /** Estimated characters per line (used for line-height math); defaults to 80. */
   readonly defaultCharsPerLine?: number;
   /** Average character width in twips; derived from a 12pt font by default. */
   readonly averageCharWidth?: number;
   /**
-   * Optional text measurement function for precise layout.
-   * Should return the width of the text in points.
+   * Optional text measurement function for precise layout. It is given the
+   * font size in **points** (not half-points) and should return the width of
+   * the text in points.
    * Uses heuristic character-count estimation if not provided.
    *
    * @example
@@ -204,12 +219,12 @@ let activeStyleCache: Map<Paragraph, ResolvedParagraph> | undefined;
 let activeStyles: StyleResolver | undefined;
 
 /** Effective properties and visible runs for `para` in the active layout. */
-function resolved(para: Paragraph): ResolvedParagraph {
+function resolved(para: Paragraph, context?: StyleResolveContext): ResolvedParagraph {
   const styles = activeStyles!;
   const cache = activeStyleCache!;
   let hit = cache.get(para);
   if (!hit) {
-    const style = styles.paragraph(para);
+    const style = styles.paragraph(para, context);
     const runProperties = style.runProperties;
     const runs: LayoutRun[] = [];
     for (const run of finalViewRuns(para.children)) {
@@ -279,9 +294,11 @@ function computeAvailableWidth(sp: SectionProperties | undefined): number {
  * same natural height from the same font size.
  * halfPt 22 (11pt) → 13.2pt = 264 twips.
  */
-function baseLineHeight(fontSizeHalfPt: number): number {
+function baseLineHeight(fontSizeHalfPt: number, fontName = "Calibri"): number {
   const ptSize = fontSizeHalfPt / 2;
-  return Math.round(ptSize * LINE_HEIGHT_FACTOR * 20); // pt → twips: ×20
+  // The face's own line, as the positioned pass sets it (see `font-face`).
+  const single = faceLineHeight(fontName, ptSize) ?? ptSize * LINE_HEIGHT_FACTOR;
+  return Math.round(single * 20); // pt → twips: ×20
 }
 
 /**
@@ -290,8 +307,12 @@ function baseLineHeight(fontSizeHalfPt: number): number {
  * - exact:   value is the height in twips
  * - atLeast: value is a floor in twips — max(value, baseLine)
  */
-function computeLineHeight(spacing: LineSpacing | undefined, fontSizeHalfPt: number): number {
-  const baseLine = baseLineHeight(fontSizeHalfPt);
+function computeLineHeight(
+  spacing: LineSpacing | undefined,
+  fontSizeHalfPt: number,
+  fontName?: string
+): number {
+  const baseLine = baseLineHeight(fontSizeHalfPt, fontName);
 
   if (!spacing?.line) {
     return baseLine;
@@ -625,13 +646,7 @@ function collectRunTokens(run: Run, tokens: LayoutToken[]): void {
   for (const item of run.content) {
     switch (item.type) {
       case "text": {
-        // Split text into word tokens at break opportunities
-        const words = splitIntoWords(item.text);
-        for (const word of words) {
-          if (word.length > 0) {
-            tokens.push({ type: "word", width: getEffectiveTextWidth(word) });
-          }
-        }
+        pushWordTokens(item.text, tokens);
         break;
       }
       case "tab":
@@ -654,11 +669,7 @@ function collectRunTokens(run: Run, tokens: LayoutToken[]): void {
         break;
       }
       case "field":
-        for (const word of splitIntoWords(item.cachedValue ?? "")) {
-          if (word.length > 0) {
-            tokens.push({ type: "word", width: getEffectiveTextWidth(word) });
-          }
-        }
+        pushWordTokens(item.cachedValue ?? "", tokens);
         break;
       case "noBreakHyphen":
         tokens.push({ type: "word", width: 1 });
@@ -670,48 +681,33 @@ function collectRunTokens(run: Run, tokens: LayoutToken[]): void {
 }
 
 /**
- * Split text into words at break opportunities.
- * Break opportunities: after space, after hyphen, between CJK characters.
- * Spaces are included with the preceding word (trailing space model).
+ * Push a word token for each word of `text`, split at break opportunities:
+ * after a space or hyphen (kept with the word before it — the trailing-space
+ * model) and around each CJK character, which breaks on its own.
  */
-function splitIntoWords(text: string): string[] {
-  const words: string[] = [];
-  let current = "";
-
+function pushWordTokens(text: string, tokens: LayoutToken[]): void {
+  let width = 0;
   for (let i = 0; i < text.length; i++) {
     const code = text.codePointAt(i)!;
-    const ch = String.fromCodePoint(code);
     if (code > 0xffff) {
       i++; // Skip surrogate pair low half
     }
-
-    if (code === 0x20 || code === 0x0a) {
-      // Space — attach to current word and break after
-      current += ch;
-      words.push(current);
-      current = "";
-    } else if (code === 0x2d || code === 0x2010 || code === 0x2011) {
-      // Hyphen — break after hyphen
-      current += ch;
-      words.push(current);
-      current = "";
+    if (code === 0x20 || code === 0x0a || code === 0x2d || code === 0x2010 || code === 0x2011) {
+      tokens.push({ type: "word", width: width + 1 });
+      width = 0;
     } else if (isCjkChar(code)) {
-      // CJK characters: each is its own break opportunity
-      if (current.length > 0) {
-        words.push(current);
-        current = "";
+      if (width > 0) {
+        tokens.push({ type: "word", width });
+        width = 0;
       }
-      words.push(ch);
+      tokens.push({ type: "word", width: 2 });
     } else {
-      current += ch;
+      width++;
     }
   }
-
-  if (current.length > 0) {
-    words.push(current);
+  if (width > 0) {
+    tokens.push({ type: "word", width });
   }
-
-  return words;
 }
 
 /**
@@ -913,6 +909,13 @@ function hasLeadingPageBreak(runs: readonly LayoutRun[]): boolean {
   return false;
 }
 
+/** Whether the paragraph holds nothing but breaks (and empty text). */
+function holdsOnlyBreaks(runs: readonly LayoutRun[]): boolean {
+  return runs.every(({ run }) =>
+    run.content.every(item => item.type === "break" || (item.type === "text" && item.text === ""))
+  );
+}
+
 /** Whether any run in the paragraph contains a column break. */
 function hasColumnBreakInRuns(runs: readonly LayoutRun[]): boolean {
   for (const { run } of runs) {
@@ -946,10 +949,11 @@ function estimateParagraphHeight(
   defaultCharsPerLine: number,
   averageCharWidth: number,
   measureTextFn?: (text: string, fontName: string, fontSize: number) => number,
-  measureTextMetricsFn?: LayoutOptions["measureTextMetrics"]
+  measureTextMetricsFn?: LayoutOptions["measureTextMetrics"],
+  context?: StyleResolveContext
 ): number {
   // Effective properties — style chain included. See `resolved`.
-  const res = resolved(para);
+  const res = resolved(para, context);
   const props = res.properties;
   const spacing = props?.spacing;
   const inheritedSize = inheritedFontSize(res, defaultFontSize);
@@ -992,7 +996,7 @@ function estimateParagraphHeight(
   // `w:sz`, but the runs are still measured — and therefore still wrapped — at
   // their own size. Scaling the width too turned a one-line heading into two and
   // over-reserved by 1.8×, which is as wrong for `NUMPAGES` as under-reserving.
-  const lineHeight = computeLineHeight(spacing, fontSize) * headingScale;
+  const lineHeight = computeLineHeight(spacing, fontSize, inheritedFont) * headingScale;
 
   // Check if inline images increase the effective line height
   const imgMaxHeight = getInlineImageMaxHeight(res.runs);
@@ -1003,7 +1007,8 @@ function estimateParagraphHeight(
     lineHeight,
     imgMaxHeight,
     spacing?.lineRule === "exact",
-    measureTextMetricsFn
+    measureTextMetricsFn,
+    headingScale
   );
 
   // Line count
@@ -1064,23 +1069,26 @@ function estimateParagraphLineHeight(
   nominalHeightTwips: number,
   imageHeightTwips: number,
   exact: boolean,
-  measureTextMetricsFn: LayoutOptions["measureTextMetrics"]
+  measureTextMetricsFn: LayoutOptions["measureTextMetrics"],
+  headingScale = 1
 ): number {
   let ascent = 0;
   let descent = 0;
   for (const { run, props } of runs) {
     const text = getRunText(run);
-    const fontSize = getRunLayoutFontSizePt(props, inheritedSizeHalfPt);
+    // Drawn at the heading scale, as the positioned pass sets it.
+    const fontSize = getRunLayoutFontSizePt(props, inheritedSizeHalfPt) * headingScale;
     const metrics = measureRunMetricsByScript(
       text,
       props,
       inheritedFont,
       fontSize,
       measureTextMetricsFn ??
-        ((t, font, size, bold, italic) => ({
-          ascent: getFontAscent(styledFontVariant(font, bold, italic), size),
-          descent: getFontDescent(styledFontVariant(font, bold, italic), size)
-        }))
+        ((t, font, size, bold, italic) =>
+          faceExtents(font, size, bold) ?? {
+            ascent: getFontAscent(styledFontVariant(font, bold, italic), size),
+            descent: getFontDescent(styledFontVariant(font, bold, italic), size)
+          })
     );
     const shift =
       props?.vertAlign === "superscript"
@@ -1127,31 +1135,45 @@ function estimateRowHeight(
 
   // Calculate the maximum content height across all cells in this row
   const colCount = row.cells.length;
+  const gridCols = gridColumnCount(table);
   // Scaled to the measure, like the positioned pass: `w:tblGrid` is advisory, and a
   // grid wider than the page is shrunk to fit. Using the declared twips as-is
   // estimated a table from the Excel or HTML bridge with columns twice their drawn
   // width — half the wrapped lines, and a page count short of the truth.
-  const colWidths = resolveColumnWidthsTwips(table, colCount, availableWidth);
+  const tableProperties = activeStyles!.tableProperties(table);
+  const colWidths = resolveColumnWidthsTwips(
+    tableProperties === table.properties ? table : { ...table, properties: tableProperties },
+    gridCols,
+    availableWidth
+  );
 
   let maxCellHeight = 0;
+  let gridCol = row.properties?.gridBefore ?? 0;
   for (let c = 0; c < colCount; c++) {
     const cell = row.cells[c];
     const gridSpan = cell.properties?.gridSpan ?? 1;
     let cellWidth = 0;
-    for (let g = 0; g < gridSpan && c + g < colWidths.length; g++) {
-      cellWidth += colWidths[c + g];
+    for (let g = 0; g < gridSpan && gridCol + g < colWidths.length; g++) {
+      cellWidth += colWidths[gridCol + g];
     }
 
     // Inset by the cell's effective margins (`w:tcMar` → `w:tblCellMar` →
     // Word's defaults). Hardcoding the defaults here ignored any table that
     // declared its own, so this estimate and the positioner disagreed about both
     // the wrap width and the row height.
-    const cellMargins = resolveCellMarginsTwips(table.properties, cell.properties);
+    const cellMargins = resolveCellMarginsTwips(tableProperties, cell.properties);
+    // Its paragraphs resolve in the table's style, as in the positioned pass.
+    const context = activeStyles!.cellContext(table, rowIndex, gridCol, colWidths.length);
+    gridCol += gridSpan;
     const cellContentWidth = Math.max(1, cellWidth - cellMargins.left - cellMargins.right);
 
     // Calculate height of cell content (paragraphs + nested tables)
     let cellHeight = 0;
-    for (const content of cell.content) {
+    for (let k = 0; k < cell.content.length; k++) {
+      const content = cell.content[k]!;
+      if (isCellEndAfterNestedTable(cell.content, k)) {
+        continue;
+      }
       if (content.type === "paragraph") {
         cellHeight += estimateParagraphHeight(
           content,
@@ -1160,13 +1182,20 @@ function estimateRowHeight(
           defaultCharsPerLine,
           averageCharWidth,
           measureTextFn,
-          measureTextMetricsFn
+          measureTextMetricsFn,
+          context
         );
       } else if (content.type === "table") {
+        const nestedProperties = activeStyles!.tableProperties(content);
         cellHeight += estimateTableHeight(
           content,
           defaultFontSize,
-          cellContentWidth,
+          nestedTableWidthTwips(
+            nestedProperties,
+            content.columnWidths,
+            cellContentWidth,
+            tableProperties?.layout === "fixed"
+          ) ?? cellContentWidth,
           defaultCharsPerLine,
           averageCharWidth,
           measureTextFn,
@@ -1189,7 +1218,7 @@ function estimateRowHeight(
 
   // Minimum height: one line plus the table's own cell margins, from the same
   // function the positioned pass uses.
-  const minHeight = minimumRowHeightPt(table.properties, defaultFontSize / 2) * 20;
+  const minHeight = minimumRowHeightPt(tableProperties, defaultFontSize / 2) * 20;
   return Math.max(minHeight, maxCellHeight);
 }
 
@@ -1269,7 +1298,7 @@ function computeColumnWidth(availableWidth: number, columns: SectionColumns | un
 
 /** Collect the bookmarks declared in a paragraph. */
 function collectBookmarks(
-  children: readonly ParagraphChild[],
+  children: readonly (ParagraphChild | RangeMarker)[],
   currentPage: number,
   bookmarkPages: Map<string, number>
 ): void {
@@ -1285,6 +1314,34 @@ function collectBookmarks(
   }
 }
 
+/** Collect the bookmarks a table declares, in its paragraphs and between its rows and cells. */
+function collectTableBookmarks(
+  table: Table,
+  currentPage: number,
+  bookmarkPages: Map<string, number>
+): void {
+  const markers = (list: readonly RangeMarker[] | undefined): void => {
+    if (list) {
+      collectBookmarks(list, currentPage, bookmarkPages);
+    }
+  };
+  for (const row of table.rows) {
+    markers(row.rangeMarkersBefore);
+    for (const cell of row.cells) {
+      markers(cell.rangeMarkersBefore);
+      for (const block of cell.content) {
+        if (block.type === "paragraph") {
+          collectBookmarks(block.children, currentPage, bookmarkPages);
+        } else {
+          collectTableBookmarks(block, currentPage, bookmarkPages);
+        }
+      }
+    }
+    markers(row.rangeMarkersAfter);
+  }
+  markers(table.rangeMarkersAfter);
+}
+
 // =============================================================================
 // Main Layout Function
 // =============================================================================
@@ -1294,6 +1351,7 @@ function collectBookmarks(
  * Returns the page each body-content item lands on, plus the total page count.
  */
 export function layoutDocument(doc: DocxDocument, options?: LayoutOptions): LayoutResult {
+  doc = withDisplayFields(finalizeDocument(doc));
   // Paginating must see the same effective properties the renderer sees, so
   // style resolution is active for the whole call. See `resolved`.
   const previousStyles = activeStyles;
@@ -1394,7 +1452,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
       case "nextPage":
       case "evenPage":
       case "oddPage": {
-        const opening = openSection(shownPage, nextProps);
+        const opening = openSection(shownPage, nextProps, hasFacingPages(doc));
         newPage();
         if (opening.blankPage) {
           newPage();
@@ -1557,9 +1615,38 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
   // Walk the body content.
   // =========================================================================
 
+  // Bookmarks started between blocks: they belong to the page the next block starts on.
+  let pendingBookmarks: string[] = [];
+  const flushPendingBookmarks = (page: number): void => {
+    for (const name of pendingBookmarks) {
+      bookmarkPages.set(name, page);
+    }
+    pendingBookmarks = [];
+  };
+
   for (let i = 0; i < body.length; i++) {
     const item = body[i];
+    for (const marker of item.rangeMarkersBefore ?? []) {
+      if (marker.type === "bookmarkStart") {
+        pendingBookmarks.push(marker.name);
+      }
+    }
+    if (pendingBookmarks.length > 0) {
+      const before = contentPages.length;
+      layoutItem(item, i);
+      flushPendingBookmarks(contentPages[before] ?? currentPage);
+    } else {
+      layoutItem(item, i);
+    }
+  }
+  for (const marker of doc.bodyRangeMarkersAfter ?? []) {
+    if (marker.type === "bookmarkStart") {
+      pendingBookmarks.push(marker.name);
+    }
+  }
+  flushPendingBookmarks(currentPage);
 
+  function layoutItem(item: BodyContent, i: number): void {
     switch (item.type) {
       case "paragraph": {
         const para = item;
@@ -1592,7 +1679,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
           handleParagraphLayout(para, paraHeight, i, body);
           contentPages.push(currentPage);
           contentSections.push(currentSection);
-          forcedBreakBefore.push(breaksBefore);
+          forcedBreakBefore.push(breaksBefore && !holdsOnlyBreaks(resolved(para).runs));
 
           // Then open the next section.
           newSection(findNextSectionProps(body, i + 1) ?? doc.sectionProperties);
@@ -1638,11 +1725,14 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
 
         contentPages.push(currentPage);
         contentSections.push(currentSection);
-        forcedBreakBefore.push(wantsPageBreak);
+        // A paragraph holding nothing but a page break ends the page and
+        // starts none: its mark stays with the break (see `forcedBreakBefore`).
+        forcedBreakBefore.push(wantsPageBreak && !holdsOnlyBreaks(resolved(para).runs));
         break;
       }
 
       case "table": {
+        collectTableBookmarks(item, currentPage, bookmarkPages);
         const tableStartPage = currentPage;
         layoutTable(item);
         contentPages.push(tableStartPage);
@@ -1721,7 +1811,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
       inheritedSize,
       paragraphMarkFontSize(props, inheritedSize)
     );
-    const lineHeight = computeLineHeight(spacing, fontSize);
+    const lineHeight = computeLineHeight(spacing, fontSize, inheritedFont);
 
     // Line count for the paragraph (CJK-aware).
     let lineCount: number;

@@ -165,9 +165,9 @@ describe("tryParseDate", () => {
     it("parses YYYY-MM-DD format", () => {
       const date = tryParseDate("2024-01-15");
       expect(date).toBeInstanceOf(Date);
-      expect(date!.getFullYear()).toBe(2024);
-      expect(date!.getMonth()).toBe(0); // January
-      expect(date!.getDate()).toBe(15);
+      expect(date!.getUTCFullYear()).toBe(2024);
+      expect(date!.getUTCMonth()).toBe(0); // January; a date-only value is UTC midnight
+      expect(date!.getUTCDate()).toBe(15);
     });
 
     it("parses YYYY-MM-DDTHH:mm:ss format", () => {
@@ -352,21 +352,21 @@ describe("applyDynamicTypingToRow", () => {
   describe("with castDate", () => {
     it("parses dates when castDate=true", () => {
       const row = { date: "2024-01-15", name: "Event" };
-      const result = applyDynamicTypingToRow(row, false, true);
+      const result = applyDynamicTypingToRow(row, false, { castDate: true });
       expect(result.date).toBeInstanceOf(Date);
       expect(result.name).toBe("Event");
     });
 
     it("parses dates for specified columns only", () => {
       const row = { created: "2024-01-15", note: "2024-01-15" };
-      const result = applyDynamicTypingToRow(row, false, ["created"]);
+      const result = applyDynamicTypingToRow(row, false, { castDate: ["created"] });
       expect(result.created).toBeInstanceOf(Date);
       expect(result.note).toBe("2024-01-15");
     });
 
     it("combines with dynamicTyping", () => {
       const row = { date: "2024-01-15", count: "42", active: "true" };
-      const result = applyDynamicTypingToRow(row, true, true);
+      const result = applyDynamicTypingToRow(row, true, { castDate: true });
       expect(result.date).toBeInstanceOf(Date);
       expect(result.count).toBe(42);
       expect(result.active).toBe(true);

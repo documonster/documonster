@@ -24,8 +24,8 @@
  * sample is not an establishment.
  */
 import type { Margins, PageSetup } from "@excel/types";
-import { COLUMN_WIDTH_UNITS, TWIPS_PER_POINT } from "@excel/xlsb/binary";
-import { BinaryReader, BinaryWriter } from "@utils/binary";
+import { COLUMN_WIDTH_UNITS, TWIPS_PER_POINT, XlsbReader } from "@excel/xlsb/binary";
+import { BinaryWriter } from "@utils/binary";
 
 /** Bytes in a `BrtMargins`. Six `float64`s. */
 const MARGINS_SIZE = 48;
@@ -45,7 +45,7 @@ export function readMargins(payload: Uint8Array, part: string): Margins | undefi
   if (payload.length < MARGINS_SIZE) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   return {
     left: reader.readFloat64(),
     right: reader.readFloat64(),
@@ -107,7 +107,7 @@ export function readPageSetup(payload: Uint8Array, part: string): ReadPageSetup 
   if (payload.length < 34) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const paperSize = reader.readUint32();
   const scale = reader.readUint32();
   const horizontalDpi = reader.readUint32();
@@ -227,7 +227,7 @@ export function readSheetFormatInfo(
   if (payload.length < 8) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const dxGCol = reader.readUint32();
   const cchDefColWidth = reader.readUint16();
   const rowHeightTwips = reader.readUint16();

@@ -4,8 +4,10 @@
  * Covers:
  *   1. Sign a new PDF with PdfDocumentBuilder.sign()
  *   2. Sign an existing PDF with PdfEditor.sign()
- *   3. Verify a signature with Pdf.verifySignature()
+ *   3. Find and verify every signature with Pdf.verifySignatures()
  *   4. Tamper detection — modified PDF fails verification
+ *   5. An unsigned update after signing — still intact, no longer the whole file
+ *   6. Low-level: verify one signature with Pdf.Signature.verify()
  *
  * Run: pnpm example --filter pdf-signatures
  */
@@ -62,13 +64,18 @@ const { certificate, privateKey } = await generateSelfSignedCertificate("Example
     location: "San Francisco, CA"
   });
 
-  const signedPdf = await doc.build();
+  const signedPdf = await doc.toBuffer();
   fs.writeFileSync(path.join(outDir, "01-builder-signed.pdf"), signedPdf);
   console.log(`   Output: 01-builder-signed.pdf (${signedPdf.length} bytes)`);
 
-  // Verify it
-  const verification = await verifyFromPdf(signedPdf);
-  console.log(`   Valid: ${verification.valid}`);
+  // Verify it: every signature field in the file, each with its own report
+  const [verification] = await Pdf.verifySignatures(signedPdf);
+  // `intact` is integrity only: the bytes are unchanged and the signature matches the
+  // certificate it carries. Whether to trust that certificate — and so the name in it —
+  // is for your own trust store to decide; `verification.certificate` is the DER to check.
+  console.log(`   Field: ${verification.fieldName}, claimed signer: ${verification.claimedSigner}`);
+  console.log(`   Name: ${verification.name}, reason: ${verification.reason}`);
+  console.log(`   Intact: ${verification.intact}`);
   console.log(`   Covers whole file: ${verification.coversWholeFile}`);
 }
 
@@ -85,12 +92,12 @@ const { certificate, privateKey } = await generateSelfSignedCertificate("Example
   page.drawText("Invoice #12345", { x: 72, y: 750, fontSize: 20, bold: true });
   page.drawText("Amount: $1,500.00", { x: 72, y: 720, fontSize: 14 });
   page.drawText("Due: 2026-05-01", { x: 72, y: 700, fontSize: 12 });
-  const unsignedPdf = await doc.build();
+  const unsignedPdf = await doc.toBuffer();
   fs.writeFileSync(path.join(outDir, "02-unsigned.pdf"), unsignedPdf);
   console.log(`   Unsigned: 02-unsigned.pdf (${unsignedPdf.length} bytes)`);
 
   // Load and sign — one method call
-  const editor = Pdf.Editor.load(unsignedPdf);
+  const editor = Pdf.Editor.read(unsignedPdf);
   const signedPdf = await editor.sign({
     certificate,
     privateKey,
@@ -100,8 +107,8 @@ const { certificate, privateKey } = await generateSelfSignedCertificate("Example
   fs.writeFileSync(path.join(outDir, "02-editor-signed.pdf"), signedPdf);
   console.log(`   Signed:   02-editor-signed.pdf (${signedPdf.length} bytes)`);
 
-  const verification = await verifyFromPdf(signedPdf);
-  console.log(`   Valid: ${verification.valid}`);
+  const [verification] = await Pdf.verifySignatures(signedPdf);
+  console.log(`   Intact: ${verification.intact}`);
   console.log(`   Covers whole file: ${verification.coversWholeFile}`);
 }
 
@@ -115,18 +122,18 @@ const { certificate, privateKey } = await generateSelfSignedCertificate("Example
   const doc = new Pdf.Builder();
   doc.addPage().drawText("Tamper test", { x: 72, y: 750, fontSize: 16 });
   doc.sign({ certificate, privateKey, name: "Security Test" });
-  const signedPdf = await doc.build();
+  const signedPdf = await doc.toBuffer();
 
   // Verify original — should pass
-  const original = await verifyFromPdf(signedPdf);
-  console.log(`   Original: valid=${original.valid}`);
+  const [original] = await Pdf.verifySignatures(signedPdf);
+  console.log(`   Original: intact=${original.intact}`);
 
   // Tamper with a byte and verify — should fail
   const tampered = new Uint8Array(signedPdf);
   tampered[50] = tampered[50] ^ 0xff;
-  const tamperedResult = await verifyFromPdf(tampered);
-  console.log(`   Tampered: valid=${tamperedResult.valid}`);
-  console.log(`   Reason:   ${tamperedResult.reason}`);
+  const [tamperedResult] = await Pdf.verifySignatures(tampered);
+  console.log(`   Tampered: intact=${tamperedResult.intact}`);
+  console.log(`   Failure:  ${tamperedResult.failure}`);
 }
 
 // =============================================================================
@@ -139,9 +146,9 @@ const { certificate, privateKey } = await generateSelfSignedCertificate("Example
   const doc = new Pdf.Builder();
   doc.addPage().drawText("Document with signature field", { x: 72, y: 750, fontSize: 14 });
   doc.sign({ certificate, privateKey, name: "Reader Test" });
-  const signedPdf = await doc.build();
+  const signedPdf = await doc.toBuffer();
 
-  const result = await Pdf.read(signedPdf);
+  const result = await Pdf.extract(signedPdf);
   const sigField = result.formFields.find(f => f.type === "signature");
   console.log(`   Form fields: ${result.formFields.length}`);
   console.log(`   Signature field found: ${sigField !== undefined}`);
@@ -150,29 +157,48 @@ const { certificate, privateKey } = await generateSelfSignedCertificate("Example
   }
 }
 
-console.log(`\nAll examples written to: ${outDir}`);
-
 // =============================================================================
-// Helper: Extract and verify signature from PDF bytes
+// 5. An Unsigned Update After Signing
 // =============================================================================
 
-async function verifyFromPdf(pdf: Uint8Array) {
-  const text = new TextDecoder().decode(pdf);
+{
+  console.log("\n5. Incremental update after signing:");
 
-  const contentsMatch = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/);
-  if (!contentsMatch) {
-    return { valid: false, coversWholeFile: false, digestAlgorithm: "", reason: "No /Contents" };
-  }
+  const doc = new Pdf.Builder();
+  doc.addPage().drawText("Signed, then annotated", { x: 72, y: 750, fontSize: 14 });
+  doc.sign({ certificate, privateKey, name: "Revision Test" });
+  const signedPdf = await doc.toBuffer();
 
-  const brMatch = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
-  if (!brMatch) {
-    return { valid: false, coversWholeFile: false, digestAlgorithm: "", reason: "No /ByteRange" };
-  }
+  // An incremental update leaves the signed bytes alone, so the signature still holds —
+  // but it covers the revision it signed, not the annotation appended after it.
+  const editor = Pdf.Editor.read(signedPdf);
+  editor.getPage(0).drawText("Received", { x: 72, y: 700, fontSize: 12 });
+  const updated = await editor.toBuffer({ incremental: true });
+  fs.writeFileSync(path.join(outDir, "05-signed-then-updated.pdf"), updated);
 
-  return Pdf.verifySignature(pdf, contentsMatch[1], [
-    parseInt(brMatch[1]),
-    parseInt(brMatch[2]),
-    parseInt(brMatch[3]),
-    parseInt(brMatch[4])
-  ]);
+  const [report] = await Pdf.verifySignatures(updated);
+  console.log(`   Intact: ${report.intact}`);
+  console.log(`   Covers whole file: ${report.coversWholeFile}`);
 }
+
+// =============================================================================
+// 6. Low-level: Verify One Signature
+// =============================================================================
+
+{
+  console.log("\n6. Pdf.Signature.verify with a known /ByteRange:");
+
+  const doc = new Pdf.Builder();
+  doc.addPage().drawText("Low-level verification", { x: 72, y: 750, fontSize: 14 });
+  doc.sign({ certificate, privateKey, name: "Low Level" });
+  const signedPdf = await doc.toBuffer();
+
+  // `verifySignatures` locates the dictionary for you; `Signature.verify` takes the
+  // pieces directly — here, the hex string sitting in the gap between the two ranges.
+  const [{ byteRange }] = await Pdf.verifySignatures(signedPdf);
+  const gap = signedPdf.subarray(byteRange[0] + byteRange[1] + 1, byteRange[2] - 1);
+  const result = await Pdf.Signature.verify(signedPdf, new TextDecoder().decode(gap), byteRange);
+  console.log(`   Intact: ${result.intact}`);
+}
+
+console.log(`\nAll examples written to: ${outDir}`);

@@ -2,7 +2,10 @@
  * Encryption-related types and utilities for ZIP files.
  */
 
-import type { AesKeyStrength } from "@archive/crypto/aes";
+import { ArchiveArgumentError } from "@archive/core/errors";
+import type { AesKeyStrength } from "@archive/crypto/aes-format";
+import { checkKeyStrength } from "@archive/crypto/aes-format";
+import { describeValue } from "@utils/describe-value";
 
 /**
  * Encryption method used for a ZIP entry.
@@ -72,6 +75,16 @@ const ENCRYPTION_METHOD_FROM_STRENGTH: Record<AesKeyStrength, ZipEncryptionMetho
  * Get encryption method display name.
  */
 export function getEncryptionMethodName(method: ZipEncryptionMethod): string {
+  if (typeof method !== "string" || !Object.hasOwn(ENCRYPTION_METHOD_NAMES, method)) {
+    throw new ArchiveArgumentError(
+      "method",
+      `Archive.Crypto.getEncryptionMethodName: method must be one of ${Object.keys(
+        ENCRYPTION_METHOD_NAMES
+      )
+        .map(name => JSON.stringify(name))
+        .join(", ")}, got ${describeValue(method)}`
+    );
+  }
   return ENCRYPTION_METHOD_NAMES[method];
 }
 
@@ -79,19 +92,20 @@ export function getEncryptionMethodName(method: ZipEncryptionMethod): string {
  * Check if encryption method is AES-based.
  */
 export function isAesEncryption(method: ZipEncryptionMethod): boolean {
-  return method in AES_KEY_STRENGTHS;
+  return typeof method === "string" && Object.hasOwn(AES_KEY_STRENGTHS, method);
 }
 
 /**
  * Get AES key strength from encryption method.
  */
 export function getAesKeyStrength(method: ZipEncryptionMethod): AesKeyStrength | undefined {
-  return AES_KEY_STRENGTHS[method];
+  return isAesEncryption(method) ? AES_KEY_STRENGTHS[method] : undefined;
 }
 
 /**
  * Get encryption method from AES key strength.
  */
 export function encryptionMethodFromAesKeyStrength(strength: AesKeyStrength): ZipEncryptionMethod {
+  checkKeyStrength("Archive.Crypto.getEncryptionMethodForAesKeyStrength", strength, "strength");
   return ENCRYPTION_METHOD_FROM_STRENGTH[strength];
 }

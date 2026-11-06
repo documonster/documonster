@@ -11,7 +11,7 @@
  * - Chrome < 103
  */
 
-import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitExceededError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 import { assertLimitOption } from "@utils/limits";
 
@@ -236,7 +236,7 @@ class BitReader {
  *
  * @param data - Compressed data in deflate-raw format
  * @param maxOutputLength - Optional output bound; decoding stops with a
- *   `ArchiveLimitError` before the output buffer grows past it
+ *   `ArchiveLimitExceededError` before the output buffer grows past it
  * @returns Decompressed data
  */
 export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Array {
@@ -256,7 +256,7 @@ export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Arr
   const ensureCapacity = (additional: number): void => {
     const required = outLen + additional;
     if (required > limit) {
-      throw new ArchiveLimitError("maxOutputLength", limit);
+      throw new ArchiveLimitExceededError("maxOutputLength", limit);
     }
     if (required <= output.length) {
       return;
@@ -361,12 +361,24 @@ export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Arr
           // End of block
           break;
         } else {
-          // Length/distance pair
+          // Length/distance pair. Codes 286-287 and distance codes 30-31 have no meaning
+          // (RFC 1951 §3.2.6), and neither has an entry in the tables below: looking one up
+          // reads `undefined` extra bits, which turns the bit counter into NaN, after which
+          // no read consumes input and the block decodes forever.
           const lengthCode = symbol - 257;
+          if (lengthCode >= LENGTH_BASE.length) {
+            throw new ArchiveError(`Invalid DEFLATE length code: ${symbol}`);
+          }
           const length = LENGTH_BASE[lengthCode] + reader.readBits(LENGTH_EXTRA[lengthCode]);
 
           const distCode = reader.decodeSymbol(distanceTree);
+          if (distCode >= DISTANCE_BASE.length) {
+            throw new ArchiveError(`Invalid DEFLATE distance code: ${distCode}`);
+          }
           const distance = DISTANCE_BASE[distCode] + reader.readBits(DISTANCE_EXTRA[distCode]);
+          if (distance > outLen) {
+            throw new ArchiveError("Invalid DEFLATE distance too far back");
+          }
 
           // Copy from output buffer. Overlapping copies (distance < length) are
           // intentional and must be done byte-by-byte so repeated runs expand

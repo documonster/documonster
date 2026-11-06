@@ -13,11 +13,15 @@
  * - Options control which parts of the document are visited
  */
 
-import { isRun } from "@word/core/text-utils";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle } from "@word/core/argument-checks";
+import { w } from "@word/core/option-schema";
+import { hyperlinkContent, isRangeMarker, isRun } from "@word/core/text-utils";
 import type {
   DocxDocument,
   BodyContent,
   Paragraph,
+  RangeMarker,
   ParagraphChild,
   Run,
   RunContent,
@@ -36,6 +40,7 @@ import type {
   BookmarkStart,
   CommentRangeStart,
   CommentRangeEnd,
+  CommentReference,
   TextBox,
   TableOfContents,
   AltChunk,
@@ -87,6 +92,20 @@ export interface WalkOptions {
   readonly includeComments?: boolean;
 }
 
+/** The keys of {@link WalkOptions}, which `Transform.map` and `Query.listTables` take too. */
+export const walkOptionsShape = {
+  includeHeaders: w.boolean().optional(),
+  includeFooters: w.boolean().optional(),
+  includeFootnotes: w.boolean().optional(),
+  includeEndnotes: w.boolean().optional(),
+  includeComments: w.boolean().optional()
+};
+
+/** {@link WalkOptions}, as `Query.each` takes them. */
+export const walkOptionsSchema = w.record(walkOptionsShape);
+const _walkOptionsMatch: SchemaMatches<typeof walkOptionsSchema, WalkOptions> = true;
+void _walkOptionsMatch;
+
 /**
  * Visitor interface for document traversal.
  * All methods are optional — implement only what you need.
@@ -128,6 +147,15 @@ export interface DocxVisitor {
   visitBookmarkEnd?(id: number, path: WalkPath): void;
   visitCommentRangeStart?(comment: CommentRangeStart, path: WalkPath): void;
   visitCommentRangeEnd?(comment: CommentRangeEnd, path: WalkPath): void;
+  /**
+   * Every range marker — bookmark, comment, move, custom-XML and permission
+   * ranges — wherever it sits: inside a paragraph, between blocks, between
+   * table rows or cells, before a run or at the end of an SDT. Called in
+   * addition to the kind-specific callbacks above.
+   */
+  visitRangeMarker?(marker: RangeMarker, path: WalkPath): void;
+  /** A comment's reference mark (`w:commentReference`), a paragraph child. */
+  visitCommentReference?(reference: CommentReference, path: WalkPath): void;
 
   // — Run-level —
   visitRunContent?(content: RunContent, run: Run, path: WalkPath): void;
@@ -170,6 +198,9 @@ export function walkDocument(doc: DocxDocument, visitor: DocxVisitor, options?: 
   // Walk body
   if (walkBlocks(doc.body, visitor, basePath) === "stop") {
     return;
+  }
+  if (doc.bodyRangeMarkersAfter) {
+    walkRangeMarkers(doc.bodyRangeMarkersAfter, visitor, { ...basePath, index: doc.body.length });
   }
 
   // Walk headers
@@ -296,6 +327,10 @@ function walkBodyContent(
   if (path.depth > MAX_WALK_DEPTH) {
     return "continue";
   }
+  // Markers between the previous block and this one come first.
+  if (block.rangeMarkersBefore) {
+    walkRangeMarkers(block.rangeMarkersBefore, visitor, path);
+  }
   switch (block.type) {
     case "paragraph":
       return walkParagraph(block, visitor, path);
@@ -378,6 +413,42 @@ function walkBodyContent(
   }
 }
 
+/** Report a range marker to the visitor callback for its kind, if any. */
+function walkRangeMarker(marker: RangeMarker, visitor: DocxVisitor, path: WalkPath): void {
+  visitor.visitRangeMarker?.(marker, path);
+  switch (marker.type) {
+    case "bookmarkStart":
+      visitor.visitBookmarkStart?.(marker, path);
+      break;
+    case "bookmarkEnd":
+      visitor.visitBookmarkEnd?.(marker.id, path);
+      break;
+    case "commentRangeStart":
+      visitor.visitCommentRangeStart?.(marker, path);
+      break;
+    case "commentRangeEnd":
+      visitor.visitCommentRangeEnd?.(marker, path);
+      break;
+    default:
+      break;
+  }
+}
+
+function walkRangeMarkers(
+  markers: readonly RangeMarker[] | undefined,
+  visitor: DocxVisitor,
+  path: WalkPath
+): void {
+  // Called for every block and child; most carry no markers, so this must not
+  // allocate when there are none.
+  if (markers === undefined) {
+    return;
+  }
+  for (let i = 0; i < markers.length; i++) {
+    walkRangeMarker(markers[i]!, visitor, path);
+  }
+}
+
 function walkParagraph(para: Paragraph, visitor: DocxVisitor, path: WalkPath): "stop" | "continue" {
   const action = visitor.enterParagraph?.(para, path);
   if (action === "stop") {
@@ -398,6 +469,14 @@ function walkParagraph(para: Paragraph, visitor: DocxVisitor, path: WalkPath): "
     }
   }
 
+  if (para.rangeMarkersAfter) {
+    walkRangeMarkers(para.rangeMarkersAfter, visitor, {
+      ...path,
+      index: para.children.length,
+      depth: path.depth + 1
+    });
+  }
+
   visitor.leaveParagraph?.(para, path);
   return "continue";
 }
@@ -407,6 +486,13 @@ function walkParagraphChild(
   visitor: DocxVisitor,
   path: WalkPath
 ): "stop" | "continue" {
+  // Markers that ride on this child (range permissions) come before it.
+  if (child.rangeMarkersBefore) {
+    walkRangeMarkers(child.rangeMarkersBefore, visitor, path);
+  }
+  if (visitor.visitRangeMarker && isRangeMarker(child)) {
+    visitor.visitRangeMarker(child, path);
+  }
   // Type-discriminated dispatch
   if ("type" in child) {
     const typed = child as { type: string };
@@ -454,6 +540,9 @@ function walkParagraphChild(
       case "commentRangeEnd":
         visitor.visitCommentRangeEnd?.(child as CommentRangeEnd, path);
         return "continue";
+      case "commentReference":
+        visitor.visitCommentReference?.(child as CommentReference, path);
+        return "continue";
       default:
         // Unknown typed child — might be a Run with a `type` property on content
         break;
@@ -478,6 +567,15 @@ function walkRun(run: Run, visitor: DocxVisitor, path: WalkPath): "stop" | "cont
     return "continue";
   }
 
+  // Range markers inside a complex field belong to the run that holds it.
+  for (const content of run.content) {
+    if (content.type === "field" && content.rangeMarkers) {
+      for (const entry of content.rangeMarkers) {
+        walkRangeMarker(entry.marker, visitor, path);
+      }
+    }
+  }
+
   // Walk run content
   if (visitor.visitRunContent) {
     for (const content of run.content) {
@@ -499,14 +597,17 @@ function walkHyperlink(hl: Hyperlink, visitor: DocxVisitor, path: WalkPath): "st
     return "continue";
   }
 
-  for (let i = 0; i < hl.children.length; i++) {
-    const child = hl.children[i] as ParagraphChild;
+  // Nested children (tracked changes, content controls, …) are walked in
+  // place among the runs.
+  const content = hyperlinkContent(hl);
+  for (let i = 0; i < content.length; i++) {
     const childPath: WalkPath = { ...path, index: i, depth: path.depth + 1 };
-    const result = walkParagraphChild(child, visitor, childPath);
+    const result = walkParagraphChild(content[i]!, visitor, childPath);
     if (result === "stop") {
       return "stop";
     }
   }
+  walkRangeMarkers(hl.rangeMarkersAfter, visitor, path);
 
   visitor.leaveHyperlink?.(hl, path);
   return "continue";
@@ -525,6 +626,7 @@ function walkTable(table: Table, visitor: DocxVisitor, path: WalkPath): "stop" |
   for (let ri = 0; ri < table.rows.length; ri++) {
     const row = table.rows[ri];
     const rowPath: WalkPath = { ...path, index: ri, depth: path.depth + 1 };
+    walkRangeMarkers(row.rangeMarkersBefore, visitor, rowPath);
 
     const rowAction = visitor.enterTableRow?.(row, rowPath);
     if (rowAction === "stop") {
@@ -538,6 +640,7 @@ function walkTable(table: Table, visitor: DocxVisitor, path: WalkPath): "stop" |
     for (let ci = 0; ci < row.cells.length; ci++) {
       const cell = row.cells[ci];
       const cellPath: WalkPath = { ...rowPath, index: ci, depth: rowPath.depth + 1 };
+      walkRangeMarkers(cell.rangeMarkersBefore, visitor, cellPath);
 
       const cellAction = visitor.enterTableCell?.(cell, cellPath);
       if (cellAction === "stop") {
@@ -561,8 +664,10 @@ function walkTable(table: Table, visitor: DocxVisitor, path: WalkPath): "stop" |
       visitor.leaveTableCell?.(cell, cellPath);
     }
 
+    walkRangeMarkers(row.rangeMarkersAfter, visitor, rowPath);
     visitor.leaveTableRow?.(row, rowPath);
   }
+  walkRangeMarkers(table.rangeMarkersAfter, visitor, path);
 
   visitor.leaveTable?.(table, path);
   return "continue";
@@ -599,17 +704,20 @@ function walkSdt(
       }
     } else if ("type" in item && item.type === "sdt") {
       // Nested SDT — recurse so visitors see the inner content controls.
+      walkRangeMarkers(item.rangeMarkersBefore, visitor, itemPath);
       const result = walkSdt(item, visitor, itemPath);
       if (result === "stop") {
         return "stop";
       }
     } else if (!("type" in item) && isRun(item)) {
+      walkRangeMarkers(item.rangeMarkersBefore, visitor, itemPath);
       const result = walkRun(item, visitor, itemPath);
       if (result === "stop") {
         return "stop";
       }
     }
   }
+  walkRangeMarkers(sdt.contentRangeMarkersAfter, visitor, innerPath);
 
   visitor.leaveSdt?.(sdt, path);
   return "continue";
@@ -724,9 +832,12 @@ function walkMathContentArray(
 // =============================================================================
 
 /**
- * Collect all paragraphs from a document (including nested in tables/SDTs).
+ * Collect all paragraphs from a document (including nested in tables/SDTs):
+ * the body, headers, footers, footnotes and endnotes. Comments are left out
+ * unless `options.includeComments` is set — see {@link WalkOptions}.
  */
 export function collectParagraphs(doc: DocxDocument, options?: WalkOptions): Paragraph[] {
+  checkHandle(doc, "document", "doc", "Query.listParagraphs");
   const result: Paragraph[] = [];
   walkDocument(
     doc,
@@ -745,6 +856,7 @@ export function collectParagraphs(doc: DocxDocument, options?: WalkOptions): Par
  * Collect all runs from a document (including nested).
  */
 export function collectRuns(doc: DocxDocument, options?: WalkOptions): Run[] {
+  checkHandle(doc, "document", "doc", "Query.listRuns");
   const result: Run[] = [];
   walkDocument(
     doc,

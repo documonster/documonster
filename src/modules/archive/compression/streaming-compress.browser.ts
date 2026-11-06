@@ -24,12 +24,10 @@ import {
   inflateRaw,
   SyncDeflater as PureJsSyncDeflater
 } from "@archive/compression/deflate-fallback";
-import type { WorkerPool, WorkerTaskType } from "@archive/compression/worker-pool/index.browser";
-import {
-  hasWorkerSupport,
-  getDefaultWorkerPool
-} from "@archive/compression/worker-pool/index.browser";
+import type { WorkerPool } from "@archive/compression/worker-pool/index.browser";
+import { hasWorkerSupport } from "@archive/compression/worker-pool/pool.base";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import { ArchiveWorkerStreamStartError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 
@@ -252,12 +250,15 @@ function createNativeWebStreamCodec(format: WebStreamFormat, isCompress: boolean
 // =============================================================================
 
 function createWorkerStreamCodec(
-  type: WorkerTaskType,
+  type: "deflate" | "inflate",
   pool: WorkerPool | undefined,
   level: number | undefined,
   allowTransfer: boolean | undefined
 ): DeflateStream {
-  const effectivePool = pool ?? getDefaultWorkerPool();
+  // The pool — its scheduler and the worker script it boots — is loaded when a stream first asks for a worker, so a
+  // caller that never sets `useWorker` does not carry it in its bundle. Until it arrives, writes queue on the codec's
+  // write chain like any other pending write.
+  const loaded = import("@archive/compression/worker-pool/pool.browser");
 
   let endResolve: (() => void) | null = null;
   let endReject: ((err: Error) => void) | null = null;
@@ -267,29 +268,89 @@ function createWorkerStreamCodec(
   });
 
   const codec = new AsyncStreamCodec();
-  const workerStream = effectivePool.openStream(type, {
-    level,
-    allowTransfer,
-    onData: chunk => codec.emit("data", chunk),
-    onEnd: () => {
-      codec.emit("end");
-      endResolve?.();
-    },
-    onError: err => {
-      codec.emit("error", err);
-      endReject?.(err);
+  const opened = loaded.then(({ getDefaultWorkerPool }) =>
+    (pool ?? getDefaultWorkerPool()).openStream(type, {
+      level,
+      allowTransfer,
+      onData: chunk => codec.emit("data", chunk),
+      onEnd: () => {
+        codec.emit("end");
+        endResolve?.();
+      },
+      onError: err => {
+        codec.emit("error", err);
+        endReject?.(err);
+      }
+    })
+  );
+  // Rejections are taken by the write or close that awaits `opened`; this keeps one that nothing awaited — an abort
+  // before the first write — from being reported as unhandled.
+  opened.catch(() => {});
+
+  // A worker that does not start — it timed out on a busy device, or failed to boot —
+  // has been sent nothing, so the stream continues on the main thread with no loss.
+  let fallback: DeflateStream | null = null;
+  const toMainThread = (): DeflateStream => {
+    if (!fallback) {
+      fallback = createStreamCodec(type, { level, useWorker: false });
+      fallback.on("data", (chunk: Uint8Array) => codec.emit("data", chunk));
+      fallback.on("end", () => {
+        codec.emit("end");
+        endResolve?.();
+      });
+      fallback.on("error", (err: Error) => {
+        codec.emit("error", err);
+        endReject?.(err);
+      });
     }
-  });
+    return fallback;
+  };
+  const writeTo = (stream: DeflateStream, chunk: Uint8Array): Promise<void> =>
+    new Promise((resolve, reject) => {
+      stream.write(chunk, (err?: Error | null) => (err ? reject(err) : resolve()));
+    });
 
   codec.setBackend({
-    write: chunk => workerStream.write(chunk),
+    write: async chunk => {
+      if (fallback) {
+        return writeTo(fallback, chunk);
+      }
+      try {
+        await (await opened).write(chunk);
+      } catch (error) {
+        if (!(error instanceof ArchiveWorkerStreamStartError)) {
+          throw error;
+        }
+        await writeTo(toMainThread(), chunk);
+      }
+    },
     close: async () => {
-      await workerStream.end();
+      if (!fallback) {
+        try {
+          await (await opened).end();
+        } catch (error) {
+          if (!(error instanceof ArchiveWorkerStreamStartError)) {
+            throw error;
+          }
+          toMainThread();
+        }
+      }
+      const mainThread = fallback as DeflateStream | null;
+      if (mainThread) {
+        await new Promise<void>((resolve, reject) => {
+          mainThread.end((err?: Error | null) => (err ? reject(err) : resolve()));
+        });
+      }
       await endPromise;
     },
     abort: err => {
       endResolve?.();
-      workerStream.abort(err?.message);
+      const mainThread = fallback as DeflateStream | null;
+      if (mainThread) {
+        mainThread.destroy();
+      } else {
+        void opened.then(stream => stream.abort(err?.message));
+      }
     }
   });
 
@@ -464,6 +525,22 @@ export function createGzipStream(options: StreamCompressOptions = {}): GzipStrea
 /** Create a streaming GZIP decompressor */
 export function createGunzipStream(options: StreamCompressOptions = {}): GunzipStream {
   return createWrappedStream(GZIP_CONFIG, false, options);
+}
+
+/** The browser has one gzip compressor; see the Node variant for what this is for. */
+export type GzipEncoder = GzipStream;
+
+/**
+ * Create a gzip compressor for a stream that is compressed once and kept, such as a
+ * `.tar.gz`. Where the runtime has no `CompressionStream("gzip")` this compresses with
+ * `gzipSync` and its output is that function's, byte for byte; the native encoder
+ * cannot be given a level and encodes differently, so its output is only guaranteed to
+ * decompress to the same bytes.
+ *
+ * @internal
+ */
+export function createGzipEncoder(options: StreamCompressOptions = {}): GzipEncoder {
+  return createGzipStream(options);
 }
 
 /** Create a streaming Zlib compressor */

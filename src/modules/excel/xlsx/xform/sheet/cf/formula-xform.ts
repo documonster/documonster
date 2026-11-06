@@ -1,3 +1,4 @@
+import { fromFileFormula, toFileFormula } from "@excel/utils/future-functions";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { XmlSink } from "@xml/types";
 
@@ -7,7 +8,7 @@ class FormulaXform extends BaseXform<string> {
   }
 
   render(xmlStream: XmlSink, model?: string): void {
-    xmlStream.leafNode(this.tag, undefined, model);
+    xmlStream.leafNode(this.tag, undefined, model === undefined ? undefined : toFileFormula(model));
   }
 
   parseOpen(): void {
@@ -19,6 +20,9 @@ class FormulaXform extends BaseXform<string> {
   }
 
   parseClose(name: string): boolean {
+    if (name === this.tag && typeof this.model === "string") {
+      this.model = fromFileFormula(this.model);
+    }
     return name !== this.tag;
   }
 }

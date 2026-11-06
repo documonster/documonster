@@ -17,7 +17,7 @@ export type WorkbookHandle = ReturnType<typeof Workbook.create>;
 /** A worksheet handle. */
 export type SheetHandle = ReturnType<typeof Workbook.addWorksheet>;
 
-/** 1-based inclusive grid window, matching `Worksheet.dimensions`. */
+/** 1-based inclusive grid window, matching `Worksheet.getDimensions`. */
 export interface GridWindow {
   readonly top: number;
   readonly left: number;
@@ -29,20 +29,14 @@ export interface GridWindow {
 export const MAX_EXCEL_ROWS = 1_048_576;
 export const MAX_EXCEL_COLUMNS = 16_384; // XFD
 
-/**
- * Read a worksheet's name.
- *
- * The handle has no public `name` property — `ws.name` is `undefined` — so the
- * model record is the only public route. Verified empirically; do not "simplify"
- * this to `ws.name`.
- */
+/** A sheet's name. */
 export function sheetName(ws: SheetHandle): string {
-  return Worksheet.getModel(ws).name;
+  return Worksheet.getName(ws);
 }
 
 /** Every worksheet name in workbook order. */
 export function sheetNames(wb: WorkbookHandle): string[] {
-  return Workbook.getWorksheets(wb).map(sheetName);
+  return Workbook.listWorksheets(wb).map(sheetName);
 }
 
 /**
@@ -54,7 +48,7 @@ export function requireSheet(wb: WorkbookHandle, sheet: string | number | undefi
   const names = sheetNames(wb);
 
   if (sheet === undefined) {
-    const first = Workbook.getWorksheets(wb)[0];
+    const first = Workbook.listWorksheets(wb)[0];
     if (first === undefined) {
       throw toolError.invalidInput("this workbook has no worksheets");
     }
@@ -62,7 +56,7 @@ export function requireSheet(wb: WorkbookHandle, sheet: string | number | undefi
   }
 
   if (typeof sheet === "number") {
-    const found = Workbook.getWorksheets(wb)[sheet - 1];
+    const found = Workbook.listWorksheets(wb)[sheet - 1];
     if (found === undefined) {
       throw toolError.invalidInput(
         `sheet index ${sheet} is out of range (workbook has ${names.length})`,
@@ -85,7 +79,7 @@ export function requireSheet(wb: WorkbookHandle, sheet: string | number | undefi
 /**
  * Parse an A1 range into a 1-based window.
  *
- * `Address.decodeRange` returns 0-based `{ s, e }`; `Worksheet.dimensions`
+ * `Address.decodeRange` returns 0-based `{ s, e }`; `Worksheet.getDimensions`
  * returns 1-based `{ top, left, bottom, right }`. Mixing the two is the easiest
  * off-by-one in this package, so the conversion happens exactly here.
  */
@@ -138,12 +132,13 @@ export function parseRange(range: string): GridWindow {
  * An empty sheet reports `{ top: 0, left: 0, bottom: 0, right: 0 }` — verified
  * empirically, both freshly created and after a file round-trip. That satisfies
  * `bottom >= top`, so checking only for an inverted rectangle lets zeroes through
- * and the first `columnLetter(0)` then throws `ColumnOutOfBoundsError`. Hence the
+ * and the first `columnLetter(0)` then throws `ExcelColumnOutOfBoundsError`. Hence the
  * explicit `>= 1` checks.
  */
 export function usedWindow(ws: SheetHandle): GridWindow | undefined {
-  const dimensions = Worksheet.dimensions(ws);
+  const dimensions = Worksheet.getDimensions(ws);
   if (
+    dimensions === undefined ||
     dimensions.top < 1 ||
     dimensions.left < 1 ||
     dimensions.bottom < dimensions.top ||
@@ -194,15 +189,15 @@ export type CellMode = "values" | "formulas" | "both";
  * sees in Excel and what they will quote back to the model.
  */
 export function renderCell(ws: SheetHandle, row: number, column: number, mode: CellMode): string {
-  const formula = Cell.getFormula(ws, row, column);
+  const formula = Cell.getFormula(ws, { row, col: column });
 
   if (mode === "formulas") {
     return formula === undefined
-      ? escapeTableCell(Cell.getDisplayText(ws, row, column))
+      ? escapeTableCell(Cell.getDisplayText(ws, { row, col: column }))
       : escapeTableCell(`=${formula}`);
   }
 
-  const display = escapeTableCell(Cell.getDisplayText(ws, row, column));
+  const display = escapeTableCell(Cell.getDisplayText(ws, { row, col: column }));
   if (mode === "both" && formula !== undefined) {
     return `${display} \`=${escapeTableCell(formula)}\``;
   }

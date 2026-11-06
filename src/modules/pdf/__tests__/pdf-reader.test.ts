@@ -4,10 +4,7 @@
  * Tests the entire reading pipeline: tokenizer, parser, document, text extraction,
  * image extraction, and metadata reading using roundtrip tests (write then read).
  */
-
-import { cellSetValue } from "@excel/core/cell";
-import { rowGetCell } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { docxToPdf } from "@pdf/word-bridge";
 import { aesCbcDecrypt, sha256 } from "@utils/crypto";
 import type { BodyContent } from "@word/types";
@@ -1075,7 +1072,7 @@ describe("PDF Reader - Image Extraction", () => {
 
     const img = page.images[0];
     // Our test PNG has alpha channel, so SMask should be present
-    expect(img.alphaMask).not.toBeNull();
+    expect(img.alphaMask).toBeDefined();
     if (img.alphaMask) {
       expect(img.alphaMask.length).toBeGreaterThan(0);
     }
@@ -1833,7 +1830,7 @@ describe("decodeText — 3-byte codespace and embedded-cmap fallback", () => {
       })
     );
     builder.addPage().drawText("AB", { x: 72, y: 700 });
-    const withToUnicode = await builder.build();
+    const withToUnicode = await builder.toBuffer();
 
     // Strip the /ToUnicode reference so extraction has to fall back to the
     // embedded font program, which is what many third-party producers emit.
@@ -1887,14 +1884,14 @@ describe("Text Reconstruction — table data should not be split into columns", 
   it("should keep 5-column table on same lines", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Test");
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Item", key: "item", width: 20 },
       { header: "SKU", key: "sku", width: 15 },
       { header: "Qty", key: "qty", width: 10 },
       { header: "Price", key: "price", width: 12 },
       { header: "Stock", key: "stock", width: 10 }
     ]);
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       { item: "Laptop", sku: "LP-001", qty: 42, price: 1299.99, stock: true },
       { item: "Mouse", sku: "WM-055", qty: 350, price: 29.99, stock: true }
     ]);
@@ -2158,11 +2155,15 @@ describe("PDF Reader - Annotation Extraction", () => {
     // Create a workbook with hyperlinks — the writer will create Link annotations
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Links");
-    const row = Worksheet.addRow(sheet, ["Click here"]);
-    cellSetValue(rowGetCell(row, 1), {
-      text: "Example",
-      hyperlink: "https://example.com"
-    });
+    const row = Row.add(sheet, ["Click here"]);
+    Cell.setValue(
+      sheet,
+      { row, col: 1 },
+      {
+        text: "Example",
+        hyperlink: "https://example.com"
+      }
+    );
 
     const pdfBytes = await excelToPdf(workbook);
     const result = await readPdf(pdfBytes);
@@ -2759,12 +2760,12 @@ describe("PDF Reader - Table Extraction", () => {
   it("should extract table from a multi-column Excel workbook PDF", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Item", key: "item", width: 20 },
       { header: "Qty", key: "qty", width: 10 },
       { header: "Price", key: "price", width: 12 }
     ]);
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       { item: "Laptop", qty: 5, price: 999.99 },
       { item: "Mouse", qty: 50, price: 29.99 },
       { item: "Keyboard", qty: 30, price: 49.99 }
@@ -2802,7 +2803,7 @@ describe("PDF Reader - Table Extraction", () => {
       page.drawText(line, { x: 72, y, fontSize: 12 });
       y -= 18;
     }
-    const pdfBytes = await doc.build();
+    const pdfBytes = await doc.toBuffer();
 
     const result = await readPdf(pdfBytes, { extractTables: true });
     expect(result.pages[0].tables.length).toBe(0);
@@ -2859,7 +2860,7 @@ describe("wrapped prose is not read as two columns", () => {
       // Offset vertically so no line shares a baseline with the left column.
       page.drawText(`right column line ${i}`, { x: 340, y: 690 - i * 20, fontSize: 11 });
     }
-    const read = await readPdf(await builder.build());
+    const read = await readPdf(await builder.toBuffer());
     const texts = read.pages[0].textLines.map(l => l.text);
     // Every line belongs to exactly one column — none was merged across the gap.
     expect(texts.every(t => !(t.includes("left") && t.includes("right")))).toBe(true);

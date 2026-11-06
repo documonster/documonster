@@ -94,7 +94,7 @@ describe("OOXML Strict: reader normalization", () => {
     // the scenario where package rels use the Strict namespace (by testing the parsing logic)
     const doc = Document.create();
     Document.addParagraph(doc, "Hello Strict");
-    const model = Document.build(doc);
+    const model = doc;
     const buffer = await Io.toBuffer(model);
 
     // The reader should work with standard documents (regression)
@@ -108,7 +108,7 @@ describe("OOXML Strict: reader normalization", () => {
     // Standard documents have word/document.xml — verify it's found correctly
     const doc = Document.create();
     Document.addParagraph(doc, "Discovery test");
-    const model = Document.build(doc);
+    const model = doc;
     const buffer = await Io.toBuffer(model);
     const result = await Io.read(buffer);
     expect(result.body.length).toBeGreaterThan(0);
@@ -250,7 +250,7 @@ describe("OOXML Strict: reader normalization", () => {
 
 describe("DrawingML effects: reflection, softEdges, 3D", () => {
   it("should serialize reflection effect", () => {
-    const shape = Build.createShape({
+    const shape = Build.shape({
       shapeType: "rect",
       width: 1000000,
       height: 500000,
@@ -275,7 +275,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize soft edges effect", () => {
-    const shape = Build.createShape({
+    const shape = Build.shape({
       shapeType: "roundRect",
       width: 2000000,
       height: 1000000,
@@ -287,7 +287,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize 3D effect with camera and bevel", () => {
-    const shape = Build.createShape({
+    const shape = Build.shape({
       shapeType: "rect",
       width: 3000000,
       height: 2000000,
@@ -316,7 +316,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize combined effects", () => {
-    const shape = Build.createShape({
+    const shape = Build.shape({
       shapeType: "ellipse",
       width: 1500000,
       height: 1500000,
@@ -345,7 +345,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize glow with transparency", () => {
-    const shape = Build.createShape({
+    const shape = Build.shape({
       shapeType: "rect",
       width: 1000000,
       height: 1000000,
@@ -359,7 +359,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should produce round-trip stable shapes with effects", async () => {
-    const shape = Build.createRect(2000000, 1000000, {
+    const shape = Build.rect(2000000, 1000000, {
       fill: { type: "solid", color: "4472C4" },
       effects: {
         shadow: {
@@ -383,7 +383,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
     Document.addParagraph(doc, "Before shape");
     Document.addContent(doc, shape);
     Document.addParagraph(doc, "After shape");
-    const model = Document.build(doc);
+    const model = doc;
     const buffer = await Io.toBuffer(model);
     const result = await Io.read(buffer);
     // Document should be parseable (at least paragraphs survive)
@@ -395,7 +395,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
     // emitted bare DrawingML fragments directly under w:body. Now the writer
     // always renders the full drawing wrapper and inserts the advanced
     // properties (effect list, gradient, scene3d) as children of wps:spPr.
-    const shape = Build.createRect(2000000, 1000000, {
+    const shape = Build.rect(2000000, 1000000, {
       fill: {
         type: "gradient",
         stops: [
@@ -411,7 +411,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
 
     const doc = Document.create();
     Document.addContent(doc, shape);
-    const buffer = await Io.toBuffer(Document.build(doc));
+    const buffer = await Io.toBuffer(doc);
 
     const { unzip } = await import("@archive/read-archive");
     const reader = unzip(buffer);
@@ -819,15 +819,15 @@ describe("OpenDoPE: resolveDataBindings", () => {
 describe("Form fields: extractFormFields", () => {
   it("should extract text form fields from document", () => {
     const doc = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formTextField({ name: "FullName", default: "Jane Doe" })])
     );
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formCheckboxField({ name: "Agree", checked: true })])
     );
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([
         Build.formDropdownField({
@@ -837,9 +837,9 @@ describe("Form fields: extractFormFields", () => {
         })
       ])
     );
-    const model = Document.build(doc);
+    const model = doc;
 
-    const fields = Query.extractFormFields(model);
+    const fields = Query.listFormFields(model);
     expect(fields.length).toBe(3);
 
     expect(fields[0].name).toBe("FullName");
@@ -881,7 +881,7 @@ describe("Form fields: extractFormFields", () => {
       ]
     };
 
-    const fields = Query.extractFormFields(model);
+    const fields = Query.listFormFields(model);
     expect(fields.length).toBe(1);
     expect(fields[0].name).toBe("InTable");
     expect(fields[0].value).toBe("TableValue");
@@ -891,46 +891,46 @@ describe("Form fields: extractFormFields", () => {
 describe("Form fields: fillFormFields", () => {
   it("should fill text form field values", () => {
     const doc = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formTextField({ name: "Name", default: "old" })])
     );
-    const model = Document.build(doc);
+    const model = doc;
 
     const values = new Map<string, string | boolean | number>([["Name", "New Value"]]);
     const filled = Query.fillFormFields(model, values);
 
-    const fields = Query.extractFormFields(filled);
+    const fields = Query.listFormFields(filled);
     expect(fields[0].value).toBe("New Value");
   });
 
   it("should fill checkbox form field values", () => {
     const doc = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formCheckboxField({ name: "Accept", checked: false })])
     );
-    const model = Document.build(doc);
+    const model = doc;
 
     const values = new Map<string, string | boolean | number>([["Accept", true]]);
     const filled = Query.fillFormFields(model, values);
 
-    const fields = Query.extractFormFields(filled);
+    const fields = Query.listFormFields(filled);
     expect(fields[0].value).toBe(true);
   });
 
   it("should not modify fields without matching values", () => {
     const doc = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formTextField({ name: "Keep", default: "original" })])
     );
-    const model = Document.build(doc);
+    const model = doc;
 
     const values = new Map<string, string | boolean | number>([["Other", "ignored"]]);
     const filled = Query.fillFormFields(model, values);
 
-    const fields = Query.extractFormFields(filled);
+    const fields = Query.listFormFields(filled);
     expect(fields[0].value).toBe("original");
   });
 
@@ -954,7 +954,7 @@ describe("Form fields: fillFormFields", () => {
 
     const values = new Map<string, string | boolean | number>([["Cell1", "Filled!"]]);
     const filled = Query.fillFormFields(model, values);
-    const fields = Query.extractFormFields(filled);
+    const fields = Query.listFormFields(filled);
     expect(fields[0].value).toBe("Filled!");
   });
 });
@@ -970,10 +970,10 @@ describe("SmartArt: round-trip via opaqueParts", () => {
     Document.addParagraph(doc, "Before shape");
     Document.addContent(
       doc,
-      Build.createRect(2000000, 1000000, { fill: { type: "solid", color: "FF0000" } })
+      Build.rect(2000000, 1000000, { fill: { type: "solid", color: "FF0000" } })
     );
     Document.addParagraph(doc, "After shape");
-    const model = Document.build(doc);
+    const model = doc;
     const buffer = await Io.toBuffer(model);
 
     // Read it back - shape content should survive
@@ -986,7 +986,7 @@ describe("SmartArt: round-trip via opaqueParts", () => {
     // This ensures SmartArt diagram files are preserved
     const doc = Document.create();
     Document.addParagraph(doc, "Simple doc");
-    const model = Document.build(doc);
+    const model = doc;
     const buffer = await Io.toBuffer(model);
 
     // Read back - well-formed docs shouldn't have opaque parts
@@ -1043,15 +1043,15 @@ describe("Integration: new features round-trip", () => {
 
   it("should round-trip document with form fields", async () => {
     const doc = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formTextField({ name: "FirstName", default: "Alice" })])
     );
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([Build.formCheckboxField({ name: "Premium", checked: true })])
     );
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([
         Build.formDropdownField({
@@ -1061,11 +1061,11 @@ describe("Integration: new features round-trip", () => {
         })
       ])
     );
-    const model = Document.build(doc);
+    const model = doc;
     const buffer = await Io.toBuffer(model);
 
     const result = await Io.read(buffer);
-    const fields = Query.extractFormFields(result);
+    const fields = Query.listFormFields(result);
 
     expect(fields.length).toBe(3);
     expect(fields[0].name).toBe("FirstName");
@@ -1080,7 +1080,7 @@ describe("Integration: new features round-trip", () => {
     const { extractAll } = await import("@archive/unzip/extract");
     const doc = Document.create();
     Document.useDefaultStyles(doc);
-    Document.addParagraphElement(
+    Document.addParagraph(
       doc,
       Build.paragraph([
         Build.formDropdownField({
@@ -1090,7 +1090,7 @@ describe("Integration: new features round-trip", () => {
         })
       ])
     );
-    const buffer = await Io.toBuffer(Document.build(doc));
+    const buffer = await Io.toBuffer(doc);
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/document.xml")!.data);
 
     // The empty entry must become a single space, never an empty value, so

@@ -3,7 +3,7 @@
  */
 
 import {
-  asArray,
+  asArrayArg,
   getCell,
   stripErrorCells,
   stripHiddenRowCells,
@@ -96,10 +96,13 @@ function compareForSort(a: ScalarValue, b: ScalarValue): number {
 }
 
 export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
-  const dataArr = asArray(args[0]);
-  const includeArr = asArray(args[1]);
-  if (!dataArr || !includeArr) {
-    return ERRORS.VALUE;
+  const dataArr = asArrayArg(args[0]);
+  const includeArr = asArrayArg(args[1]);
+  if (isError(dataArr)) {
+    return dataArr;
+  }
+  if (isError(includeArr)) {
+    return includeArr;
   }
   const ifEmpty = args.length > 2 && args[2].kind !== RVKind.Blank ? topLeft(args[2]) : null;
 
@@ -176,9 +179,9 @@ export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnSORT(args: RuntimeValue[]): RuntimeValue {
-  const dataArr = asArray(args[0]);
-  if (!dataArr) {
-    return ERRORS.VALUE;
+  const dataArr = asArrayArg(args[0]);
+  if (isError(dataArr)) {
+    return dataArr;
   }
   const rows: ScalarValue[][] = [];
   for (let r = 0; r < dataArr.height; r++) {
@@ -241,9 +244,9 @@ export function fnSORT(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnUNIQUE(args: RuntimeValue[]): RuntimeValue {
-  const dataArr = asArray(args[0]);
-  if (!dataArr) {
-    return ERRORS.VALUE;
+  const dataArr = asArrayArg(args[0]);
+  if (isError(dataArr)) {
+    return dataArr;
   }
   const byColV =
     args.length > 1
@@ -341,24 +344,32 @@ function scalarUniqueKey(v: ScalarValue): string {
 }
 
 export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
-  const dataArr = asArray(args[0]);
-  if (!dataArr || args.length < 2) {
+  const dataArr = asArrayArg(args[0]);
+  if (isError(dataArr)) {
+    return dataArr;
+  }
+  if (args.length < 2) {
     return ERRORS.VALUE;
   }
-  const data: { row: ScalarValue[]; idx: number }[] = [];
-  for (let r = 0; r < dataArr.height; r++) {
-    const row: ScalarValue[] = [];
-    for (let c = 0; c < dataArr.width; c++) {
-      row.push(getCell(dataArr, r, c));
-    }
-    data.push({ row, idx: r });
-  }
+  // Each `by_array` is one column as tall as `array` (it sorts the rows) or one row as wide
+  // as it (it sorts the columns), and every key sorts the same way; anything else is #VALUE!.
+  // A key one column wide is a column — a single value too — so `SORTBY(A1:A3, A1)` is
+  // #VALUE!. Keys used to be read as columns whatever their shape, a missing cell as blank.
   const sortKeys: { arr: ArrayValue; order: number }[] = [];
+  let byColumns: boolean | undefined;
   for (let i = 1; i < args.length; i += 2) {
-    const keyArr = asArray(args[i]);
-    if (!keyArr) {
+    const keyArr = asArrayArg(args[i]);
+    if (isError(keyArr)) {
+      return keyArr;
+    }
+    const keyByColumns = keyArr.width !== 1;
+    const fits = keyByColumns
+      ? keyArr.height === 1 && keyArr.width === dataArr.width
+      : keyArr.height === dataArr.height;
+    if (!fits || (byColumns !== undefined && byColumns !== keyByColumns)) {
       return ERRORS.VALUE;
     }
+    byColumns = keyByColumns;
     // Blank order → default 1 (ascending); anything other than ±1 is
     // #VALUE!. Mirrors the SORT validation — a blank used to produce
     // 0 via `toNumberRV`, silently disabling the sort key.
@@ -374,10 +385,14 @@ export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
     }
     sortKeys.push({ arr: keyArr, order: orderV.value });
   }
-  data.sort((a, b) => {
+  const columns = byColumns === true;
+  const count = columns ? dataArr.width : dataArr.height;
+  const order = Array.from({ length: count }, (_, i) => i);
+  // `Array.prototype.sort` is stable, so equal keys keep their order, as in Excel.
+  order.sort((a, b) => {
     for (const sk of sortKeys) {
-      const va = getCell(sk.arr, a.idx, 0);
-      const vb = getCell(sk.arr, b.idx, 0);
+      const va = columns ? getCell(sk.arr, 0, a) : getCell(sk.arr, a, 0);
+      const vb = columns ? getCell(sk.arr, 0, b) : getCell(sk.arr, b, 0);
       const cmp = compareForSort(va, vb);
       if (cmp !== 0) {
         return cmp * sk.order;
@@ -385,7 +400,15 @@ export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
     }
     return 0;
   });
-  return rvArray(data.map(d => d.row));
+  const rows: ScalarValue[][] = [];
+  for (let r = 0; r < dataArr.height; r++) {
+    const row: ScalarValue[] = [];
+    for (let c = 0; c < dataArr.width; c++) {
+      row.push(columns ? getCell(dataArr, r, order[c]) : getCell(dataArr, order[r], c));
+    }
+    rows.push(row);
+  }
+  return rvArray(rows);
 }
 
 export function fnSUBTOTAL(args: RuntimeValue[]): RuntimeValue {
@@ -735,9 +758,9 @@ export function fnTOROW(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnCHOOSEROWS(args: RuntimeValue[]): RuntimeValue {
-  const d = asArray(args[0]);
-  if (!d) {
-    return ERRORS.VALUE;
+  const d = asArrayArg(args[0]);
+  if (isError(d)) {
+    return d;
   }
   const result: ScalarValue[][] = [];
   for (let i = 1; i < args.length; i++) {
@@ -766,9 +789,9 @@ export function fnCHOOSEROWS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnCHOOSECOLS(args: RuntimeValue[]): RuntimeValue {
-  const d = asArray(args[0]);
-  if (!d) {
-    return ERRORS.VALUE;
+  const d = asArrayArg(args[0]);
+  if (isError(d)) {
+    return d;
   }
   const ci: number[] = [];
   for (let i = 1; i < args.length; i++) {
@@ -868,9 +891,9 @@ export function fnHSTACK(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnTAKE(args: RuntimeValue[]): RuntimeValue {
-  const d = asArray(args[0]);
-  if (!d) {
-    return ERRORS.VALUE;
+  const d = asArrayArg(args[0]);
+  if (isError(d)) {
+    return d;
   }
   const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(d.height);
   if (isError(rowsV)) {
@@ -902,9 +925,9 @@ export function fnTAKE(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnDROP(args: RuntimeValue[]): RuntimeValue {
-  const d = asArray(args[0]);
-  if (!d) {
-    return ERRORS.VALUE;
+  const d = asArrayArg(args[0]);
+  if (isError(d)) {
+    return d;
   }
   const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(rowsV)) {
@@ -935,10 +958,15 @@ export function fnDROP(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnWRAPROWS(args: RuntimeValue[]): RuntimeValue {
-  if (!isArray(args[0])) {
+  // `vector` must be one row or one column (a single value is one of each); a 2-D array is
+  // #VALUE!, as Microsoft documents. It used to be flattened row by row.
+  const arr = asArrayArg(args[0]);
+  if (isError(arr)) {
+    return arr;
+  }
+  if (arr.height !== 1 && arr.width !== 1) {
     return ERRORS.VALUE;
   }
-  const arr = args[0] as ArrayValue;
   const flat: ScalarValue[] = [];
   for (let r = 0; r < arr.height; r++) {
     for (let c = 0; c < arr.width; c++) {
@@ -953,8 +981,9 @@ export function fnWRAPROWS(args: RuntimeValue[]): RuntimeValue {
   // `row.length < 2.5` work by accidental float coercion in V8, but the
   // intent is an integer wrap width; encode it explicitly.
   const wc = Math.trunc(wcV.value);
+  // Microsoft: #NUM! when wrap_count is less than 1.
   if (wc < 1) {
-    return ERRORS.VALUE;
+    return ERRORS.NUM;
   }
   const pad: ScalarValue = args.length > 2 ? topLeft(args[2]) : ERRORS.NA;
   const result: ScalarValue[][] = [];
@@ -969,10 +998,15 @@ export function fnWRAPROWS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnWRAPCOLS(args: RuntimeValue[]): RuntimeValue {
-  if (!isArray(args[0])) {
+  // `vector` must be one row or one column (a single value is one of each); a 2-D array is
+  // #VALUE!, as Microsoft documents. It used to be flattened row by row.
+  const arr = asArrayArg(args[0]);
+  if (isError(arr)) {
+    return arr;
+  }
+  if (arr.height !== 1 && arr.width !== 1) {
     return ERRORS.VALUE;
   }
-  const arr = args[0] as ArrayValue;
   const flat: ScalarValue[] = [];
   for (let r = 0; r < arr.height; r++) {
     for (let c = 0; c < arr.width; c++) {
@@ -984,8 +1018,9 @@ export function fnWRAPCOLS(args: RuntimeValue[]): RuntimeValue {
     return wcV;
   }
   const wc = Math.trunc(wcV.value);
+  // Microsoft: #NUM! when wrap_count is less than 1.
   if (wc < 1) {
-    return ERRORS.VALUE;
+    return ERRORS.NUM;
   }
   const pad: ScalarValue = args.length > 2 ? topLeft(args[2]) : ERRORS.NA;
   const numCols = Math.ceil(flat.length / wc);
@@ -1002,9 +1037,9 @@ export function fnWRAPCOLS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnEXPAND(args: RuntimeValue[]): RuntimeValue {
-  const d = asArray(args[0]);
-  if (!d) {
-    return ERRORS.VALUE;
+  const d = asArrayArg(args[0]);
+  if (isError(d)) {
+    return d;
   }
   const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(d.height);
   if (isError(rowsV)) {

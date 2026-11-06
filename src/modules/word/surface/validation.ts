@@ -2,6 +2,11 @@
  * `Validation` namespace surface — document structure validation.
  *
  * `import { Validation } from "documonster/word"` →
- *   `Validation.document(doc)` — tree-shaken via `export * as Validation`.
+ *   `Validation.validate(doc)` — tree-shaken via `export * as Validation`.
  */
-export { validateDocument as document } from "@word/advanced/validation";
+import { validateDocument } from "@word/advanced/validation";
+
+export { validateDocument as validate } from "@word/advanced/validation";
+
+/** @deprecated Use {@link validate}. Removed in 1.0. */
+export const document = validateDocument;

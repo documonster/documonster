@@ -19,6 +19,7 @@ describe("documonster/excel namespace surface", () => {
       "Chart",
       "Chartsheet",
       "Column",
+      "ConditionalFormatting",
       "DataValidation",
       "DefinedNames",
       "Form",
@@ -62,10 +63,10 @@ describe("documonster/excel namespace surface", () => {
     for (const name of [
       "ExcelError",
       "isExcelError",
-      "WorksheetNameError",
-      "InvalidAddressError",
-      "ChartOptionsError",
-      "ColumnOutOfBoundsError"
+      "ExcelWorksheetNameError",
+      "ExcelInvalidAddressError",
+      "ExcelChartOptionsError",
+      "ExcelColumnOutOfBoundsError"
     ]) {
       expect(typeof e[name], name).toBe("function");
     }
@@ -266,8 +267,8 @@ describe("documonster/excel namespace surface", () => {
   });
 
   it("Format namespace parses a value against a target cell's own numFmt", () => {
-    expect(typeof Excel.Format.parseValueByFormat).toBe("function");
-    expect(Excel.Format.parseValueByFormat("dd/mm/yyyy", "09/07/2026")).toEqual(
+    expect(typeof Excel.Format.parseValue).toBe("function");
+    expect(Excel.Format.parseValue("dd/mm/yyyy", "09/07/2026")).toEqual(
       new Date(Date.UTC(2026, 6, 9))
     );
   });

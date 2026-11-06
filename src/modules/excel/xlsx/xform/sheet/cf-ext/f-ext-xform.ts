@@ -1,3 +1,4 @@
+import { fromFileFormula, toFileFormula } from "@excel/utils/future-functions";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 class FExtXform extends BaseXform {
@@ -6,7 +7,7 @@ class FExtXform extends BaseXform {
   }
 
   render(xmlStream, model) {
-    xmlStream.leafNode(this.tag, null, model);
+    xmlStream.leafNode(this.tag, null, typeof model === "string" ? toFileFormula(model) : model);
   }
 
   parseOpen() {
@@ -18,6 +19,9 @@ class FExtXform extends BaseXform {
   }
 
   parseClose(name) {
+    if (name === this.tag && typeof this.model === "string") {
+      this.model = fromFileFormula(this.model);
+    }
     return name !== this.tag;
   }
 }

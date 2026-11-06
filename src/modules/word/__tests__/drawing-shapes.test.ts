@@ -10,7 +10,7 @@ import { Document, Build, Io } from "../index";
 describe("Drawing shapes", () => {
   describe("createRect", () => {
     it("creates a rectangle shape", () => {
-      const shape = Build.createRect(914400, 457200);
+      const shape = Build.rect(914400, 457200);
       expect(shape.type).toBe("drawingShape");
       expect(shape.shapeType).toBe("rect");
       expect(shape.width).toBe(914400);
@@ -20,21 +20,21 @@ describe("Drawing shapes", () => {
 
   describe("createRoundRect", () => {
     it("creates a rounded rectangle shape", () => {
-      const shape = Build.createRoundRect(1000000, 500000);
+      const shape = Build.roundRect(1000000, 500000);
       expect(shape.shapeType).toBe("roundRect");
     });
   });
 
   describe("createEllipse", () => {
     it("creates an ellipse shape", () => {
-      const shape = Build.createEllipse(800000, 800000);
+      const shape = Build.ellipse(800000, 800000);
       expect(shape.shapeType).toBe("ellipse");
     });
   });
 
   describe("createLine", () => {
     it("creates a line with noFill", () => {
-      const shape = Build.createLine(914400, 0);
+      const shape = Build.line(914400, 0);
       expect(shape.shapeType).toBe("line");
       expect(shape.noFill).toBe(true);
     });
@@ -42,80 +42,80 @@ describe("Drawing shapes", () => {
 
   describe("createArrow", () => {
     it("creates right arrow", () => {
-      const shape = Build.createArrow("right", 914400, 457200);
+      const shape = Build.arrow("right", 914400, 457200);
       expect(shape.shapeType).toBe("rightArrow");
     });
 
     it("creates left arrow", () => {
-      const shape = Build.createArrow("left", 914400, 457200);
+      const shape = Build.arrow("left", 914400, 457200);
       expect(shape.shapeType).toBe("leftArrow");
     });
 
     it("creates up arrow", () => {
-      const shape = Build.createArrow("up", 457200, 914400);
+      const shape = Build.arrow("up", 457200, 914400);
       expect(shape.shapeType).toBe("upArrow");
     });
 
     it("creates down arrow", () => {
-      const shape = Build.createArrow("down", 457200, 914400);
+      const shape = Build.arrow("down", 457200, 914400);
       expect(shape.shapeType).toBe("downArrow");
     });
   });
 
   describe("createFlowchartShape", () => {
     it("creates a process shape", () => {
-      const shape = Build.createFlowchartShape("process", 914400, 457200);
+      const shape = Build.flowchartShape("process", 914400, 457200);
       expect(shape.shapeType).toBe("flowChartProcess");
     });
 
     it("creates a decision shape", () => {
-      const shape = Build.createFlowchartShape("decision", 914400, 914400);
+      const shape = Build.flowchartShape("decision", 914400, 914400);
       expect(shape.shapeType).toBe("flowChartDecision");
     });
 
     it("creates a terminator shape", () => {
-      const shape = Build.createFlowchartShape("terminator", 914400, 457200);
+      const shape = Build.flowchartShape("terminator", 914400, 457200);
       expect(shape.shapeType).toBe("flowChartTerminator");
     });
   });
 
   describe("createCallout", () => {
     it("creates rect callout", () => {
-      const shape = Build.createCallout("rect", 1000000, 600000);
+      const shape = Build.callout("rect", 1000000, 600000);
       expect(shape.shapeType).toBe("wedgeRectCallout");
     });
 
     it("creates cloud callout", () => {
-      const shape = Build.createCallout("cloud", 1000000, 600000);
+      const shape = Build.callout("cloud", 1000000, 600000);
       expect(shape.shapeType).toBe("cloudCallout");
     });
   });
 
   describe("createStar", () => {
     it("creates 4-point star", () => {
-      const shape = Build.createStar(4, 500000, 500000);
+      const shape = Build.star(4, 500000, 500000);
       expect(shape.shapeType).toBe("star4");
     });
 
     it("creates 5-point star", () => {
-      const shape = Build.createStar(5, 500000, 500000);
+      const shape = Build.star(5, 500000, 500000);
       expect(shape.shapeType).toBe("star5");
     });
 
     it("creates 8-point star", () => {
-      const shape = Build.createStar(8, 500000, 500000);
+      const shape = Build.star(8, 500000, 500000);
       expect(shape.shapeType).toBe("star8");
     });
 
     it("creates 32-point star", () => {
-      const shape = Build.createStar(32, 500000, 500000);
+      const shape = Build.star(32, 500000, 500000);
       expect(shape.shapeType).toBe("star32");
     });
   });
 
   describe("createShape with full options", () => {
     it("creates shape with fill, outline, altText, rotation, behindDoc", () => {
-      const shape = Build.createShape({
+      const shape = Build.shape({
         shapeType: "rect",
         width: 914400,
         height: 457200,
@@ -136,7 +136,7 @@ describe("Drawing shapes", () => {
     });
 
     it("creates shape with noFill", () => {
-      const shape = Build.createShape({
+      const shape = Build.shape({
         shapeType: "ellipse",
         width: 500000,
         height: 500000,
@@ -148,7 +148,7 @@ describe("Drawing shapes", () => {
     });
 
     it("maps flipH/flipV and textBody anchor onto the model", () => {
-      const shape = Build.createShape({
+      const shape = Build.shape({
         shapeType: "rightArrow",
         width: 914400,
         height: 457200,
@@ -166,7 +166,7 @@ describe("Drawing shapes", () => {
       const doc = Document.create();
       Document.addContent(
         doc,
-        Build.createShape({
+        Build.shape({
           shapeType: "rightArrow",
           width: 914400,
           height: 457200,
@@ -175,7 +175,7 @@ describe("Drawing shapes", () => {
           textBody: { anchor: "ctr", paragraphs: [Build.textParagraph("X")] }
         })
       );
-      const bytes = await Io.package(Document.build(doc));
+      const bytes = await Io.toBuffer(doc);
       const files = await extractAll(bytes);
       const docXml = new TextDecoder().decode(files.get("word/document.xml")!.data);
       expect(docXml).toMatch(/<a:xfrm[^>]*flipH="1"/);
@@ -186,14 +186,14 @@ describe("Drawing shapes", () => {
   describe("round-trip through DOCX", () => {
     it("preserves drawing shape through package/read cycle", async () => {
       const doc = Document.create();
-      const shape = Build.createRect(914400, 457200, {
+      const shape = Build.rect(914400, 457200, {
         fill: { type: "solid", color: "00FF00" },
         altText: "Green box"
       });
       Document.addContent(doc, shape);
 
       // packageDocx may throw due to unrelated internal bug — verify structure is valid
-      const built = Document.build(doc);
+      const built = doc;
       const shapes = built.body.filter(el => el.type === "drawingShape");
       expect(shapes.length).toBe(1);
       expect((shapes[0] as any).shapeType).toBe("rect");
@@ -204,12 +204,12 @@ describe("Drawing shapes", () => {
       const doc = Document.create();
       Document.addContent(
         doc,
-        Build.createRect(914400, 457200, {
+        Build.rect(914400, 457200, {
           fill: { type: "solid", color: "C00000" },
           altText: "alt"
         })
       );
-      const bytes = await Io.package(Document.build(doc));
+      const bytes = await Io.toBuffer(doc);
       const files = await extractAll(bytes);
       const docXml = new TextDecoder().decode(files.get("word/document.xml")!.data);
 
@@ -232,9 +232,9 @@ describe("Drawing shapes", () => {
       const doc = Document.create();
       Document.addContent(
         doc,
-        Build.createEllipse(457200, 457200, { fill: { type: "solid", color: "1F4E79" } })
+        Build.ellipse(457200, 457200, { fill: { type: "solid", color: "1F4E79" } })
       );
-      const bytes = await Io.package(Document.build(doc));
+      const bytes = await Io.toBuffer(doc);
       const files = await extractAll(bytes);
       const docXml = new TextDecoder().decode(files.get("word/document.xml")!.data);
       expect(docXml).toContain("<wp:anchor");

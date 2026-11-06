@@ -21,12 +21,12 @@
  * - Coordinates are in a single user space with **Y pointing down**, matching
  *   SVG and the chart scene. Backends that are Y-up (PDF) flip in their own
  *   adapter, which is the only place that knows about it.
- * - `group` carries an affine transform. {@link renderDrawList} maintains the
+ * - `group` carries an affine transform. The walker (`Draw.render`) maintains the
  *   current transform and hands surfaces **already-transformed, absolute**
  *   coordinates, so a surface never implements transform stacking. Producers get
  *   convenient nesting; backends stay flat.
  * - Paths are limited to move / line / cubic / close. Arcs are converted to
- *   cubics by {@link arcToCubics} at construction time, because every backend can
+ *   cubics by `Draw.Geometry.arcToCubics` at construction time, because every backend can
  *   draw a cubic and only some can draw an arc.
  */
 
@@ -45,8 +45,11 @@ export interface DrawMatrix {
   readonly f: number;
 }
 
-/** The identity transform. */
-export const IDENTITY: DrawMatrix = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+/**
+ * The identity transform. Frozen: it is shared by every walk of every list, so a write to it
+ * would move every later drawing in the process.
+ */
+export const IDENTITY: DrawMatrix = Object.freeze({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
 
 /** A point in user space. */
 export interface DrawPoint {
@@ -115,7 +118,6 @@ export const DEFAULT_TEXT_FAMILY = "arial";
 /** Horizontal alignment of a text run around its origin. */
 export type DrawTextAnchor = "start" | "middle" | "end";
 
-/** Font selection and size for a text node. */
 /**
  * The part of a text style that decides *which face* draws it.
  *
@@ -130,10 +132,17 @@ export interface RasterTextStyle {
   readonly italic?: boolean;
 }
 
+/** Font selection, size, alignment and colour for a text node. */
 export interface DrawTextStyle extends RasterTextStyle {
   /** Size in user units. */
   readonly size: number;
+  /** Alignment around the node's `x`. Defaults to `"start"`. */
   readonly anchor?: DrawTextAnchor;
+  /**
+   * Ink colour. **Omitted means the text is not drawn**, on every backend — the same rule
+   * as `DrawPaint`, where an absent paint is no paint. Give `{ r: 0, g: 0, b: 0, a: 1 }`
+   * for black.
+   */
   readonly fill?: Rgba01;
 }
 
@@ -545,6 +554,12 @@ export function sectorToPath(
 export interface DrawSubpath {
   readonly points: readonly DrawPoint[];
   readonly closed: boolean;
+}
+
+/** Options for `Draw.Geometry.flattenPath`. */
+export interface DrawFlattenPathOptions {
+  /** Multiplies the output points, so a supersampling backend gets finer subdivision. Defaults to 1. */
+  readonly scale?: number;
 }
 
 /**

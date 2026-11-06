@@ -1,8 +1,13 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AbsoluteAnchorXform } from "@excel/xlsx/xform/drawing/absolute-anchor-xform";
+import { MCE_NAMESPACE, readChoice } from "@excel/xlsx/xform/drawing/alternate-content";
+import type { AlternateContentModel } from "@excel/xlsx/xform/drawing/alternate-content";
+import { assignDrawingObjectIds } from "@excel/xlsx/xform/drawing/drawing-object-ids";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
+import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
@@ -11,7 +16,8 @@ interface DrawingAnchor {
   range?: string | { pos?: unknown; br?: unknown };
   br?: unknown;
   anchorType?: string;
-  alternateContent?: { requires: string };
+  alternateContent?: AlternateContentModel;
+  outerAlternateContent?: AlternateContentModel;
 }
 
 function getAnchorType(model: DrawingAnchor): string {
@@ -30,6 +36,10 @@ interface DrawingModel {
 }
 
 class DrawingXform extends BaseXform<DrawingModel> {
+  get writerNamespaces(): WriterNamespaces {
+    return DRAWING_WRITER_NAMESPACES;
+  }
+
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
 
@@ -39,7 +49,12 @@ class DrawingXform extends BaseXform<DrawingModel> {
   private _inChoice = false;
   private _inFallback = false;
   private _fallbackDepth = 0;
-  private _choiceRequires: string | undefined = undefined;
+  private _choice: AlternateContentModel | undefined = undefined;
+  /** The `<mc:Fallback>` children, each kept as XML for the writer to put back. */
+  private _fallbackParts: string[] = [];
+  private readonly _fallbackChild = new PreservedSubtreeXform(() => ({
+    "xmlns:mc": MCE_NAMESPACE
+  }));
   /** Number of anchors before entering mc:AlternateContent — used to tag new anchors */
   private _anchorCountBeforeAC = 0;
 
@@ -60,6 +75,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
       const anchor = this.map[item.anchorType];
       anchor.prepare(item, { index });
     });
+    assignDrawingObjectIds(model.anchors);
   }
 
   get tag(): string {
@@ -100,9 +116,10 @@ class DrawingXform extends BaseXform<DrawingModel> {
   }
 
   parseOpen(node: ParseOpenTag): boolean {
-    // Inside mc:Fallback — skip everything
+    // Inside mc:Fallback — each child is kept whole
     if (this._inFallback) {
       this._fallbackDepth++;
+      this._fallbackChild.parseOpen(node);
       return true;
     }
 
@@ -129,7 +146,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
       case "mc:Choice":
         if (this._inAlternateContent) {
           this._inChoice = true;
-          this._choiceRequires = node.attributes?.Requires;
+          this._choice = readChoice(node);
         }
         break;
 
@@ -137,6 +154,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
         if (this._inAlternateContent) {
           this._inFallback = true;
           this._fallbackDepth = 1;
+          this._fallbackParts = [];
         }
         break;
 
@@ -153,6 +171,9 @@ class DrawingXform extends BaseXform<DrawingModel> {
 
   parseText(text: string): void {
     if (this._inFallback) {
+      if (this._fallbackDepth > 1) {
+        this._fallbackChild.parseText(text);
+      }
       return;
     }
     if (this.parser) {
@@ -161,11 +182,14 @@ class DrawingXform extends BaseXform<DrawingModel> {
   }
 
   parseClose(name: string): boolean {
-    // Inside mc:Fallback — skip until closed
+    // Inside mc:Fallback — until it closes
     if (this._inFallback) {
       this._fallbackDepth--;
       if (this._fallbackDepth === 0) {
         this._inFallback = false;
+      } else if (!this._fallbackChild.parseClose(name)) {
+        this._fallbackParts.push(this._fallbackChild.model as string);
+        this._fallbackChild.reset();
       }
       return true;
     }
@@ -186,15 +210,32 @@ class DrawingXform extends BaseXform<DrawingModel> {
         this._acDepth = (this._acDepth ?? 0) - 1;
         if (this._acDepth <= 0) {
           // Tag any anchors added during this mc:AlternateContent with alternateContent info
-          if (this._inAlternateContent && this._choiceRequires) {
+          if (this._inAlternateContent && this._choice) {
             const anchors = this.model!.anchors;
             for (let i = this._anchorCountBeforeAC; i < anchors.length; i++) {
-              anchors[i].alternateContent = { requires: this._choiceRequires };
+              // Every anchor of the Choice is written in a wrapper of its own; the Fallback
+              // goes with the first, so it is written once.
+              const wrapper: AlternateContentModel =
+                i === this._anchorCountBeforeAC && this._fallbackParts.length > 0
+                  ? {
+                      ...this._choice,
+                      placement: "anchor",
+                      fallbackXml: this._fallbackParts.join("")
+                    }
+                  : { ...this._choice, placement: "anchor" };
+              // An anchor that already carries the wrapper of its shape slot keeps it: this one
+              // goes beside it.
+              if (anchors[i].alternateContent?.placement === "content") {
+                anchors[i].outerAlternateContent = wrapper;
+              } else {
+                anchors[i].alternateContent = wrapper;
+              }
             }
           }
           this._inAlternateContent = false;
           this._inChoice = false;
-          this._choiceRequires = undefined;
+          this._choice = undefined;
+          this._fallbackParts = [];
           this._acDepth = 0;
         }
         return true;
@@ -250,5 +291,8 @@ class DrawingXform extends BaseXform<DrawingModel> {
     "xmlns:cx": "http://schemas.microsoft.com/office/drawing/2014/chartex"
   };
 }
+
+/** The drawing writer always declares `xdr` and `a`; the others only for some drawings. */
+const DRAWING_WRITER_NAMESPACES: WriterNamespaces = { fixed: DrawingXform.DRAWING_ATTRIBUTES };
 
 export { DrawingXform };

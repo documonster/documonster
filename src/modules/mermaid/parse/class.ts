@@ -11,7 +11,13 @@
  */
 
 import { normaliseDirection } from "@mermaid/parse/flowchart";
-import { decodeLabel, indexOfUnquoted, splitStatements, unquote } from "@mermaid/parse/lex";
+import {
+  SkipLog,
+  decodeLabel,
+  indexOfUnquoted,
+  splitStatementsAt,
+  unquote
+} from "@mermaid/parse/lex";
 import type {
   ClassBox,
   ClassDiagram,
@@ -59,7 +65,9 @@ export function parseClass(source: string, direction: FlowDirection): ClassDiagr
     return entry;
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^classDiagram(-v2)?\b/i.test(text)) {
       continue;
     }
@@ -79,6 +87,8 @@ export function parseClass(source: string, direction: FlowDirection): ClassDiagr
       const member = readMember(text);
       if (member) {
         touch(openClass).members.push(member);
+      } else {
+        skipped.add(statement);
       }
       continue;
     }
@@ -126,13 +136,30 @@ export function parseClass(source: string, direction: FlowDirection): ClassDiagr
       const member = readMember(attached[2]);
       if (member) {
         entry.members.push(member);
+      } else {
+        skipped.add(statement);
       }
       continue;
     }
 
-    if (/^(note|style|click|callback|link|cssClass|namespace|accTitle|accDescr)\b/i.test(text)) {
+    // `<<interface>> Shape` annotates a class from outside its braces.
+    const annotation = /^<<\s*(.+?)\s*>>\s+(\S+)$/.exec(text);
+    if (annotation) {
+      touch(annotation[2]).stereotype = annotation[1];
       continue;
     }
+
+    // A `}` outside a class body closes a `namespace { … }`, whose classes are drawn
+    // without the frame.
+    if (
+      text === "}" ||
+      /^(note|style|click|callback|link|cssClass|classDef|namespace|accTitle|accDescr)\b/i.test(
+        text
+      )
+    ) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   const boxes: ClassBox[] = [...classes].map(([id, entry]) => ({
@@ -147,7 +174,8 @@ export function parseClass(source: string, direction: FlowDirection): ClassDiagr
     direction: dir,
     ...(title === undefined ? {} : { title }),
     classes: boxes,
-    links
+    links,
+    ...skipped.report()
   };
 }
 

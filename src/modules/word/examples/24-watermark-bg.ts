@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { DocumentTheme, Watermark } from "../index";
 
 const outDir = path.resolve(
@@ -43,10 +43,7 @@ fs.mkdirSync(outDir, { recursive: true });
     font: "Arial"
   };
   Document.setWatermark(d, wm);
-  fs.writeFileSync(
-    path.join(outDir, "01-text-watermark.docx"),
-    await Io.toBuffer(Document.build(d))
-  );
+  fs.writeFileSync(path.join(outDir, "01-text-watermark.docx"), await Document.toBuffer(d));
   console.log("  → 01-text-watermark.docx");
 }
 
@@ -108,7 +105,10 @@ fs.mkdirSync(outDir, { recursive: true });
   ]);
   // We use the public addImage path which assigns a stable rId then strip
   // the inserted body paragraph: only the image part survives in the package.
-  const imgInfo = Document.addImage(d, logoPng, "png", Units.cmToTwips(5), Units.cmToTwips(2), {
+  const imgInfo = Document.addImage(d, logoPng, {
+    type: "png",
+    width: Units.cmToEmu(5),
+    height: Units.cmToEmu(2),
     altText: "Watermark logo",
     name: "WatermarkSource"
   });
@@ -124,10 +124,7 @@ fs.mkdirSync(outDir, { recursive: true });
     heightPt: 120
   };
   Document.setWatermark(d, wm);
-  fs.writeFileSync(
-    path.join(outDir, "02-image-watermark.docx"),
-    await Io.toBuffer(Document.build(d))
-  );
+  fs.writeFileSync(path.join(outDir, "02-image-watermark.docx"), await Document.toBuffer(d));
   console.log("  → 02-image-watermark.docx");
 }
 
@@ -140,7 +137,7 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.addHeading(d, "Page background", 1);
   Document.addParagraph(d, "The page is pale blue.");
   Document.setBackground(d, { color: "DEEBF7" });
-  fs.writeFileSync(path.join(outDir, "03-bg-color.docx"), await Io.toBuffer(Document.build(d)));
+  fs.writeFileSync(path.join(outDir, "03-bg-color.docx"), await Document.toBuffer(d));
   console.log("  → 03-bg-color.docx");
 }
 
@@ -156,7 +153,7 @@ fs.mkdirSync(outDir, { recursive: true });
     "The words below are coloured via themeColor references. With the custom " +
       "Sunset theme attached, they render as red / orange / yellow / green / blue / purple."
   );
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.text("Accent1 (red)  ", {
@@ -176,7 +173,7 @@ fs.mkdirSync(outDir, { recursive: true });
       })
     ])
   );
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.text("Accent4 (green)  ", {
@@ -224,10 +221,9 @@ fs.mkdirSync(outDir, { recursive: true });
       minor: { latin: "Calibri", eastAsia: "Microsoft YaHei" }
     }
   };
-  // Theme is attached via the build()-state mutator surface
-  const built = Document.build(d);
-  const themed = { ...built, theme };
-  fs.writeFileSync(path.join(outDir, "04-custom-theme.docx"), await Io.toBuffer(themed));
+  // No `Document.*` helper sets a theme, so attach it to a copy of the tree
+  const themed = { ...d, theme };
+  fs.writeFileSync(path.join(outDir, "04-custom-theme.docx"), await Document.toBuffer(themed));
   console.log("  → 04-custom-theme.docx");
 }
 
@@ -248,6 +244,6 @@ fs.mkdirSync(outDir, { recursive: true });
     rotation: -30,
     semiTransparent: true
   });
-  fs.writeFileSync(path.join(outDir, "05-combined.docx"), await Io.toBuffer(Document.build(d)));
+  fs.writeFileSync(path.join(outDir, "05-combined.docx"), await Document.toBuffer(d));
   console.log("  → 05-combined.docx");
 }

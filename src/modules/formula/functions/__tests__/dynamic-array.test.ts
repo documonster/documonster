@@ -303,8 +303,8 @@ describe("EXPAND", () => {
 // ============================================================================
 
 describe("FILTER comprehensive", () => {
-  it("data scalar -> #VALUE!", () => {
-    expect(fnFILTER([rvNumber(1), rvArray([[rvBoolean(true)]])])).toEqual(ERRORS.VALUE);
+  it("data scalar is a 1×1 array", () => {
+    expect(fnFILTER([rvNumber(1), rvArray([[rvBoolean(true)]])])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("include not a column -> #VALUE!", () => {
@@ -409,8 +409,8 @@ describe("SORT comprehensive", () => {
     expect(fnSORT([data, rvNumber(5), rvNumber(1), rvBoolean(true)])).toEqual(ERRORS.VALUE);
   });
 
-  it("scalar data -> #VALUE!", () => {
-    expect(fnSORT([rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("scalar data is a 1×1 array", () => {
+    expect(fnSORT([rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("stable across mixed kinds (Numbers < Strings < Booleans)", () => {
@@ -451,13 +451,13 @@ describe("SORTBY comprehensive", () => {
     expect((r.rows[0][0] as StringValue).value).toBe("b"); // key=3 → first
   });
 
-  it("data scalar -> #VALUE!", () => {
-    expect(fnSORTBY([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
+  it("data scalar is a 1×1 array", () => {
+    expect(fnSORTBY([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
-  it("by_array scalar -> #VALUE!", () => {
+  it("by_array scalar is a 1×1 key", () => {
     const data = rvArray([[rvNumber(1)]]);
-    expect(fnSORTBY([data, rvNumber(1)])).toEqual(ERRORS.VALUE);
+    expect(fnSORTBY([data, rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("only data arg -> #VALUE!", () => {
@@ -481,8 +481,8 @@ describe("UNIQUE comprehensive", () => {
     expect(r.width).toBe(2);
   });
 
-  it("scalar -> #VALUE!", () => {
-    expect(fnUNIQUE([rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("scalar is a 1×1 array", () => {
+    expect(fnUNIQUE([rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("M×N deduplicates rows", () => {
@@ -623,8 +623,8 @@ describe("TAKE comprehensive", () => {
     expect(fnTAKE([data, rvNumber(0), rvNumber(0)])).toEqual(ERRORS.CALC);
   });
 
-  it("scalar -> #VALUE!", () => {
-    expect(fnTAKE([rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("scalar is a 1×1 array", () => {
+    expect(fnTAKE([rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("only rows provided keeps all columns", () => {
@@ -661,8 +661,8 @@ describe("DROP comprehensive", () => {
     expect(r.width).toBe(3);
   });
 
-  it("scalar data -> #VALUE!", () => {
-    expect(fnDROP([rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("scalar data is a 1×1 array", () => {
+    expect(fnDROP([rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 });
 
@@ -687,8 +687,8 @@ describe("CHOOSEROWS comprehensive", () => {
     expect(r.height).toBe(2);
   });
 
-  it("scalar data -> #VALUE!", () => {
-    expect(fnCHOOSEROWS([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("scalar data is a 1×1 array", () => {
+    expect(fnCHOOSEROWS([rvNumber(1), rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("error index propagates", () => {
@@ -725,8 +725,8 @@ describe("CHOOSECOLS comprehensive", () => {
     expect(fnCHOOSECOLS([data, rvNumber(99)])).toEqual(ERRORS.VALUE);
   });
 
-  it("scalar data -> #VALUE!", () => {
-    expect(fnCHOOSECOLS([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("scalar data is a 1×1 array", () => {
+    expect(fnCHOOSECOLS([rvNumber(1), rvNumber(1)])).toEqual(rvArray([[rvNumber(1)]]));
   });
 
   it("error index", () => {
@@ -828,14 +828,14 @@ describe("WRAPROWS comprehensive", () => {
     expect((r.rows[1][1] as NumberValue).value).toBe(0);
   });
 
-  it("wrap_count < 1 -> #VALUE!", () => {
+  it("wrap_count < 1 -> #NUM!", () => {
     const data = rvArray([[rvNumber(1), rvNumber(2)]]);
-    expect(fnWRAPROWS([data, rvNumber(0)])).toEqual(ERRORS.VALUE);
-    expect(fnWRAPROWS([data, rvNumber(-1)])).toEqual(ERRORS.VALUE);
+    expect(fnWRAPROWS([data, rvNumber(0)])).toEqual(ERRORS.NUM);
+    expect(fnWRAPROWS([data, rvNumber(-1)])).toEqual(ERRORS.NUM);
   });
 
-  it("scalar -> #VALUE!", () => {
-    expect(fnWRAPROWS([rvNumber(1), rvNumber(2)])).toEqual(ERRORS.VALUE);
+  it("scalar is a 1×1 array", () => {
+    expect(fnWRAPROWS([rvNumber(1), rvNumber(2)])).toEqual(rvArray([[rvNumber(1), ERRORS.NA]]));
   });
 
   it("exact multiple: no padding", () => {
@@ -868,13 +868,13 @@ describe("WRAPCOLS comprehensive", () => {
     expect((r.rows[1][1] as StringValue).value).toBe("X");
   });
 
-  it("wrap_count < 1 -> #VALUE!", () => {
+  it("wrap_count < 1 -> #NUM!", () => {
     const data = rvArray([[rvNumber(1), rvNumber(2)]]);
-    expect(fnWRAPCOLS([data, rvNumber(0)])).toEqual(ERRORS.VALUE);
+    expect(fnWRAPCOLS([data, rvNumber(0)])).toEqual(ERRORS.NUM);
   });
 
-  it("scalar -> #VALUE!", () => {
-    expect(fnWRAPCOLS([rvNumber(1), rvNumber(2)])).toEqual(ERRORS.VALUE);
+  it("scalar is a 1×1 array", () => {
+    expect(fnWRAPCOLS([rvNumber(1), rvNumber(2)])).toEqual(rvArray([[rvNumber(1)], [ERRORS.NA]]));
   });
 
   it("error wrap_count propagates", () => {
@@ -996,8 +996,13 @@ describe("EXPAND comprehensive", () => {
     expect(fnEXPAND([data, rvNumber(1000), rvNumber(100_001)])).toEqual(ERRORS.NUM);
   });
 
-  it("scalar -> #VALUE!", () => {
-    expect(fnEXPAND([rvNumber(1), rvNumber(2), rvNumber(2)])).toEqual(ERRORS.VALUE);
+  it("scalar is a 1×1 array", () => {
+    expect(fnEXPAND([rvNumber(1), rvNumber(2), rvNumber(2)])).toEqual(
+      rvArray([
+        [rvNumber(1), ERRORS.NA],
+        [ERRORS.NA, ERRORS.NA]
+      ])
+    );
   });
 
   it("error args propagate", () => {
@@ -1521,10 +1526,10 @@ describe("WRAPCOLS saturation", () => {
     expect(r.height).toBe(1);
     expect(r.width).toBe(3);
   });
-  it("wrap_count <= 0 → #VALUE!", () => {
+  it("wrap_count <= 0 → #NUM!", () => {
     const src = rvArray([[rvNumber(1)]]);
-    expect(fnWRAPCOLS([src, rvNumber(0)])).toEqual(ERRORS.VALUE);
-    expect(fnWRAPCOLS([src, rvNumber(-1)])).toEqual(ERRORS.VALUE);
+    expect(fnWRAPCOLS([src, rvNumber(0)])).toEqual(ERRORS.NUM);
+    expect(fnWRAPCOLS([src, rvNumber(-1)])).toEqual(ERRORS.NUM);
   });
   it("error in source produces an error (engine returns #VALUE!)", () => {
     const r = fnWRAPCOLS([ERRORS.NA, rvNumber(2)]);
@@ -1912,8 +1917,8 @@ describe("WRAPROWS + TOROW extras (R9 batch 2)", () => {
     expect(r.height).toBe(3);
     expect(r.width).toBe(1);
   });
-  it("WRAPROWS wrap_count <= 0 → #VALUE!", () => {
-    expect(fnWRAPROWS([rvArray([[rvNumber(1)]]), rvNumber(0)])).toEqual(ERRORS.VALUE);
+  it("WRAPROWS wrap_count <= 0 → #NUM!", () => {
+    expect(fnWRAPROWS([rvArray([[rvNumber(1)]]), rvNumber(0)])).toEqual(ERRORS.NUM);
   });
   it("WRAPROWS error source produces error", () => {
     const r = fnWRAPROWS([ERRORS.NA, rvNumber(2)]);

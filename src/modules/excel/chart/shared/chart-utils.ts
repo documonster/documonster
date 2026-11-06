@@ -32,7 +32,15 @@
 
 import { measureText } from "@draw/text";
 import type { ChartColor, ChartFill, ChartLine } from "@excel/chart/model/types";
-import { CHART_THEME_PALETTE, DEFAULT_OFFICE_THEME } from "@utils/theme-colors";
+import { chartColorTransformList } from "@excel/chart/shared/color-transforms";
+import {
+  applyColorTransforms,
+  CHART_THEME_PALETTE,
+  DEFAULT_OFFICE_THEME,
+  hexToRgb01,
+  rgb01ToHex
+} from "@utils/theme-colors";
+import type { ColorTransform, OoxmlThemeColorName, Rgba01Color } from "@utils/theme-colors";
 import { emuToPt } from "@utils/units";
 import { stripXmlIllegalChars as sharedStripXmlIllegalChars } from "@xml/encode";
 
@@ -96,6 +104,18 @@ export const COLORS = [
   `#${DEFAULT_OFFICE_THEME.accent6}`
 ];
 
+/**
+ * The automatic colour of the `index`-th series (or point, for a chart that varies colours by
+ * point): Excel's rotation through the theme's six accents, `accent1` first — from
+ * `themeColors`, the workbook's or the document's theme, where given, else the default Office
+ * theme ({@link COLORS}). A chart that names no colour of its own follows its theme, as in
+ * Excel and Word.
+ */
+export function automaticSeriesColor(index: number, themeColors?: ChartThemeColors): string {
+  const slot = (((index % 6) + 6) % 6) as number;
+  return resolveChartColor({ theme: 4 + slot }, themeColors) ?? COLORS[slot];
+}
+
 /** Dark grey for axis lines / frame strokes. */
 export const AXIS_COLOR = "#444444";
 /** Light grey for gridlines. */
@@ -146,19 +166,6 @@ export function splitTextLines(text: string): { index: number; text: string }[] 
 export function singleLineLabel(label: string): string {
   return /[\r\n]/.test(label) ? label.split(/\r\n|[\r\n]/).join(" ") : label;
 }
-
-/**
- * Preview-grade DrawingML theme palette in `CT_ColorMapping` order, sourced
- * from the shared default Office theme ({@link CHART_THEME_PALETTE}). The
- * renderer only consults this when a chart references a theme colour but no
- * `<a:clrScheme>` has been resolved — the full theme lookup chain requires the
- * workbook's `theme.xml`, which the preview path deliberately does not load.
- * Authors who need exact theme-accurate colours should rasterise with a tool
- * that resolves the theme.
- */
-const THEME_PREVIEW_PALETTE: readonly string[] = Object.freeze(
-  CHART_THEME_PALETTE.map(hex => `#${hex}`)
-);
 
 /**
  * DrawingML theme slot names in the canonical order used by
@@ -561,90 +568,138 @@ export function interpolateColor(a: string, b: string, t: number): string {
 // ============================================================================
 
 /**
- * Resolve a {@link ChartColor} into a preview-grade hex colour. Accepts
- * every DrawingML colour variant Excel emits — `srgb`, `theme` (looked
- * up in {@link THEME_PREVIEW_PALETTE}), `sysClr` (the two Excel keeps
- * meaningful in the preview — `windowText` / `window`), and `prstClr`
- * (the ~140-entry {@link PRESET_COLOR_HEX_TABLE}). Returns `undefined`
- * when the colour is absent or references something this preview cannot
- * resolve (an unknown preset / sysClr, or a theme index outside the
- * 12-entry palette). Callers that need a default coalesce with `??`.
- *
- * Shared by fill, line, and text-property resolvers so a file that
- * sets, say, a gridline colour via `<a:schemeClr val="accent3"/>`
- * paints the correct accent-3 hex — previously the line/text paths
- * only honoured `srgbClr` and silently fell back to the renderer's
- * default grey.
- *
- * Colour modifiers (`tint`, `shade`, `lumMod`, `lumOff`, `alpha`,
- * `satMod`) are intentionally NOT applied — the preview path doesn't
- * model the DrawingML blend pipeline, and approximating one component
- * in isolation produces visibly-wrong results. Authors who need
- * exact theme-derived colours should rasterise with a full DrawingML
- * renderer.
+ * A theme's colour scheme as the chart renderers take it: six hex digits (`RRGGBB`) per
+ * scheme slot. A slot left out takes the default Office theme's colour.
  */
-export function resolveChartColor(color: ChartColor | undefined): string | undefined {
+export type ChartThemeColors = Readonly<Partial<Record<OoxmlThemeColorName, string>>>;
+
+/**
+ * Resolve a {@link ChartColor} into a hex colour (`#RRGGBB`) — the one colour resolver of
+ * the chart renderers, for every element: fills, lines, markers, gridlines, axes, text,
+ * legends, data labels, trendlines, error bars, effects and Office 2016 charts.
+ *
+ * The base colour is the `srgb`, the scheme slot (`theme`) — read from `themeColors`, the
+ * workbook's theme, where given, else the default Office theme — the `sysClr` (`windowText`,
+ * `window`) or the `prstClr`. Its DrawingML transforms are then applied with the engine every
+ * module shares ({@link applyColorTransforms}), in the order the chart writers emit them:
+ * `tint` (a negative one is a `shade`, the writers' convention), `shade`, `satMod`, `lumMod`,
+ * `lumOff`. Without them an Excel-saved gridline (`tx1`, lumMod 15 %, lumOff 85 %) came out
+ * black instead of Excel's `#D9D9D9`. Opacity (`alpha`) is not part of the hex — see
+ * {@link resolveChartColorRgba}.
+ *
+ * Returns `undefined` when there is no colour, or one this resolver cannot know (a
+ * placeholder `phClr`, an unknown preset or system colour, a malformed `srgb`); callers
+ * coalesce to their default.
+ */
+export function resolveChartColor(
+  color: ChartColor | undefined,
+  themeColors?: ChartThemeColors
+): string | undefined {
+  const resolved = resolveChartColorRgba(color, themeColors);
+  return resolved === undefined ? undefined : `#${rgb01ToHex(resolved)}`;
+}
+
+/**
+ * {@link resolveChartColor} with the colour's opacity: `alpha` applied too, each channel in
+ * `0..1`.
+ */
+export function resolveChartColorRgba(
+  color: ChartColor | undefined,
+  themeColors?: ChartThemeColors
+): Rgba01Color | undefined {
+  const base = baseChartColor(color, themeColors);
+  if (base === undefined || color === undefined) {
+    return undefined;
+  }
+  const rgb = hexToRgb01(base);
+  return rgb ? applyColorTransforms(rgb, chartColorTransforms(color)) : undefined;
+}
+
+/**
+ * The transforms a {@link ChartColor} is drawn with: its ordered list (`transforms`, with the named fields applied as
+ * the type defines it) when it carries one, else the named fields in the order the chart writers emit them.
+ */
+function chartColorTransforms(color: ChartColor): ColorTransform[] {
+  const list = chartColorTransformList(color);
+  if (list !== undefined) {
+    // A negative `tint` is a `shade` here too — the writers' convention for the named field, and what the engine,
+    // which clamps `tint` to 0..1, would otherwise draw as white.
+    return list.map(t =>
+      t.kind === "tint" && typeof t.val === "number" && t.val < 0
+        ? { kind: "shade", val: 100000 + t.val }
+        : t
+    );
+  }
+  const transforms: ColorTransform[] = [];
+  const finite = (value: number | undefined): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+  if (finite(color.tint) && color.tint !== 0) {
+    transforms.push(
+      color.tint < 0
+        ? { kind: "shade", val: Math.round((1 + color.tint) * 100000) }
+        : { kind: "tint", val: Math.round(color.tint * 100000) }
+    );
+  }
+  if (finite(color.shade)) {
+    transforms.push({ kind: "shade", val: color.shade });
+  }
+  if (finite(color.satMod)) {
+    transforms.push({ kind: "satMod", val: color.satMod });
+  }
+  if (finite(color.lumMod)) {
+    transforms.push({ kind: "lumMod", val: color.lumMod });
+  }
+  if (finite(color.lumOff)) {
+    transforms.push({ kind: "lumOff", val: color.lumOff });
+  }
+  if (finite(color.alpha)) {
+    transforms.push({ kind: "alpha", val: color.alpha });
+  }
+  return transforms;
+}
+
+/** The colour before its transforms, as six hex digits. */
+function baseChartColor(
+  color: ChartColor | undefined,
+  themeColors: ChartThemeColors | undefined
+): string | undefined {
   if (!color) {
     return undefined;
   }
   if (typeof color.srgb === "string") {
-    // Validate: OOXML `ST_HexBinary3` is a 6-digit hex (RGB) but we
-    // tolerate a leading `#` for backward compatibility. Also honour
-    // the 8-digit `RRGGBBAA` form Excel uses when encoding alpha
-    // inside the hex — drop the alpha for the preview (alpha is
-    // surfaced separately as `color.alpha` on the structured model).
-    //
-    // If `srgb` is set but malformed, return `undefined` rather than
-    // falling through to `theme` / `sysClr` / `prstClr`. Legitimate
-    // DrawingML colours set exactly one of those fields, so a
-    // fall-through only ever helps malformed data — and when it does,
-    // it silently substitutes a different colour source than the
-    // author wrote, which is worse than coalescing to a default.
+    // `ST_HexBinary3` is six digits; a leading `#` and Excel's 8-digit `RRGGBBAA` (alpha is
+    // carried separately as `alpha`) are tolerated. A malformed `srgb` resolves to nothing
+    // rather than to a different colour source than the author wrote.
     const clean = color.srgb.replace(/^#/, "");
-    if (/^[0-9a-fA-F]{6}$/.test(clean)) {
-      return `#${clean.toUpperCase()}`;
-    }
-    if (/^[0-9a-fA-F]{8}$/.test(clean)) {
-      return `#${clean.slice(0, 6).toUpperCase()}`;
+    if (/^[0-9a-fA-F]{6}$/.test(clean) || /^[0-9a-fA-F]{8}$/.test(clean)) {
+      return clean.slice(0, 6).toUpperCase();
     }
     return undefined;
   }
   if (typeof color.theme === "number") {
-    // `Number.isInteger` guards against `NaN`, `Infinity`, fractional
-    // values, and negative indices — any of which would slip past
-    // `typeof === "number"` but produce `undefined` on index access,
-    // silently skipping the sysClr / prstClr fallbacks below. On a
-    // malformed or out-of-range theme index, fall through so the
-    // caller's default resolution still runs.
-    if (
-      Number.isInteger(color.theme) &&
-      color.theme >= 0 &&
-      color.theme < THEME_PREVIEW_PALETTE.length
-    ) {
-      return THEME_PREVIEW_PALETTE[color.theme];
+    // `Number.isInteger` rejects `NaN`, `Infinity`, fractions and negatives that would
+    // otherwise read `undefined`; on one, fall through so the other sources still answer.
+    if (Number.isInteger(color.theme) && color.theme >= 0 && color.theme < THEME_NAMES.length) {
+      const slot = THEME_NAMES[color.theme] as OoxmlThemeColorName;
+      const fromTheme = themeColors?.[slot];
+      return fromTheme !== undefined && /^[0-9a-fA-F]{6}$/.test(fromTheme)
+        ? fromTheme.toUpperCase()
+        : CHART_THEME_PALETTE[color.theme];
     }
   }
   if (typeof color.schemeName === "string") {
-    // `schemeName` carries a DrawingML scheme token that couldn't be
-    // mapped onto a theme slot. The preview has no concept of
-    // placeholder colours (e.g. `phClr`), so fall back to `undefined`
-    // — caller coalesces to a default. Returning `undefined` here is
-    // preferable to guessing a theme colour that may not match the
-    // author's intent on a real `<a:clrScheme>` resolver.
+    // A placeholder colour (`phClr`) or an unknown token: no colour of its own.
     return undefined;
   }
   if (typeof color.sysClr === "string") {
-    if (color.sysClr === "windowText") {
-      return "#000000";
-    }
-    if (color.sysClr === "window") {
-      return "#FFFFFF";
-    }
-    return undefined;
+    return color.sysClr === "windowText"
+      ? "000000"
+      : color.sysClr === "window"
+        ? "FFFFFF"
+        : undefined;
   }
   if (typeof color.prstClr === "string") {
-    const hex = PRESET_COLOR_HEX_TABLE[color.prstClr];
-    return hex ? `#${hex}` : undefined;
+    return PRESET_COLOR_HEX_TABLE[color.prstClr];
   }
   return undefined;
 }
@@ -653,7 +708,7 @@ export function resolveChartColor(color: ChartColor | undefined): string | undef
  * Resolve a {@link ChartFill} into a preview-grade hex colour. Recognises
  * the four `<a:solidFill>` children Excel writes (`srgbClr`, `schemeClr`,
  * `sysClr`, `prstClr`) via the shared {@link resolveChartColor} resolver
- * and the {@link THEME_PREVIEW_PALETTE} / {@link PRESET_COLOR_HEX_TABLE}
+ * and the {@link PRESET_COLOR_HEX_TABLE}
  * lookup tables for the theme / preset variants.
  *
  * When the fill cannot be resolved (no fill set, empty `solidFill`,
@@ -666,9 +721,10 @@ export function resolveChartColor(color: ChartColor | undefined): string | undef
  */
 export function previewShapeFillColor<F extends string | undefined>(
   fill: ChartFill | undefined,
-  fallback: F
+  fallback: F,
+  themeColors?: ChartThemeColors
 ): F | string {
-  return resolveChartColor(fill?.solid) ?? fallback;
+  return resolveChartColor(fill?.solid, themeColors) ?? fallback;
 }
 
 /**
@@ -679,8 +735,11 @@ export function previewShapeFillColor<F extends string | undefined>(
  * sysClr line colour (gridlines, axes, trendlines, error bars) to the
  * renderer's default grey on load.
  */
-export function previewShapeLineColor(line: ChartLine | undefined): string | undefined {
-  return resolveChartColor(line?.color);
+export function previewShapeLineColor(
+  line: ChartLine | undefined,
+  themeColors?: ChartThemeColors
+): string | undefined {
+  return resolveChartColor(line?.color, themeColors);
 }
 
 /**

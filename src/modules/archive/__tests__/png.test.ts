@@ -1,4 +1,5 @@
 import { unzlibSync } from "@archive/compression/compress";
+import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import { encodePng, withPngDpi } from "@archive/png";
 import { describe, expect, it } from "vitest";
 
@@ -114,12 +115,24 @@ describe("encodePng", () => {
     expect(chunk(encodePng(makeRgba(2, 2), 2, 2), "pHYs")).toBeUndefined();
   });
 
-  it("omits pHYs for a dpi that cannot describe a resolution", () => {
-    // `Math.round(NaN)` is NaN, which used to serialise as a zero
-    // pixels-per-metre pHYs — invalid rather than merely unhelpful.
-    for (const dpi of [0, -96, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(chunk(encodePng(makeRgba(2, 2), 2, 2, { dpi }), "pHYs")).toBeUndefined();
+  it("refuses a dpi that cannot describe a resolution", () => {
+    // Writing no pHYs for such a value hid the caller's mistake; `Math.round(NaN)` used to
+    // serialise as a zero pixels-per-metre pHYs before that.
+    for (const dpi of [0, -96, Number.NaN, Number.POSITIVE_INFINITY, "96", null]) {
+      let error: unknown;
+      try {
+        encodePng(makeRgba(2, 2), 2, 2, { dpi: dpi as number });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error, String(dpi)).toBeInstanceOf(ArchiveArgumentError);
+      expect((error as ArchiveArgumentError).field).toBe("options.dpi");
     }
+  });
+
+  it("refuses options that are not an object", () => {
+    expect(() => encodePng(makeRgba(2, 2), 2, 2, 42 as never)).toThrow(ArchiveArgumentError);
+    expect(chunk(encodePng(makeRgba(2, 2), 2, 2, { dpi: undefined }), "pHYs")).toBeUndefined();
   });
 
   it("writes pHYs in pixels per metre when a dpi is given", () => {
@@ -146,6 +159,18 @@ describe("encodePng", () => {
 
   it("rejects a pixel buffer that does not match the dimensions", () => {
     expect(() => encodePng(new Uint8Array(15), 2, 2)).toThrow(/needs 16/);
+  });
+
+  it("reports a wrong argument as an ArchiveError", () => {
+    expect(() => encodePng(makeRgba(2, 2), 0, 2)).toThrow(ArchiveError);
+    expect(() => encodePng(new Uint8Array(15), 2, 2)).toThrow(ArchiveError);
+    expect(() => encodePng(null as never, 1, 1)).toThrow(ArchiveError);
+    expect(() => encodePng(new Uint16Array(4) as never, 1, 1)).toThrow(ArchiveError);
+  });
+
+  it("accepts a canvas ImageData's Uint8ClampedArray", () => {
+    const clamped = new Uint8ClampedArray(makeRgba(2, 2));
+    expect(encodePng(clamped, 2, 2)).toEqual(encodePng(makeRgba(2, 2), 2, 2));
   });
 });
 

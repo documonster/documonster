@@ -11,7 +11,7 @@
  * never fire. Two implementations of the refusal would have been free to differ about the default (`"error"`), about the
  * wording, and about whether an empty list is a refusal.
  */
-import { ExcelNotSupportedError } from "@excel/errors";
+import { ExcelUnsupportedFeatureError } from "@excel/errors";
 
 /**
  * The shared refusal, so the two entry points cannot disagree about what a loss is.
@@ -26,14 +26,14 @@ export function refuseUnsupported(
    * Which writer is refusing, for the error's `operation`.
    *
    * Named rather than fixed at `"Write XLSB"`, because the XLSX writer refuses through this too now — it has exactly one
-   * loss of its own (a preserved sheet part from the other container) and the option governing it used to be inert.
+   * loss of its own (a preserved part from the other container) and the option governing it used to be inert.
    */
   container: "XLSB" | "XLSX" = "XLSB"
 ): void {
   if (unsupported.length === 0 || (options?.unsupported ?? "error") !== "error") {
     return;
   }
-  throw new ExcelNotSupportedError(
+  throw new ExcelUnsupportedFeatureError(
     `Write ${container}`,
     // Deliberately not "cell(s) … written as blanks": the report covers sheet features and defined
     // names as well, and what happens to each differs — an unsupported cell becomes a blank, a

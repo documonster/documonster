@@ -1,13 +1,15 @@
 /**
  * DOCX Module - Reference Scanners
  *
- * Shared helpers for scanning the document model for image / hyperlink /
- * chart references that need to be registered against a part-level .rels
+ * Shared helpers for scanning the document model for hyperlink / chart
+ * references (images: see `part-images.ts`) that need to be registered against a part-level .rels
  * file. Used by both the bulk packager and the streaming writer to avoid
  * behaviour drift in how header/footer/notes/comments parts collect their
  * own relationships.
  */
 
+import { RelType } from "@word/constants";
+import { sanitizeUrl } from "@word/core/internal-utils";
 import { walkBlocks } from "@word/core/walker";
 import type {
   BodyContent,
@@ -16,31 +18,11 @@ import type {
   Hyperlink,
   Paragraph,
   ParagraphChild,
-  Run
+  PreservedLink
 } from "@word/types";
-
-/** Scan a Run for image rIds. */
-function scanRunForImages(run: Run, out: Set<string>): void {
-  for (const rc of run.content) {
-    if (rc.type === "image" && rc.rId) {
-      out.add(rc.rId);
-    }
-  }
-}
-
-/**
- * Recursively collect image rIds referenced inside a list of paragraph
- * children. Descends into track-change wrappers (`InsertedRun`,
- * `MovedToRun`, etc.) so an image embedded inside `<w:ins>...</w:ins>` is
- * not silently lost.
- */
-export function scanChildrenForImages(children: readonly ParagraphChild[], out: Set<string>): void {
-  walkBlocks([{ type: "paragraph", children } as Paragraph], {
-    enterRun(run) {
-      scanRunForImages(run, out);
-    }
-  });
-}
+import { addRelationship } from "@word/writer/relationships";
+import type { RelationshipsState } from "@word/writer/relationships";
+import type { PreservedLinkRId } from "@word/writer/render-context";
 
 /**
  * Recursively collect external-URL hyperlinks from a list of paragraph
@@ -78,15 +60,6 @@ function walkParagraphs(blocks: readonly BodyContent[], onParagraph: (p: Paragra
   });
 }
 
-/** Collect all image rIds referenced in header/footer content. */
-export function collectImageRidsFromContent(content: HeaderFooterContent): Set<string> {
-  const rIds = new Set<string>();
-  walkParagraphs(content.children as readonly BodyContent[], p => {
-    scanChildrenForImages(p.children, rIds);
-  });
-  return rIds;
-}
-
 /** Collect hyperlinks from header/footer content. */
 export function collectHyperlinksFromHeaderFooter(content: HeaderFooterContent): Hyperlink[] {
   const links: Hyperlink[] = [];
@@ -108,22 +81,6 @@ export function collectChartsFromHeaderFooter(
   });
 }
 
-/** Collect image rIds and hyperlinks from a notes/comments collection. */
-export function collectImageRidsFromNotes(
-  notes: readonly { content: readonly Paragraph[] }[] | undefined
-): Set<string> {
-  const rIds = new Set<string>();
-  if (!notes) {
-    return rIds;
-  }
-  for (const note of notes) {
-    for (const p of note.content) {
-      scanChildrenForImages(p.children, rIds);
-    }
-  }
-  return rIds;
-}
-
 export function collectHyperlinksFromNotes(
   notes: readonly { content: readonly Paragraph[] }[] | undefined
 ): Hyperlink[] {
@@ -137,4 +94,72 @@ export function collectHyperlinksFromNotes(
     }
   }
   return links;
+}
+
+/**
+ * Every hyperlink that markup kept verbatim under `root` refers to — an
+ * `a:hlinkClick` on a drawing's `docPr` or a shape's `cNvPr`. Each must be
+ * registered in the `.rels` of the part `root` is written into, like a
+ * modelled hyperlink, and its markup rewritten to the id it gets.
+ */
+export function collectPreservedLinks(root: unknown): PreservedLink[] {
+  const out: PreservedLink[] = [];
+  const stack: unknown[] = [root];
+  const seen = new Set<object>();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== "object" || ArrayBuffer.isView(node) || seen.has(node)) {
+      continue;
+    }
+    // A model may share or even cycle through objects; visit each once.
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        stack.push(item);
+      }
+      continue;
+    }
+    if (node instanceof Map) {
+      for (const value of node.values()) {
+        stack.push(value);
+      }
+      continue;
+    }
+    const record = node as Record<string, unknown>;
+    for (const key of ["_frame", "_preserved"]) {
+      const kept = record[key] as { links?: readonly PreservedLink[] } | undefined;
+      for (const link of kept?.links ?? []) {
+        if (link.url) {
+          out.push(link);
+        }
+      }
+    }
+    for (const key in record) {
+      const value = record[key];
+      if (value !== null && typeof value === "object" && key !== "_frame" && key !== "_preserved") {
+        stack.push(value);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * A {@link PreservedLinkRId} for the part whose relationships are `rels`: each
+ * hyperlink that markup kept verbatim refers to is registered there, once, as
+ * the markup is written — the part's `.rels` must therefore be serialised
+ * after the part. A target `sanitizeUrl` rejects gets no relationship, and
+ * the writer drops its id.
+ */
+export function preservedLinkRegistrar(rels: RelationshipsState): PreservedLinkRId {
+  const ids = new WeakMap<PreservedLink, string | undefined>();
+  return link => {
+    if (ids.has(link)) {
+      return ids.get(link);
+    }
+    const safe = link.url ? sanitizeUrl(link.url) : undefined;
+    const id = safe ? addRelationship(rels, RelType.Hyperlink, safe, "External") : undefined;
+    ids.set(link, id);
+    return id;
+  };
 }

@@ -19,10 +19,10 @@
  * document and a broken one.
  */
 
-import { encodePng } from "documonster/archive";
-import { rasterizeToRgba, translate, type DrawList, type RasterFontSource } from "documonster/draw";
+import { Archive } from "documonster/archive";
+import { Draw, Matrix, type DrawList, type DrawRasterFontSource } from "documonster/draw";
 import type { MermaidRenderOptions } from "documonster/mermaid";
-import type { MarkdownImageData, MarkdownImportOptions } from "documonster/word/markdown";
+import type { DocxMarkdownImageData, DocxMarkdownImportOptions } from "documonster/word/markdown";
 
 import { McpToolError, toolError } from "../errors.js";
 import { planSlices } from "./diagram-slice.js";
@@ -135,7 +135,7 @@ export interface PreparedMarkdown {
    * Pass as `markdownToDocx`'s `resolveImage`. Present only when at least one
    * fence was rendered, so the no-diagram path behaves exactly as before.
    */
-  readonly resolveImage?: MarkdownImportOptions["resolveImage"];
+  readonly resolveImage?: DocxMarkdownImportOptions["resolveImage"];
   /** Lines worth reporting to the caller. */
   readonly notes: readonly string[];
 }
@@ -200,7 +200,7 @@ const DEFAULT_DIAGRAM_FONT_POINTS = 14;
 export async function prepareMarkdownDiagrams(
   markdown: string,
   style: DiagramStyleArgs = {},
-  fonts?: { readonly raster?: readonly RasterFontSource[]; readonly useSystemFonts?: boolean }
+  fonts?: { readonly raster?: readonly DrawRasterFontSource[]; readonly useSystemFonts?: boolean }
 ): Promise<PreparedMarkdown> {
   const fences = findMermaidFences(markdown);
   if (fences.length === 0) {
@@ -218,7 +218,7 @@ export async function prepareMarkdownDiagrams(
   // Only tune a layout the caller has not spoken about.
   const tune =
     style.maxLabelWidth === undefined && style.nodeGap === undefined && style.rankGap === undefined;
-  const images = new Map<string, MarkdownImageData>();
+  const images = new Map<string, DocxMarkdownImageData>();
   const failures: string[] = [];
   /**
    * Code points no available face could draw in any embedded diagram.
@@ -255,7 +255,7 @@ export async function prepareMarkdownDiagrams(
         split.push({ line: fence.line, pieces: cuts.length });
       }
       const parts: string[] = [];
-      const pending: Array<{ url: string; image: MarkdownImageData }> = [];
+      const pending: Array<{ url: string; image: DocxMarkdownImageData }> = [];
       const fenceBudget = { ...budget };
       cuts.forEach((cut, index) => {
         // Paint this viewport, not the whole diagram then crop it. A diagram
@@ -268,12 +268,12 @@ export async function prepareMarkdownDiagrams(
           children: [
             {
               kind: "group",
-              transform: translate(0, -cut.top / fit),
+              transform: Matrix.translate(0, -cut.top / fit),
               children: list.children
             }
           ]
         };
-        const piece = rasterizeToRgba(slice, {
+        const piece = Draw.toRgba(slice, {
           scale: EMBED_SCALE * fit,
           // An embedded diagram is rasterised, so it needs the operator's faces exactly as a
           // standalone PNG does. Without them, `--pdf-font` made the prose of a converted
@@ -282,7 +282,7 @@ export async function prepareMarkdownDiagrams(
           ...(fonts?.useSystemFonts === undefined ? {} : { useSystemFonts: fonts.useSystemFonts })
         });
         const encoded = {
-          bytes: encodePng(piece.data, piece.width, piece.height, {
+          bytes: Archive.encodePng(piece.data, piece.width, piece.height, {
             // Pixels and the OOXML extent have both already been reduced by
             // `fit`, so their ratio remains 2 px/pt = 144 DPI. Multiplying by
             // fit again made a 50%-fitted PNG falsely claim 72 DPI.

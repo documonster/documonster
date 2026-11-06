@@ -13,14 +13,15 @@
  *
  * @example
  * ```ts
- * const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+ * const result = Markdown.parse("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
  * // result.headers = ["Name", "Age"]
  * // result.rows = [["Alice", "30"]]
  * // result.alignments = ["none", "none"]
  * ```
  */
 
-import { BR_TAG_REGEX, LINEBREAK_REGEX, UNESCAPE_REGEX } from "@markdown/constants";
+import { checkParseArguments } from "@markdown/arguments";
+import { CELL_ESCAPE_OR_BR_REGEX, LINEBREAK_REGEX } from "@markdown/constants";
 import { MarkdownParseError } from "@markdown/errors";
 import type { MarkdownAlignment, MarkdownParseOptions, MarkdownParseResult } from "@markdown/types";
 
@@ -48,7 +49,12 @@ interface ResolvedParseOpts {
   readonly convertBr: boolean;
 }
 
-function resolveParseOpts(options: MarkdownParseOptions): ResolvedParseOpts {
+function resolveParseOpts(
+  where: string,
+  input: unknown,
+  options: MarkdownParseOptions
+): ResolvedParseOpts {
+  checkParseArguments(where, input, options);
   return {
     trim: options.trim !== false,
     unescape: options.unescape !== false,
@@ -241,14 +247,13 @@ function isSeparatorRow(cells: string[]): boolean {
  * Process cell content: trim, optionally unescape, and optionally convert `<br>` to newlines.
  */
 function processCell(value: string, opts: ResolvedParseOpts): string {
-  let result = opts.trim ? value.trim() : value;
-  if (opts.unescape) {
-    result = result.replace(UNESCAPE_REGEX, "$1");
+  const result = opts.trim ? value.trim() : value;
+  if (!opts.unescape && !opts.convertBr) {
+    return result;
   }
-  if (opts.convertBr) {
-    result = result.replace(BR_TAG_REGEX, "\n");
-  }
-  return result;
+  return result.replace(CELL_ESCAPE_OR_BR_REGEX, (match: string, escaped: string | undefined) =>
+    escaped !== undefined ? (opts.unescape ? escaped : match) : opts.convertBr ? "\n" : match
+  );
 }
 
 /**
@@ -308,6 +313,52 @@ function hasDash(line: string): boolean {
 }
 
 // =============================================================================
+// Code blocks
+// =============================================================================
+
+/** An opening code fence (CommonMark §4.5): up to three spaces, then three or more ` or ~. */
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * The line after the fenced code block opening at `start`, or `start` when no fence opens
+ * there. An unclosed fence runs to the end of the document, as CommonMark reads it. A table
+ * inside a code block is code, not a table.
+ */
+function skipFencedCode(lines: string[], start: number): number {
+  const open = FENCE_OPEN.exec(lines[start]);
+  if (!open) {
+    return start;
+  }
+  const fence = open[1];
+  if (fence[0] === "`" && lines[start].slice(open[0].length).includes("`")) {
+    return start; // a backtick fence's info string cannot hold a backtick
+  }
+  const close = new RegExp(`^ {0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}[ \\t]*$`);
+  for (let i = start + 1; i < lines.length; i++) {
+    if (close.test(lines[i])) {
+      return i + 1;
+    }
+  }
+  return lines.length;
+}
+
+/** Whether a line is indented four columns or more — an indented code block, not a table. */
+function isIndentedCode(line: string): boolean {
+  let columns = 0;
+  for (let i = 0; i < line.length && columns < 4; i++) {
+    const ch = line.charCodeAt(i);
+    if (ch === CH_SPACE) {
+      columns++;
+    } else if (ch === CH_TAB) {
+      columns += 4 - (columns % 4);
+    } else {
+      return false;
+    }
+  }
+  return columns >= 4;
+}
+
+// =============================================================================
 // Core Table Parser (shared between parseMarkdown and parseMarkdownAll)
 // =============================================================================
 
@@ -326,6 +377,9 @@ function parseTableAt(
     return null;
   }
 
+  if (isIndentedCode(lines[startLine])) {
+    return null;
+  }
   const line = lines[startLine].trim();
 
   // Skip empty lines and non-table content
@@ -423,7 +477,8 @@ function parseTableAt(
  * 2. A separator row (dashes with optional colons for alignment)
  * 3. Zero or more data rows
  *
- * Non-table content before and after the table is ignored.
+ * Non-table content before and after the table is ignored, and so is a table inside a
+ * fenced (```` ``` ````, `~~~`) or indented code block: GFM renders that as code.
  *
  * @param input - Markdown string containing a table
  * @param options - Parse options
@@ -434,28 +489,33 @@ function parseTableAt(
  * @example
  * ```ts
  * // Basic table
- * const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+ * const result = Markdown.parse("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
  *
  * // With alignment
- * const result = parseMarkdown("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
+ * const result = Markdown.parse("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
  * // result.alignments = ["left", "center", "right"]
  *
  * // From a larger Markdown document
- * const result = parseMarkdown(markdownDoc); // Finds the first table
+ * const result = Markdown.parse(markdownDoc); // Finds the first table
  *
  * // With options
- * const result = parseMarkdown(input, { trim: false, maxRows: 100 });
+ * const result = Markdown.parse(input, { trim: false, maxRows: 100 });
  * ```
  */
 export function parseMarkdown(
   input: string,
   options: MarkdownParseOptions = {}
 ): MarkdownParseResult {
-  const opts = resolveParseOpts(options);
+  const opts = resolveParseOpts("Markdown.parse", input, options);
   const lines = input.split(LINEBREAK_REGEX);
   const lineCount = lines.length;
 
   for (let i = 0; i < lineCount - 1; i++) {
+    const afterCode = skipFencedCode(lines, i);
+    if (afterCode !== i) {
+      i = afterCode - 1;
+      continue;
+    }
     const parsed = parseTableAt(lines, i, lineCount, opts);
     if (parsed) {
       return parsed.result;
@@ -477,7 +537,7 @@ export function parseMarkdown(
  *
  * @example
  * ```ts
- * const tables = parseMarkdownAll(markdownDoc);
+ * const tables = Markdown.parseAll(markdownDoc);
  * console.log(`Found ${tables.length} tables`);
  * tables.forEach((t, i) => console.log(`Table ${i}: ${t.headers.join(", ")}`));
  * ```
@@ -486,13 +546,18 @@ export function parseMarkdownAll(
   input: string,
   options: MarkdownParseOptions = {}
 ): MarkdownParseResult[] {
-  const opts = resolveParseOpts(options);
+  const opts = resolveParseOpts("Markdown.parseAll", input, options);
   const lines = input.split(LINEBREAK_REGEX);
   const lineCount = lines.length;
   const tables: MarkdownParseResult[] = [];
   let i = 0;
 
   while (i < lineCount - 1) {
+    const afterCode = skipFencedCode(lines, i);
+    if (afterCode !== i) {
+      i = afterCode;
+      continue;
+    }
     const parsed = parseTableAt(lines, i, lineCount, opts);
     if (parsed) {
       tables.push(parsed.result);

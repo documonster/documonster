@@ -16,6 +16,7 @@
 
 import type { ThreadedComment, ThreadedCommentMention, ThreadedCommentPerson } from "@excel/types";
 import { synthGuid } from "@excel/utils/guid";
+import { normalizeElementPrefixes } from "@excel/xlsx/xform/namespace-prefixes";
 import { findChild, findChildren, parseXml, textContent } from "@xml/dom";
 
 /**
@@ -33,6 +34,7 @@ export function parseThreadedComments(
   } catch {
     return [];
   }
+  normalizeElementPrefixes(root);
   const result: Array<{ ref: string; comment: ThreadedComment }> = [];
   for (const el of findChildren(root, "threadedComment")) {
     const ref = el.attributes.ref;
@@ -79,6 +81,7 @@ export function parsePersonList(rawXml: string): ThreadedCommentPerson[] {
   } catch {
     return [];
   }
+  normalizeElementPrefixes(root);
   return findChildren(root, "person")
     .map(el => {
       const id = el.attributes.id ?? `{${synthGuid()}}`;

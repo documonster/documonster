@@ -11,7 +11,9 @@
  * Also provides {@link buildIncremental} for appending incremental updates
  * to an existing PDF without rewriting the original bytes.
  *
- * Encryption uses AES-256 (V=5, R=5) per ISO 32000-2:2020.
+ * New documents are encrypted with AES-256 (V=5, R=5) per ISO 32000-2:2020
+ * ({@link PdfWriter.setEncryption}); a rewrite of an encrypted document keeps the
+ * handler it was read with ({@link PdfWriter.setSecurityHandler}).
  *
  * @see ISO 32000-2:2020, Chapter 7.5 — File Structure
  */
@@ -21,6 +23,7 @@ import type { EncryptionState } from "@pdf/core/encryption";
 import { encryptData } from "@pdf/core/encryption";
 import { PdfDict, pdfRef, pdfString, pdfHexString, pdfDate, pdfNumber } from "@pdf/core/pdf-object";
 import type { PdfContentStream } from "@pdf/core/pdf-stream";
+import { findSignatureContents } from "@pdf/core/signature-dict";
 import { PdfStructureError } from "@pdf/errors";
 import { concatUint8Arrays } from "@utils/binary";
 
@@ -40,6 +43,58 @@ interface PdfStreamObject extends PdfIndirectObject {
   streamData: Uint8Array;
 }
 
+/** Per-object encryption: `kind` selects the file's string or stream crypt filter. */
+export type PdfObjectEncryptFn = (
+  data: Uint8Array,
+  objNum: number,
+  gen: number,
+  kind: "string" | "stream"
+) => Uint8Array;
+
+/**
+ * A security handler for {@link PdfWriter.setSecurityHandler}. Every string and stream
+ * the writer emits goes through {@link encrypt}; {@link encryptDict} and {@link fileId}
+ * become the file's `/Encrypt` and `/ID`, which is everything a reader derives the file
+ * key from — so a handler taken from an existing file keeps that file's passwords.
+ */
+export interface PdfWriterSecurityHandler {
+  /** The `/Encrypt` dictionary, serialized. Written in the clear (ISO 32000-1 §7.6.1). */
+  readonly encryptDict: string;
+  /**
+   * The trailer's `/ID` pair. A handler up to revision 4 derives its key from the first
+   * element, so it must be the one the key was made with. `undefined` writes no `/ID`.
+   */
+  readonly fileId: readonly [Uint8Array, Uint8Array] | undefined;
+  readonly encrypt: PdfObjectEncryptFn;
+  /** `false` keeps metadata streams (`/Type /Metadata`) in the clear (§7.6.3.2). */
+  readonly encryptMetadata: boolean;
+}
+
+/** The handler {@link PdfWriter.setEncryption} installs: AES-256, V=5, R=5. */
+function aes256SecurityHandler(state: EncryptionState): PdfWriterSecurityHandler {
+  const encryptDict = new PdfDict()
+    .set("Filter", "/Standard")
+    .set("V", "5")
+    .set("R", "5")
+    .set("Length", "256")
+    .set("P", String(state.permissions))
+    .set("O", pdfHexString(state.oValue))
+    .set("U", pdfHexString(state.uValue))
+    .set("OE", pdfHexString(state.oeValue))
+    .set("UE", pdfHexString(state.ueValue))
+    .set("Perms", pdfHexString(state.permsValue))
+    .set("EncryptMetadata", "true")
+    .set("CF", "<< /StdCF << /Type /CryptFilter /CFM /AESV3 /AuthEvent /DocOpen /Length 32 >> >>")
+    .set("StmF", "/StdCF")
+    .set("StrF", "/StdCF");
+  return {
+    encryptDict: encryptDict.toString(),
+    fileId: [state.fileId, state.fileId],
+    encrypt: (data, objNum, gen) => encryptData(data, objNum, gen, state.encryptionKey),
+    encryptMetadata: true
+  };
+}
+
 // =============================================================================
 // PDF Writer
 // =============================================================================
@@ -57,7 +112,7 @@ export class PdfWriter {
   private objects: Array<PdfIndirectObject | PdfStreamObject> = [];
   private catalogRef = 0;
   private infoRef = 0;
-  private encryption: EncryptionState | null = null;
+  private security: PdfWriterSecurityHandler | null = null;
   private pdfVersion = "2.0";
 
   /**
@@ -72,7 +127,15 @@ export class PdfWriter {
    * Enable encryption for this document.
    */
   setEncryption(state: EncryptionState): void {
-    this.encryption = state;
+    this.security = aes256SecurityHandler(state);
+  }
+
+  /**
+   * Encrypt this document with an existing security handler — the one an encrypted
+   * document was read with, when it is rewritten.
+   */
+  setSecurityHandler(handler: PdfWriterSecurityHandler): void {
+    this.security = handler;
   }
 
   // ===========================================================================
@@ -126,8 +189,15 @@ export class PdfWriter {
     let streamData = data instanceof Uint8Array ? data : data.toUint8Array();
     const compress = options?.compress ?? true;
 
-    // Compress with zlib (RFC 1950) for PDF /FlateDecode
-    if (compress && streamData.length > 256 && !dict.toString().includes("/Filter")) {
+    // Compress with zlib (RFC 1950) for PDF /FlateDecode — never an XMP metadata stream,
+    // which PDF/A requires unfiltered and XMP readers find by scanning the bytes.
+    const dictText = dict.toString();
+    if (
+      compress &&
+      streamData.length > 256 &&
+      !dictText.includes("/Filter") &&
+      !isMetadataStreamDict(dictText)
+    ) {
       const compressed = zlibSync(streamData, { level: 6 });
       if (compressed.length < streamData.length) {
         dict.set("Filter", "/FlateDecode");
@@ -188,7 +258,10 @@ export class PdfWriter {
     title?: string;
     author?: string;
     subject?: string;
+    keywords?: string;
     creator?: string;
+    /** Written as /Producer. Defaults to `documonster`. */
+    producer?: string;
     /** Written as /CreationDate. Defaults to the current time. */
     creationDate?: Date;
     /** Written as /ModDate when given. */
@@ -206,10 +279,13 @@ export class PdfWriter {
     if (options.subject) {
       dict.set("Subject", pdfString(options.subject));
     }
+    if (options.keywords) {
+      dict.set("Keywords", pdfString(options.keywords));
+    }
     if (options.creator) {
       dict.set("Creator", pdfString(options.creator));
     }
-    dict.set("Producer", pdfString("documonster"));
+    dict.set("Producer", pdfString(options.producer ?? "documonster"));
     dict.set("CreationDate", pdfDate(options.creationDate ?? new Date()));
     if (options.modDate) {
       dict.set("ModDate", pdfDate(options.modDate));
@@ -218,6 +294,16 @@ export class PdfWriter {
     this.addObject(objNum, dict);
     this.infoRef = objNum;
     return objNum;
+  }
+
+  /**
+   * Add an information dictionary written by the caller, under a number it allocated, and
+   * make it the trailer's /Info — for an editor carrying over a document's own entries,
+   * which {@link addInfoDict} (the builder's five fields) cannot express.
+   */
+  addInfoObject(objNum: number, body: string): void {
+    this.addObject(objNum, body);
+    this.infoRef = objNum;
   }
 
   // ===========================================================================
@@ -242,6 +328,8 @@ export class PdfWriter {
      * `/Saturation` overlay as opaque black.
      */
     transparencyGroup?: boolean;
+    /** `/Rotate`: a quarter turn, 90, 180 or 270. Omitted for none. */
+    rotate?: number;
   }): number {
     const objNum = this.allocObject();
     const mediaBox = `[0 0 ${pdfNumber(options.width)} ${pdfNumber(options.height)}]`;
@@ -255,6 +343,9 @@ export class PdfWriter {
       .set("Resources", pdfRef(options.resourcesRef));
     if (options.transparencyGroup) {
       dict.set("Group", "<< /S /Transparency /CS /DeviceRGB /I false /K false >>");
+    }
+    if (options.rotate !== undefined) {
+      dict.set("Rotate", String(options.rotate));
     }
     if (options.annotRefs && options.annotRefs.length > 0) {
       dict.set("Annots", "[" + options.annotRefs.map(r => pdfRef(r)).join(" ") + "]");
@@ -330,7 +421,8 @@ export class PdfWriter {
     this.objects.sort((a, b) => a.objectNumber - b.objectNumber);
 
     // Pre-allocate encrypt object number (content written later, after body)
-    const encryptObjNum = this.encryption ? this.allocObject() : 0;
+    const security = this.security;
+    const encryptObjNum = security ? this.allocObject() : 0;
 
     // --- Body (indirect objects) ---
     for (const obj of this.objects) {
@@ -343,10 +435,10 @@ export class PdfWriter {
 
       // Encrypt string literals in object content (if encryption enabled)
       let content = obj.content;
-      if (this.encryption && obj.objectNumber !== encryptObjNum) {
-        const key = this.encryption.encryptionKey;
+      const encrypting = security !== null && obj.objectNumber !== encryptObjNum;
+      if (encrypting) {
         content = encryptStringsInContent(content, data =>
-          encryptData(data, obj.objectNumber, 0, key)
+          security.encrypt(data, obj.objectNumber, 0, "string")
         );
       }
 
@@ -354,13 +446,8 @@ export class PdfWriter {
       let streamBytes: Uint8Array | null = null;
       if ("streamData" in obj && obj.streamData) {
         streamBytes = obj.streamData;
-        if (this.encryption && obj.objectNumber !== encryptObjNum) {
-          streamBytes = encryptData(
-            streamBytes,
-            obj.objectNumber,
-            0,
-            this.encryption.encryptionKey
-          );
+        if (encrypting && (security.encryptMetadata || !isMetadataStreamDict(content))) {
+          streamBytes = security.encrypt(streamBytes, obj.objectNumber, 0, "stream");
           // Update /Length in content to reflect encrypted size
           content = content.replace(/\/Length \d+/, `/Length ${streamBytes.length}`);
         }
@@ -389,27 +476,9 @@ export class PdfWriter {
       byteOffset += objFooter.length;
     }
 
-    // --- Encrypt dictionary (V=5, R=5, AES-256) ---
-    if (this.encryption) {
-      const encDict = new PdfDict()
-        .set("Filter", "/Standard")
-        .set("V", "5")
-        .set("R", "5")
-        .set("Length", "256")
-        .set("P", String(this.encryption.permissions))
-        .set("O", pdfHexString(this.encryption.oValue))
-        .set("U", pdfHexString(this.encryption.uValue))
-        .set("OE", pdfHexString(this.encryption.oeValue))
-        .set("UE", pdfHexString(this.encryption.ueValue))
-        .set("Perms", pdfHexString(this.encryption.permsValue))
-        .set("EncryptMetadata", "true")
-        .set(
-          "CF",
-          "<< /StdCF << /Type /CryptFilter /CFM /AESV3 /AuthEvent /DocOpen /Length 32 >> >>"
-        )
-        .set("StmF", "/StdCF")
-        .set("StrF", "/StdCF");
-      const encContent = encDict.toString();
+    // --- Encrypt dictionary, in the clear ---
+    if (security) {
+      const encContent = security.encryptDict;
       const encObj: PdfIndirectObject = {
         objectNumber: encryptObjNum,
         offset: byteOffset,
@@ -486,9 +555,11 @@ export class PdfWriter {
     if (this.infoRef > 0) {
       trailerStr += `/Info ${pdfRef(this.infoRef)}\n`;
     }
-    if (encryptObjNum > 0) {
+    if (security) {
       trailerStr += `/Encrypt ${pdfRef(encryptObjNum)}\n`;
-      trailerStr += `/ID [${pdfHexString(this.encryption!.fileId)} ${pdfHexString(this.encryption!.fileId)}]\n`;
+      if (security.fileId) {
+        trailerStr += `/ID [${pdfHexString(security.fileId[0])} ${pdfHexString(security.fileId[1])}]\n`;
+      }
     }
     trailerStr += ">>\n";
     trailerStr += "startxref\n";
@@ -521,10 +592,16 @@ function encryptStringsInContent(
 ): string {
   const encoder = new TextEncoder();
   const result: string[] = [];
+  // A signature's /Contents stays in the clear (see `@pdf/core/signature-dict`).
+  const clear = content.includes("/ByteRange") ? findSignatureContents(content) : undefined;
   let i = 0;
 
   while (i < content.length) {
-    if (content[i] === "(") {
+    if (clear?.has(i)) {
+      const end = clearStringEnd(content, i);
+      result.push(content.slice(i, end));
+      i = end;
+    } else if (content[i] === "(") {
       // Parse a balanced parenthesized string, respecting \ escapes
       const start = i;
       i++; // skip opening '('
@@ -604,6 +681,30 @@ function encryptStringsInContent(
   }
 
   return result.join("");
+}
+
+/** The offset just past the literal or hex string that starts at `start`. */
+function clearStringEnd(content: string, start: number): number {
+  if (content[start] === "<") {
+    const end = content.indexOf(">", start);
+    return end < 0 ? content.length : end + 1;
+  }
+  let depth = 0;
+  let i = start;
+  while (i < content.length) {
+    const ch = content[i];
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    i++;
+    if (ch === "(") {
+      depth++;
+    } else if (ch === ")" && --depth === 0) {
+      return i;
+    }
+  }
+  return content.length;
 }
 
 function unescapePdfString(value: string): string {
@@ -736,12 +837,7 @@ export function buildIncremental(
      * stays in the clear (ISO 32000-1 §7.5.8.2). `kind` selects the file's
      * string or stream crypt filter; an Identity filter returns data as-is.
      */
-    encrypt?: (
-      data: Uint8Array,
-      objNum: number,
-      gen: number,
-      kind: "string" | "stream"
-    ) => Uint8Array;
+    encrypt?: PdfObjectEncryptFn;
     /**
      * The file's `/EncryptMetadata`. When `false`, an appended metadata
      * stream (`/Type /Metadata`) keeps its data in the clear (§7.6.3.2).
@@ -762,7 +858,9 @@ export function buildIncremental(
     oldXrefOffset < 0 ||
     oldXrefOffset >= originalData.length
   ) {
-    throw new PdfStructureError(`buildIncremental: invalid /Prev offset ${oldXrefOffset}`);
+    throw new PdfStructureError(
+      `An incremental update cannot be appended: the cross-reference offset ${oldXrefOffset} it would chain to (/Prev) is not in the file.`
+    );
   }
 
   // --- Determine /Size for the new trailer ---
@@ -771,7 +869,9 @@ export function buildIncremental(
   if (originalSize === undefined) {
     // Without it a new object (or the xref stream) could be given the number
     // of an object the file already uses, shadowing it for every reader.
-    throw new PdfStructureError("buildIncremental: the original /Size is required");
+    throw new PdfStructureError(
+      "An incremental update cannot be appended: the file's trailer has no /Size."
+    );
   }
   let maxObjNum = parseInt(originalSize, 10) - 1;
   for (const objNum of objects.keys()) {
@@ -830,8 +930,14 @@ export function buildIncremental(
       let streamData = body.data;
       const dict = body.dict;
 
-      // Compress if beneficial and not already filtered
-      if (streamData.length > 256 && !dict.toString().includes("/Filter")) {
+      // Compress if beneficial and not already filtered — except an XMP metadata stream,
+      // which PDF/A requires unfiltered and which XMP readers find by scanning the bytes. A
+      // full rewrite writes it with `compress: false`; an update has to agree.
+      if (
+        streamData.length > 256 &&
+        !dict.toString().includes("/Filter") &&
+        !isMetadataStreamDict(dict.toString())
+      ) {
         const compressed = zlibSync(streamData, { level: 6 });
         if (compressed.length < streamData.length) {
           dict.set("Filter", "/FlateDecode");

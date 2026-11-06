@@ -20,11 +20,12 @@
  * paragraph variants and per-line for paragraphs.
  */
 
-import type { PdfPageBuilder } from "@pdf/builder/document-builder";
+import type { DocumentMetadata, PdfPageBuilder } from "@pdf/builder/document-builder";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
+import { PdfRenderError } from "@pdf/errors";
 import type { PdfFontConfig } from "@pdf/font/font-config";
 import type { FontManager } from "@pdf/font/font-manager";
-import type { PdfColor } from "@pdf/types";
+import type { PdfColor, PdfExportOptions } from "@pdf/types";
 import type { CjkLanguage } from "@utils/cjk";
 import { hexToRgb01 } from "@utils/theme-colors";
 import { SCRIPT_BASELINE_SHIFT_FACTOR } from "@word/layout/layout-constants";
@@ -54,14 +55,10 @@ import type {
 
 /** Options for rendering a LayoutDocument into a PdfDocumentBuilder. */
 export interface RenderLayoutOptions {
-  /** Document title (sets PDF metadata). */
-  readonly title?: string;
-  /** Document author (sets PDF metadata). */
-  readonly author?: string;
-  /** Document subject. */
-  readonly subject?: string;
-  /** Document creator (defaults to "documonster"). */
-  readonly creator?: string;
+  /** The PDF's document properties, already resolved against the Word core properties. */
+  readonly metadata?: DocumentMetadata;
+  /** Password protection for the PDF. */
+  readonly encryption?: PdfExportOptions["encryption"];
   /** Default font family used when a paragraph run has no explicit font. */
   readonly defaultFont?: string;
   /** Default font size in points. */
@@ -122,7 +119,7 @@ const BLACK: PdfColor = { r: 0, g: 0, b: 0 };
 
 /**
  * Render a `LayoutDocument` into a freshly-constructed
- * `PdfDocumentBuilder`. Call `.build()` on the returned builder to get
+ * `PdfDocumentBuilder`. Call `.toBuffer()` on the returned builder to get
  * the final PDF bytes; alternatively use {@link layoutToPdfBytes}.
  */
 export function renderLayoutDocumentToPdf(
@@ -151,13 +148,11 @@ export function renderLayoutDocumentToPdf(
   if (options.onWarning) {
     builder.onWarning(options.onWarning);
   }
-  if (options.title || options.author || options.subject) {
-    builder.setMetadata({
-      title: options.title,
-      author: options.author,
-      subject: options.subject,
-      creator: options.creator
-    });
+  if (options.metadata) {
+    builder.setMetadata(options.metadata);
+  }
+  if (options.encryption) {
+    builder.setEncryption(options.encryption);
   }
 
   for (const page of layout.pages) {
@@ -177,7 +172,7 @@ export async function layoutToPdfBytes(
   options: RenderLayoutOptions = {}
 ): Promise<Uint8Array> {
   const builder = renderLayoutDocumentToPdf(layout, options);
-  return builder.build();
+  return builder.toBuffer();
 }
 
 // =============================================================================
@@ -299,8 +294,10 @@ function renderPageContent(
       break;
     default: {
       const _exhaustive: never = item;
-      throw new Error(
-        `renderLayoutDocumentToPdf: unhandled PageContent ${(_exhaustive as { type: string }).type}`
+      throw new PdfRenderError(
+        `Pdf.fromDocx: the laid-out page holds content of a kind this writer cannot draw (${
+          (_exhaustive as { type: string }).type
+        })`
       );
     }
   }
@@ -399,12 +396,13 @@ function renderParagraphDecoration(
     pdfPage.drawLine({ x1, y1, x2, y2, color, lineWidth: edge.width });
   };
 
+  // A rule's thickness lies outside its space, so its centre line is half of it further out.
   if (borders.top) {
-    const y = top + borders.top.space;
+    const y = top + borders.top.space + (borders.top.extent ?? borders.top.width) / 2;
     stroke(borders.top, left, y, right, y);
   }
   if (borders.bottom) {
-    const y = bottom - borders.bottom.space;
+    const y = bottom - borders.bottom.space - (borders.bottom.extent ?? borders.bottom.width) / 2;
     stroke(borders.bottom, left, y, right, y);
   }
   if (borders.left) {

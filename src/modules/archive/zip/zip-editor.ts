@@ -3,14 +3,15 @@ import {
   DEFAULT_ZIP_TIMESTAMPS,
   REPRODUCIBLE_ZIP_MOD_TIME
 } from "@archive/core/defaults";
-import { throwIfAborted, toError, ArchiveError } from "@archive/core/errors";
+import { checkEntryPath, checkString, checkZipOptions } from "@archive/core/entry-checks";
+import { ArchiveArgumentError, throwIfAborted, toError, ArchiveError } from "@archive/core/errors";
 import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
 import { encodeZipStringWithCodec, resolveZipStringCodec } from "@archive/core/text";
 import type { ArchiveSink } from "@archive/io/archive-sink";
-import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
-import type { ArchiveSource } from "@archive/io/archive-source";
+import { checkSinkArgument, collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
 import {
-  toAsyncIterable,
+  iterateArchiveSource,
   collectUint8ArrayStream,
   toUint8ArraySync,
   isSyncArchiveSource,
@@ -26,16 +27,17 @@ import { dateToZipDos } from "@archive/zip-spec/timestamps";
 import type { ZipEntryRecord } from "@archive/zip-spec/zip-entry-info";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
-import { FLAG_ENCRYPTED } from "@archive/zip-spec/zip-records";
+import { FLAG_DATA_DESCRIPTOR, FLAG_ENCRYPTED } from "@archive/zip-spec/zip-records";
 import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 import { ZipDeflateFile, ZipRawFile } from "@archive/zip/stream";
 import type { ZipRawEntry, ZipEntry } from "@archive/zip/zip-bytes";
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
-import type { ZipEditPlan } from "@archive/zip/zip-edit-plan";
+import { ZipEditPlan } from "@archive/zip/zip-edit-plan";
 import type { SetViewEntry } from "@archive/zip/zip-edit-view";
 import { ZipEditView } from "@archive/zip/zip-edit-view";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
 import { createZipOperation } from "@archive/zip/zip-output-pipeline";
+import { asPlainBytes } from "@utils/binary";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -155,10 +157,35 @@ function isRandomAccessReader(value: unknown): value is RandomAccessReader {
   );
 }
 
+/**
+ * Whether a copied entry must keep a data descriptor (flag bit 3). A ZipCrypto header's check
+ * byte is the high byte of the DOS time when bit 3 is set and of the CRC otherwise (APPNOTE
+ * 6.1.6), and Info-ZIP, 7-Zip and Windows check whichever the flag names — so a ZipCrypto
+ * payload keeps the flag it was encrypted under. For anything else it is the writer's choice.
+ */
+function keepsDataDescriptor(info: ZipEntryRecord): boolean | undefined {
+  if (info.encryptionMethod !== "zipcrypto") {
+    return undefined;
+  }
+  return ((info.flags ?? FLAG_DATA_DESCRIPTOR) & FLAG_DATA_DESCRIPTOR) !== 0;
+}
+
 function getPreservedBaseFlags(info: ZipEntryRecord): number {
-  // Preserve only bits that must match the raw payload.
-  // Writer-controlled bits (e.g. UTF-8, data descriptor) are intentionally not preserved.
-  return info.isEncrypted ? FLAG_ENCRYPTED : 0;
+  // Preserve the bits that must match the raw payload: encryption, and for ZipCrypto the
+  // data-descriptor bit its check byte depends on. Other writer-controlled bits (UTF-8, …)
+  // are the writer's.
+  if (!info.isEncrypted) {
+    return 0;
+  }
+  return keepsDataDescriptor(info) ? FLAG_ENCRYPTED | FLAG_DATA_DESCRIPTOR : FLAG_ENCRYPTED;
+}
+
+/** The entry's DOS time and date as stored, else computed from `lastModified`. */
+function preservedDos(info: ZipEntryRecord): { dosTime: number; dosDate: number } {
+  if (info.dosTime !== undefined && info.dosDate !== undefined) {
+    return { dosTime: info.dosTime, dosDate: info.dosDate };
+  }
+  return dateToZipDos(info.lastModified);
 }
 
 function buildPreservedRawEntry(
@@ -175,6 +202,9 @@ function buildPreservedRawEntry(
     uncompressedSize: info.uncompressedSize,
     compressionMethod: info.compressionMethod,
     modTime: info.lastModified,
+    // Copied verbatim: recomputing them in this machine's zone moves the stamp (and an
+    // entry's UT field, copied too, would then disagree with it).
+    ...preservedDos(info),
     comment: info.comment,
     encoding,
     extraField: info.extraField,
@@ -196,11 +226,11 @@ function buildPreservedRawEntry(
  *
  * ## Usage
  * ```ts
- * const editor = await editZip(existingZipBytes);
+ * const editor = await Archive.editZip(existingZipBytes);
  * editor.delete("old-file.txt");
  * editor.set("new-file.txt", "hello world");
  * editor.rename("foo.txt", "bar.txt");
- * const output = await editor.bytes();
+ * const output = await editor.toBuffer();
  * ```
  *
  * ## Path Normalization
@@ -218,7 +248,7 @@ export class ZipEditor {
   private readonly _onWarning?: (warning: ZipEditWarning) => void;
 
   /** Original entries for quick lookup (never mutated). */
-  private readonly _baseEntries: Map<string, ZipEntryRecord>;
+  private readonly _baseEntries: readonly ZipEntryRecord[];
 
   /** Final output view managed by ZipEditView. */
   private readonly _view: ZipEditView<ZipEntryRecord>;
@@ -248,6 +278,7 @@ export class ZipEditor {
     this._reader = input.reader;
     this._remote = input.remote;
 
+    checkZipOptions("Archive.editZip", options);
     this._onWarning = options.onWarning;
 
     const originalComment = this._remote.getZipComment();
@@ -274,20 +305,19 @@ export class ZipEditor {
       progressIntervalMs: options.progressIntervalMs
     };
 
-    this._baseEntries = new Map();
     this._view = new ZipEditView({ path: this._options.path });
 
     const entries = this._remote.getEntries();
-    for (const info of entries) {
-      this._baseEntries.set(info.path, info);
-    }
+    this._baseEntries = entries;
     this._view.initFromEntries(entries, e => e.path);
   }
 
   /**
    * Open an existing ZIP archive for editing.
    *
-   * @param source - The ZIP data (Uint8Array, ArrayBuffer, Blob, string, or async iterable)
+   * @param source - The ZIP data (Uint8Array, ArrayBuffer, Blob, string, async iterable or a
+   *   random-access reader). A string is the archive's content, encoded as UTF-8 — never a file
+   *   path or URL; read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
    * @param options - Edit options
    * @returns A new `ZipEditor` instance
    *
@@ -308,7 +338,7 @@ export class ZipEditor {
    * ```
    */
   static async open(
-    source: ArchiveSource | RandomAccessReader,
+    source: ArchiveSource | ArchiveBytes | RandomAccessReader,
     options: ZipEditOptions = {}
   ): Promise<ZipEditor> {
     if (isRandomAccessReader(source)) {
@@ -351,12 +381,21 @@ export class ZipEditor {
   }
 
   /**
-   * Get a snapshot of the original parsed entries (ignores pending edits).
-   *
-   * Use this to inspect the archive before making changes.
+   * The entries of the archive as it was opened, ignoring pending edits — a copy. Use it to
+   * inspect the source before making changes; {@link has} answers for the archive the edits
+   * will produce.
+   */
+  getSourceEntries(): ZipEntryRecord[] {
+    return [...this._baseEntries];
+  }
+
+  /**
+   * @deprecated Use {@link getSourceEntries}. The name read as the archive the edits produce —
+   * which `ArchiveFile#getEntries` returns — while this has always returned the source's
+   * entries. Removed in 1.0.
    */
   getEntries(): ZipEntryRecord[] {
-    return Array.from(this._baseEntries.values());
+    return this.getSourceEntries();
   }
 
   /**
@@ -366,6 +405,7 @@ export class ZipEditor {
    * @returns `true` if the entry exists and is not deleted
    */
   has(name: string): boolean {
+    checkEntryPath("Archive.ZipEditor#has", name, "name");
     return this._view.has(name);
   }
 
@@ -376,6 +416,7 @@ export class ZipEditor {
    * @returns `true` if the entry existed and was deleted, `false` otherwise
    */
   delete(name: string): boolean {
+    checkEntryPath("Archive.ZipEditor#delete", name, "name");
     return this._view.delete(name);
   }
 
@@ -453,14 +494,32 @@ export class ZipEditor {
    * @returns `this` for chaining
    */
   setComment(comment?: string): this {
+    checkString("Archive.ZipEditor#setComment", "comment", comment, true);
     this._options.comment = comment;
     return this;
   }
 
   /**
-   * Apply a reusable edit plan to this editor.
+   * Apply a reusable edit plan to this editor. Every operation is checked first, against
+   * this editor's naming rules, so a plan that is refused leaves the editor unchanged.
    */
   apply(plan: ZipEditPlan): this {
+    if (!(plan instanceof ZipEditPlan)) {
+      throw new ArchiveArgumentError("plan", "Archive.ZipEditor#apply: plan must be a ZipEditPlan");
+    }
+    for (const op of plan.getOperations()) {
+      switch (op.type) {
+        case "set":
+          this._view.checkSet(op.name, op.source, op.options);
+          break;
+        case "rename":
+          this._view.checkRename(op.from, op.to);
+          break;
+        case "comment":
+          checkString("Archive.ZipEditor#setComment", "comment", op.comment, true);
+          break;
+      }
+    }
     plan.applyTo(this);
     return this;
   }
@@ -492,7 +551,7 @@ export class ZipEditor {
     compressedData: AsyncIterable<Uint8Array>,
     zip64: Zip64Mode
   ): ZipRawFile {
-    const { dosTime, dosDate } = dateToZipDos(info.lastModified);
+    const { dosTime, dosDate } = preservedDos(info);
     return new ZipRawFile(outName, {
       compressedData,
       crc32: info.crc32,
@@ -507,7 +566,8 @@ export class ZipEditor {
       zip64,
       externalAttributes: info.externalAttributes,
       versionMadeBy: info.versionMadeBy,
-      codec: this._stringCodec
+      codec: this._stringCodec,
+      dataDescriptor: keepsDataDescriptor(info) ?? true
     });
   }
 
@@ -549,7 +609,7 @@ export class ZipEditor {
    * }
    * ```
    */
-  stream(options: ZipStreamOptions = {}): AsyncIterable<Uint8Array> {
+  stream(options: ZipStreamOptions = {}): AsyncIterable<Uint8Array<ArrayBuffer>> {
     return this.operation(options).iterable;
   }
 
@@ -758,8 +818,8 @@ export class ZipEditor {
             await file.push(bytes, true);
             await file.outputCheckpoint();
           } else {
-            // Streaming path (includes Blob via toAsyncIterable(Blob) which prefers Blob.stream())
-            for await (const chunk of toAsyncIterable(entry.source, { signal, onChunk })) {
+            // Streaming path (includes Blob via iterateArchiveSource(Blob) which prefers Blob.stream())
+            for await (const chunk of iterateArchiveSource(entry.source, { signal, onChunk })) {
               throwIfAborted(signal);
               await file.push(chunk, false);
               await file.outputCheckpoint();
@@ -790,20 +850,20 @@ export class ZipEditor {
    *
    * @example
    * ```ts
-   * const zipData = await editor.bytes();
+   * const zipData = await editor.toBuffer();
    *
    * // With progress tracking
-   * const zipData = await editor.bytes({
+   * const zipData = await editor.toBuffer({
    *   onProgress: (p) => console.log(`${p.entriesDone}/${p.entriesTotal}`)
    * });
    * ```
    */
-  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+  async toBuffer(options: ZipStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
     const signalOpt = options.signal ?? this._streamDefaults.signal;
     const onProgress = options.onProgress ?? this._streamDefaults.onProgress;
 
     if (onProgress || signalOpt) {
-      return collect(this.stream(options));
+      return asPlainBytes(await collect(this.stream(options)));
     }
 
     const preservedMeta = this._buildRawPreservedEntries();
@@ -892,7 +952,9 @@ export class ZipEditor {
         })
       ];
 
-      return createZipSync([...rawEntries, ...normalEntries], this._getBuildOptions());
+      return asPlainBytes(
+        createZipSync([...rawEntries, ...normalEntries], this._getBuildOptions())
+      );
     }
 
     // Async path: some sources need streaming collection (Blob or streaming)
@@ -903,8 +965,8 @@ export class ZipEditor {
         if (isSyncArchiveSource(entry.source)) {
           data = toUint8ArraySync(entry.source);
         } else {
-          // Streaming source: collect all chunks (includes Blob via toAsyncIterable(Blob) which prefers Blob.stream())
-          data = await collectUint8ArrayStream(toAsyncIterable(entry.source));
+          // Streaming source: collect all chunks (includes Blob via iterateArchiveSource(Blob) which prefers Blob.stream())
+          data = await collectUint8ArrayStream(iterateArchiveSource(entry.source));
         }
 
         return {
@@ -926,7 +988,16 @@ export class ZipEditor {
 
     const normalEntries: ZipEntry[] = [...recompressedPreserved, ...resolvedEntries];
 
-    return createZip([...rawEntries, ...normalEntries], this._getBuildOptions());
+    return asPlainBytes(
+      await createZip([...rawEntries, ...normalEntries], this._getBuildOptions())
+    );
+  }
+
+  /**
+   * @deprecated Use {@link toBuffer}. Removed in 1.0.
+   */
+  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array<ArrayBuffer>> {
+    return this.toBuffer(options);
   }
 
   /**
@@ -943,6 +1014,7 @@ export class ZipEditor {
    * ```
    */
   async pipeTo(sink: ArchiveSink, options: ZipStreamOptions = {}): Promise<void> {
+    checkSinkArgument("Archive.ZipEditor#pipeTo", sink);
     await pipeIterableToSink(this.stream(options), sink);
   }
 }
@@ -950,32 +1022,10 @@ export class ZipEditor {
 /**
  * Open an existing ZIP archive for editing.
  *
- * This is a convenience function equivalent to `ZipEditor.open()`.
- *
- * @param source - The ZIP data
- * @param options - Edit options
- * @returns A new `ZipEditor` instance
- *
- * @example
- * ```ts
- * import { editZip, zip } from "@archive";
- *
- * // Create and edit
- * const original = await zip().add("a.txt", "hello").bytes();
- * const editor = await editZip(original);
- * editor.set("b.txt", "world");
- * const modified = await editor.bytes();
- *
- * // Edit with options
- * const editor = await editZip(original, {
- *   path: { mode: "safe" },
- *   reproducible: true,
- *   onWarning: (w) => console.warn(w.message)
- * });
- * ```
+ * @deprecated Use {@link ZipEditor.open}; this only forwards to it. Removed in 1.0.
  */
 export async function editZip(
-  source: ArchiveSource | RandomAccessReader,
+  source: ArchiveSource | ArchiveBytes | RandomAccessReader,
   options: ZipEditOptions = {}
 ): Promise<ZipEditor> {
   return ZipEditor.open(source, options);
@@ -984,7 +1034,7 @@ export async function editZip(
 /**
  * Open a remote ZIP archive for editing using HTTP Range requests.
  *
- * This is a convenience function equivalent to `ZipEditor.openUrl()`.
+ * @deprecated Use {@link ZipEditor.openUrl}; this only forwards to it. Removed in 1.0.
  */
 export async function editZipUrl(url: string, options: ZipEditUrlOptions = {}): Promise<ZipEditor> {
   return ZipEditor.openUrl(url, options);

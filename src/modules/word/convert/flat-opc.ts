@@ -14,10 +14,12 @@
  */
 
 import { NS_PKG } from "@word/constants";
+import { checkBytes, invalidArgument } from "@word/core/argument-checks";
 import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
 import { getFileExt } from "@word/core/opc-paths";
 import { DocxParseError } from "@word/errors";
 import { parseXml } from "@xml/dom";
+import { XmlParseError } from "@xml/errors";
 import type { XmlElement, XmlNode } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
@@ -47,10 +49,23 @@ export interface FlatOpcPart {
  * @param xmlContent - The Flat OPC XML string or UTF-8 bytes.
  * @returns A map of part paths to their binary content.
  */
-export function parseFlatOpc(xmlContent: string | Uint8Array): Map<string, Uint8Array> {
-  const xmlStr = typeof xmlContent === "string" ? xmlContent : utf8Decoder.decode(xmlContent);
+export function parseFlatOpc(
+  xmlContent: string | Uint8Array | ArrayBuffer | ArrayBufferView
+): Map<string, Uint8Array> {
+  const xml = checkTextOrBytes(xmlContent, "xmlContent", "Convert.flatOpcToParts");
+  const xmlStr = typeof xml === "string" ? xml : utf8Decoder.decode(xml);
 
-  const doc = parseXml(xmlStr);
+  let doc: ReturnType<typeof parseXml>;
+  try {
+    doc = parseXml(xmlStr);
+  } catch (error) {
+    if (error instanceof XmlParseError) {
+      throw new DocxParseError(`Flat OPC: not well-formed XML: ${error.message}`, {
+        cause: error
+      });
+    }
+    throw error;
+  }
   const root = doc.root;
   if (!root) {
     throw new DocxParseError("Flat OPC: missing root element");
@@ -132,11 +147,10 @@ export function parseFlatOpc(xmlContent: string | Uint8Array): Map<string, Uint8
 /**
  * Check if content appears to be a Flat OPC XML document.
  */
-export function isFlatOpc(content: string | Uint8Array): boolean {
+export function isFlatOpc(content: string | Uint8Array | ArrayBuffer | ArrayBufferView): boolean {
+  const text = checkTextOrBytes(content, "content", "Convert.isFlatOpc");
   const sample =
-    typeof content === "string"
-      ? content.substring(0, 500)
-      : utf8Decoder.decode(content.slice(0, 500));
+    typeof text === "string" ? text.substring(0, 500) : utf8Decoder.decode(text.subarray(0, 500));
   // Match the actual opening tag pattern, not just the string presence
   return (
     sample.includes("<pkg:package") ||
@@ -156,9 +170,15 @@ export function isFlatOpc(content: string | Uint8Array): boolean {
  * @returns The Flat OPC XML string.
  */
 export function toFlatOpc(
-  entries: Map<string, Uint8Array>,
-  contentTypes?: Map<string, string>
+  entries: ReadonlyMap<string, Uint8Array>,
+  contentTypes?: ReadonlyMap<string, string>
 ): string {
+  if (!(entries instanceof Map)) {
+    invalidArgument("Convert.partsToFlatOpc", "entries", "a Map of part name to bytes", entries);
+  }
+  if (contentTypes !== undefined && !(contentTypes instanceof Map)) {
+    invalidArgument("Convert.partsToFlatOpc", "contentTypes", "a Map", contentTypes);
+  }
   const resolvedCT = contentTypes ?? extractContentTypes(entries);
   const xml = new XmlWriter();
 
@@ -366,7 +386,7 @@ function inferContentTypeFromPath(path: string): string {
 }
 
 /** Extract content types from [Content_Types].xml if present in entries. */
-function extractContentTypes(entries: Map<string, Uint8Array>): Map<string, string> {
+function extractContentTypes(entries: ReadonlyMap<string, Uint8Array>): Map<string, string> {
   const ctMap = new Map<string, string>();
   const ctXml = entries.get("[Content_Types].xml");
   if (!ctXml) {
@@ -374,7 +394,17 @@ function extractContentTypes(entries: Map<string, Uint8Array>): Map<string, stri
   }
 
   const xmlStr = utf8Decoder.decode(ctXml);
-  const doc = parseXml(xmlStr);
+  let doc: ReturnType<typeof parseXml>;
+  try {
+    doc = parseXml(xmlStr);
+  } catch (error) {
+    if (error instanceof XmlParseError) {
+      throw new DocxParseError(`Flat OPC: not well-formed XML: ${error.message}`, {
+        cause: error
+      });
+    }
+    throw error;
+  }
   const root = doc.root;
   if (!root) {
     return ctMap;
@@ -464,4 +494,8 @@ function isImageExtension(ext: string): boolean {
   return ["png", "jpeg", "jpg", "gif", "bmp", "tiff", "tif", "svg", "webp", "emf", "wmf"].includes(
     ext
   );
+}
+
+function checkTextOrBytes(value: unknown, field: string, where: string): string | Uint8Array {
+  return typeof value === "string" ? value : checkBytes(value, field, where);
 }

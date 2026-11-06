@@ -93,6 +93,12 @@ export interface XmlDocument {
    * options are enabled.
    */
   prologue: Array<XmlComment | XmlProcessingInstruction>;
+  /**
+   * Top-level comments and processing instructions after the root element (in fragment mode,
+   * after the first root element). Like `prologue`, only populated when `comments` or
+   * `processingInstructions` are enabled; always present on a parsed document.
+   */
+  epilogue?: Array<XmlComment | XmlProcessingInstruction>;
 }
 
 // =============================================================================
@@ -146,7 +152,7 @@ export interface XmlSink {
 // =============================================================================
 
 /** SAX open-tag event data. */
-export interface SaxTag {
+export interface XmlSaxTag {
   /** Element name (includes prefix if present, e.g. "x:row"). */
   name: string;
   /** Attribute map. */
@@ -164,20 +170,20 @@ export interface SaxTag {
 }
 
 /**
- * The subset of a {@link SaxTag} a parser consumer needs at open-tag time:
+ * The subset of a {@link XmlSaxTag} a parser consumer needs at open-tag time:
  * the element name, its attributes, and (optionally) whether it self-closes.
- * A full `SaxTag` is assignable to this, while test fixtures can supply just
+ * A full `XmlSaxTag` is assignable to this, while test fixtures can supply just
  * `{ name, attributes }`. Use this for `parseOpen`-style handler parameters.
  */
-export type ParseOpenTag = Pick<SaxTag, "name" | "attributes"> & {
+export type ParseOpenTag = Pick<XmlSaxTag, "name" | "attributes"> & {
   isSelfClosing?: boolean;
 };
 
 /** SAX event discriminated union. */
-export type SaxEvent =
-  | { eventType: "opentag"; value: SaxTag }
+export type XmlSaxEvent =
+  | { eventType: "opentag"; value: XmlSaxTag }
   | { eventType: "text"; value: string }
-  | { eventType: "closetag"; value: SaxTag }
+  | { eventType: "closetag"; value: XmlSaxTag }
   | { eventType: "cdata"; value: string }
   | { eventType: "comment"; value: string }
   | { eventType: "pi"; value: { target: string; body: string } }
@@ -185,22 +191,22 @@ export type SaxEvent =
 
 /**
  * Loose-typed SAX event for legacy consumers that don't narrow on eventType.
- * New code should use {@link SaxEvent} with proper discriminant checks.
+ * New code should use {@link XmlSaxEvent} with proper discriminant checks.
  *
  * `value` is the union of every event payload rather than `any`, so a consumer
  * that ignores `eventType` still gets a checked type (and `any` never leaks out
  * of the parser into caller code).
  */
-export interface SaxEventAny {
+export interface XmlSaxEventAny {
   eventType: "opentag" | "text" | "closetag" | "cdata" | "comment" | "pi" | "error";
-  value: SaxTag | string | { target: string; body: string } | Error;
+  value: XmlSaxTag | string | { target: string; body: string } | Error;
 }
 
 /** SAX event handler map. */
-export interface SaxHandlers {
-  opentag?: (tag: SaxTag) => void;
+export interface XmlSaxHandlers {
+  opentag?: (tag: XmlSaxTag) => void;
   text?: (text: string) => void;
-  closetag?: (tag: SaxTag) => void;
+  closetag?: (tag: XmlSaxTag) => void;
   cdata?: (text: string) => void;
   comment?: (text: string) => void;
   pi?: (target: string, body: string) => void;
@@ -215,10 +221,10 @@ export interface SaxHandlers {
  * - `"skip"` — Silently remove the invalid character from the output.
  * - `"replace"` — Replace the invalid character with U+FFFD (REPLACEMENT CHARACTER).
  */
-export type InvalidCharHandling = "error" | "skip" | "replace";
+export type XmlInvalidCharHandling = "error" | "skip" | "replace";
 
 /** SAX parser options. */
-export interface SaxOptions {
+export interface XmlSaxOptions {
   /** Track position (line/column) for error messages. Default: true */
   position?: boolean;
   /** File name for error messages. */
@@ -245,7 +251,7 @@ export interface SaxOptions {
    *
    * @default "error"
    */
-  invalidCharHandling?: InvalidCharHandling;
+  invalidCharHandling?: XmlInvalidCharHandling;
 }
 
 // =============================================================================
@@ -269,7 +275,7 @@ export interface SaxOptions {
  *
  *   1. Wrap the target so `write()` buffers into a bounded queue and
  *      pause your XML production loop when the queue is full.
- *   2. Use a small in-memory buffer as the `WritableTarget`, then ship
+ *   2. Use a small in-memory buffer as the `XmlWritableTarget`, then ship
  *      the assembled bytes to the slow sink with proper backpressure
  *      (e.g. via `pipeline()`).
  *
@@ -281,7 +287,7 @@ export interface SaxOptions {
  * is the practical bound on how much a slow user sink can buffer behind
  * the xlsx writer.
  */
-export interface WritableTarget {
+export interface XmlWritableTarget {
   write(chunk: string | Uint8Array): void;
 }
 
@@ -295,7 +301,7 @@ export interface WritableTarget {
  * Controls how an {@link XmlElement} DOM tree is converted to a plain
  * JavaScript object.
  */
-export interface ToPlainObjectOptions {
+export interface XmlToPlainObjectOptions {
   /**
    * When true, discard all attributes entirely. Takes precedence over
    * `attributePrefix` — when `ignoreAttributes` is true, no attribute keys
@@ -347,10 +353,10 @@ export interface ToPlainObjectOptions {
 /**
  * Options for `parseXmlToObject()`.
  *
- * Extends {@link ToPlainObjectOptions} with SAX parser settings, since
+ * Extends {@link XmlToPlainObjectOptions} with SAX parser settings, since
  * `parseXmlToObject` handles both parsing and conversion in a single pass.
  */
-export interface ParseXmlToObjectOptions extends ToPlainObjectOptions {
+export interface XmlParseToObjectOptions extends XmlToPlainObjectOptions {
   /** Parse as fragment (no root element required). Default: false */
   fragment?: boolean;
   /** Maximum element nesting depth. Default: 256. */
@@ -358,7 +364,7 @@ export interface ParseXmlToObjectOptions extends ToPlainObjectOptions {
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
   /** How to handle invalid XML characters. Default: "error". */
-  invalidCharHandling?: InvalidCharHandling;
+  invalidCharHandling?: XmlInvalidCharHandling;
 }
 
 // =============================================================================
@@ -382,5 +388,24 @@ export interface XmlParseOptions {
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
   /** How to handle invalid XML characters. Default: "error". */
-  invalidCharHandling?: InvalidCharHandling;
+  invalidCharHandling?: XmlInvalidCharHandling;
 }
+
+/** @deprecated Use {@link XmlToPlainObjectOptions}. Removed in 1.0. */
+export type ToPlainObjectOptions = XmlToPlainObjectOptions;
+/** @deprecated Use {@link XmlParseToObjectOptions}. Removed in 1.0. */
+export type ParseXmlToObjectOptions = XmlParseToObjectOptions;
+/** @deprecated Use {@link XmlInvalidCharHandling}. Removed in 1.0. */
+export type InvalidCharHandling = XmlInvalidCharHandling;
+/** @deprecated Use {@link XmlWritableTarget}. Removed in 1.0. */
+export type WritableTarget = XmlWritableTarget;
+/** @deprecated Use {@link XmlSaxTag}. Removed in 1.0. */
+export type SaxTag = XmlSaxTag;
+/** @deprecated Use {@link XmlSaxEvent}. Removed in 1.0. */
+export type SaxEvent = XmlSaxEvent;
+/** @deprecated Use {@link XmlSaxEventAny}. Removed in 1.0. */
+export type SaxEventAny = XmlSaxEventAny;
+/** @deprecated Use {@link XmlSaxHandlers}. Removed in 1.0. */
+export type SaxHandlers = XmlSaxHandlers;
+/** @deprecated Use {@link XmlSaxOptions}. Removed in 1.0. */
+export type SaxOptions = XmlSaxOptions;

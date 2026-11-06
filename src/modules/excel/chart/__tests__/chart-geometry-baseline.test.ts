@@ -60,7 +60,7 @@
  */
 
 import type { AddChartOptions } from "@excel/chart";
-import { renderChartSvg } from "@excel/chart";
+import { ChartClassic } from "@excel/chart";
 import { addChart, getCharts } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook } from "@excel/index";
 import { describeSvgGeometry, extractSvgGeometry } from "@test/svg-geometry";
@@ -74,23 +74,23 @@ const SIZE = { width: 240, height: 160 };
 type Baseline = readonly [string, number, string];
 
 const BASELINES: Record<string, Baseline> = {
-  bar: ["399419c1", 30, "polyline:9 rect:6 text:15"],
-  bar3D: ["72fe13c6", 38, "polygon:8 polyline:9 rect:6 text:15"],
-  line: ["1110363f", 31, "circle:4 polyline:10 rect:2 text:15"],
+  bar: ["15152a5d", 30, "polyline:9 rect:6 text:15"],
+  bar3D: ["b4286cd2", 38, "polygon:8 polyline:9 rect:6 text:15"],
+  line: ["03e33bd3", 31, "circle:4 polyline:10 rect:2 text:15"],
   // line3D is a documented 2D degradation, so it is expected to match `line`.
-  line3D: ["1110363f", 31, "circle:4 polyline:10 rect:2 text:15"],
-  pie: ["4b2bace6", 14, "path:4 rect:5 text:5"],
-  pie3D: ["4b2bace6", 14, "path:4 rect:5 text:5"],
-  doughnut: ["c1e6fed0", 14, "path:4 rect:5 text:5"],
-  area: ["15d2d80b", 28, "polygon:1 polyline:10 rect:2 text:15"],
-  area3D: ["15d2d80b", 28, "polygon:1 polyline:10 rect:2 text:15"],
-  scatter: ["8915a90c", 46, "circle:4 polyline:12 rect:2 text:28"],
-  bubble: ["af401bca", 45, "circle:4 polyline:11 rect:2 text:28"],
-  radar: ["121f2fd2", 28, "circle:1 polygon:1 polyline:9 rect:2 text:15"],
-  stock: ["25d614b1", 39, "polyline:13 rect:9 text:17"],
-  surface: ["d3864373", 30, "polyline:9 rect:6 text:15"],
-  surface3D: ["d3864373", 30, "polyline:9 rect:6 text:15"],
-  ofPie: ["2003d49a", 31, "path:4 polyline:4 rect:5 text:18"]
+  line3D: ["03e33bd3", 31, "circle:4 polyline:10 rect:2 text:15"],
+  pie: ["3f23d42a", 14, "path:4 rect:5 text:5"],
+  pie3D: ["3f23d42a", 14, "path:4 rect:5 text:5"],
+  doughnut: ["95a97a74", 14, "path:4 rect:5 text:5"],
+  area: ["4f77fe8f", 28, "polygon:1 polyline:10 rect:2 text:15"],
+  area3D: ["4f77fe8f", 28, "polygon:1 polyline:10 rect:2 text:15"],
+  scatter: ["cf4488f0", 46, "circle:4 polyline:12 rect:2 text:28"],
+  bubble: ["ea5d558e", 45, "circle:4 polyline:11 rect:2 text:28"],
+  radar: ["8dbf17a6", 28, "circle:1 polygon:1 polyline:9 rect:2 text:15"],
+  stock: ["c3b71705", 39, "polyline:13 rect:9 text:17"],
+  surface: ["e23e2637", 30, "polyline:9 rect:6 text:15"],
+  surface3D: ["e23e2637", 30, "polyline:9 rect:6 text:15"],
+  ofPie: ["eda230be", 31, "path:4 polyline:4 rect:5 text:18"]
 };
 
 /** Build a minimal but non-degenerate chart of the given type. */
@@ -126,7 +126,7 @@ function chartOf(type: AddChartOptions["type"]) {
           ? { type, series: [series("O"), series("H", "C"), series("L"), series("C", "C")] }
           : { type, series: [series("S")], title: "T" };
   addChart(ws, options as AddChartOptions, "E1:L12");
-  return Chart.chartModel(getCharts(ws)[0])!;
+  return Chart.getModel(getCharts(ws)[0])!;
 }
 
 /** Census of shape kinds, e.g. `"rect:9 text:18"`. */
@@ -144,7 +144,7 @@ function census(svg: string): string {
 describe("classic chart geometry is stable", () => {
   for (const [type, [hash, count, kinds]] of Object.entries(BASELINES)) {
     it(`${type} draws the same picture`, () => {
-      const svg = renderChartSvg(chartOf(type as AddChartOptions["type"]), SIZE);
+      const svg = ChartClassic.toSvg(chartOf(type as AddChartOptions["type"]), SIZE);
       const shapes = extractSvgGeometry(svg);
       // Assert the census first: when it differs, the failure names what changed
       // instead of just reporting two hashes.
@@ -175,7 +175,7 @@ describe("classic chart geometry is stable", () => {
   it("renders every type into a non-empty scene", () => {
     for (const type of Object.keys(BASELINES)) {
       const shapes = extractSvgGeometry(
-        renderChartSvg(chartOf(type as AddChartOptions["type"]), SIZE)
+        ChartClassic.toSvg(chartOf(type as AddChartOptions["type"]), SIZE)
       );
       // More than just the background rect.
       expect(shapes.length, type).toBeGreaterThan(5);
@@ -183,8 +183,12 @@ describe("classic chart geometry is stable", () => {
   });
 
   it("scales the whole scene with the requested size", () => {
-    const small = extractSvgGeometry(renderChartSvg(chartOf("bar"), { width: 240, height: 160 }));
-    const large = extractSvgGeometry(renderChartSvg(chartOf("bar"), { width: 480, height: 320 }));
+    const small = extractSvgGeometry(
+      ChartClassic.toSvg(chartOf("bar"), { width: 240, height: 160 })
+    );
+    const large = extractSvgGeometry(
+      ChartClassic.toSvg(chartOf("bar"), { width: 480, height: 320 })
+    );
     expect(large).toHaveLength(small.length);
     // The rightmost coordinate must grow with the canvas rather than staying put.
     const rightmost = (shapes: typeof small): number =>

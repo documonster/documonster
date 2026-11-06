@@ -13,8 +13,8 @@ import path from "node:path";
 
 import { Cell, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
-import { Document, Io, Query } from "documonster/word";
-import { renderToMarkdown } from "documonster/word/markdown";
+import { Document, Query } from "documonster/word";
+import { WordMarkdown } from "documonster/word/markdown";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
@@ -73,13 +73,13 @@ describe("doc_write", () => {
     const fx = await fixture();
     await run(docWriteTool, fx, { path: "report.docx", markdown: SAMPLE_MD });
 
-    const doc = await Io.readFile(path.join(fx.root, "report.docx"));
-    const markdown = renderToMarkdown(doc);
+    const doc = await Document.readFile(path.join(fx.root, "report.docx"));
+    const markdown = WordMarkdown.fromDocx(doc);
     expect(markdown).toContain("# Quarterly Report");
     expect(markdown).toContain("## Regions");
     expect(markdown).toContain("- APAC grew fastest");
     // The table must survive, not collapse into paragraphs.
-    expect(Query.tableCount(doc)).toBe(1);
+    expect(Query.getTableCount(doc)).toBe(1);
   });
 
   it("writes a real PDF", async () => {
@@ -91,7 +91,7 @@ describe("doc_write", () => {
 
     // And its text is actually extractable — a PDF that renders nothing would
     // still have the right magic bytes.
-    const parsed = await Pdf.read(new Uint8Array(bytes), { extractText: true });
+    const parsed = await Pdf.extract(new Uint8Array(bytes), { extractText: true });
     expect(parsed.pages[0]?.text).toContain("Quarterly Report");
   });
 
@@ -109,8 +109,8 @@ describe("doc_write", () => {
     ).rejects.toThrow(/already exists/);
 
     await run(docWriteTool, fx, { path: "r.docx", markdown: "# Two\n", overwrite: true });
-    const doc = await Io.readFile(path.join(fx.root, "r.docx"));
-    expect(renderToMarkdown(doc)).toContain("# Two");
+    const doc = await Document.readFile(path.join(fx.root, "r.docx"));
+    expect(WordMarkdown.fromDocx(doc)).toContain("# Two");
   });
 
   it("rejects an output format it cannot produce", async () => {
@@ -152,7 +152,7 @@ describe("doc_convert", () => {
     Document.addHeading(doc, "Policy", 1);
     Document.addParagraph(doc, "Body text here.");
     Document.addBulletList(doc, ["alpha", "beta"]);
-    await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -186,7 +186,7 @@ describe("doc_convert", () => {
     // would accept them and this would pass regardless.
     const reopened = Workbook.create();
     await Workbook.readFile(reopened, path.join(fx.root, "out.xlsb"));
-    expect(Workbook.getWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual([
       "Data",
       "Notes"
     ]);
@@ -297,7 +297,7 @@ describe("doc_convert", () => {
     await run(docConvertTool, fx, { from: source, to: "out.pdf" });
 
     const bytes = await readFile(path.join(fx.root, "out.pdf"));
-    const parsed = await Pdf.read(new Uint8Array(bytes), { extractText: true });
+    const parsed = await Pdf.extract(new Uint8Array(bytes), { extractText: true });
     expect(parsed.pages[0]?.text).toContain("Policy");
   });
 
@@ -306,12 +306,12 @@ describe("doc_convert", () => {
     await writeFile(path.join(fx.root, "in.md"), SAMPLE_MD, "utf8");
 
     await run(docConvertTool, fx, { from: "in.md", to: "a.docx" });
-    expect(renderToMarkdown(await Io.readFile(path.join(fx.root, "a.docx")))).toContain(
+    expect(WordMarkdown.fromDocx(await Document.readFile(path.join(fx.root, "a.docx")))).toContain(
       "# Quarterly Report"
     );
 
     await run(docConvertTool, fx, { from: "in.md", to: "b.pdf" });
-    const parsed = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, "b.pdf"))), {
+    const parsed = await Pdf.extract(new Uint8Array(await readFile(path.join(fx.root, "b.pdf"))), {
       extractText: true
     });
     expect(parsed.pages[0]?.text).toContain("Quarterly Report");
@@ -380,9 +380,12 @@ describe("doc_convert", () => {
     const report = await run(docConvertTool, fx, { from: "calc.xlsx", to: "calc.pdf" });
     expect(report).toContain("recalculated");
 
-    const parsed = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, "calc.pdf"))), {
-      extractText: true
-    });
+    const parsed = await Pdf.extract(
+      new Uint8Array(await readFile(path.join(fx.root, "calc.pdf"))),
+      {
+        extractText: true
+      }
+    );
     expect(parsed.pages[0]?.text).toContain("30");
   });
 

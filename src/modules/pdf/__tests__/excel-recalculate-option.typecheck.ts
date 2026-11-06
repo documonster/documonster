@@ -7,25 +7,25 @@
 // assignable, so passing a recalculator that cannot handle an excel workbook
 // compiled cleanly and then failed at runtime.
 //
-// The option now lives on `ExcelToPdfOptions` typed against the real workbook,
+// The option now lives on `PdfFromExcelOptions` typed against the real workbook,
 // so the mismatch is a compile error. The `@ts-expect-error` blocks below fail
 // the build if that masking ever returns.
 
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import type { Workbook } from "@excel/index";
-import type { ExcelToPdfOptions } from "@pdf/index";
+import type { PdfFromExcelOptions } from "@pdf/index";
 import { Pdf } from "@pdf/index";
 
 declare const wb: Workbook.Handle;
 
 // Correct injection — the excel-side recalculator.
-void Pdf.fromExcel(wb, { recalculate: calculateFormulas });
+void Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 
 // Omitting it keeps the cached XLSX results (engine stays out of the bundle).
 void Pdf.fromExcel(wb, { title: "no recalc" });
 
 // A recalculator with an unrelated parameter type must not be assignable.
-const options: ExcelToPdfOptions = {
+const options: PdfFromExcelOptions = {
   // @ts-expect-error `string` is not an excel workbook handle
   recalculate: (_wb: string) => {}
 };

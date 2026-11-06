@@ -31,15 +31,22 @@ import {
   type SparklineColor
 } from "@excel/core/sparkline";
 import type { Color } from "@excel/types";
-import { decodeCell, decodeRange, encodeCell } from "@excel/utils/address";
-import { encodeRange, readRange, readWideString, type BiffRange } from "@excel/xlsb/binary";
+import { decodeCell, encodeCell } from "@excel/utils/address";
+import {
+  encodeRange,
+  readSheetRange,
+  readWideString,
+  type BiffRange,
+  XlsbReader
+} from "@excel/xlsb/binary";
 import { encodeColor, readColor } from "@excel/xlsb/color";
 import { decodePtg, encodePtg, type PtgContext } from "@excel/xlsb/formula/ptg";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
 import { parse } from "@formula/syntax/parser";
 import { printAst } from "@formula/syntax/print";
 import { tokenize } from "@formula/syntax/tokenizer";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import type { BinaryReader } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** `isltype`: 0 line, 1 column, 2 stacked. */
 const SPARKLINE_TYPE = ["line", "column", "stacked"] as const;
@@ -284,7 +291,12 @@ function encodeSparkline(
     // parses to. An unqualified `A1:C1` becomes a plain `PtgArea` and is not a form this record accepts,
     // so the sheet name is added when the model leaves it off.
     const qualified = data.includes("!") ? data : `'${sheetName.replace(/'/g, "''")}'!${data}`;
-    const tokens = encodePtg(parse(tokenize(qualified)), context, `sparkline ${cell}`);
+    // A data range is a reference, as a defined name's definition is: `3b …`, the reference class.
+    const tokens = encodePtg(
+      parse(tokenize(qualified)),
+      { ...context, role: "name" },
+      `sparkline ${cell}`
+    );
     return encodeFrtHeader({ sqref: cell, formula: tokens });
   } catch {
     return undefined;
@@ -384,18 +396,6 @@ function axisFlag(
   return type === "group" ? 1 << groupBit : 0;
 }
 
-/** Whether a reference decodes, so a group with a broken one can be reported rather than written. */
-export function isUsableSparkline(sparkline: SheetSparkline): boolean {
-  const { cellRef: cell, dataRef: data } = sparkline;
-  try {
-    decodeCell(cell);
-    decodeRange(data.includes("!") ? (data.split("!")[1] ?? data) : data);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * One of a sparkline group's eight colours, falling back to what Excel writes for it.
  *
@@ -447,7 +447,7 @@ export function readSparklineGroup(
   part: string
 ): SheetSparklineGroup | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     // The `FRTHeader`, which for this record has no optional block set. Consumed by reading it, so a file that
     // does carry one does not shift every field after it.
     skipFrtHeader(reader, part);
@@ -568,7 +568,7 @@ export function readSparkline(
   context: PtgContext
 ): SheetSparkline | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const flags = reader.readUint32();
     let cellRef: string | undefined;
     let dataRef: string | undefined;
@@ -587,11 +587,11 @@ export function readSparkline(
 }
 
 /** The single cell an `FRTSqrefs` block names, as `A1`. */
-function readFrtSqrefs(reader: BinaryReader): string {
+function readFrtSqrefs(reader: XlsbReader): string {
   reader.readUint32(); // csqref, which MUST be 1
   reader.readUint32(); // the FRTSqref flag word
   reader.readInt32(); // crfx, which MUST be 1 — no reserved word precedes it; see `encodeFrtSqrefs`
-  const range = readRange(reader);
+  const range = readSheetRange(reader, "BrtSparkline");
   // `rwFirst == rwLast` and `colFirst == colLast` for a sparkline, so the first corner is the cell.
   return encodeCell({ r: range.firstRow, c: range.firstColumn });
 }
@@ -607,7 +607,7 @@ function readFrtFormulas(
   const cce = reader.readUint32();
   reader.readUint32(); // `cb`, the ancillary block's length — it precedes the tokens; see `encodeFrtFormulas`
   const tokens = reader.readBytes(cce);
-  const decoded = decodePtg(tokens, context, `${part} sparkline data`);
+  const decoded = decodePtg(tokens, { ...context, role: "name" }, `${part} sparkline data`);
   // `FRTParsedFormula` cannot carry `PtgExp`, so a shared-formula reference here is a malformed record.
   return "sharedRow" in decoded ? undefined : printAst(decoded);
 }
@@ -618,7 +618,7 @@ function readFrtFormulas(
  * Read rather than skipped by a fixed four bytes: the flag word says which blocks follow, and a file that
  * carries one would otherwise shift every field after it.
  */
-function skipFrtHeader(reader: BinaryReader, part: string): void {
+function skipFrtHeader(reader: XlsbReader, part: string): void {
   const flags = reader.readUint32();
   if (((flags >> 1) & 1) === 1) {
     readFrtSqrefs(reader);

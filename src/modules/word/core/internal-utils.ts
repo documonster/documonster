@@ -137,6 +137,45 @@ export function randomBytes(length: number): Uint8Array {
 export type Mutable<T> = { -readonly [P in keyof T]: T[P] };
 
 /**
+ * A deep copy of document-model content: plain objects and arrays are copied,
+ * as are the byte arrays and maps inside them; anything else is a primitive.
+ * The model is plain data, so this is what `structuredClone` would return for
+ * it — at a fraction of the cost, which matters where content is copied once
+ * per repetition (a template loop with thousands of items).
+ */
+export function cloneModel<T>(value: T): T {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const out = new Array(value.length);
+    for (let i = 0; i < value.length; i++) {
+      out[i] = cloneModel(value[i]);
+    }
+    return out as T;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return (
+      value instanceof DataView
+        ? new DataView(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
+        : (value as unknown as Uint8Array).slice()
+    ) as T;
+  }
+  if (value instanceof Map) {
+    const out = new Map();
+    for (const [key, item] of value) {
+      out.set(key, cloneModel(item));
+    }
+    return out as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const key in value) {
+    out[key] = cloneModel((value as Record<string, unknown>)[key]);
+  }
+  return out as T;
+}
+
+/**
  * Deep mutable version — recursively removes readonly from nested objects.
  */
 export type DeepMutable<T> = {

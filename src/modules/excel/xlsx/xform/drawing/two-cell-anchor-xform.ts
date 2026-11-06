@@ -1,7 +1,18 @@
-import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
+import {
+  CHART_EX_REQUIRES,
+  choiceAttributes,
+  MCE_NAMESPACE,
+  readChoice,
+  requiresChartEx
+} from "@excel/xlsx/xform/drawing/alternate-content";
+import type { AlternateContentModel } from "@excel/xlsx/xform/drawing/alternate-content";
+import {
+  BaseCellAnchorXform,
+  preservedObjectXforms
+} from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import type { PositionModel } from "@excel/xlsx/xform/drawing/cell-position-xform";
-import { GenericEchoXform } from "@excel/xlsx/xform/drawing/generic-echo-xform";
 import type { EchoNode } from "@excel/xlsx/xform/drawing/generic-echo-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
@@ -10,6 +21,7 @@ import type { PicModel } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import type { ShapeRenderModel } from "@excel/xlsx/xform/drawing/shape-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
+import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
@@ -23,34 +35,36 @@ interface TwoCellModel {
   shape?: ShapeRenderModel;
   /** Graphic frame model (for charts and other embedded objects) */
   graphicFrame?: GraphicFrameModel;
-  /**
-   * A `<xdr:grpSp>` grouped shape, captured verbatim (see
-   * {@link GenericEchoXform}). Without an explicit map entry for "xdr:grpSp",
-   * the anchor's dispatch loop fell through to its generic per-tag lookup for
-   * every descendant of the unrecognized group wrapper — so an `<xdr:pic>`
-   * nested inside a group was matched directly and promoted to `model.picture`,
-   * silently replacing the whole group with one of its own children at the
-   * wrong geometry, id and hyperlink.
-   */
-  group?: EchoNode;
+  /** A group, shape or connector read from a file and written back verbatim — see `PRESERVED_TAGS`. */
+  preserved?: EchoNode;
   /** Wrap the anchor in mc:AlternateContent for modern drawing clients */
-  alternateContent?: { requires: string };
+  alternateContent?: AlternateContentModel;
+  /**
+   * For an anchor read wrapped twice: the `<mc:AlternateContent>` around the whole anchor, beside the
+   * one in its shape slot (`alternateContent`).
+   */
+  outerAlternateContent?: AlternateContentModel;
   medium?: unknown;
 }
 
 class TwoCellAnchorXform extends BaseCellAnchorXform {
   // Parse state for the inner `<mc:AlternateContent>` block that
   // chartEx drawings place in the shape slot of a `<xdr:twoCellAnchor>`.
-  // See `render()` for the canonical layout. When `_inFallback`
-  // flips on we swallow every open/close/text until the matching
-  // `</mc:Fallback>` — the Fallback contents are a legacy-Excel
-  // placeholder shape that structured consumers don't need to
-  // surface; `alternateContent.requires` on the model is enough
-  // to re-emit it verbatim on save.
+  // See `render()` for the canonical layout. Inside `<mc:Fallback>`
+  // nothing is parsed structurally: each child is kept as XML and
+  // written back as the Fallback, so a consumer that cannot take the
+  // Choice still sees what the source showed it.
   private _acDepth = 0;
   private _inFallback = false;
   private _fallbackDepth = 0;
-  private _choiceRequires: string | undefined = undefined;
+  private _choice: AlternateContentModel | undefined = undefined;
+  private _fallbackParts: string[] = [];
+  /** Written back inside the `<mc:Fallback>` of an `<mc:AlternateContent>` that declares `mc`. */
+  private readonly _fallbackChild = new PreservedSubtreeXform(() => ({
+    "xmlns:mc": MCE_NAMESPACE
+  }));
+  /** Writes a form control's hidden bridge shape; a shape read from a file is preserved instead. */
+  private readonly _formControlShape: BaseXform = new SpXform();
 
   constructor() {
     super();
@@ -59,10 +73,9 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       "xdr:from": new CellPositionXform({ tag: "xdr:from" }),
       "xdr:to": new CellPositionXform({ tag: "xdr:to" }),
       "xdr:pic": new PicXform(),
-      "xdr:sp": new SpXform(),
+      ...preservedObjectXforms(),
       "xdr:userShape": new ShapeXform(),
       "xdr:graphicFrame": new GraphicFrameXform(),
-      "xdr:grpSp": new GenericEchoXform("xdr:grpSp"),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -128,21 +141,30 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     // wrap-the-whole-anchor form with an empty Fallback. That form
     // was fine for 2010-era form controls and round-tripping code
     // still depends on it; it is NOT the chartEx shape.
-    const requires = model.alternateContent?.requires;
-    const isChartEx = requires === "cx1" || requires === "cx";
-    const wrapAnchorInAc = !!requires && !isChartEx;
+    // A ChartEx anchor is recognised by what it holds — a `<cx:chart>` — or by
+    // the namespace its Choice requires, never by the prefix spelling it.
+    const alternateContent = model.alternateContent;
+    const isChartEx = model.graphicFrame?.isChartEx === true || requiresChartEx(alternateContent);
+    // `alternateContent` is the wrapper the anchor's one object sits in — inside the
+    // anchor, as ChartEx always is — unless it was read from around the whole anchor
+    // (form controls), where it goes back. An anchor read with both keeps the outer
+    // one apart, in `outerAlternateContent`.
+    const aroundAnchor =
+      alternateContent !== undefined &&
+      alternateContent.placement !== "content" &&
+      !(isChartEx && requiresChartEx(alternateContent));
+    const outer = model.outerAlternateContent ?? (aroundAnchor ? alternateContent : undefined);
+    const inner = aroundAnchor ? undefined : alternateContent;
+    // A Choice that requires a prefix no namespace can be declared for would be
+    // an MCE violation; such a wrapper is not written.
+    const outerChoice = outer ? choiceAttributes(outer) : undefined;
+    const innerChoice = inner && !isChartEx ? choiceAttributes(inner) : undefined;
+    const wrapAnchorInAc = outerChoice !== undefined;
 
     if (wrapAnchorInAc) {
       // Legacy wrap-the-whole-anchor path (form controls, etc.)
-      xmlStream.openNode("mc:AlternateContent", {
-        "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006"
-      });
-      xmlStream.openNode("mc:Choice", {
-        Requires: requires,
-        ...(requires === "a14"
-          ? { "xmlns:a14": "http://schemas.microsoft.com/office/drawing/2010/main" }
-          : {})
-      });
+      xmlStream.openNode("mc:AlternateContent", { "xmlns:mc": MCE_NAMESPACE });
+      xmlStream.openNode("mc:Choice", outerChoice);
     }
 
     const editAs = model.range.editAs ?? (model.graphicFrame ? undefined : "oneCell");
@@ -160,21 +182,16 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     if (isChartEx) {
       // ChartEx: wrap the graphicFrame/shape INSIDE the anchor in
       // mc:AlternateContent, matching Excel's emitted layout.
-      this.renderChartExAlternateContent(xmlStream, model);
-    } else if (model.picture) {
-      this.map["xdr:pic"].render(xmlStream, model.picture);
-    } else if (model.graphicFrame) {
-      this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
-    } else if (model.group) {
-      this.map["xdr:grpSp"].render(xmlStream, model.group);
-    } else if (model.shape) {
-      // A user-visible shape routes to the dedicated ShapeXform; the legacy
-      // form-control shape (no `kind`) stays on the SpXform path.
-      if (model.shape.kind === "userShape") {
-        this.map["xdr:userShape"].render(xmlStream, model.shape);
-      } else {
-        this.map["xdr:sp"].render(xmlStream, model.shape);
-      }
+      this.renderChartExAlternateContent(xmlStream, model, inner);
+    } else if (innerChoice) {
+      xmlStream.openNode("mc:AlternateContent", { "xmlns:mc": MCE_NAMESPACE });
+      xmlStream.openNode("mc:Choice", innerChoice);
+      this.renderContent(xmlStream, model);
+      xmlStream.closeNode(); // mc:Choice
+      this.renderFallback(xmlStream, inner?.fallbackXml);
+      xmlStream.closeNode(); // mc:AlternateContent
+    } else {
+      this.renderContent(xmlStream, model);
     }
     this.map["xdr:clientData"].render(xmlStream, {});
 
@@ -182,8 +199,38 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
 
     if (wrapAnchorInAc) {
       xmlStream.closeNode(); // mc:Choice
-      xmlStream.leafNode("mc:Fallback");
+      this.renderFallback(xmlStream, outer?.fallbackXml);
       xmlStream.closeNode(); // mc:AlternateContent
+    }
+  }
+
+  /** The anchor's one object: a picture, a graphic frame, a preserved object or a shape. */
+  private renderContent(xmlStream: XmlSink, model: TwoCellModel): void {
+    if (model.picture) {
+      this.map["xdr:pic"].render(xmlStream, model.picture);
+    } else if (model.graphicFrame) {
+      this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
+    } else if (model.preserved) {
+      this.renderPreserved(xmlStream, model.preserved);
+    } else if (model.shape) {
+      // A user-visible shape routes to the dedicated ShapeXform; the legacy
+      // form-control shape (no `kind`) stays on the SpXform path.
+      if (model.shape.kind === "userShape") {
+        this.map["xdr:userShape"].render(xmlStream, model.shape);
+      } else {
+        this._formControlShape.render(xmlStream, model.shape);
+      }
+    }
+  }
+
+  /** `<mc:Fallback>` with the source's content, or empty. */
+  private renderFallback(xmlStream: XmlSink, fallbackXml: string | undefined): void {
+    if (fallbackXml) {
+      xmlStream.openNode("mc:Fallback");
+      xmlStream.writeRaw(fallbackXml);
+      xmlStream.closeNode();
+    } else {
+      xmlStream.leafNode("mc:Fallback");
     }
   }
 
@@ -207,22 +254,32 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
    * sizing from the outer `<xdr:from>`/`<xdr:to>` cell range — they
    * do NOT each re-declare the anchor; there is only one anchor.
    */
-  private renderChartExAlternateContent(xmlStream: XmlSink, model: TwoCellModel): void {
-    xmlStream.openNode("mc:AlternateContent", {
-      "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006"
-    });
+  private renderChartExAlternateContent(
+    xmlStream: XmlSink,
+    model: TwoCellModel,
+    source: AlternateContentModel | undefined
+  ): void {
+    xmlStream.openNode("mc:AlternateContent", { "xmlns:mc": MCE_NAMESPACE });
 
-    xmlStream.openNode("mc:Choice", {
-      "xmlns:cx1": "http://schemas.microsoft.com/office/drawing/2015/9/8/chartex",
-      Requires: "cx1"
-    });
+    // The Choice requires what the source's did, declared — or, for a
+    // Choice that names a ChartEx revision nothing can declare, the one
+    // Excel names.
+    const choice =
+      (source && requiresChartEx(source) ? choiceAttributes(source) : undefined) ??
+      choiceAttributes({ requires: CHART_EX_REQUIRES })!;
+    xmlStream.openNode("mc:Choice", choice);
     if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
     }
     xmlStream.closeNode(); // mc:Choice
 
     xmlStream.openNode("mc:Fallback");
-    this.renderChartExFallbackShape(xmlStream, model);
+    // A Fallback read from around a whole anchor holds anchors, not the shape this slot needs.
+    if (source?.placement === "content" && source.fallbackXml) {
+      xmlStream.writeRaw(source.fallbackXml);
+    } else {
+      this.renderChartExFallbackShape(xmlStream, model);
+    }
     xmlStream.closeNode(); // mc:Fallback
 
     xmlStream.closeNode(); // mc:AlternateContent
@@ -304,10 +361,10 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
   }
 
   parseOpen(node: ParseOpenTag): boolean {
-    // Swallow everything inside `<mc:Fallback>` — it is a legacy
-    // placeholder shape the writer regenerates verbatim.
+    // Inside `<mc:Fallback>`: each child is captured whole.
     if (this._inFallback) {
       this._fallbackDepth++;
+      this._fallbackChild.parseOpen(node);
       return true;
     }
 
@@ -320,13 +377,14 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
         return true;
       case "mc:Choice":
         if (this._acDepth > 0) {
-          this._choiceRequires = node.attributes?.Requires;
+          this._choice = readChoice(node);
         }
         return true;
       case "mc:Fallback":
         if (this._acDepth > 0) {
           this._inFallback = true;
           this._fallbackDepth = 1;
+          this._fallbackParts = [];
         }
         return true;
       default:
@@ -348,7 +406,8 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
         this._acDepth = 0;
         this._inFallback = false;
         this._fallbackDepth = 0;
-        this._choiceRequires = undefined;
+        this._choice = undefined;
+        this._fallbackParts = [];
         break;
       default:
         this.parser = this.map[node.name];
@@ -362,6 +421,9 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
 
   parseText(text: string): void {
     if (this._inFallback) {
+      if (this._fallbackDepth > 1) {
+        this._fallbackChild.parseText(text);
+      }
       return;
     }
     if (this.parser) {
@@ -378,6 +440,9 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       this._fallbackDepth--;
       if (this._fallbackDepth === 0) {
         this._inFallback = false;
+      } else if (!this._fallbackChild.parseClose(name)) {
+        this._fallbackParts.push(this._fallbackChild.model as string);
+        this._fallbackChild.reset();
       }
       return true;
     }
@@ -387,12 +452,19 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
         this._acDepth--;
         if (this._acDepth <= 0) {
           this._acDepth = 0;
-          // Tag the anchor model with the Requires value so the
-          // writer re-emits the MC wrapper on save.
-          if (this._choiceRequires) {
-            this.model.alternateContent = { requires: this._choiceRequires };
+          // Tag the anchor model with the Choice so the writer
+          // re-emits the MC wrapper on save, Fallback and all.
+          if (this._choice) {
+            this.model.alternateContent = {
+              ...this._choice,
+              placement: "content",
+              ...(this._fallbackParts.length > 0
+                ? { fallbackXml: this._fallbackParts.join("") }
+                : {})
+            };
           }
-          this._choiceRequires = undefined;
+          this._choice = undefined;
+          this._fallbackParts = [];
         }
         return true;
       case "mc:Choice":
@@ -417,7 +489,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
         // instances are shared across every anchor in the drawing, so leaving
         // a stale `.model` behind made the next anchor of a different kind
         // (e.g. a grpSp-only anchor following a picture anchor) silently
-        // inherit the previous anchor's picture/graphicFrame/group.
+        // inherit the previous anchor's picture/graphicFrame/preserved object.
         if (this.map["xdr:pic"].model) {
           this.model.picture = this.map["xdr:pic"].model;
           this.map["xdr:pic"].reset();
@@ -426,10 +498,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
           this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
           this.map["xdr:graphicFrame"].reset();
         }
-        if (this.map["xdr:grpSp"].model) {
-          this.model.group = this.map["xdr:grpSp"].model as EchoNode;
-          this.map["xdr:grpSp"].reset();
-        }
+        this.model.preserved = this.takePreserved();
         return false;
       default:
         // could be some unrecognised tags

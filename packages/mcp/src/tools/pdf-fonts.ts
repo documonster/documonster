@@ -18,8 +18,8 @@
 
 import { readFileSync } from "node:fs";
 
-import type { RasterFontSource } from "documonster/draw";
-import type { CjkLanguage, PdfFontConfig, PdfFontSource } from "documonster/pdf";
+import type { DrawRasterFontSource } from "documonster/draw";
+import type { PdfCjkLanguage, PdfFontConfig, PdfFontSource } from "documonster/pdf";
 import { z } from "zod";
 
 import type { PdfFontRef, ServerConfig } from "../config.js";
@@ -193,8 +193,8 @@ export const textLanguageShape = {
 } as const;
 
 /** Spread into a PDF call. Empty when the caller said nothing. */
-export function textLanguageOption(args: { readonly textLanguage?: CjkLanguage }): {
-  readonly textLanguage?: CjkLanguage;
+export function textLanguageOption(args: { readonly textLanguage?: PdfCjkLanguage }): {
+  readonly textLanguage?: PdfCjkLanguage;
 } {
   return args.textLanguage === undefined ? {} : { textLanguage: args.textLanguage };
 }
@@ -208,7 +208,7 @@ export function textLanguageOption(args: { readonly textLanguage?: CjkLanguage }
  */
 export function diagramFontOptions(config: FontConfig): {
   readonly pdf?: PdfFontConfig;
-  readonly raster?: readonly RasterFontSource[];
+  readonly raster?: readonly DrawRasterFontSource[];
   readonly useSystemFonts?: boolean;
 } {
   if (config.pdfFont === undefined) {

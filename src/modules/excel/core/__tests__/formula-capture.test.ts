@@ -5,9 +5,12 @@
  * right shape of the live workbook.
  */
 
+import { cellSetModel } from "@excel/core/cell";
 import { definedNamesAdd } from "@excel/core/defined-names";
+import { ValueType } from "@excel/core/enums";
 import { captureFormulaSnapshot } from "@excel/core/formula-capture";
 import { getDefinedNames } from "@excel/core/workbook";
+import { getCell } from "@excel/core/worksheet-core";
 import { Cell, Row, Workbook } from "@excel/index";
 import { snapshotCellKey } from "@formula/integration/workbook-snapshot";
 import { describe, it, expect } from "vitest";
@@ -131,8 +134,13 @@ describe("captureFormulaSnapshot: error value sanitization (R8)", () => {
   it("gates unknown error codes to #VALUE!", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    // Inject an unknown error string
-    Cell.setValue(ws, "A1", { error: "custom-err" } as unknown as string);
+    // Inject an unknown error string. `Cell.setValue` refuses one, so it comes in the way a file could carry it: through
+    // the cell model, which keeps what it is given.
+    cellSetModel(getCell(ws, "A1"), {
+      address: "A1",
+      type: ValueType.Error,
+      value: { error: "custom-err" } as never
+    });
     const snap = captureFormulaSnapshot(wb);
     const v = snap.worksheets[0].cells.get(snapshotCellKey(1, 1))?.value;
     expect(v).toEqual({ error: "#VALUE!" });

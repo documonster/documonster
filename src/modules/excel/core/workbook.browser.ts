@@ -7,9 +7,10 @@
  * Features:
  * - xlsx: File/stream/buffer support (file operations Node.js only)
  * - csv: CSV read/write support (file operations Node.js only)
- * - streaming: createStreamWriter/createStreamReader for large files
+ * - streaming: `Stream.WorkbookWriter` / `Stream.WorkbookReader` for large files
  */
 
+import { nameCall } from "@excel/chart/api/call";
 // Chart runtime is imported statically. The chart modules depend only on the
 // `*-core` data layer (never on this file), so there is no import cycle, and
 // the bundler tree-shakes the whole chart tree out of consumer bundles that
@@ -30,11 +31,12 @@ import type {
   AddChartsheetOptions,
   AddPivotChartsheetOptions
 } from "@excel/core/chartsheet";
-import { chartsheetModel, createChartsheet } from "@excel/core/chartsheet";
-import type { SyntaxProbe } from "@excel/core/defined-names";
-import { createDefinedNames } from "@excel/core/defined-names";
+import { checkChartsheetOptions, createChartsheet } from "@excel/core/chartsheet";
+import { createDefinedNames, definedNamesHasName } from "@excel/core/defined-names";
 import { withPivotChartSource } from "@excel/core/pivot-chart";
 import type { PivotTable } from "@excel/core/pivot-table";
+import { sheetNamesInTabOrder, withReferenceEdit } from "@excel/core/structural-edit";
+import { keptSettingsReport } from "@excel/core/unrecognized-values";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
   addChartEntry,
@@ -47,14 +49,20 @@ import {
   copyChartExSidecars,
   nextChartExNumber,
   nextChartNumber,
+  releaseChartMedia,
   removeChartEntry,
   removeChartExStructuredEntry,
+  checkWorkbook,
+  refuseLongSheetName,
   setChartColors,
   setChartStyle,
   validateSheetName
 } from "@excel/core/workbook-core";
+import type { WorkbookCreateOptions } from "@excel/core/workbook-create-options";
+import { createOptionsSchema } from "@excel/core/workbook-create-options";
+import type { UnrecognizedValue } from "@excel/core/workbook-io-types";
 import type { ExternalLinkModel } from "@excel/core/workbook-model";
-import type { Worksheet } from "@excel/core/worksheet";
+import type { Worksheet, WorksheetModel } from "@excel/core/worksheet";
 import {
   createWorksheet,
   destroy,
@@ -63,6 +71,7 @@ import {
   getSheetWorkbook
 } from "@excel/core/worksheet";
 import { setSheetModel } from "@excel/core/worksheet-load";
+import { ExcelArgumentError } from "@excel/errors";
 import type {
   WorkbookReaderOptions,
   WorkbookReaderInput
@@ -76,10 +85,19 @@ import type {
   ThreadedCommentPerson,
   WorkbookProtection
 } from "@excel/types";
+import type {} from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import { synthGuid } from "@excel/utils/guid";
+import { renameTablesInFormula } from "@excel/utils/reference-rewrite";
+import { splitPasswordOptions, verifySheetPassword } from "@excel/utils/sheet-protection";
+import { discardKeptSheetSettings } from "@excel/utils/sheet-settings-checks";
 import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { RuntimeValue } from "@formula/runtime/values";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
+import { isRecordArgument } from "@utils/object";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // =============================================================================
 // Internal Types
@@ -121,7 +139,10 @@ function isChartExType(type: string): boolean {
 // Workbook Class
 // =============================================================================
 
-export function createWorkbook(options?: { formulaSyntaxProbe?: SyntaxProbe }): WorkbookData {
+/** A new, empty workbook. `options.formulaSyntaxProbe` decides how defined names that may be formulas are classified. */
+export function createWorkbook(options?: WorkbookCreateOptions): WorkbookData {
+  // `null` has always been taken as no options.
+  checkSchema("Workbook.create", "options", createOptionsSchema.nullable().optional(), options);
   const wb = {} as WorkbookData;
   wb._tableNames = new Set<string>();
 
@@ -161,16 +182,131 @@ export function createWorkbook(options?: { formulaSyntaxProbe?: SyntaxProbe }): 
   wb._opaqueDrops = [];
   wb._writerExternalLinkCache = new Map();
   wb._definedNames = createDefinedNames(options?.formulaSyntaxProbe);
+  // Live: the registry refuses a name a table holds — see `DefinedNamesData._tableNames`.
+  wb._definedNames._tableNames = wb._tableNames;
 
   return wb;
 }
 
-export function importSheet(wb: WorkbookData, source: Worksheet, name?: string): Worksheet {
-  const newWs = addWorksheet(wb, name ?? getSheetName(source));
+/**
+ * The names the tables of `source` take in `wb`: a name the target already uses — for a table or a defined name — is
+ * given the next free one, as Excel's "Move or Copy" does (`Sales` → `Sales2`, `Sales3`, …). Keyed by `excelNameKey`.
+ */
+function freeTableNames(wb: WorkbookData, source: Worksheet): Map<string, string> {
+  const renames = new Map<string, string>();
+  const taken = (candidate: string): boolean => {
+    const key = excelNameKey(candidate);
+    return (
+      wb._tableNames.has(key) ||
+      definedNamesHasName(wb._definedNames, candidate) ||
+      [...renames.values()].some(name => excelNameKey(name) === key)
+    );
+  };
+  for (const tableName of Object.keys(source.tables ?? {})) {
+    if (!taken(tableName)) {
+      continue;
+    }
+    let n = 2;
+    while (taken(`${tableName}${n}`)) {
+      n++;
+    }
+    renames.set(excelNameKey(tableName), `${tableName}${n}`);
+  }
+  return renames;
+}
+
+/**
+ * `model` with its tables renamed by `renames` and every reference the sheet makes to them — cell formulas, table
+ * column formulas, conditional formats and validations — restated under the new names. Nothing in `model` itself is
+ * changed: it shares objects with the source sheet.
+ */
+function withRenamedTables(
+  model: WorksheetModel,
+  renames: ReadonlyMap<string, string>
+): WorksheetModel {
+  if (renames.size === 0) {
+    return model;
+  }
+  const rename = (formula: unknown): unknown =>
+    typeof formula === "string" ? renameTablesInFormula(formula, renames) : formula;
+  const renameList = (list: unknown): unknown => (Array.isArray(list) ? list.map(rename) : list);
+  const dataValidations: Record<string, unknown> = {};
+  for (const [key, rule] of Object.entries(model.dataValidations ?? {})) {
+    dataValidations[key] =
+      rule && typeof rule === "object"
+        ? { ...rule, formulae: renameList((rule as { formulae?: unknown }).formulae) }
+        : rule;
+  }
+  return {
+    ...model,
+    rows: model.rows?.map(row => ({
+      ...row,
+      cells: row.cells.map(cell => {
+        const formula = (cell as { formula?: unknown }).formula;
+        return typeof formula === "string" ? { ...cell, formula: rename(formula) as string } : cell;
+      })
+    })),
+    tables: (model.tables ?? []).map(table => {
+      const renamed = renames.get(excelNameKey(table.name));
+      return {
+        ...table,
+        ...(renamed === undefined ? {} : { name: renamed, displayName: renamed }),
+        columns: table.columns.map(column => ({
+          ...column,
+          calculatedColumnFormula: rename(column.calculatedColumnFormula) as string | undefined,
+          totalsRowFormula: rename(column.totalsRowFormula) as string | undefined
+        }))
+      };
+    }),
+    conditionalFormattings: (model.conditionalFormattings ?? []).map(formatting => ({
+      ...formatting,
+      rules: formatting.rules.map(rule => {
+        const formulae = (rule as { formulae?: unknown }).formulae;
+        return formulae === undefined
+          ? rule
+          : ({ ...rule, formulae: renameList(formulae) } as typeof rule);
+      })
+    })),
+    dataValidations: dataValidations as WorksheetModel["dataValidations"]
+  };
+}
+
+/**
+ * Copy the worksheet `source` — from this workbook or another — into this one under `name` (by default its own) and
+ * return the copy. Cells, styles, merges, tables, images and charts come along; media from another workbook are
+ * registered here.
+ *
+ * A copied table whose name the target already uses — for a table or a defined name — is renamed as Excel's "Move or
+ * Copy" renames it: `Sales` becomes `Sales2` (or the next free number), and the copied sheet's own references to it —
+ * cell formulas, table column formulas, conditional formats and validations — are restated under the new name.
+ * References from other sheets keep naming the original.
+ *
+ * Everything that can refuse the import is checked before the sheet is added, so a refused import adds nothing.
+ *
+ * @throws {ExcelArgumentError} when `source` is not a worksheet or `name` is not a string.
+ * @throws {ExcelWorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
+ */
+export function importWorksheet(wb: WorkbookData, source: Worksheet, name?: string): Worksheet {
+  checkWorkbook(wb);
+  // Everything that can refuse the import is checked before the sheet is added, so a refused import leaves nothing
+  // behind.
+  const check = argumentChecks("Workbook.importWorksheet");
+  if (
+    typeof source !== "object" ||
+    source === null ||
+    !Array.isArray((source as { _rows?: unknown })._rows) ||
+    typeof (source as { _name?: unknown })._name !== "string"
+  ) {
+    check.fail("source", "a worksheet", source);
+  }
+  check.string("name", name);
+  refuseLongSheetName(name);
+  validateSheetName(wb, name ?? getSheetName(source));
 
   // Deep copy via model: the getter serializes ALL worksheet properties and the
   // setter deserializes them, so future properties are automatically included.
-  const sourceModel = getSheetModel(source);
+  const sourceModel = withRenamedTables(getSheetModel(source), freeTableNames(wb, source));
+  const newWs = addWorksheet(wb, name ?? getSheetName(source));
   // Remap chart numbers so the source's `chartNumber` / `chartExNumber`
   // references point at entries we actually copy into the target
   // workbook. Build the map here so the rewritten `charts` array and
@@ -287,29 +423,38 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
     return cloned;
   };
 
-  setSheetModel(newWs, {
-    ...sourceModel,
-    id: newWs.id,
-    name: getSheetName(newWs),
-    media: importedMedia,
-    charts: remappedCharts,
-    drawing: remapDrawing(sourceModel.drawing),
-    // getSheetModel()/setSheetModel() pass these through by reference (unlike
-    // `charts`, which is rebuilt above), so two sheets would otherwise share
-    // the same TableModel / PivotTable / rule / form-control instances —
-    // mutating one sheet's copy silently mutated the source. Structured-clone
-    // at the import boundary gives the imported sheet independent data. These
-    // carry no cross-sheet identity to remap (unlike charts/drawings), so a
-    // plain deep copy is the whole fix.
-    tables: structuredClone(sourceModel.tables ?? []),
-    pivotTables: structuredClone(sourceModel.pivotTables ?? []),
-    conditionalFormattings: structuredClone(sourceModel.conditionalFormattings ?? []),
-    formControls: structuredClone(sourceModel.formControls ?? [])
-  });
+  try {
+    applyImportedModel();
+  } catch (error) {
+    // A model the target refuses part-way leaves no half-imported sheet behind.
+    removeWorksheet(wb, newWs);
+    throw error;
+  }
+  function applyImportedModel(): void {
+    setSheetModel(newWs, {
+      ...sourceModel,
+      id: newWs.id,
+      name: getSheetName(newWs),
+      media: importedMedia,
+      charts: remappedCharts,
+      drawing: remapDrawing(sourceModel.drawing),
+      // getSheetModel()/setSheetModel() pass these through by reference (unlike
+      // `charts`, which is rebuilt above), so two sheets would otherwise share
+      // the same TableModel / PivotTable / rule / form-control instances —
+      // mutating one sheet's copy silently mutated the source. Structured-clone
+      // at the import boundary gives the imported sheet independent data. These
+      // carry no cross-sheet identity to remap (unlike charts/drawings), so a
+      // plain deep copy is the whole fix.
+      tables: structuredClone(sourceModel.tables ?? []),
+      pivotTables: structuredClone(sourceModel.pivotTables ?? []),
+      conditionalFormattings: structuredClone(sourceModel.conditionalFormattings ?? []),
+      formControls: structuredClone(sourceModel.formControls ?? [])
+    });
+  }
 
   // Copy the actual chart parts + sidecars into the target workbook
   // so the remapped `charts` array references live entries. Without
-  // this, `importSheet` left the target with chart anchors but no
+  // this, `importWorksheet` left the target with chart anchors but no
   // backing chart XML, producing a broken package on save. We copy
   // both the structured model (via `getChartEntry` / `addChartEntry`
   // — the public API) and all sidecars (`copyChartSidecars` /
@@ -356,15 +501,50 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
   return newWs;
 }
 
+/** Options for {@link protectWorkbook}: the protection flags, plus the password that unlocks them. */
+export interface ProtectWorkbookOptions extends Partial<WorkbookProtection> {
+  /** Password hashed into the workbook; omit to protect without one. */
+  password?: string;
+}
+
+/** Protect the workbook's structure or windows: `protect(wb, { password: "pw", lockStructure: true })`. */
+export function protectWorkbook(wb: WorkbookData, options?: ProtectWorkbookOptions): Promise<void>;
+/**
+ * @deprecated Pass the password in the options object: `protect(wb, { password, ...options })`.
+ * Removed in 1.0.
+ */
+export function protectWorkbook(
+  wb: WorkbookData,
+  password: string | undefined,
+  options?: Partial<WorkbookProtection>
+): Promise<void>;
 export async function protectWorkbook(
   wb: WorkbookData,
-  password?: string,
-  options?: Partial<WorkbookProtection>
+  passwordOrOptions?: string | ProtectWorkbookOptions,
+  legacyOptions?: Partial<WorkbookProtection>
 ): Promise<void> {
+  checkWorkbook(wb);
+  const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
   wb.protection = await buildWorkbookProtection(password, options);
 }
 
+/**
+ * Whether `password` is the one the workbook's structure or windows were protected with — the hash `protect` stored,
+ * or a file's — as `Worksheet.verifyPassword` checks a sheet's. `false` when the workbook is not protected, or was
+ * protected without a password.
+ *
+ * @throws {ExcelArgumentError} when `password` is not a string (the promise rejects).
+ */
+export async function verifyWorkbookPassword(wb: WorkbookData, password: string): Promise<boolean> {
+  checkWorkbook(wb);
+  argumentChecks("Workbook.verifyPassword").required("password", password);
+  argumentChecks("Workbook.verifyPassword").string("password", password);
+  return verifySheetPassword(wb.protection, password);
+}
+
+/** Remove the workbook's structure and window protection, as `protect` set it. */
 export function unprotectWorkbook(wb: WorkbookData): void {
+  checkWorkbook(wb);
   wb.protection = undefined;
 }
 
@@ -373,6 +553,7 @@ export function addWorksheet(
   name?: string,
   options?: AddWorksheetOptions
 ): Worksheet {
+  checkWorkbook(wb);
   const id = getNextId(wb);
 
   // Allocate `orderNo` from the unified worksheet+chartsheet counter.
@@ -400,19 +581,112 @@ export function addWorksheet(
   return worksheet;
 }
 
-export function removeWorksheet(wb: WorkbookData, id: number | string): void {
-  const worksheet = getWorksheet(wb, id);
-  if (worksheet) {
-    destroy(worksheet);
-  }
+/**
+ * The sheet settings a read kept because they are outside their setting's vocabulary, as the workbook keeps them
+ * **now** — each with its sheet, its path (`pageSetup.orientation`) and its text, in sheet order: what
+ * `Workbook.readWithDiagnostics` reported as `unrecognizedValues`, less what an edit or
+ * {@link discardUnrecognizedValues} has since replaced or dropped. The entries are those the discard filter is called
+ * with. Copies.
+ */
+export function listUnrecognizedValues(wb: WorkbookData): UnrecognizedValue[] {
+  checkWorkbook(wb);
+  return keptSettingsReport(wb);
 }
 
+/** Options for {@link discardUnrecognizedValues}. */
+const discardOptionsSchema = s.object(
+  { filter: s.function<(setting: UnrecognizedValue) => boolean>().optional() },
+  { readonly: true }
+);
+
+export interface DiscardUnrecognizedValuesOptions {
+  /**
+   * Which kept settings to drop: called with each — its sheet, its path (`pageSetup.orientation`) and its text — and
+   * drops those it returns `true` for. Without it, every one is dropped.
+   */
+  readonly filter?: (setting: UnrecognizedValue) => boolean;
+}
+
+const _discardOptionsMatch: SchemaMatches<
+  typeof discardOptionsSchema,
+  DiscardUnrecognizedValuesOptions
+> = true;
+void _discardOptionsMatch;
+
+/**
+ * Drop the sheet settings a read kept because they are outside their setting's vocabulary — what
+ * `Workbook.readWithDiagnostics` lists as `unrecognizedValues` — so the workbook is written with each such setting as
+ * it now reads. Returns how many there were.
+ *
+ * Until then a kept value is written back as read while its field is absent; assigning the field takes over, but
+ * clearing it again brings the kept text back. This is how to remove one instead — all of them, or with `filter` the
+ * ones you choose:
+ *
+ * ```ts
+ * Workbook.discardUnrecognizedValues(wb, { filter: s => s.sheet === "Report" && s.path.startsWith("views") });
+ * ```
+ */
+export function discardUnrecognizedValues(
+  wb: WorkbookData,
+  options?: DiscardUnrecognizedValuesOptions
+): number {
+  checkWorkbook(wb);
+  checkSchema(
+    "Workbook.discardUnrecognizedValues",
+    "options",
+    discardOptionsSchema.optional(),
+    options
+  );
+  const filter = options?.filter;
+  let discarded = 0;
+  for (const ws of getWorksheets(wb)) {
+    const sheet = getSheetName(ws);
+    discarded += discardKeptSheetSettings(
+      ws,
+      filter === undefined ? undefined : setting => filter({ sheet, ...setting })
+    );
+  }
+  return discarded;
+}
+
+/**
+ * Remove a worksheet — given by id, name or handle — and turn references to it into `#REF!`. Returns `true` if it
+ * was in the workbook.
+ */
+export function removeWorksheet(wb: WorkbookData, sheet: number | string | Worksheet): boolean {
+  checkWorkbook(wb);
+  // `getWorksheet` reads a missing id as "the first sheet"; removing it for a forgotten argument loses a sheet.
+  const check = argumentChecks("Workbook.removeWorksheet");
+  check.required("sheet", sheet);
+  if (typeof sheet !== "number" && typeof sheet !== "string" && typeof sheet !== "object") {
+    check.fail("sheet", "an id, a name or a worksheet", sheet);
+  }
+  const worksheet =
+    typeof sheet === "object" && sheet !== null
+      ? wb._worksheets[sheet.id] === sheet
+        ? sheet
+        : undefined
+      : getWorksheet(wb, sheet);
+  if (!worksheet) {
+    return false;
+  }
+  destroy(worksheet);
+  return true;
+}
+
+/**
+ * Add a chartsheet — a tab that holds one chart — and return it. `name` defaults to `ChartN`.
+ *
+ * @throws {ExcelWorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
+ */
 export function addChartsheet(
   wb: WorkbookData,
   name: string | undefined,
   options: AddChartsheetOptions
 ): ChartsheetData {
+  checkWorkbook(wb);
   const sheetName = _validateChartsheetName(wb, name ?? `Chart${wb._chartsheets.length + 1}`);
+  checkChartsheetOptions("Workbook.addChartsheet", options, false);
   const sheetNo = _nextChartsheetNo(wb);
   const id = _nextSheetId(wb);
   // Assign a unified `orderNo` across worksheets and chartsheets so
@@ -437,6 +711,17 @@ export function addChartsheet(
     drawing: { rId: "rId1" }
   };
 
+  return chartArgument("Workbook.addChartsheet", "options.chart", () =>
+    addChartsheetModel(wb, chartsheet, options)
+  );
+}
+
+/** Build the chartsheet's chart and add both — the second half of {@link addChartsheet}. */
+function addChartsheetModel(
+  wb: WorkbookData,
+  chartsheet: ChartsheetModel,
+  options: AddChartsheetOptions
+): ChartsheetData {
   if (isChartExOptions(options.chart)) {
     const chartExNumber = nextChartExNumber(wb);
     const model = buildChartExModel(options.chart);
@@ -485,51 +770,154 @@ export function addChartsheet(
   return createChartsheet(chartsheet, wb);
 }
 
+/** {@link addChartsheet} for a chart whose data is the pivot table `pivotTable`. */
 export function addPivotChartsheet(
   wb: WorkbookData,
   name: string | undefined,
   pivotTable: PivotTable,
   options: AddPivotChartsheetOptions
 ): ChartsheetData {
-  return addChartsheet(wb, name, {
-    ...options,
-    chart: withPivotChartSource(pivotTable, options.chart)
-  });
+  checkWorkbook(wb);
+  checkChartsheetOptions("Workbook.addPivotChartsheet", options, true);
+  const chart = chartArgument("Workbook.addPivotChartsheet", "options.chart", () =>
+    withPivotChartSource(pivotTable, options.chart)
+  );
+  try {
+    return addChartsheet(wb, name, { ...options, chart });
+  } catch (error) {
+    throw renamedCall(error, "Workbook.addChartsheet", "Workbook.addPivotChartsheet");
+  }
 }
 
+/**
+ * Run the chart validator for a chart the caller passed at `root` — `options.chart` for {@link addChartsheet}, `chart`
+ * for {@link replaceChartsheetChart} — so an argument error names the caller's path, not the validator's own
+ * `options.series[0].values`, and its message starts with `where`.
+ */
+function chartArgument<T>(where: string, root: string, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    throw nameCall(rooted(error, root), where);
+  }
+}
+
+/** `error` with a field the validator rooted at `options` re-rooted at `root`, in the field and the message. */
+function rooted(error: unknown, root: string): unknown {
+  if (!(error instanceof ExcelArgumentError)) {
+    return error;
+  }
+  const field = error.field;
+  if (field !== "options" && !field.startsWith("options.") && !field.startsWith("options[")) {
+    return error;
+  }
+  const next = `${root}${field.slice("options".length)}`;
+  const before = error.message;
+  const at = before.indexOf(field);
+  error.message =
+    at < 0 ? before : `${before.slice(0, at)}${next}${before.slice(at + field.length)}`;
+  if (typeof error.stack === "string" && error.stack.includes(before)) {
+    error.stack = error.stack.replace(before, error.message);
+  }
+  (error as { field: string }).field = next;
+  return error;
+}
+
+/** An argument error that named the call `from`, named for `to` — a public call made through another one. */
+function renamedCall(error: unknown, from: string, to: string): unknown {
+  if (error instanceof ExcelArgumentError && error.message.startsWith(`${from}: `)) {
+    const before = error.message;
+    error.message = `${to}: ${before.slice(from.length + 2)}`;
+    if (typeof error.stack === "string" && error.stack.includes(before)) {
+      error.stack = error.stack.replace(before, error.message);
+    }
+  }
+  return error;
+}
+
+/**
+ * The chartsheet named `nameOrIndex` (compared as Excel compares sheet names), or at that **0-based position** among
+ * the chartsheets — not the sheet id `getWorksheet` takes — or `undefined` when there is none. A position moves when
+ * an earlier chartsheet is removed; to keep hold of a chartsheet, keep its handle or its name.
+ *
+ * @param nameOrIndex - The chartsheet's name, or its 0-based position among the chartsheets (not its sheet id).
+ */
 export function getChartsheet(
   wb: WorkbookData,
   nameOrIndex: string | number
 ): ChartsheetData | undefined {
+  checkWorkbook(wb);
   const model = _getChartsheetModel(wb, nameOrIndex);
   return model ? createChartsheet(model, wb) : undefined;
 }
 
-export function removeChartsheet(wb: WorkbookData, nameOrIndex: string | number): boolean {
-  const index =
-    typeof nameOrIndex === "number"
-      ? nameOrIndex
-      : wb._chartsheets.findIndex(sheet => sheet.name.toLowerCase() === nameOrIndex.toLowerCase());
-  if (index < 0 || index >= wb._chartsheets.length) {
+/**
+ * Remove a chartsheet — the handle `addChartsheet` / `getChartsheet` returned, its name, or its 0-based position among
+ * the chartsheets. Names scoped to it go and later scopes renumber. Returns `true` if one was removed.
+ */
+export function removeChartsheet(
+  wb: WorkbookData,
+  chartsheet: string | number | ChartsheetData
+): boolean {
+  checkWorkbook(wb);
+  const index = chartsheetIndex(wb, chartsheet, "Workbook.removeChartsheet", "chartsheet");
+  if (index < 0) {
     return false;
   }
-  const [removed] = wb._chartsheets.splice(index, 1);
-  if (removed.chartNumber) {
-    removeChartEntry(wb, removed.chartNumber);
-  }
-  if (removed.chartExNumber) {
-    removeChartExStructuredEntry(wb, removed.chartExNumber);
-  }
+  // A chartsheet holds no cells, but it holds a tab position: names scoped to it go, and later scopes renumber.
+  const edit = {
+    kind: "removeSheet",
+    sheet: wb._chartsheets[index].name,
+    sheets: sheetNamesInTabOrder(wb)
+  } as const;
+  withReferenceEdit(wb, edit, () => {
+    const [removed] = wb._chartsheets.splice(index, 1);
+    // Its id is not handed out again — see `getNextId`.
+    if (removed && typeof removed.id === "number" && Number.isFinite(removed.id)) {
+      wb._lastSheetId = Math.max(wb._lastSheetId ?? 0, removed.id);
+    }
+    if (removed.chartNumber) {
+      releaseChartMedia(wb, removed.chartNumber);
+      removeChartEntry(wb, removed.chartNumber);
+    }
+    if (removed.chartExNumber) {
+      removeChartExStructuredEntry(wb, removed.chartExNumber);
+    }
+  });
   return true;
+}
+
+/**
+ * The position among `wb`'s chartsheets of a chartsheet given by name (compared as Excel compares sheet names),
+ * 0-based position or handle — or `-1` when `wb` has no such chartsheet. Anything else is refused, naming `field`.
+ */
+function chartsheetIndex(wb: WorkbookData, target: unknown, where: string, field: string): number {
+  if (typeof target === "number" && Number.isInteger(target)) {
+    return target >= 0 && target < wb._chartsheets.length ? target : -1;
+  }
+  if (typeof target === "string") {
+    const key = sheetNameKey(target);
+    return wb._chartsheets.findIndex(sheet => sheetNameKey(sheet.name) === key);
+  }
+  // A fractional position names no chartsheet, as anything else that is not one does.
+  const model = (target as { _model?: unknown } | null | undefined)?._model;
+  if (typeof model !== "object" || model === null) {
+    argumentChecks(where).fail(
+      field,
+      "a chartsheet, its name or its 0-based position (a whole number)",
+      target
+    );
+  }
+  return wb._chartsheets.indexOf(model as ChartsheetModel);
 }
 
 function _getChartsheetModel(
   wb: WorkbookData,
-  nameOrIndex: string | number
+  target: string | number | ChartsheetData,
+  where = "Workbook.getChartsheet",
+  field = "nameOrIndex"
 ): ChartsheetModel | undefined {
-  return typeof nameOrIndex === "number"
-    ? wb._chartsheets[nameOrIndex]
-    : wb._chartsheets.find(sheet => sheet.name.toLowerCase() === nameOrIndex.toLowerCase());
+  return wb._chartsheets[chartsheetIndex(wb, target, where, field)];
 }
 
 export function renameChartsheet(
@@ -537,6 +925,7 @@ export function renameChartsheet(
   nameOrIndex: string | number,
   name: string
 ): boolean {
+  checkWorkbook(wb);
   const model = _getChartsheetModel(wb, nameOrIndex);
   if (!model) {
     return false;
@@ -555,16 +944,25 @@ export function renameChartsheet(
   }
 }
 
+/**
+ * Copy a chartsheet — by handle, name or 0-based position — chart included, under `name` (by default its name followed
+ * by ` Copy`), and return the copy, or `undefined` when there is no such chartsheet.
+ *
+ * @throws {ExcelWorksheetNameError} when `name` is taken, longer than 31 characters or not a name Excel accepts.
+ */
 export function copyChartsheet(
   wb: WorkbookData,
-  nameOrIndex: string | number,
+  chartsheet: string | number | ChartsheetData,
   name?: string
 ): ChartsheetData | undefined {
-  const source = _getChartsheetModel(wb, nameOrIndex);
+  checkWorkbook(wb);
+  const source = _getChartsheetModel(wb, chartsheet, "Workbook.copyChartsheet", "chartsheet");
   if (!source) {
     return undefined;
   }
-  const cloneName = _validateChartsheetName(wb, name ?? `${source.name} Copy`);
+  // A name the caller gave is refused past 31 characters; the default this makes is shortened instead.
+  refuseLongSheetName(name);
+  const cloneName = validateSheetName(wb, name ?? `${source.name} Copy`);
   const clone: ChartsheetModel = {
     ...deepClone(source),
     id: _nextSheetId(wb),
@@ -617,16 +1015,25 @@ export function copyChartsheet(
   return createChartsheet(clone, wb);
 }
 
+/**
+ * Replace the chart of a chartsheet — by handle, name or 0-based position — with one built from `chart`. Returns
+ * `false` when there is no such chartsheet.
+ */
 export function replaceChartsheetChart(
   wb: WorkbookData,
-  nameOrIndex: string | number,
+  chartsheet: string | number | ChartsheetData,
   chart: AddChartsheetOptions["chart"]
 ): boolean {
-  const wrapper = getChartsheet(wb, nameOrIndex);
-  if (!wrapper) {
+  checkWorkbook(wb);
+  const model = _getChartsheetModel(
+    wb,
+    chartsheet,
+    "Workbook.replaceChartsheetChart",
+    "chartsheet"
+  );
+  if (!model) {
     return false;
   }
-  const model = chartsheetModel(wrapper);
   // Build the replacement first so a malformed options object throws
   // *before* we remove the existing chart entry. Without this, a
   // failed `buildChartExModel` / `buildChartModel` would leave the
@@ -634,14 +1041,21 @@ export function replaceChartsheetChart(
   let newChartExModel: ChartExModel | undefined;
   let newChartModel: ChartModel | undefined;
   if (isChartExOptions(chart)) {
-    newChartExModel = buildChartExModel(chart);
+    newChartExModel = chartArgument("Workbook.replaceChartsheetChart", "chart", () =>
+      buildChartExModel(chart)
+    );
   } else if (isComboChartOptions(chart)) {
-    newChartModel = buildComboChartModel(chart);
+    newChartModel = chartArgument("Workbook.replaceChartsheetChart", "chart", () =>
+      buildComboChartModel(chart)
+    );
   } else {
-    newChartModel = buildChartModel(chart);
+    newChartModel = chartArgument("Workbook.replaceChartsheetChart", "chart", () =>
+      buildChartModel(chart)
+    );
   }
   // Remove existing entries only after the new model builds cleanly.
   if (model.chartNumber) {
+    releaseChartMedia(wb, model.chartNumber);
     removeChartEntry(wb, model.chartNumber);
     model.chartNumber = undefined;
   }
@@ -683,21 +1097,57 @@ export function replaceChartsheetChart(
   return true;
 }
 
-export function eachSheet(
+/** Visit every worksheet in tab order, with its sheet id. */
+export function eachWorksheet(
   wb: WorkbookData,
   callback: (sheet: Worksheet, id: number) => void
 ): void {
+  checkWorkbook(wb);
+  if (typeof callback !== "function") {
+    argumentChecks("Workbook.eachWorksheet").fail("callback", "a function", callback);
+  }
   getWorksheets(wb).forEach(sheet => {
     callback(sheet, sheet.id);
   });
 }
 
+/** The identity a threaded-comment author is registered with — see {@link registerPerson}. */
+export interface RegisterPersonOptions {
+  /** The author's id with their identity provider (an e-mail address, an AD object id, …). */
+  userId?: string;
+  /** The identity provider: `"AD"`, `"Windows Live"`, `"PeoplePicker"`, `"None"`, … */
+  providerId?: string;
+}
+
+/**
+ * Register a threaded-comment author and return their person id. Registering the same display name and
+ * user id again returns the existing id.
+ */
+export function registerPerson(
+  wb: WorkbookData,
+  displayName: string,
+  options?: RegisterPersonOptions
+): string;
+/**
+ * @deprecated Pass the identity in the options object: `registerPerson(wb, name, { userId, providerId })`.
+ * Removed in 1.0.
+ */
 export function registerPerson(
   wb: WorkbookData,
   displayName: string,
   userId?: string,
   providerId?: string
+): string;
+export function registerPerson(
+  wb: WorkbookData,
+  displayName: string,
+  userIdOrOptions?: string | RegisterPersonOptions,
+  legacyProviderId?: string
 ): string {
+  checkWorkbook(wb);
+  const { userId, providerId } = isRecordArgument(userIdOrOptions)
+    ? userIdOrOptions
+    : { userId: userIdOrOptions, providerId: legacyProviderId };
   const existing = wb._persons.find(p => p.displayName === displayName && p.userId === userId);
   if (existing) {
     return existing.id;
@@ -714,12 +1164,68 @@ export function registerPerson(
   return id;
 }
 
+/** Options for `Workbook.registerFunction`. */
+export interface RegisterFunctionOptions {
+  /** The fewest arguments the function takes. Defaults to 0. */
+  minArity?: number;
+  /** The most arguments the function takes. Defaults to 255, Excel's limit. */
+  maxArity?: number;
+  /** Recalculate on every calculation, as `NOW()` and `RAND()` are. */
+  volatile?: boolean;
+  /**
+   * The function returns an array, so a formula calling it — `=F()`, `=F()*2` — is a dynamic array: the formula
+   * engine spills it and the writers store it with dynamic-array metadata, as for `SEQUENCE`. Without it the function
+   * returns one value, even when it shadows a built-in that returns an array: a formula calling it is ordinary, and an
+   * array it returns all the same is intersected to its top-left value, as Excel computes an ordinary formula.
+   * @default false
+   */
+  returnsArray?: boolean;
+}
+
+const arity = () => s.number({ integer: true, min: 0, max: 255 }).optional();
+const registerFunctionOptionsSchema = s.object({
+  minArity: arity(),
+  maxArity: arity(),
+  volatile: s.boolean().optional(),
+  returnsArray: s.boolean().optional()
+});
+const _registerFunctionOptionsMatch: SchemaMatches<
+  typeof registerFunctionOptionsSchema,
+  RegisterFunctionOptions
+> = true;
+void _registerFunctionOptionsMatch;
+
+/**
+ * Register a custom worksheet function the formula engine calls when a formula uses `name` (compared without
+ * regard to case). A registered name shadows a built-in one of the same name.
+ *
+ * @throws {ExcelArgumentError} when `name` is not a non-empty string, `fn` is not a function, or an arity is not a
+ * whole number from 0 to 255 with `minArity` at most `maxArity`.
+ */
 export function registerFunction(
   wb: WorkbookData,
   name: string,
   fn: (args: RuntimeValue[]) => RuntimeValue | number | string | boolean | null | undefined,
-  options?: { minArity?: number; maxArity?: number; volatile?: boolean }
+  options?: RegisterFunctionOptions
 ): void {
+  checkWorkbook(wb);
+  const check = argumentChecks("Workbook.registerFunction");
+  check.required("name", name);
+  check.string("name", name, { nonEmpty: true });
+  if (typeof fn !== "function") {
+    check.fail("fn", "a function", fn);
+  }
+  checkSchema(
+    "Workbook.registerFunction",
+    "options",
+    registerFunctionOptionsSchema.optional(),
+    options
+  );
+  if (options) {
+    if ((options.minArity ?? 0) > (options.maxArity ?? 255)) {
+      check.fail("options.minArity", "at most options.maxArity", options.minArity);
+    }
+  }
   if (!wb.userFunctions) {
     wb.userFunctions = new Map();
   }
@@ -728,15 +1234,25 @@ export function registerFunction(
   // consumer of the `Workbook` namespace — carry the formula runtime for a member most of them never
   // call. `core/formula-adapter.ts` converts on the way into the engine instead; see
   // {@link WorkbookFunctionDescriptor}.
+  //
+  // Keyed by `toUpperCase()`, not `excelNameKey`, on purpose: the formula parser canonicalises a
+  // call's name the same way (`stripFunctionPrefix(name.toUpperCase())`) and the evaluator looks the
+  // key up as it is, so registration has to produce the key the lookup produces. Changing one side
+  // alone would make every registered function unreachable.
   wb.userFunctions.set(name.toUpperCase(), {
     minArity: options?.minArity ?? 0,
     maxArity: options?.maxArity ?? 255,
     volatile: options?.volatile,
+    ...(options?.returnsArray === undefined ? {} : { returnsArray: options.returnsArray }),
     invoke: fn as (args: never[]) => unknown
   });
 }
 
+/** Remove a function {@link registerFunction} registered. Returns `true` if there was one. */
 export function unregisterFunction(wb: WorkbookData, name: string): boolean {
+  checkWorkbook(wb);
+  argumentChecks("Workbook.unregisterFunction").required("name", name);
+  argumentChecks("Workbook.unregisterFunction").string("name", name);
   return wb.userFunctions?.delete(name.toUpperCase()) ?? false;
 }
 
@@ -792,26 +1308,33 @@ function _nextSheetOrderNo(wb: WorkbookData): number {
   return max + 1;
 }
 
+/** The id for a new chartsheet — the one pool {@link getNextId} allocates from. */
 export function _nextSheetId(wb: WorkbookData): number {
-  const worksheetIds = getWorksheets(wb).map(ws => ws.id);
-  const chartsheetIds = wb._chartsheets.map(cs => cs.id).filter(Number.isFinite);
-  const ids = [...worksheetIds, ...chartsheetIds];
-  return ids.length > 0 ? Math.max(...ids) + 1 : 1;
+  return getNextId(wb);
 }
 
 export function _validateChartsheetName(wb: WorkbookData, name: string): string {
+  refuseLongSheetName(name);
   return validateSheetName(wb, name);
+}
+
+/** What `Workbook.addExternalLink` takes: the linked workbook and, optionally, what this one caches of it. */
+export interface AddExternalLinkOptions {
+  /** The linked file — a bare name or a path relative to this workbook (`"data/ref.xlsx"`). */
+  target: string;
+  /** The linked workbook's sheet names, in its order. */
+  sheetNames?: readonly string[];
+  /** Cached cell values per linked sheet, as Excel stores them for display. */
+  cachedValues?: ExternalLinkModel["cachedValues"];
+  /** Whether `target` is outside the package (`"External"`, the default) or a part inside it. */
+  targetMode?: ExternalLinkModel["targetMode"];
 }
 
 export function addExternalLink(
   wb: WorkbookData,
-  input: {
-    target: string;
-    sheetNames?: string[];
-    cachedValues?: ExternalLinkModel["cachedValues"];
-    targetMode?: ExternalLinkModel["targetMode"];
-  }
+  input: AddExternalLinkOptions
 ): ExternalLinkModel {
+  checkWorkbook(wb);
   const link: ExternalLinkModel = {
     index: wb.externalLinks.length + 1,
     target: input.target,
@@ -827,6 +1350,14 @@ export function getExternalLink(
   wb: WorkbookData,
   indexOrTarget: number | string
 ): ExternalLinkModel | undefined {
+  checkWorkbook(wb);
+  if (typeof indexOrTarget !== "number" && typeof indexOrTarget !== "string") {
+    argumentChecks("Workbook.getExternalLink").fail(
+      "indexOrTarget",
+      "a 1-based index or a target",
+      indexOrTarget
+    );
+  }
   if (typeof indexOrTarget === "number") {
     return wb.externalLinks[indexOrTarget - 1];
   }
@@ -835,6 +1366,14 @@ export function getExternalLink(
 }
 
 export function _collectExternalLinksForWrite(wb: WorkbookData): ExternalLinkModel[] {
+  // The links `addExternalLink` returns are the workbook's own, so an edit to one after it was checked is checked
+  // here: an empty target is a relationship that points nowhere.
+  wb.externalLinks.forEach((link, i) => {
+    const check = argumentChecks("Workbook.toBuffer");
+    check.required(`externalLinks[${i}].target`, link.target);
+    check.string(`externalLinks[${i}].target`, link.target, { nonEmpty: true });
+    check.oneOf(`externalLinks[${i}].targetMode`, link.targetMode, ["External", "Internal"]);
+  });
   const userLower = new Set(wb.externalLinks.map(l => l.target.toLowerCase()));
   const combined: ExternalLinkModel[] = wb.externalLinks.map((link, i) => ({
     ...link,
@@ -909,46 +1448,53 @@ export function getDefaultFont(wb: WorkbookData): Partial<Font> | undefined {
   return wb._defaultFont;
 }
 
+/**
+ * The id for a new sheet: one past the highest id the workbook holds or has removed. Worksheets and chartsheets
+ * share one `sheetId` pool in `workbook.xml` (each must be unique across both), and an id is never handed out twice in
+ * a session — a numeric id held across a remove does not come to name another sheet. That is Excel's rule: given
+ * sheets 1, 2, 3, Excel 16.114 numbered a sheet added after deleting sheet 3 as 4, and one added after deleting sheet 1
+ * as 5 (`tmp/office-tests/r6-sheetid`). Reusing the lowest free id used to hand a worksheet a removed chartsheet's.
+ */
 export function getNextId(wb: WorkbookData): number {
-  // Worksheets and chartsheets share a single `sheetId` namespace in
-  // `workbook.xml`'s `<sheets>` element (OOXML requires each
-  // `sheetId` to be globally unique across both families). Allocating
-  // from `_worksheets` alone used to hand out an id already claimed
-  // by a chartsheet whenever the author interleaved their calls —
-  // e.g. `addWorksheet(×16)` → ids 1-16; `addChartsheet(×2)` → ids
-  // 17-18 (via `_nextSheetId()`); then `addWorksheet("X")` walked
-  // `_worksheets` slots 1..16, found them full, and returned
-  // `_worksheets.length = 17`, colliding with the first chartsheet.
-  // Excel rejects the resulting workbook as corrupt. Collect
-  // chartsheet ids up front so the search honours the shared pool.
-  const chartsheetIds = new Set<number>();
+  let highest = wb._lastSheetId ?? 0;
+  for (const ws of wb._worksheets) {
+    if (ws && ws.id > highest) {
+      highest = ws.id;
+    }
+  }
   for (const cs of wb._chartsheets) {
-    if (cs && typeof cs.id === "number" && Number.isFinite(cs.id)) {
-      chartsheetIds.add(cs.id);
+    if (cs && typeof cs.id === "number" && Number.isFinite(cs.id) && cs.id > highest) {
+      highest = cs.id;
     }
   }
-  // Prefer reusing vacated `_worksheets` slots (left as holes by
-  // `removeWorksheetEx`) so ids stay stable across delete+add cycles.
-  for (let i = 1; i < wb._worksheets.length; i++) {
-    if (!wb._worksheets[i] && !chartsheetIds.has(i)) {
-      return i;
-    }
-  }
-  // No reusable hole — hand out the next id beyond the current
-  // tail, skipping any slots already taken by chartsheets.
-  let candidate = wb._worksheets.length || 1;
-  while (chartsheetIds.has(candidate)) {
-    candidate++;
-  }
-  return candidate;
+  return highest + 1;
 }
 
 export function getChartsheets(wb: WorkbookData): ChartsheetData[] {
+  checkWorkbook(wb);
   return wb._chartsheets.map(model => createChartsheet(model, wb));
 }
 
 export function getPersons(wb: WorkbookData): ThreadedCommentPerson[] {
   return wb._persons;
+}
+
+/**
+ * The threaded-comment authors registered on the workbook — by {@link registerPerson} or read from a file — in
+ * registration order. They are copies: register an author with `registerPerson`.
+ */
+export function listPersons(wb: WorkbookData): ThreadedCommentPerson[] {
+  checkWorkbook(wb);
+  return wb._persons.map(person => ({ ...person }));
+}
+
+/**
+ * The links to other workbooks this one declares, in order — `getExternalLink(wb, i)` is the `i`-th, counting from 1.
+ * Like `getExternalLink` they are the workbook's own: an edit reaches the file, and is checked when it is written.
+ */
+export function listExternalLinks(wb: WorkbookData): ExternalLinkModel[] {
+  checkWorkbook(wb);
+  return [...wb.externalLinks];
 }
 
 // `getWorkbookModel` lives in `core/workbook-model.ts` — see the note there on why the model
@@ -1022,8 +1568,8 @@ function cloneChartExEntry(entry: ChartExEntry, chartExNumber: number): ChartExE
 
 export type Workbook = WorkbookData;
 
-// Streaming factories (formerly Workbook.createStreamWriter / .createStreamReader
-// statics). Free functions so they tree-shake.
+// Constructor forwards behind the deprecated `Workbook.createStreamWriter` /
+// `createStreamReader`; use `new Stream.WorkbookWriter` / `new Stream.WorkbookReader`.
 export function createStreamWriter(options?: WorkbookWriterOptions): WorkbookWriter {
   return new WorkbookWriter(options);
 }
@@ -1059,9 +1605,9 @@ export {
   getWorksheets,
   copyChartSidecars,
   copyChartExSidecars,
-  defineCellStyle,
+  addCellStyle,
   getCellStyle,
   listCellStyles,
   removeCellStyle,
-  useBuiltinCellStyle
+  useBuiltInCellStyle
 } from "@excel/core/workbook-core";

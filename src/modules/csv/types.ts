@@ -81,7 +81,7 @@ export interface TransformContext {
 /**
  * Formatted value with explicit quoting control.
  *
- * Create instances via `quoted()` / `unquoted()`.
+ * Create instances via `Csv.forceQuote()` / `Csv.preventQuote()`.
  * Use `isFormattedValue()` for runtime checks.
  */
 export type FormattedValue = FormattedValueImpl;
@@ -215,7 +215,7 @@ export interface CsvBaseOptions {
  */
 export interface CsvParseOptions extends CsvBaseOptions {
   /** Delimiters to try during auto-detection (when delimiter is "") */
-  delimitersToGuess?: string[];
+  delimitersToGuess?: readonly string[];
   /** Line ending character(s) (default: auto-detect) */
   lineEnding?: string;
   /** Skip empty lines: true, false, or "greedy" (also skips whitespace-only) */
@@ -234,6 +234,9 @@ export interface CsvParseOptions extends CsvBaseOptions {
    * Maximum number of data rows to parse (excludes header row).
    * Counts only actual data rows that pass validation.
    * Example: maxRows: 10 returns at most 10 data rows.
+   *
+   * **A preview, not a guard:** the rows past it are left unread and `meta.truncated` says so; nothing
+   * is thrown. (Excel's `XlsxReadOptions.maxRows` is the opposite — it refuses a sheet that is longer.)
    */
   maxRows?: number;
   /**
@@ -260,7 +263,11 @@ export interface CsvParseOptions extends CsvBaseOptions {
   columnMismatch?: ColumnMismatchConfig;
   /** Group columns with same name into arrays */
   groupColumnsByName?: boolean;
-  /** Return records as object keyed by column value */
+  /**
+   * Return records as an object keyed by this header column's value (requires `headers`; a
+   * name that is not a header is refused). A later record with the same key replaces the
+   * earlier one.
+   */
   objname?: string;
   /**
    * Character encoding of the input bytes — any label `TextDecoder` accepts
@@ -279,11 +286,24 @@ export interface CsvParseOptions extends CsvBaseOptions {
   fastMode?: boolean;
   /** Dynamic typing configuration */
   dynamicTyping?: DynamicTypingConfig;
-  /** Auto-detect and convert date strings */
+  /**
+   * Decimal separator `dynamicTyping` reads numbers with (default `"."`). With `","`,
+   * `1,5` becomes `1.5` and a value holding `"."` stays a string; use a delimiter other
+   * than `","`. The counterpart of {@link CsvFormatOptions.decimalSeparator}.
+   */
+  decimalSeparator?: "." | ",";
+  /**
+   * Auto-detect and convert ISO date strings. A date with no time (`2020-01-02`) is UTC
+   * midnight, as ECMAScript reads it; a date-time without an offset is local time; one with
+   * `Z` or an offset is that instant.
+   */
   castDate?: CastDateConfig;
-  /** Chunk callback for batch processing */
+  /**
+   * Chunk callback for batch processing. Only {@link Csv.parseStream} and the parser stream
+   * hand rows over while parsing; `Csv.parse` and `Csv.parseAsync` refuse it.
+   */
   chunk?: (rows: Row[], meta: ChunkMeta) => boolean | void | Promise<boolean | void>;
-  /** Rows per chunk */
+  /** Rows per chunk (streaming parsers only, like {@link CsvParseOptions.chunk}) */
   chunkSize?: number;
   /** Callback before parsing first chunk */
   beforeFirstChunk?: (chunk: string) => string | void;
@@ -293,11 +313,19 @@ export interface CsvParseOptions extends CsvBaseOptions {
   raw?: boolean;
   /** Allow unescaped quotes mid-field */
   relaxQuotes?: boolean;
-  /** Skip malformed records instead of throwing */
+  /**
+   * @deprecated Has no effect: a malformed record (a column-count mismatch the
+   * `columnMismatch` strategy rejects, or text after a closing quote) is always left out of
+   * `rows`, reported in `errors` / `invalidRows` and handed to {@link onSkip}. It only used to
+   * decide whether `onSkip` was called. Removed in 1.0.
+   */
   skipRecordsWithError?: boolean;
   /** Skip records where all values are empty */
   skipRecordsWithEmptyValues?: boolean;
-  /** Callback when record is skipped due to error */
+  /**
+   * Called for every record left out because of an error, by every parser. It is the only
+   * report a streaming consumer (`Csv.parseStream`) gets.
+   */
   onSkip?: OnSkipCallback;
 }
 
@@ -341,10 +369,18 @@ export interface CsvFormatOptions extends CsvBaseOptions {
    * - `Record<string, boolean>`: Quote by header name
    */
   quoteHeaders?: boolean | boolean[] | Record<string, boolean>;
-  /** Header handling: true (auto-detect), array, or false */
-  headers?: string[] | boolean | null;
+  /**
+   * Header handling.
+   * - omitted or `true`: for keyed rows (objects and `[key, value]` lists) the first row's
+   *   keys are written as the header row, and every row is read by those keys, so a row that
+   *   lists its keys in another order still lands in the right columns; array rows get no
+   *   header row.
+   * - `false`: no header row; keyed rows are still read by the first row's keys.
+   * - `string[]`: the header row, and the keys keyed rows are read by.
+   */
+  headers?: readonly string[] | boolean | null;
   /** Column configuration with key/header separation */
-  columns?: (string | ColumnConfig)[];
+  columns?: readonly (string | ColumnConfig)[];
   /**
    * Whether to write headers.
    * - `true`: Always write headers (even if no data rows)
@@ -352,6 +388,14 @@ export interface CsvFormatOptions extends CsvBaseOptions {
    * - Default: `true` when headers are provided/detected
    */
   writeHeaders?: boolean;
+  /**
+   * The first of the array rows is the header row: it is written as one — quoted by `quoteHeaders` rather than
+   * `quoteColumns`, without `typeTransform` — and taken as given, nothing renamed. For a writer whose rows carry their
+   * header themselves (`ExcelCsv`, whose header row is the sheet's first row). Has no effect with `headers` or
+   * `columns`, or for keyed rows.
+   * @internal
+   */
+  firstRowIsHeader?: boolean;
   /** Include BOM for UTF-8 */
   bom?: boolean;
   /** Include trailing newline after last row */
@@ -435,7 +479,7 @@ export interface RecordInfo {
   quoted: boolean[];
   /** Raw unparsed line content (only present when `raw: true` option is set) */
   raw?: string;
-  /** Length of invalid field (internal use) */
+  /** @deprecated Never set by any parser. Removed in 1.0. */
   invalid_field_length?: number;
 }
 

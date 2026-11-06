@@ -5,6 +5,7 @@
  * Used by both the inline table parser and the styles parser.
  */
 
+import { WRITTEN, readToken } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, findChildNs, safeParseInt } from "@word/reader/parse-utils";
 import {
@@ -70,7 +71,12 @@ function parseTableProperties(el: XmlElement): TableProperties {
 
   const jcEl = findChildNs(el, "jc");
   if (jcEl) {
-    props.alignment = attrVal(jcEl, "val") as TableProperties["alignment"];
+    props.alignment = readToken(
+      attrVal(jcEl, "val"),
+      WRITTEN.tableAlignment,
+      props,
+      "alignment"
+    ) as TableProperties["alignment"];
   }
 
   const indEl = findChildNs(el, "tblInd");
@@ -85,7 +91,12 @@ function parseTableProperties(el: XmlElement): TableProperties {
 
   const layoutEl = findChildNs(el, "tblLayout");
   if (layoutEl) {
-    props.layout = attrVal(layoutEl, "type") as TableProperties["layout"];
+    props.layout = readToken(
+      attrVal(layoutEl, "type"),
+      WRITTEN.tableLayout,
+      props,
+      "layout"
+    ) as TableProperties["layout"];
   }
 
   const cellMarEl = findChildNs(el, "tblCellMar");

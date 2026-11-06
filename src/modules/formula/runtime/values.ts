@@ -575,6 +575,32 @@ export function scalarEquals(a: ScalarValue, b: ScalarValue): boolean {
 }
 
 /**
+ * What a formula cell holds for the result `v`: an empty cell is 0 — as the whole result, or as
+ * an element of an array the formula spills — because that is the value Excel stores and shows
+ * (`=A9` over an empty A9 is 0, and so is the empty element of `=A1:A3`). It is the cell's value,
+ * so a formula reading that cell sees 0 too (`ISBLANK` is FALSE). Only the result is converted:
+ * inside an expression an empty cell stays empty (`A9=""` is TRUE). An empty string is not an
+ * empty cell and stays `""`.
+ */
+export function toCellResult(v: RuntimeValue): RuntimeValue {
+  if (v.kind === RVKind.Blank) {
+    return ZERO;
+  }
+  if (
+    v.kind !== RVKind.Array ||
+    !v.rows.some(row => row.some(cell => cell.kind === RVKind.Blank))
+  ) {
+    return v;
+  }
+  return {
+    ...v,
+    rows: v.rows.map(row => row.map(cell => (cell.kind === RVKind.Blank ? ZERO : cell)))
+  };
+}
+
+const ZERO: NumberValue = { kind: RVKind.Number, value: 0 };
+
+/**
  * Get the top-left scalar from any value (for implicit intersection fallback).
  */
 export function topLeft(v: RuntimeValue): ScalarValue {

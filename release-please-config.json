@@ -13,7 +13,8 @@
         "README.md",
         "README_zh.md",
         "src/modules/excel/README.md",
-        "src/modules/excel/README_zh.md"
+        "src/modules/excel/README_zh.md",
+        "MIGRATION_EXCELTS_TO_DOCUMONSTER.md"
       ]
     }
   },

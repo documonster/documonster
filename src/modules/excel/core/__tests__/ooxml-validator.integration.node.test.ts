@@ -2,7 +2,15 @@ import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
 import { testUtils } from "@excel/__tests__/shared";
 import { cellSetNote, cellSetNumFmt, cellSetValue } from "@excel/core/cell";
 import { addTable, getCell } from "@excel/core/worksheet";
-import { Form, Image, Pivot, Table, Workbook, Worksheet } from "@excel/index";
+import {
+  ConditionalFormatting,
+  Form,
+  Image,
+  Pivot,
+  Table,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { makeTestDataPath } from "@test/utils";
 import { describe, it } from "vitest";
 
@@ -45,7 +53,7 @@ describe("OOXML validator", () => {
     });
 
     // Conditional formatting on top of the table.
-    Worksheet.addConditionalFormatting(stress, {
+    ConditionalFormatting.add(stress, {
       ref: "B6:B9",
       rules: [
         {

@@ -34,7 +34,7 @@ function rebuildZip(entries: Map<string, ExtractedFile>): Uint8Array {
     zip.add(p, entry.data);
   }
 
-  return zip.bytesSync();
+  return zip.toBufferSync();
 }
 
 async function makeWorkbookWithSingleCheckbox(): Promise<Uint8Array> {

@@ -200,7 +200,9 @@ export function writePdfAMetadata(
     title?: string;
     author?: string;
     subject?: string;
+    keywords?: string;
     creator?: string;
+    producer?: string;
     creationDate?: Date;
     modDate?: Date;
   }
@@ -216,7 +218,7 @@ export function writePdfAMetadata(
   const author = xmlEncode(metadata.author ?? "");
   const subject = xmlEncode(metadata.subject ?? "");
   const creator = xmlEncode(metadata.creator ?? "documonster");
-  const producer = "documonster";
+  const producer = xmlEncode(metadata.producer ?? "documonster");
 
   const xmp = [
     '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
@@ -240,6 +242,9 @@ export function writePdfAMetadata(
     "  <xmp:CreateDate>" + isoDate + "</xmp:CreateDate>",
     "  <xmp:ModifyDate>" + modIsoDate + "</xmp:ModifyDate>",
     "  <pdf:Producer>" + producer + "</pdf:Producer>",
+    ...(metadata.keywords
+      ? ["  <pdf:Keywords>" + xmlEncode(metadata.keywords) + "</pdf:Keywords>"]
+      : []),
     "  <pdfaid:part>1</pdfaid:part>",
     "  <pdfaid:conformance>B</pdfaid:conformance>",
     "</rdf:Description>",

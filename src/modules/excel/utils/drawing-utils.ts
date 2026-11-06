@@ -6,7 +6,10 @@
  * a single, correct image-rel deduplication strategy.
  */
 
+import type { LegacyControlModel } from "@excel/core/form-control";
+import { legacyControlPlacement } from "@excel/core/form-control-placement";
 import { mediaRelTargetFromRels } from "@excel/utils/ooxml-paths";
+import { createFirstFreeRelIds } from "@excel/utils/rel-ids";
 import { RelType } from "@excel/xlsx/rel-type";
 
 // =============================================================================
@@ -323,7 +326,7 @@ export function filterDrawingAnchors<
     picture?: unknown;
     graphicFrame?: unknown;
     shape?: unknown;
-    group?: unknown;
+    preserved?: unknown;
   } | null
 >(anchors: T[]): T[] {
   return anchors.filter(a => {
@@ -340,16 +343,16 @@ export function filterDrawingAnchors<
     // ext: { cx, cy } }` on write — the drawing XML came out empty
     // and the chart disappeared from the saved file.
     if (range?.pos !== undefined) {
-      return !!a.picture || !!a.graphicFrame || !!a.shape || !!a.group;
+      return !!a.picture || !!a.graphicFrame || !!a.shape || !!a.preserved;
     }
     // Form controls have range.br and shape properties
     if (range?.br && a.shape) {
       return true;
     }
-    // Grouped shapes (`<xdr:grpSp>`, captured verbatim by GenericEchoXform)
-    // carry neither picture/shape/graphicFrame — they are a valid anchor
-    // payload in their own right and must survive the write filter.
-    if (a.group) {
+    // Objects read from a file and captured verbatim (a group, a text box, a
+    // connector) carry neither picture/shape/graphicFrame — they are a valid
+    // anchor payload in their own right and must survive the write filter.
+    if (a.preserved) {
       return true;
     }
     // One-cell anchors need a valid picture, graphicFrame (charts) or shape.
@@ -362,6 +365,72 @@ export function filterDrawingAnchors<
     }
     return true;
   });
+}
+
+/**
+ * The anchors a drawing read from a file keeps verbatim — a group, a text box, a connector — and the relationships
+ * they name.
+ *
+ * Their captured XML names its original relationship ids directly (`a:blip r:embed`, `a:hlinkClick r:id`, …), so those
+ * ids are kept as they are, and *only* the relationships a preserved object points at: the rest of the drawing's
+ * relationships belonged to the pictures and charts a writer rebuilds, and keeping them would leave references to
+ * nothing. A chart anchor is not preserved here; it is renumbered by the writer.
+ */
+export function preservedDrawingObjects(drawing: {
+  readonly anchors?: readonly unknown[];
+  readonly rels?: readonly DrawingRel[];
+}): { anchors: DrawingAnchor[]; rels: DrawingRel[] } {
+  const anchors = (drawing.anchors ?? []).filter(anchor => {
+    const a = anchor as { preserved?: unknown; chartNumber?: unknown; chartExNumber?: unknown };
+    return a.preserved !== undefined && !a.chartNumber && !a.chartExNumber;
+  }) as DrawingAnchor[];
+  const referenced = new Set<string>();
+  for (const anchor of anchors) {
+    for (const id of relIdsOf((anchor as { preserved?: RelIdNode }).preserved)) {
+      referenced.add(id);
+    }
+  }
+  return { anchors, rels: (drawing.rels ?? []).filter(rel => referenced.has(rel.Id)) };
+}
+
+interface RelIdNode {
+  readonly attrs?: Record<string, unknown>;
+  readonly children?: readonly unknown[];
+}
+
+/**
+ * The relationship ids a preserved object names, by object. Nothing edits a preserved object — it is renumbered on a
+ * copy — so the answer holds for every write of the workbook, and a drawing of a few megabytes is not walked again on
+ * each one.
+ */
+const relIdsByObject = new WeakMap<object, ReadonlySet<string>>();
+
+function relIdsOf(node: RelIdNode | undefined): ReadonlySet<string> {
+  if (node === undefined) {
+    return new Set();
+  }
+  let ids = relIdsByObject.get(node);
+  if (ids === undefined) {
+    const found = new Set<string>();
+    collectRelIds(node, found);
+    ids = found;
+    relIdsByObject.set(node, ids);
+  }
+  return ids;
+}
+
+function collectRelIds(node: RelIdNode | undefined, into: Set<string>): void {
+  if (!node) {
+    return;
+  }
+  for (const value of Object.values(node.attrs ?? {})) {
+    if (typeof value === "string" && /^rId\d+$/.test(value)) {
+      into.add(value);
+    }
+  }
+  for (const child of node.children ?? []) {
+    collectRelIds(child as RelIdNode, into);
+  }
 }
 
 /**
@@ -433,6 +502,19 @@ export interface ShapeLike {
 }
 
 /**
+ * The name Excel gives an unnamed checkbox: `Check Box N`, where `N` is the shape's position in its
+ * VML block — `_x0000_s1025` is `Check Box 1`, and so is `_x0000_s2049` on the sheet that owns block 2.
+ */
+export function defaultCheckboxName(shapeId: number): string {
+  return defaultControlName("Check Box", shapeId);
+}
+
+/** `Check Box N`'s rule for any control: its kind, then its position in its VML block. */
+function defaultControlName(kind: string, shapeId: number): string {
+  return `${kind} ${shapeId > 1024 ? ((shapeId - 1) % 1024) + 1 : 1}`;
+}
+
+/**
  * Anchors for a sheet's legacy form controls.
  *
  * Extracted from the XLSX worksheet xform alongside {@link buildShapeAnchors}, and for the same reason:
@@ -460,17 +542,25 @@ export function buildFormControlAnchors(
     // `shapeId` is the control's own, not derived from the anchor position — the VML shape shares it, so
     // renumbering here would break the bridge.
     const shapeId = control.shapeId ?? 1025;
+    // The bridge follows the cells as the control does, as Excel writes it.
+    const editAs =
+      control.vmlShape !== undefined
+        ? legacyControlPlacement(control as unknown as LegacyControlModel)
+        : (control.editAs ?? "oneCell");
     anchors.push({
       range: {
-        editAs: "absolute",
+        editAs,
         tl: toNativeAnchorPos(control.tl),
         br: toNativeAnchorPos(control.br)
       },
       alternateContent: { requires: "a14" },
       shape: {
         cNvPrId: shapeId,
-        // Excel's own default, and the arithmetic is its: legacy shape ids start at 1025.
-        name: control.name || `Check Box ${Math.max(1, shapeId - 1024)}`,
+        name:
+          control.name ||
+          (control.objectType === undefined
+            ? defaultCheckboxName(shapeId)
+            : defaultControlName(control.objectType, shapeId)),
         hidden: true,
         spid: `_x0000_s${shapeId}`,
         text: control.text
@@ -495,13 +585,76 @@ function toNativeAnchorPos(position: {
   };
 }
 
+/** What a parsed, reconciled drawing anchor says about the picture it holds. */
+interface ReadPictureAnchor {
+  readonly range?: unknown;
+  readonly medium?: { readonly index?: unknown; readonly alphaModFix?: number };
+  readonly picture?: {
+    readonly hyperlinks?: unknown;
+    readonly xfrmOffX?: number;
+    readonly xfrmOffY?: number;
+    readonly xfrmExtCx?: number;
+    readonly xfrmExtCy?: number;
+    readonly rawSpPr?: unknown;
+  };
+}
+
+/**
+ * The worksheet media a read drawing's pictures become: a placed image for each, or an overlay watermark
+ * for one drawn translucent (`alphaModFix` below 100%). Shared by the XLSX and XLSB readers, so a picture
+ * comes back the same whichever container it was read from.
+ */
+export function mediaFromDrawingAnchors(
+  anchors: readonly ReadPictureAnchor[],
+  imageIdOf: (medium: { readonly index?: unknown }) => unknown = medium => medium.index
+): Record<string, unknown>[] {
+  const media: Record<string, unknown>[] = [];
+  for (const anchor of anchors) {
+    const { medium, picture } = anchor;
+    if (!medium) {
+      continue;
+    }
+    const hasAlpha = medium.alphaModFix !== undefined && medium.alphaModFix < 100000;
+    if (hasAlpha) {
+      media.push({
+        type: "watermark",
+        imageId: imageIdOf(medium),
+        opacity: medium.alphaModFix! / 100000
+      });
+    } else {
+      media.push({
+        type: "image",
+        imageId: imageIdOf(medium),
+        range: anchor.range,
+        hyperlinks: picture?.hyperlinks,
+        // Carry the picture's absolute geometry through so a plain re-save (which discards the parsed
+        // anchor and rebuilds it from this media entry) doesn't zero out an `editAs="oneCell"`
+        // picture's position/size, rendering it invisible.
+        xfrmOffX: picture?.xfrmOffX,
+        xfrmOffY: picture?.xfrmOffY,
+        xfrmExtCx: picture?.xfrmExtCx,
+        xfrmExtCy: picture?.xfrmExtCy,
+        rawSpPr: picture?.rawSpPr
+      });
+    }
+  }
+  return media;
+}
+
 /** The form-control fields an anchor is built from. */
 export interface FormControlLike {
   readonly shapeId?: number;
   readonly name?: string;
+  /** A preserved control's `ObjectType`, which names it when it has no name of its own. Absent for a checkbox. */
+  readonly objectType?: string;
   readonly text?: unknown;
   readonly tl?: { col: number; colOff: number; row: number; rowOff: number };
   readonly br?: { col: number; colOff: number; row: number; rowOff: number };
+  /** How a checkbox follows the cells under it; absent for a preserved control, whose own markup says. */
+  readonly editAs?: "oneCell" | "twoCell" | "absolute";
+  /** A preserved control's `<control>` entry and VML shape, which say how it follows the cells. */
+  readonly control?: unknown;
+  readonly vmlShape?: unknown;
 }
 
 /**
@@ -532,7 +685,9 @@ export function buildChartAnchors(
         height: emuToPixels(chart.range.ext.cy)
       };
     }
-    const relationshipId = `rId${drawingRels.length + 1}`;
+    // The first id the drawing does not use: a preserved object keeps the id its XML names, so the ids are not
+    // always `rId1…rIdN` and counting them would reissue one.
+    const relationshipId = createFirstFreeRelIds(new Set(drawingRels.map(rel => rel.Id)))();
     const isChartEx = (chart.chartExNumber ?? 0) > 0;
     const number = isChartEx ? chart.chartExNumber! : chart.chartNumber!;
     drawingRels.push({

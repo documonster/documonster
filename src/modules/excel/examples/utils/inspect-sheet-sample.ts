@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 
 import type { RegionInfo, SheetInfo } from "@excel/examples/inspect-sheet";
-import { Cell, Table, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Table, Workbook, Worksheet } from "@excel/index";
 
 /**
  * One of each case the description has to tell apart. Written to disk and read back by the caller, because
@@ -36,7 +36,7 @@ export async function buildSample(file: string): Promise<void> {
       ["Gizmo", 4, 1.25, null]
     ]
   });
-  Worksheet.fillFormula(orders, "D4:D6", "B4*C4", [7.5, 10, 5]);
+  Worksheet.fillFormula(orders, "D4:D6", "B4*C4", { results: [7.5, 10, 5] });
   Table.add(orders, {
     name: "Stock",
     ref: "A10",
@@ -50,7 +50,7 @@ export async function buildSample(file: string): Promise<void> {
 
   // An auto-filter below an export note.
   const filtered = Workbook.addWorksheet(wb, "Filtered");
-  Worksheet.addRows(filtered, [
+  Row.addMany(filtered, [
     ["Exported 2026-10-03"],
     [],
     ["Region", "Sales"],
@@ -61,33 +61,30 @@ export async function buildSample(file: string): Promise<void> {
 
   // Frozen rows above the data, and a column whose first data row is blank.
   const frozen = Workbook.addWorksheet(wb, "Frozen");
-  Worksheet.addRows(frozen, [
+  Row.addMany(frozen, [
     ["Monthly report"],
     ["Month", "Visits", "Notes"],
     ["Jan", 10, null],
     ["Feb", 12, "launch"]
   ]);
-  Worksheet.freeze(frozen, 0, 2);
+  Worksheet.freeze(frozen, { rows: 2 });
 
   // A header row that is only the default, a two-column array formula and a running total.
   const plain = Workbook.addWorksheet(wb, "Plain");
-  Worksheet.addRows(plain, [
+  Row.addMany(plain, [
     ["x", "x²", "x³", "running"],
     [1, null, null, null],
     [2, null, null, null],
     [3, null, null, null]
   ]);
-  Worksheet.fillFormula(
-    plain,
-    "B2:C4",
-    "A2:A4^{2,3}",
-    [
+  Worksheet.fillFormula(plain, "B2:C4", "A2:A4^{2,3}", {
+    results: [
       [1, 1],
       [4, 8],
       [9, 27]
     ],
-    "array"
-  );
+    shareType: "array"
+  });
   Cell.setValue(plain, "D2", { formula: "A2", result: 1 });
   Cell.setValue(plain, "D3", { formula: "D2+A3", result: 3 });
   Cell.setValue(plain, "D4", { formula: "D3+A4", result: 6 });
@@ -104,7 +101,7 @@ export async function buildSample(file: string): Promise<void> {
     rows: [["k", 1]]
   });
   Cell.setValue(edges, "A6", "footnote");
-  Worksheet.fillFormula(edges, "F1:F3", "ROW()", [1, 2, 3], "array");
+  Worksheet.fillFormula(edges, "F1:F3", "ROW()", { results: [1, 2, 3], shareType: "array" });
   Table.add(edges, {
     name: "Headless",
     ref: "H5",
@@ -117,7 +114,7 @@ export async function buildSample(file: string): Promise<void> {
   // One column per kind of value, so the typed first-data-row reading is pinned for each. H2 is merged
   // into G2 and reads as its master.
   const kinds = Workbook.addWorksheet(wb, "Kinds");
-  Worksheet.addRow(kinds, ["check", "err", "divErr", "rich", "link", "uncached", "date", "merged"]);
+  Row.add(kinds, ["check", "err", "divErr", "rich", "link", "uncached", "date", "merged"]);
   Cell.setValue(kinds, "A2", { checkbox: false });
   Cell.setValue(kinds, "B2", { error: "#N/A" });
   Cell.setValue(kinds, "C2", { formula: "1/0", result: { error: "#DIV/0!" } });

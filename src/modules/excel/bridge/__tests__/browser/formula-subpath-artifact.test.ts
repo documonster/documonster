@@ -29,7 +29,7 @@ describe("excel/formula browser artifact", () => {
     excel.Cell.setValue(ws, "A2", 23);
     excel.Cell.setValue(ws, "A3", { formula: "SUM(A1:A2)" });
 
-    formula.calculateFormulas(wb);
+    formula.ExcelFormula.calculate(wb);
 
     expect(excel.Cell.getResult(ws, "A3")).toBe(42);
   });

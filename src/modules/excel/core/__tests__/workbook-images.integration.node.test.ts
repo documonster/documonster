@@ -10,9 +10,11 @@ import {
   addBackgroundImage,
   addImage,
   getBackgroundImageId,
-  getImages
+  getImages,
+  insertRow,
+  duplicateRow
 } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
@@ -395,7 +397,7 @@ describe("Workbook", () => {
         addImage(ws, imgId, "B2:D4");
 
         // Insert a row before the image
-        Worksheet.insertRow(ws, 1, []);
+        insertRow(ws, 1, []);
 
         const images = getImages(ws);
         expect(images.length).toBe(1);
@@ -418,7 +420,7 @@ describe("Workbook", () => {
         addImage(ws, imgId, "A1:B2");
 
         // Insert a row after the image
-        Worksheet.insertRow(ws, 5, []);
+        insertRow(ws, 5, []);
 
         const images = getImages(ws);
         const img = images[0];
@@ -440,7 +442,7 @@ describe("Workbook", () => {
         addImage(ws, imgId, "A3:B4");
 
         // Remove 1 row at row 1
-        Worksheet.spliceRows(ws, 1, 1);
+        Row.splice(ws, 1, 1);
 
         const images = getImages(ws);
         const img = images[0];
@@ -460,7 +462,7 @@ describe("Workbook", () => {
         addImage(ws, imgId, "B1:C2");
 
         // Insert a column before column B
-        Worksheet.spliceColumns(ws, 1, 0, []);
+        Column.splice(ws, 1, 0, []);
 
         const images = getImages(ws);
         const img = images[0];
@@ -486,7 +488,7 @@ describe("Workbook", () => {
         addImage(ws, imgId2, "A3:B4");
 
         // Insert 2 rows at row 2
-        Worksheet.spliceRows(ws, 2, 0, [], []);
+        Row.splice(ws, 2, 0, [], []);
 
         const images = getImages(ws);
         // First image at A1 should not move (nativeRow 0 < start-1 = 1)
@@ -506,7 +508,7 @@ describe("Workbook", () => {
         addBackgroundImage(ws, imgId);
 
         // Should not throw
-        Worksheet.insertRow(ws, 1, []);
+        insertRow(ws, 1, []);
 
         // Background image should still exist
         expect(getBackgroundImageId(ws)).toBeDefined();
@@ -525,7 +527,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "Row 1");
 
         // Duplicate row 1 twice (creates rows 2 and 3 as copies)
-        Worksheet.duplicateRow(ws, 1, 2);
+        duplicateRow(ws, 1, 2);
 
         const images = getImages(ws);
         // Original + 2 clones = 3 images
@@ -552,7 +554,7 @@ describe("Workbook", () => {
           br: { col: 2, row: 2 }
         });
 
-        Worksheet.duplicateRow(ws, 1, 1);
+        duplicateRow(ws, 1, 1);
 
         const images = getImages(ws);
         expect(images.length).toBe(2);
@@ -578,7 +580,7 @@ describe("Workbook", () => {
           ext: { width: 200, height: 150 }
         });
 
-        Worksheet.duplicateRow(ws, 1, 1);
+        duplicateRow(ws, 1, 1);
 
         const images = getImages(ws);
         expect(images.length).toBe(2);
@@ -611,7 +613,7 @@ describe("Workbook", () => {
           br: { col: 4, row: 1 }
         });
 
-        Worksheet.duplicateRow(ws, 1, 1);
+        duplicateRow(ws, 1, 1);
 
         const images = getImages(ws);
         // 2 originals + 2 clones = 4
@@ -647,7 +649,7 @@ describe("Workbook", () => {
         });
 
         // insert=true so spliceRows inserts a new row, shifting images below
-        Worksheet.duplicateRow(ws, 1, 1, true);
+        duplicateRow(ws, 1, 1, true);
 
         const images = getImages(ws);
         // 2 originals + 1 clone (from row 1 only) = 3
@@ -675,7 +677,7 @@ describe("Workbook", () => {
           }
         });
 
-        Worksheet.duplicateRow(ws, 1, 1);
+        duplicateRow(ws, 1, 1);
 
         const images = getImages(ws);
         expect(images.length).toBe(2);
@@ -700,7 +702,7 @@ describe("Workbook", () => {
           br: { col: 2, row: 1 }
         });
 
-        Worksheet.duplicateRow(ws, 1, 2);
+        duplicateRow(ws, 1, 2);
 
         // Write and read back
         await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
@@ -741,7 +743,7 @@ describe("Workbook", () => {
         });
 
         // insert=true: inserts new rows instead of overwriting
-        Worksheet.duplicateRow(ws, 1, 1, true);
+        duplicateRow(ws, 1, 1, true);
 
         const images = getImages(ws);
         expect(images.length).toBe(2);
@@ -769,7 +771,7 @@ describe("Workbook", () => {
         const srcRowNum = srcRow0 + 1;
 
         // Duplicate that row once (insert mode to push existing rows down)
-        Worksheet.duplicateRow(ws!, srcRowNum, 1, true);
+        duplicateRow(ws!, srcRowNum, 1, true);
 
         const imagesAfter = getImages(ws!);
         // Each image on the source row should be cloned once
@@ -812,7 +814,7 @@ describe("Workbook", () => {
         });
 
         // Overwrite mode (default): duplicate row 1 once, overwriting row 2
-        Worksheet.duplicateRow(ws, 1, 1);
+        duplicateRow(ws, 1, 1);
 
         const images = getImages(ws);
         // Original on row 1 + clone on row 2 = 2 (old row-2 image removed)
@@ -843,7 +845,7 @@ describe("Workbook", () => {
         });
 
         // Overwrite mode: duplicate row 1 once, overwriting row 2
-        Worksheet.duplicateRow(ws, 1, 1);
+        duplicateRow(ws, 1, 1);
 
         const images = getImages(ws);
         // Old row-2 image should be removed since the row was overwritten

@@ -175,7 +175,9 @@ export interface AddSparklineGroupOptions {
 export function buildSparklineGroup(opts: AddSparklineGroupOptions): SparklineGroup {
   const group: SparklineGroup = {
     type: opts.type,
-    sparklines: opts.sparklines
+    // Copied: the caller's array is not the group's, so reusing the options for a second group, or editing them
+    // afterwards, does not reach this one.
+    sparklines: opts.sparklines.map(sparkline => ({ ...sparkline }))
   };
   if (opts.lineWeight !== undefined) {
     group.lineWeight = opts.lineWeight;

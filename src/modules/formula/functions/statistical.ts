@@ -6,23 +6,28 @@
 
 import {
   argToNumber,
+  asArrayArg,
   flattenAll,
   flattenNumbers,
   firstError,
   forEachNumber
 } from "@formula/functions/_shared";
-import type {
-  RuntimeValue,
-  ScalarValue,
-  NumberValue,
-  ErrorValue,
-  ArrayValue
-} from "@formula/runtime/values";
+import {
+  logGamma,
+  normalTail,
+  regularizedBeta,
+  regularizedGamma,
+  solveMonotone,
+  studentCentral,
+  studentUpperTail
+} from "@formula/functions/distribution-math";
+import type { RuntimeValue, ScalarValue, NumberValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
   rvNumber,
   rvArray,
+  rvBoolean,
   toNumberRV,
   toBooleanRV,
   topLeft,
@@ -45,13 +50,6 @@ function boolArg(
     return { ok: false, error: rv };
   }
   return { ok: true, value: rv.value };
-}
-
-/**
- * Check if an arg is an array.
- */
-function isArrayArg(arg: RuntimeValue): boolean {
-  return arg.kind === RVKind.Array;
 }
 
 // ============================================================================
@@ -373,89 +371,21 @@ export function fnVARP(args: RuntimeValue[]): RuntimeValue {
 // Advanced Statistical Functions — private math helpers
 // ============================================================================
 
-// Peter Acklam's rational approximation for the standard normal inverse CDF.
-// Accuracy: |error| < 1.15e-9 across the full range (0, 1).
+/** The standard normal quantile: the z with Φ(z) = p, to double precision — see `distribution-math.ts`. */
 function normSInv(p: number): number {
   if (p <= 0 || p >= 1) {
     return NaN;
   }
-  if (p < 0.5) {
-    return -normSInv(1 - p);
+  if (p === 0.5) {
+    return 0;
   }
-  // Coefficients for rational approximation
-  const a1 = -3.969683028665376e1;
-  const a2 = 2.209460984245205e2;
-  const a3 = -2.759285104469687e2;
-  const a4 = 1.38357751867269e2;
-  const a5 = -3.066479806614716e1;
-  const a6 = 2.506628277459239;
-
-  const b1 = -5.447609879822406e1;
-  const b2 = 1.615858368580409e2;
-  const b3 = -1.556989798598866e2;
-  const b4 = 6.680131188771972e1;
-  const b5 = -1.328068155288572e1;
-
-  const c1 = -7.784894002430293e-3;
-  const c2 = -3.223964580411365e-1;
-  const c3 = -2.400758277161838;
-  const c4 = -2.549732539343734;
-  const c5 = 4.374664141464968;
-  const c6 = 2.938163982698783;
-
-  const d1 = 7.784695709041462e-3;
-  const d2 = 3.224671290700398e-1;
-  const d3 = 2.445134137142996;
-  const d4 = 3.754408661907416;
-
-  const pLow = 0.02425;
-  const pHigh = 1 - pLow;
-
-  if (p < pLow) {
-    // Rational approximation for lower region
-    const q = Math.sqrt(-2 * Math.log(p));
-    return (
-      (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-      ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
-    );
-  }
-  if (p <= pHigh) {
-    // Rational approximation for central region
-    const q = p - 0.5;
-    const r = q * q;
-    return (
-      ((((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q) /
-      (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1)
-    );
-  }
-  // Upper region — use symmetry
-  const q = Math.sqrt(-2 * Math.log(1 - p));
-  return -(
-    (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-    ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
-  );
+  // Solved in the tail the probability is in, so a p near 1 is not lost to 1 − p.
+  const z = solveMonotone(x => normalTail(x, true), p < 0.5 ? p : 1 - p, 0, 40, true);
+  return p < 0.5 ? -z : z;
 }
 
-// Standard normal CDF approximation (Abramowitz & Stegun 7.1.26). The
-// approximation has max error ~7.5e-8 — good enough for GAUSS/NORM.S.DIST
-// but it does NOT evaluate to exactly 0.5 at x = 0 (the erf kernel leaves
-// a residual ≈ 5e-10). Excel-facing callers expect symmetry around 0, so
-// we short-circuit that single point.
 function normSDist(x: number): number {
-  if (x === 0) {
-    return 0.5;
-  }
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-  const sign = x < 0 ? -1 : 1;
-  x = Math.abs(x) / Math.SQRT2;
-  const t = 1.0 / (1.0 + p * x);
-  const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-  return 0.5 * (1.0 + sign * y);
+  return normalTail(x);
 }
 
 // Standard normal PDF
@@ -607,10 +537,12 @@ export function fnQUARTILE(args: RuntimeValue[]): RuntimeValue {
   if (quart.kind === RVKind.Error) {
     return quart;
   }
-  if (quart.value < 0 || quart.value > 4) {
+  // Excel truncates the quartile: QUARTILE(data, 1.5) is the first quartile.
+  const q = Math.trunc(quart.value);
+  if (q < 0 || q > 4) {
     return ERRORS.NUM;
   }
-  return fnPERCENTILE([args[0], rvNumber(quart.value / 4)]);
+  return fnPERCENTILE([args[0], rvNumber(q / 4)]);
 }
 
 export function fnQUARTILEEXC(args: RuntimeValue[]): RuntimeValue {
@@ -618,10 +550,11 @@ export function fnQUARTILEEXC(args: RuntimeValue[]): RuntimeValue {
   if (quart.kind === RVKind.Error) {
     return quart;
   }
-  if (quart.value < 1 || quart.value > 3) {
+  const q = Math.trunc(quart.value);
+  if (q < 1 || q > 3) {
     return ERRORS.NUM;
   }
-  return fnPERCENTILEEXC([args[0], rvNumber(quart.value / 4)]);
+  return fnPERCENTILEEXC([args[0], rvNumber(q / 4)]);
 }
 
 export function fnMODE(args: RuntimeValue[]): RuntimeValue {
@@ -1146,10 +1079,12 @@ export function fnCONFIDENCENORM(args: RuntimeValue[]): RuntimeValue {
   if (size.kind === RVKind.Error) {
     return size;
   }
-  if (alpha.value <= 0 || alpha.value >= 1 || stddev.value <= 0 || size.value < 1) {
+  // Excel truncates the size.
+  const n = Math.trunc(size.value);
+  if (alpha.value <= 0 || alpha.value >= 1 || stddev.value <= 0 || n < 1) {
     return ERRORS.NUM;
   }
-  return rvNumber((normSInv(1 - alpha.value / 2) * stddev.value) / Math.sqrt(size.value));
+  return rvNumber((-normSInv(alpha.value / 2) * stddev.value) / Math.sqrt(n));
 }
 
 /**
@@ -1169,17 +1104,18 @@ export function fnCONFIDENCE_T(args: RuntimeValue[]): RuntimeValue {
   if (size.kind === RVKind.Error) {
     return size;
   }
-  if (alpha.value <= 0 || alpha.value >= 1 || stddev.value <= 0 || size.value < 2) {
+  // Excel truncates the size, and a single observation has no degrees of freedom: #DIV/0!.
+  const n = Math.trunc(size.value);
+  if (alpha.value <= 0 || alpha.value >= 1 || stddev.value <= 0 || n < 1) {
     return ERRORS.NUM;
   }
-  // Reuse the engine's existing T.INV.2T to pull the two-tailed critical
-  // value; avoids duplicating the Newton search. Excel uses df = n − 1.
-  const tCrit = fnT_INV_2T([rvNumber(alpha.value), rvNumber(size.value - 1)]);
-  if (isError(tCrit)) {
-    return tCrit;
+  if (n === 1) {
+    return ERRORS.DIV0;
   }
-  const t = (tCrit as NumberValue).value;
-  return rvNumber((t * stddev.value) / Math.sqrt(size.value));
+  // T.INV.2T(alpha, n − 1) · sd / √n.
+  return finiteNumber(
+    (studentQuantile(alpha.value / 2, 1 - alpha.value, n - 1) * stddev.value) / Math.sqrt(n)
+  );
 }
 
 /**
@@ -1200,9 +1136,13 @@ function pairedNumericValues(
   const bCells: ScalarValue[] = [];
   collectCells(a, aCells);
   collectCells(b, bCells);
+  // Arrays of different sizes are #N/A, as Excel answers.
+  if (aCells.length !== bCells.length) {
+    return ERRORS.NA;
+  }
   const xs: number[] = [];
   const ys: number[] = [];
-  const n = Math.min(aCells.length, bCells.length);
+  const n = aCells.length;
   for (let i = 0; i < n; i++) {
     const x = aCells[i];
     const y = bCells[i];
@@ -1425,111 +1365,15 @@ function gammaFn(z: number): number {
 }
 
 function lnGamma(x: number): number {
-  return Math.log(gammaFn(x));
+  return logGamma(x);
 }
 
 function betaIncomplete(x: number, a: number, b: number): number {
-  if (x <= 0) {
-    return 0;
-  }
-  if (x >= 1) {
-    return 1;
-  }
-  if (x > (a + 1) / (a + b + 2)) {
-    return 1 - betaIncomplete(1 - x, b, a);
-  }
-  const lbeta = lnGamma(a) + lnGamma(b) - lnGamma(a + b);
-  const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lbeta) / a;
-  // For extreme (a, b) the front factor underflows to 0 or overflows to
-  // Infinity (e.g. T.DIST.2T at df >= 300 computes betaIncomplete with
-  // a around 150 and x near 0.004; Math.log(x)*a dips below -650, so
-  // Math.exp returns 0 and subsequent `f *= c * d` multiplications can
-  // produce 0 * Infinity = NaN in the continued-fraction loop). Short-
-  // circuit those pathological inputs: a zero front dominates the
-  // series, so the integrated value is effectively 0.
-  if (!Number.isFinite(front) || front === 0) {
-    return 0;
-  }
-  let c = 1;
-  let d = 1 - ((a + b) * x) / (a + 1);
-  if (Math.abs(d) < 1e-30) {
-    d = 1e-30;
-  }
-  d = 1 / d;
-  let f = d;
-  for (let m = 1; m <= 200; m++) {
-    let num = (m * (b - m) * x) / ((a + 2 * m - 1) * (a + 2 * m));
-    d = 1 + num * d;
-    if (Math.abs(d) < 1e-30) {
-      d = 1e-30;
-    }
-    c = 1 + num / c;
-    if (Math.abs(c) < 1e-30) {
-      c = 1e-30;
-    }
-    d = 1 / d;
-    f *= c * d;
-    num = -((a + m) * (a + b + m) * x) / ((a + 2 * m) * (a + 2 * m + 1));
-    d = 1 + num * d;
-    if (Math.abs(d) < 1e-30) {
-      d = 1e-30;
-    }
-    c = 1 + num / c;
-    if (Math.abs(c) < 1e-30) {
-      c = 1e-30;
-    }
-    d = 1 / d;
-    const delta = c * d;
-    f *= delta;
-    if (Math.abs(delta - 1) < 1e-10) {
-      break;
-    }
-  }
-  return front * f;
+  return regularizedBeta(x, 1 - x, a, b);
 }
 
 function gammaIncomplete(a: number, x: number): number {
-  if (x < 0) {
-    return 0;
-  }
-  if (x === 0) {
-    return 0;
-  }
-  if (x < a + 1) {
-    let sum = 1 / a;
-    let term = 1 / a;
-    for (let n = 1; n <= 200; n++) {
-      term *= x / (a + n);
-      sum += term;
-      if (Math.abs(term) < Math.abs(sum) * 1e-14) {
-        break;
-      }
-    }
-    return sum * Math.exp(-x + a * Math.log(x) - lnGamma(a));
-  }
-  const b0 = x + 1 - a;
-  let ci = 1e30;
-  let d = 1 / b0;
-  let f = d;
-  for (let i = 1; i <= 200; i++) {
-    const an = -i * (i - a);
-    const bn = x + 2 * i + 1 - a;
-    d = bn + an * d;
-    if (Math.abs(d) < 1e-30) {
-      d = 1e-30;
-    }
-    ci = bn + an / ci;
-    if (Math.abs(ci) < 1e-30) {
-      ci = 1e-30;
-    }
-    d = 1 / d;
-    const delta = d * ci;
-    f *= delta;
-    if (Math.abs(delta - 1) < 1e-10) {
-      break;
-    }
-  }
-  return 1 - f * Math.exp(-x + a * Math.log(x) - lnGamma(a));
+  return regularizedGamma(a, x);
 }
 
 // ============================================================================
@@ -1550,7 +1394,14 @@ export function fnPOISSON_DIST(args: RuntimeValue[]): RuntimeValue {
     return cum.error;
   }
   const k = Math.floor(x.value);
-  if (k < 0 || mean.value < 0) {
+  if (k < 0) {
+    return ERRORS.NUM;
+  }
+  // Excel answers k = 0 with e^(−mean) even for a negative mean, and rejects a negative mean otherwise.
+  if (k === 0) {
+    return rvNumber(Math.exp(-mean.value));
+  }
+  if (mean.value < 0) {
     return ERRORS.NUM;
   }
   // Degenerate mean = 0: the Poisson distribution concentrates all mass at
@@ -1588,6 +1439,10 @@ export function fnBINOM_DIST(args: RuntimeValue[]): RuntimeValue {
   const k = Math.floor(numS.value);
   const n = Math.floor(trials.value);
   if (k < 0 || n < 0 || k > n || probS.value < 0 || probS.value > 1) {
+    return ERRORS.NUM;
+  }
+  // Excel's mass at k = 0 for p = 1 (and n > 0) is #NUM!, though it is 0.
+  if (!cum.value && k === 0 && n > 0 && probS.value === 1) {
     return ERRORS.NUM;
   }
   const pmf = (ki: number): number => {
@@ -1683,7 +1538,8 @@ export function fnBINOM_INV(args: RuntimeValue[]): RuntimeValue {
     return alpha;
   }
   const n = Math.floor(trials.value);
-  if (n < 0 || probS.value < 0 || probS.value > 1 || alpha.value < 0 || alpha.value > 1) {
+  // Excel rejects alpha = 0 or 1 and p = 0 or 1 as well, though 0 or n would answer them.
+  if (n < 0 || probS.value <= 0 || probS.value >= 1 || alpha.value <= 0 || alpha.value >= 1) {
     return ERRORS.NUM;
   }
   let cdf = 0;
@@ -1722,18 +1578,26 @@ export function fnHYPGEOM_DIST(args: RuntimeValue[]): RuntimeValue {
   const ns = Math.floor(numberSample.value);
   const ps = Math.floor(popS.value);
   const np = Math.floor(numberPop.value);
+  if (ss < 0 || ns < 0 || ps < 0 || ns > np || ps > np) {
+    return ERRORS.NUM;
+  }
+  // Counts the sample cannot hold have probability 0; the formula below would take lnΓ of a negative number.
+  const lo = Math.max(0, ns - (np - ps));
+  const hi = Math.min(ns, ps);
   const pmf = (k: number): number =>
-    Math.exp(
-      lnGamma(ps + 1) -
-        lnGamma(k + 1) -
-        lnGamma(ps - k + 1) +
-        lnGamma(np - ps + 1) -
-        lnGamma(ns - k + 1) -
-        lnGamma(np - ps - ns + k + 1) -
-        lnGamma(np + 1) +
-        lnGamma(ns + 1) +
-        lnGamma(np - ns + 1)
-    );
+    k < lo || k > hi
+      ? 0
+      : Math.exp(
+          lnGamma(ps + 1) -
+            lnGamma(k + 1) -
+            lnGamma(ps - k + 1) +
+            lnGamma(np - ps + 1) -
+            lnGamma(ns - k + 1) -
+            lnGamma(np - ps - ns + k + 1) -
+            lnGamma(np + 1) +
+            lnGamma(ns + 1) +
+            lnGamma(np - ns + 1)
+        );
   if (!cum.value) {
     return rvNumber(pmf(ss));
   }
@@ -1763,7 +1627,8 @@ export function fnNEGBINOM_DIST(args: RuntimeValue[]): RuntimeValue {
   }
   const f = Math.floor(numF.value);
   const s = Math.floor(numS.value);
-  if (f < 0 || s < 1 || probS.value < 0 || probS.value > 1) {
+  // Excel rejects p = 0 and p = 1, which concentrate the distribution at infinity and at 0.
+  if (f < 0 || s < 1 || probS.value <= 0 || probS.value >= 1) {
     return ERRORS.NUM;
   }
   const pmf = (k: number): number => {
@@ -1793,19 +1658,22 @@ export function fnCHISQ_DIST(args: RuntimeValue[]): RuntimeValue {
   if (!cum.ok) {
     return cum.error;
   }
-  if (x.value < 0 || df.value < 1) {
+  // Excel truncates the degrees of freedom: CHISQ.DIST(0.4,2.9,TRUE) is the χ² with 2.
+  const v = Math.trunc(df.value);
+  if (x.value < 0 || v < 1) {
     return ERRORS.NUM;
   }
-  // Excel's CHISQ.DIST accepts non-integer degrees of freedom; the
-  // incomplete-gamma formula is defined for any positive `df/2`. We used
-  // to Math.floor() df, which silently returned the chi-square for the
-  // nearest smaller integer df and produced visibly wrong densities for
-  // fractional inputs.
   if (cum.value) {
-    return rvNumber(gammaIncomplete(df.value / 2, x.value / 2));
+    return rvNumber(regularizedGamma(v / 2, x.value / 2));
   }
-  const halfK = df.value / 2;
-  return rvNumber(Math.exp((halfK - 1) * Math.log(x.value / 2) - x.value / 2 - lnGamma(halfK)) / 2);
+  if (x.value === 0) {
+    // The density at 0: infinite for 1 degree of freedom, 1/2 for 2, 0 beyond — as Excel answers.
+    return v === 1 ? ERRORS.NUM : rvNumber(v === 2 ? 0.5 : 0);
+  }
+  const halfK = v / 2;
+  return finiteNumber(
+    Math.exp((halfK - 1) * Math.log(x.value / 2) - x.value / 2 - lnGamma(halfK)) / 2
+  );
 }
 
 export function fnCHISQ_INV(args: RuntimeValue[]): RuntimeValue {
@@ -1817,34 +1685,23 @@ export function fnCHISQ_INV(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (p.value < 0 || p.value >= 1 || df.value < 1) {
+  // Excel truncates the degrees of freedom.
+  const v = Math.trunc(df.value);
+  if (p.value < 0 || p.value >= 1 || v < 1) {
     return ERRORS.NUM;
   }
-  // P = 0 → x = 0 exactly. Without the short-circuit, Newton from x = df
-  // would compute `(0 - 0) / pdf` = 0 on the first iteration (fine), but
-  // rounding drift can push x negative, triggering the clamp to 0.001 and
-  // returning a non-zero result.
-  if (p.value === 0) {
-    return rvNumber(0);
+  return finiteNumber(chiSquareQuantile(p.value, 1 - p.value, v));
+}
+
+/** The χ² quantile for lower tail `p` and upper tail `q = 1 − p`, solved in whichever tail is smaller. */
+function chiSquareQuantile(p: number, q: number, v: number): number {
+  if (p === 0) {
+    return 0;
   }
-  let x = df.value;
-  for (let iter = 0; iter < 100; iter++) {
-    const cdf = gammaIncomplete(df.value / 2, x / 2);
-    const halfK = df.value / 2;
-    const pdf = Math.exp((halfK - 1) * Math.log(x / 2) - x / 2 - lnGamma(halfK)) / 2;
-    if (Math.abs(pdf) < 1e-15) {
-      break;
-    }
-    const delta = (cdf - p.value) / pdf;
-    x -= delta;
-    if (x <= 0) {
-      x = 0.001;
-    }
-    if (Math.abs(delta) < 1e-10) {
-      break;
-    }
+  if (p <= q) {
+    return 2 * solveMonotone(x => regularizedGamma(v / 2, x), p, 0, Math.max(v, 1));
   }
-  return rvNumber(x);
+  return 2 * solveMonotone(x => regularizedGamma(v / 2, x, true), q, 0, Math.max(v, 1), true);
 }
 
 export function fnCHISQ_DIST_RT(args: RuntimeValue[]): RuntimeValue {
@@ -1856,10 +1713,11 @@ export function fnCHISQ_DIST_RT(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (x.value < 0 || df.value < 1) {
+  const v = Math.trunc(df.value);
+  if (x.value < 0 || v < 1) {
     return ERRORS.NUM;
   }
-  return rvNumber(1 - gammaIncomplete(df.value / 2, x.value / 2));
+  return rvNumber(regularizedGamma(v / 2, x.value / 2, true));
 }
 
 /**
@@ -1876,11 +1734,11 @@ export function fnCHISQ_INV_RT(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (p.value <= 0 || p.value > 1 || df.value < 1) {
+  const v = Math.trunc(df.value);
+  if (p.value <= 0 || p.value > 1 || v < 1) {
     return ERRORS.NUM;
   }
-  // Re-use CHISQ.INV with the complementary probability.
-  return fnCHISQ_INV([rvNumber(1 - p.value), df]);
+  return finiteNumber(chiSquareQuantile(1 - p.value, p.value, v));
 }
 
 export function fnF_DIST(args: RuntimeValue[]): RuntimeValue {
@@ -1900,22 +1758,31 @@ export function fnF_DIST(args: RuntimeValue[]): RuntimeValue {
   if (!cum.ok) {
     return cum.error;
   }
-  if (x.value < 0 || df1.value < 1 || df2.value < 1) {
+  // Excel truncates both degrees of freedom.
+  const d1 = Math.trunc(df1.value);
+  const d2 = Math.trunc(df2.value);
+  if (x.value < 0 || d1 < 1 || d2 < 1) {
     return ERRORS.NUM;
   }
-  // Accept fractional df. See CHISQ.DIST comment — the betaIncomplete/lnGamma
-  // formulas below are defined for any positive df, so there is no reason
-  // to truncate.
-  const d1 = df1.value;
-  const d2 = df2.value;
   if (cum.value) {
-    return rvNumber(betaIncomplete((d1 * x.value) / (d1 * x.value + d2), d1 / 2, d2 / 2));
+    return rvNumber(fTail(x.value, d1, d2, false));
   }
-  const num =
-    (Math.pow(d1 * x.value, d1 / 2) * Math.pow(d2, d2 / 2)) /
-    Math.pow(d1 * x.value + d2, (d1 + d2) / 2);
-  const denom = x.value * Math.exp(lnGamma(d1 / 2) + lnGamma(d2 / 2) - lnGamma((d1 + d2) / 2));
-  return rvNumber(denom === 0 ? 0 : num / denom);
+  if (x.value === 0) {
+    // The density at 0: infinite for d1 = 1, 1 for d1 = 2, 0 beyond — as Excel answers.
+    return d1 === 1 ? ERRORS.NUM : rvNumber(d1 === 2 ? 1 : 0);
+  }
+  // f(x) = (d1x)^(d1/2) d2^(d2/2) / ((d1x + d2)^((d1+d2)/2) · x · B(d1/2, d2/2)), in logs.
+  const [w, u] = fBetaArgs(x.value, d1, d2);
+  return finiteNumber(
+    Math.exp(
+      (d1 / 2) * Math.log(w) +
+        (d2 / 2) * Math.log(u) -
+        Math.log(x.value) -
+        lnGamma(d1 / 2) -
+        lnGamma(d2 / 2) +
+        lnGamma((d1 + d2) / 2)
+    )
+  );
 }
 
 export function fnF_INV(args: RuntimeValue[]): RuntimeValue {
@@ -1931,26 +1798,38 @@ export function fnF_INV(args: RuntimeValue[]): RuntimeValue {
   if (df2.kind === RVKind.Error) {
     return df2;
   }
-  if (p.value < 0 || p.value >= 1 || df1.value < 1 || df2.value < 1) {
+  // Excel truncates both degrees of freedom.
+  const d1 = Math.trunc(df1.value);
+  const d2 = Math.trunc(df2.value);
+  if (p.value < 0 || p.value >= 1 || d1 < 1 || d2 < 1) {
     return ERRORS.NUM;
   }
-  const d1 = df1.value;
-  const d2 = df2.value;
-  let lo = 0;
-  let hi = 1000;
-  for (let i = 0; i < 100; i++) {
-    const mid = (lo + hi) / 2;
-    const cdf = betaIncomplete((d1 * mid) / (d1 * mid + d2), d1 / 2, d2 / 2);
-    if (cdf < p.value) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-    if (hi - lo < 1e-10) {
-      break;
-    }
+  return finiteNumber(fQuantile(p.value, 1 - p.value, d1, d2));
+}
+
+/** The F quantile for lower tail `p` and upper tail `q = 1 − p`, solved in whichever tail is smaller. */
+function fQuantile(p: number, q: number, d1: number, d2: number): number {
+  if (p === 0) {
+    return 0;
   }
-  return rvNumber((lo + hi) / 2);
+  return p <= q
+    ? solveMonotone(x => fTail(x, d1, d2, false), p, 0, 1)
+    : solveMonotone(x => fTail(x, d1, d2, true), q, 0, 1, true);
+}
+
+/** d1x / (d1x + d2) and d2 / (d1x + d2), without overflow for a huge x. */
+function fBetaArgs(x: number, d1: number, d2: number): [w: number, u: number] {
+  if (x === 0) {
+    return [0, 1];
+  }
+  const r = d2 / d1 / x;
+  return [1 / (1 + r), r / (1 + r)];
+}
+
+/** F ≤ x (`upper` false) or F > x: I_w(d1/2, d2/2) and its complement, each computed directly. */
+function fTail(x: number, d1: number, d2: number, upper: boolean): number {
+  const [w, u] = fBetaArgs(x, d1, d2);
+  return regularizedBeta(w, u, d1 / 2, d2 / 2, upper);
 }
 
 export function fnT_DIST(args: RuntimeValue[]): RuntimeValue {
@@ -1966,18 +1845,20 @@ export function fnT_DIST(args: RuntimeValue[]): RuntimeValue {
   if (!cum.ok) {
     return cum.error;
   }
-  if (df.value < 1) {
-    return ERRORS.NUM;
+  // Excel truncates the degrees of freedom: T.DIST(0,1.5,FALSE) is 1/π, the density of t with 1.
+  const v = Math.trunc(df.value);
+  // Excel's density at 0 degrees of freedom divides by zero; below that, and for the distribution, it is #NUM!.
+  if (v < 1) {
+    return v === 0 && !cum.value ? ERRORS.DIV0 : ERRORS.NUM;
   }
-  const v = df.value;
   if (cum.value) {
-    const t = v / (v + x.value * x.value);
-    const halfBeta = 0.5 * betaIncomplete(t, v / 2, 0.5);
-    return rvNumber(x.value >= 0 ? 1 - halfBeta : halfBeta);
+    const tail = studentUpperTail(Math.abs(x.value), v);
+    return rvNumber(x.value >= 0 ? 1 - tail : tail);
   }
-  return rvNumber(
-    Math.exp(lnGamma((v + 1) / 2) - lnGamma(v / 2)) /
-      (Math.sqrt(v * Math.PI) * Math.pow(1 + (x.value * x.value) / v, (v + 1) / 2))
+  return finiteNumber(
+    Math.exp(
+      lnGamma((v + 1) / 2) - lnGamma(v / 2) - ((v + 1) / 2) * Math.log1p((x.value * x.value) / v)
+    ) / Math.sqrt(v * Math.PI)
   );
 }
 
@@ -1990,28 +1871,46 @@ export function fnT_INV(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (p.value <= 0 || p.value >= 1 || df.value < 1) {
+  // Excel truncates the degrees of freedom.
+  const v = Math.trunc(df.value);
+  if (p.value < 0 || p.value >= 1 || v < 1) {
     return ERRORS.NUM;
   }
-  let x = normSInv(p.value);
-  const v = df.value;
-  for (let iter = 0; iter < 100; iter++) {
-    const t = v / (v + x * x);
-    const halfBeta = 0.5 * betaIncomplete(t, v / 2, 0.5);
-    const cdf = x >= 0 ? 1 - halfBeta : halfBeta;
-    const pdf =
-      Math.exp(lnGamma((v + 1) / 2) - lnGamma(v / 2)) /
-      (Math.sqrt(v * Math.PI) * Math.pow(1 + (x * x) / v, (v + 1) / 2));
-    if (Math.abs(pdf) < 1e-15) {
-      break;
-    }
-    const delta = (cdf - p.value) / pdf;
-    x -= delta;
-    if (Math.abs(delta) < 1e-10) {
-      break;
-    }
+  if (p.value === 0) {
+    // Excel's t with one degree of freedom is the Cauchy 1 / tan(πp), which divides by zero; the others are #NUM!.
+    return v === 1 ? ERRORS.DIV0 : ERRORS.NUM;
   }
-  return rvNumber(x);
+  // 1 − 2p and 2p − 1 are exact wherever they are the smaller probability.
+  const t =
+    p.value < 0.5
+      ? -studentQuantile(p.value, 1 - 2 * p.value, v)
+      : studentQuantile(1 - p.value, 2 * p.value - 1, v);
+  return finiteNumber(t);
+}
+
+/**
+ * The t ≥ 0 that Student's t with `v` degrees of freedom exceeds with probability `q` ≤ 1/2, where `c` = 1 − 2q is the
+ * probability of lying within ±t. Both are passed so the smaller can be solved for: near the centre, `q` has rounded to
+ * 1/2 and only `c` still carries the digits.
+ */
+function studentQuantile(q: number, c: number, v: number): number {
+  if (c <= 0) {
+    return 0;
+  }
+  return q <= c
+    ? solveMonotone(t => studentUpperTail(t, v), q, 0, 1, true)
+    : solveMonotone(t => studentCentral(t, v), c, 0, 1);
+}
+
+/**
+ * A result that overflowed a double, or was undefined, is `#NUM!`. One below the smallest normal double is 0: Excel
+ * does not keep subnormals, and the solvers bottom out there when the answer has underflowed.
+ */
+function finiteNumber(value: number): RuntimeValue {
+  if (!Number.isFinite(value)) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(Math.abs(value) <= MIN_NORMAL ? 0 : value);
 }
 
 export function fnT_DIST_2T(args: RuntimeValue[]): RuntimeValue {
@@ -2023,11 +1922,11 @@ export function fnT_DIST_2T(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (x.value < 0 || df.value < 1) {
+  const v = Math.trunc(df.value);
+  if (x.value < 0 || v < 1) {
     return ERRORS.NUM;
   }
-  const v = df.value;
-  return rvNumber(betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5));
+  return rvNumber(2 * studentUpperTail(x.value, v));
 }
 
 export function fnT_DIST_RT(args: RuntimeValue[]): RuntimeValue {
@@ -2039,15 +1938,28 @@ export function fnT_DIST_RT(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (df.value < 1) {
+  const v = Math.trunc(df.value);
+  if (v < 1) {
     return ERRORS.NUM;
   }
-  const v = df.value;
-  const halfBeta = 0.5 * betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5);
-  // T.DIST.RT(x, df) = right-tail = 1 - CDF(x)
-  // For x >= 0: right-tail = halfBeta
-  // For x < 0: right-tail = 1 - halfBeta
-  return rvNumber(x.value >= 0 ? halfBeta : 1 - halfBeta);
+  const tail = studentUpperTail(Math.abs(x.value), v);
+  return rvNumber(x.value >= 0 ? tail : 1 - tail);
+}
+
+/**
+ * T.INV.2T / TINV: the t with P(|T| > t) = p. Excel answers for 1 < p < 2 as well, with T.INV(1 − p/2): the
+ * negative t whose two tails, counted from the other side, total p.
+ */
+function studentQuantile2T(p: number, v: number): RuntimeValue {
+  if (p < 0 || p >= 2 || v < 1) {
+    return ERRORS.NUM;
+  }
+  if (p === 0) {
+    return v === 1 ? ERRORS.DIV0 : ERRORS.NUM;
+  }
+  return finiteNumber(
+    p <= 1 ? studentQuantile(p / 2, 1 - p, v) : -studentQuantile(1 - p / 2, p - 1, v)
+  );
 }
 
 export function fnT_INV_2T(args: RuntimeValue[]): RuntimeValue {
@@ -2059,14 +1971,8 @@ export function fnT_INV_2T(args: RuntimeValue[]): RuntimeValue {
   if (df.kind === RVKind.Error) {
     return df;
   }
-  if (p.value <= 0 || p.value > 1 || df.value < 1) {
-    return ERRORS.NUM;
-  }
-  const result = fnT_INV([rvNumber(1 - p.value / 2), args[1]]);
-  if (isError(result)) {
-    return result;
-  }
-  return rvNumber(Math.abs((result as NumberValue).value));
+  const v = Math.trunc(df.value);
+  return studentQuantile2T(p.value, v);
 }
 
 // ============================================================================
@@ -2120,6 +2026,16 @@ export function fnBETA_DIST(args: RuntimeValue[]): RuntimeValue {
   if (cumVal) {
     return rvNumber(betaIncomplete(xn, alpha.value, beta.value));
   }
+  // The density at an end of the interval, as Excel answers it: 0 where explicit bounds were given; otherwise 0 when
+  // the shape there is above 1, and #NUM! when it is not (the density there is infinite, or 1 for a shape of exactly 1).
+  // "Explicit bounds" is inferred: Excel was observed with bounds 10, 20 and with none, so whether it keys on the
+  // arguments being present or on their being other than 0 and 1 is not established.
+  if (xn === 0 || xn === 1) {
+    if (args.length > 4) {
+      return rvNumber(0);
+    }
+    return (xn === 0 ? alpha.value : beta.value) > 1 ? rvNumber(0) : ERRORS.NUM;
+  }
   return rvNumber(
     Math.exp(
       (alpha.value - 1) * Math.log(xn) +
@@ -2161,23 +2077,18 @@ export function fnBETA_INV(args: RuntimeValue[]): RuntimeValue {
     }
     B = bRV.value;
   }
-  if (p.value < 0 || p.value > 1 || alpha.value <= 0 || beta.value <= 0) {
+  // Excel has no answer at p = 0 or 1, though the bounds A and B would be one.
+  if (p.value <= 0 || p.value >= 1 || alpha.value <= 0 || beta.value <= 0) {
     return ERRORS.NUM;
   }
-  let lo = 0;
-  let hi = 1;
-  for (let i = 0; i < 100; i++) {
-    const mid = (lo + hi) / 2;
-    if (betaIncomplete(mid, alpha.value, beta.value) < p.value) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-    if (hi - lo < 1e-12) {
-      break;
-    }
-  }
-  return rvNumber(A + ((lo + hi) / 2) * (B - A));
+  const a = alpha.value;
+  const b = beta.value;
+  const x =
+    p.value <= 0.5
+      ? solveMonotone(t => regularizedBeta(t, 1 - t, a, b), p.value, 0, 1)
+      : // Solved for 1 − x in the upper tail, where 1 − p is the small number.
+        1 - solveMonotone(u => regularizedBeta(u, 1 - u, b, a), 1 - p.value, 0, 1);
+  return finiteNumber(A + x * (B - A));
 }
 
 export function fnGAMMA(args: RuntimeValue[]): RuntimeValue {
@@ -2251,20 +2162,16 @@ export function fnGAMMA_INV(args: RuntimeValue[]): RuntimeValue {
   if (p.value < 0 || p.value >= 1 || alpha.value <= 0 || beta.value <= 0) {
     return ERRORS.NUM;
   }
-  let lo = 0;
-  let hi = Math.max(alpha.value * beta.value * 10, 100);
-  for (let i = 0; i < 100; i++) {
-    const mid = (lo + hi) / 2;
-    if (gammaIncomplete(alpha.value, mid / beta.value) < p.value) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-    if (hi - lo < 1e-10) {
-      break;
-    }
+  if (p.value === 0) {
+    return rvNumber(0);
   }
-  return rvNumber((lo + hi) / 2);
+  const a = alpha.value;
+  const scale = Math.max(a, 1);
+  const x =
+    p.value <= 0.5
+      ? solveMonotone(t => regularizedGamma(a, t), p.value, 0, scale)
+      : solveMonotone(t => regularizedGamma(a, t, true), 1 - p.value, 0, scale, true);
+  return finiteNumber(x * beta.value);
 }
 
 export function fnEXPON_DIST(args: RuntimeValue[]): RuntimeValue {
@@ -2285,7 +2192,7 @@ export function fnEXPON_DIST(args: RuntimeValue[]): RuntimeValue {
   }
   return rvNumber(
     cum.value
-      ? 1 - Math.exp(-lambda.value * x.value)
+      ? -Math.expm1(-lambda.value * x.value)
       : lambda.value * Math.exp(-lambda.value * x.value)
   );
 }
@@ -2311,7 +2218,11 @@ export function fnWEIBULL_DIST(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.NUM;
   }
   if (cum.value) {
-    return rvNumber(1 - Math.exp(-Math.pow(x.value / beta.value, alpha.value)));
+    return rvNumber(-Math.expm1(-Math.pow(x.value / beta.value, alpha.value)));
+  }
+  // Excel's density at 0 is 0 whatever the shape, though for alpha ≤ 1 the density is not.
+  if (x.value === 0) {
+    return rvNumber(0);
   }
   return rvNumber(
     (alpha.value / beta.value) *
@@ -2447,16 +2358,21 @@ export function fnSTANDARDIZE(args: RuntimeValue[]): RuntimeValue {
 // ============================================================================
 
 export function fnFREQUENCY(args: RuntimeValue[]): RuntimeValue {
-  if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
-    return ERRORS.VALUE;
+  const dataArr = asArrayArg(args[0]);
+  const binsArr = asArrayArg(args[1]);
+  if (isError(dataArr)) {
+    return dataArr;
   }
-  const rawData = flattenNumbers([args[0]]);
+  if (isError(binsArr)) {
+    return binsArr;
+  }
+  const rawData = flattenNumbers([dataArr]);
   const dataErr = firstError(rawData);
   if (dataErr) {
     return dataErr;
   }
   const data = (rawData as NumberValue[]).map(n => n.value);
-  const rawBins = flattenNumbers([args[1]]);
+  const rawBins = flattenNumbers([binsArr]);
   const binsErr = firstError(rawBins);
   if (binsErr) {
     return binsErr;
@@ -3144,17 +3060,13 @@ export function fnF_DIST_RT(args: RuntimeValue[]): RuntimeValue {
   if (df2.kind === RVKind.Error) {
     return df2;
   }
-  if (x.value < 0 || df1.value < 1 || df2.value < 1) {
+  // Excel truncates both degrees of freedom.
+  const d1 = Math.trunc(df1.value);
+  const d2 = Math.trunc(df2.value);
+  if (x.value < 0 || d1 < 1 || d2 < 1) {
     return ERRORS.NUM;
   }
-  // At x=0 the right tail equals 1 (entire distribution above 0).
-  if (x.value === 0) {
-    return rvNumber(1);
-  }
-  const d1 = df1.value;
-  const d2 = df2.value;
-  // Right tail via symmetry: I(d2/(d2 + d1*x), d2/2, d1/2).
-  return rvNumber(betaIncomplete(d2 / (d2 + d1 * x.value), d2 / 2, d1 / 2));
+  return rvNumber(fTail(x.value, d1, d2, true));
 }
 
 /**
@@ -3175,27 +3087,13 @@ export function fnF_INV_RT(args: RuntimeValue[]): RuntimeValue {
   if (df2.kind === RVKind.Error) {
     return df2;
   }
-  if (p.value <= 0 || p.value > 1 || df1.value < 1 || df2.value < 1) {
+  // Excel truncates both degrees of freedom.
+  const d1 = Math.trunc(df1.value);
+  const d2 = Math.trunc(df2.value);
+  if (p.value <= 0 || p.value > 1 || d1 < 1 || d2 < 1) {
     return ERRORS.NUM;
   }
-  const d1 = df1.value;
-  const d2 = df2.value;
-  // Right-tail CDF at x: I(d2/(d2 + d1*x), d2/2, d1/2), decreases with x.
-  let lo = 0;
-  let hi = 1e6;
-  for (let i = 0; i < 200; i++) {
-    const mid = (lo + hi) / 2;
-    const rt = betaIncomplete(d2 / (d2 + d1 * mid), d2 / 2, d1 / 2);
-    if (rt > p.value) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-    if (hi - lo < 1e-10) {
-      break;
-    }
-  }
-  return rvNumber((lo + hi) / 2);
+  return finiteNumber(fQuantile(1 - p.value, p.value, d1, d2));
 }
 
 // ============================================================================
@@ -3543,19 +3441,6 @@ export function fnPROB(args: RuntimeValue[]): RuntimeValue {
  * Standard normal CDF — shared by Z.TEST and the T.TEST approximations.
  * Uses the same erf-based formula as fnNORMSDIST.
  */
-function normalCDF(z: number): number {
-  // Abramowitz & Stegun 7.1.26 approximation, same family used elsewhere.
-  const sign = z < 0 ? -1 : 1;
-  const x = Math.abs(z) / Math.sqrt(2);
-  const t = 1 / (1 + 0.3275911 * x);
-  const y =
-    1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
-      t *
-      Math.exp(-x * x);
-  return 0.5 * (1 + sign * y);
-}
-
 /**
  * Z.TEST(array, x, [sigma]) — one-tailed probability value for z-test.
  *   mean = AVERAGE(array), n = COUNT(array)
@@ -3605,7 +3490,7 @@ export function fnZ_TEST(args: RuntimeValue[]): RuntimeValue {
   }
 
   const z = (mean - xV.value) / (sigma / Math.sqrt(nums.length));
-  return rvNumber(1 - normalCDF(z));
+  return rvNumber(normalTail(z, true));
 }
 
 /**
@@ -3841,11 +3726,14 @@ export function fnT_TEST(args: RuntimeValue[]): RuntimeValue {
  *   p = 1 - CHISQ.DIST(χ², df, TRUE)
  */
 export function fnCHISQ_TEST(args: RuntimeValue[]): RuntimeValue {
-  if (args[0].kind !== RVKind.Array || args[1].kind !== RVKind.Array) {
-    return ERRORS.VALUE;
+  const a = asArrayArg(args[0]);
+  const e = asArrayArg(args[1]);
+  if (isError(a)) {
+    return a;
   }
-  const a = args[0] as ArrayValue;
-  const e = args[1] as ArrayValue;
+  if (isError(e)) {
+    return e;
+  }
   if (a.height !== e.height || a.width !== e.width) {
     return ERRORS.NA;
   }
@@ -3882,4 +3770,69 @@ export function fnCHISQ_TEST(args: RuntimeValue[]): RuntimeValue {
   }
   // p = 1 - CHISQ.DIST.CDF(chi2, df) = right tail
   return rvNumber(1 - gammaIncomplete(df / 2, chi2 / 2));
+}
+
+// ============================================================================
+// Compatibility functions whose arguments or tails differ from their successors
+// ============================================================================
+
+/** TDIST(x, df, tails) — the upper tail of Student's t above x ≥ 0, doubled when `tails` is 2. */
+export function fnTDIST(args: RuntimeValue[]): RuntimeValue {
+  const x = argToNumber(args[0]);
+  if (x.kind === RVKind.Error) {
+    return x;
+  }
+  const df = argToNumber(args[1]);
+  if (df.kind === RVKind.Error) {
+    return df;
+  }
+  const tails = argToNumber(args[2]);
+  if (tails.kind === RVKind.Error) {
+    return tails;
+  }
+  const v = Math.trunc(df.value);
+  const n = Math.trunc(tails.value);
+  if (x.value < 0 || v < 1 || (n !== 1 && n !== 2)) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(n * studentUpperTail(x.value, v));
+}
+
+/** TINV(probability, df) — the two-tailed inverse, as T.INV.2T. */
+export function fnTINV(args: RuntimeValue[]): RuntimeValue {
+  const p = argToNumber(args[0]);
+  if (p.kind === RVKind.Error) {
+    return p;
+  }
+  const df = argToNumber(args[1]);
+  if (df.kind === RVKind.Error) {
+    return df;
+  }
+  return studentQuantile2T(p.value, Math.trunc(df.value));
+}
+
+/** BETADIST(x, alpha, beta, [A], [B]) — the cumulative BETA.DIST. */
+export function fnBETADIST(args: RuntimeValue[]): RuntimeValue {
+  return fnBETA_DIST([
+    args[0],
+    args[1],
+    args[2],
+    rvBoolean(true),
+    ...args.slice(3)
+  ] as RuntimeValue[]);
+}
+
+/** LOGNORMDIST(x, mean, standard_dev) — the cumulative LOGNORM.DIST. */
+export function fnLOGNORMDIST(args: RuntimeValue[]): RuntimeValue {
+  return fnLOGNORM_DIST([...args, rvBoolean(true)]);
+}
+
+/** NEGBINOMDIST(number_f, number_s, probability_s) — the NEGBINOM.DIST probability mass. */
+export function fnNEGBINOMDIST(args: RuntimeValue[]): RuntimeValue {
+  return fnNEGBINOM_DIST([...args, rvBoolean(false)]);
+}
+
+/** HYPGEOMDIST(sample_s, number_sample, population_s, number_pop) — the HYPGEOM.DIST probability mass. */
+export function fnHYPGEOMDIST(args: RuntimeValue[]): RuntimeValue {
+  return fnHYPGEOM_DIST([...args, rvBoolean(false)]);
 }

@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -53,7 +53,7 @@ Cell.setValue(ws, "H2", 3);
 Cell.setValue(ws, "I2", 4);
 Cell.setValue(ws, "J1", { formula: "MDETERM(H1:I2)" }); // -2
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 // Report — single pass, tabulated so you can eyeball the results.
 const cells = [

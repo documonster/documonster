@@ -29,13 +29,16 @@
  *     awaited via {@link SinkAdapter}). Total writer-side memory then
  *     stays O(largest_part) regardless of final DOCX size.
  *   - When `options.sink` is omitted, compressed bytes accumulate in
- *     `_outputChunks` and `finalize()` returns the assembled
+ *     `_outputChunks` and `toBuffer()` returns the assembled
  *     `Uint8Array`. Total memory is O(compressed_docx_size).
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
 import type { AnySink } from "@stream/core/sink-adapter";
 import { SinkAdapter } from "@stream/core/sink-adapter";
+import { asPlainBytes } from "@utils/binary";
+import type { SchemaMatches } from "@utils/schema";
+import { withStatedDefaults } from "@word/builder/document-finalize";
 import {
   ContentType,
   RelType,
@@ -43,11 +46,37 @@ import {
   DOCUMENT_NAMESPACES,
   STD_DOC_ATTRIBUTES
 } from "@word/constants";
+import {
+  checkAppProperties,
+  checkArray,
+  checkBlock,
+  checkCoreProperties,
+  checkDocumentSettings,
+  checkNodeArray,
+  packageOptionsShape,
+  checkParagraphProperties,
+  checkRecord,
+  checkRunProperties,
+  checkSectionProperties,
+  checkString,
+  checkStyleDef,
+  checkWatermark,
+  invalidArgument
+} from "@word/core/argument-checks";
+import { referencedStyleIds, withReferencedBuiltInStyles } from "@word/core/builtin-styles";
+import { collectImageKeys, indexImagesByKey } from "@word/core/image-keys";
+import { assertWritableImage, imagePartOverride } from "@word/core/image-media";
 import { sanitizeUrl, utf8Encoder } from "@word/core/internal-utils";
+import { atNode, checkWritableBlock, within } from "@word/core/node-path";
 import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
+import { checkSchema, model, w } from "@word/core/option-schema";
+import { isRangeMarker, isRun } from "@word/core/text-utils";
+import type { DocxVisitor } from "@word/core/walker";
 import { walkBlocks } from "@word/core/walker";
+import { planWatermark } from "@word/core/watermark-sections";
+import type { WatermarkPlan } from "@word/core/watermark-sections";
 import { DocxWriteError } from "@word/errors";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
   AbstractNumbering,
   AppProperties,
@@ -69,11 +98,12 @@ import type {
   FootnoteDef,
   HeaderDef,
   HeaderFooterRef,
-  Hyperlink,
   ImageDef,
   NumberingInstance,
   OpaquePart,
   Paragraph,
+  RangeMarker,
+  Run,
   SectionProperties,
   StyleDef,
   Watermark
@@ -86,21 +116,27 @@ import {
   addContentTypeDefault,
   addContentTypeOverride,
   addImageContentTypeDefaults,
-  renderContentTypes
+  renderContentTypes,
+  typeUntypedParts
 } from "@word/writer/content-types";
 import { renderBodyContent } from "@word/writer/document-writer";
 import { uniqueSanitizedName } from "@word/writer/docx-packager";
 import {
   renderHeader,
   renderFooter,
-  renderWatermarkHeader
+  renderWatermarkHeader,
+  sizeWatermark
 } from "@word/writer/header-footer-writer";
+import type { HeaderWatermark } from "@word/writer/header-footer-writer";
+import { assertUniqueReferencedIds } from "@word/writer/id-uniqueness";
+import { registerPartImages } from "@word/writer/part-images";
+import { renderRangeMarkers } from "@word/writer/range-marker-writer";
 import {
   collectChartsFromHeaderFooter,
   collectHyperlinksFromHeaderFooter,
   collectHyperlinksFromNotes,
-  collectImageRidsFromContent,
-  collectImageRidsFromNotes
+  collectPreservedLinks,
+  preservedLinkRegistrar
 } from "@word/writer/reference-scanners";
 import type { RelationshipsState } from "@word/writer/relationships";
 import {
@@ -110,12 +146,20 @@ import {
   getRelationshipCount,
   renderRelationships
 } from "@word/writer/relationships";
-import type { WordRenderContext } from "@word/writer/render-context";
-import { createRenderContext } from "@word/writer/render-context";
+import type { RevisionIdMap, DocxRenderContext } from "@word/writer/render-context";
+import {
+  closeStoryPart,
+  createRenderContext,
+  enterRevisionIds,
+  exitRevisionIds,
+  leaveRevisionIds,
+  renderHelpersFor,
+  withRevisionScope
+} from "@word/writer/render-context";
 import { renderSectionProperties } from "@word/writer/section-writer";
 import { StreamBuf } from "@word/writer/stream-buf";
 import { StringBuf } from "@word/writer/string-buf";
-import { xmlEncodeAttr } from "@xml/encode";
+import { xmlEncodeAttr, xmlValue } from "@xml/encode";
 import { XmlWriter } from "@xml/writer";
 
 // Per-instance StringBuf is created in the constructor (see _xmlBuffer field below).
@@ -125,6 +169,14 @@ const XML_FLUSH_BYTES = 65536;
 // Previously this was a module-level singleton which caused data races with concurrent instances.
 
 const EMPTY_U8 = new Uint8Array(0);
+
+/** Stands for the watermark-only header part while the sections are planned. */
+const WATERMARK_PART = "\u0000watermark";
+
+/** The streaming writer stores every image under its own file name. */
+function streamingImageTarget(img: ImageDef): string {
+  return `media/${img.fileName}`;
+}
 
 // =============================================================================
 // Types
@@ -143,6 +195,11 @@ export interface StreamingDocxOptions {
   readonly chunkSize?: number;
   /** Section properties for the final section. */
   readonly sectionProperties?: SectionProperties;
+  /**
+   * Range markers after the last element, before the final section properties
+   * (see `DocxDocument.bodyRangeMarkersAfter`).
+   */
+  readonly bodyRangeMarkersAfter?: readonly RangeMarker[];
   /** Document styles. */
   readonly styles?: readonly StyleDef[];
   /** Document defaults. */
@@ -203,7 +260,7 @@ export interface StreamingDocxOptions {
    * (preserve / strip / reject) so opaque rawXml fields behave consistently
    * with the buffered `packageDocx` writer.
    */
-  readonly securityPolicy?: WordSecurityPolicy;
+  readonly securityPolicy?: DocxSecurityPolicy;
 
   /**
    * Output sink. When provided, compressed bytes flow through it as soon
@@ -217,17 +274,17 @@ export interface StreamingDocxOptions {
    *  - Any duck-typed object exposing `write(chunk)` + `end()` plus
    *    `once("drain"|"error"|"close"|"finish", …)` listeners
    *
-   * When the sink is provided, {@link StreamingDocxWriter.finalize}
-   * resolves to a zero-length `Uint8Array` (the bytes have already
-   * been delivered to the sink — the empty return is a sentinel that
-   * keeps `finalize`'s return type stable across both modes). Use
-   * {@link StreamingDocxWriter.addAsync} (instead of
-   * {@link StreamingDocxWriter.add}) when you want each `add` call to
+   * When the sink is provided, {@link DocumentWriter.commit} ends the
+   * sink once the document is complete, and
+   * {@link DocumentWriter.toBuffer} is refused — the bytes are in the
+   * sink, not the writer. Use
+   * {@link DocumentWriter.addAsync} (instead of
+   * {@link DocumentWriter.add}) when you want each `add` call to
    * await actual sink drain — that gives true end-to-end backpressure
    * for tight production loops.
    *
    * When omitted, behaviour is unchanged: compressed bytes accumulate
-   * internally and `finalize()` returns the assembled `Uint8Array`.
+   * internally and `toBuffer()` returns the assembled `Uint8Array`.
    */
   readonly sink?: AnySink;
 }
@@ -245,6 +302,27 @@ export type StreamingProgressCallback = (info: {
 // =============================================================================
 
 /**
+ * A streamed element, checked before anything of it is written: a streamed
+ * element cannot be taken back out of the part once it is half-written.
+ */
+function checkStreamedBlock(element: unknown, field: string, where: string): void {
+  checkBlock(element, field, where);
+  try {
+    checkWritableBlock(element as BodyContent);
+  } catch (error) {
+    throw atNode(field, error);
+  }
+}
+
+/** Every element of a batch, checked before any of them is written. */
+function checkStreamedBlocks(elements: unknown, where: string): void {
+  checkArray(elements, "elements", where);
+  (elements as readonly unknown[]).forEach((el, i) =>
+    checkStreamedBlock(el, `elements[${i}]`, where)
+  );
+}
+
+/**
  * Streaming DOCX writer. Body elements are serialized to XML and compressed
  * into the ZIP pipeline as they arrive, so the body **model** is not retained
  * after each `add()`.
@@ -252,20 +330,38 @@ export type StreamingProgressCallback = (info: {
  * When constructed with `options.sink`, compressed bytes are pushed into
  * the sink as soon as the ZIP layer produces them, with backpressure
  * awaited via {@link SinkAdapter}; in this mode peak memory is
- * O(largest_part) and `finalize()` resolves to a zero-length
- * `Uint8Array` (the bytes are already in the sink). Without a sink,
- * compressed bytes accumulate in `_outputChunks` and `finalize()`
- * returns the assembled `Uint8Array` (peak memory
- * O(compressed_docx_size)).
+ * O(largest_part), `commit()` ends the sink and `toBuffer()` is
+ * refused (the bytes are already in the sink). Without a sink,
+ * compressed bytes accumulate in `_outputChunks` and `toBuffer()`
+ * returns the complete file (peak memory O(compressed_docx_size)).
+ *
+ * Every writer finishes with `commit()`; a writer that owns its output
+ * additionally hands it over with `toBuffer()`, which commits first if
+ * needed.
  *
  * Use {@link addAsync} (instead of {@link add}) when driving the sink
  * variant to obtain true end-to-end backpressure: each call awaits all
  * pending sink writes before resolving.
+ *
+ * @example
+ * ```ts
+ * const writer = new Stream.DocumentWriter({
+ *   styles: [{ type: "paragraph", styleId: "Normal", name: "Normal" }]
+ * });
+ *
+ * for (let i = 0; i < 100000; i++) {
+ *   writer.addText(`Paragraph ${i}`);
+ * }
+ *
+ * const buffer = await writer.toBuffer();
+ * ```
  */
-export class StreamingDocxWriter {
+export class DocumentWriter {
   private readonly _options: StreamingDocxOptions;
   private _elementCount = 0;
   private _finalized = false;
+  /** The running or settled {@link commit}; `undefined` until the writer is committed. */
+  private _finished: Promise<void> | undefined;
   private _onProgress?: StreamingProgressCallback;
 
   // Per-instance XML buffer (avoids module-level singleton data race)
@@ -325,7 +421,7 @@ export class StreamingDocxWriter {
   // ("Chart content was not registered with a relationship id") and
   // hyperlinks/images dangle.
   private _documentRels!: RelationshipsState;
-  private _renderCtx!: WordRenderContext;
+  private _renderCtx!: DocxRenderContext;
   /** Charts encountered in body content; rendered to `word/charts/chartN.xml` at finalize time. */
   private readonly _bodyCharts: ChartContent[] = [];
   /** ChartEx items encountered in body content. */
@@ -347,6 +443,20 @@ export class StreamingDocxWriter {
   private _nextChartExSeq = 0;
   /** Hyperlink object identities already registered (to keep one rId per object). */
   private readonly _registeredHyperlinks = new WeakSet<object>();
+  /** What the walker reports to while registering an element's references; one for every element. */
+  private readonly _referenceVisitor: DocxVisitor = {
+    enterParagraph: para => {
+      this._registerParagraphReferences(para);
+    },
+    enterRun: run => {
+      this._registerRunImages(run);
+    },
+    enterHyperlink: h => {
+      this._registerHyperlink(h);
+    }
+  };
+  /** Every image by each of its keys. */
+  private readonly _imageIndex: ReadonlyMap<string, ImageDef>;
   /** Image rIds already registered to documentRels (avoid duplicates). */
   private readonly _registeredImageRIds = new Set<string>();
   /** header map key → newly allocated rId. Populated by `_allocateHeaderFooterRIds`. */
@@ -355,20 +465,41 @@ export class StreamingDocxWriter {
   private readonly _footerKeyToRid = new Map<string, string>();
   /** rId allocated for the auto-generated watermark header (if any). */
   private _watermarkHeaderRid: string | undefined;
+  /** The style ids the body written so far references. */
+  private readonly _styleRefs = new Set<string>();
+  /**
+   * Where the watermark goes, planned section by section as the sections
+   * stream past (see `planWatermark`). Its hosts are header map keys.
+   */
+  private _watermarkPlan: WatermarkPlan | undefined;
+  /** Header and footer ids a section break inside the body names. */
+  private readonly _innerSectionRIds = new Set<string>();
+  /** The header types the final section names the watermark-only header for. */
+  private _finalWatermarkTypes: readonly HeaderFooterRef["type"][] = [];
 
+  /**
+   * @throws {DocxDuplicateIdError} If two footnotes, endnotes, comments,
+   * numbering definitions or builder images in `options` share an id.
+   */
   constructor(options: StreamingDocxOptions = {}) {
+    checkStreamingOptions(options, "new Stream.DocumentWriter");
     // Sanitize image/font file names up-front. They get embedded into
     // ZIP entry paths and into rels Target attributes; a hostile name
     // (e.g. `../../etc/passwd.png` from a round-tripped untrusted DOCX)
     // would otherwise produce a zipslip-shaped output. Mirrors what
     // `packageDocx` does in `shallowCopyDocForPackaging`.
-    const sanitized = sanitizeStreamingOptions(options);
+    assertUniqueReferencedIds(options);
+    const sanitized = withHeaderSwitches(sanitizeStreamingOptions(options));
     this._options = sanitized;
+    this._imageIndex = indexImagesByKey(sanitized.images);
     this._initZip();
   }
 
   /** Set a progress callback. */
   onProgress(cb: StreamingProgressCallback): this {
+    if (typeof cb !== "function") {
+      invalidArgument("Stream.DocumentWriter#onProgress", "cb", "a function", cb);
+    }
     this._onProgress = cb;
     return this;
   }
@@ -379,8 +510,14 @@ export class StreamingDocxWriter {
    * can be garbage collected — it is not retained.
    */
   add(element: BodyContent): this {
+    checkStreamedBlock(element, "element", "Stream.DocumentWriter#add");
+    return within("element", () => this._add(element));
+  }
+
+  /** Write an element {@link checkStreamedBlock} has checked. */
+  private _add(element: BodyContent): this {
     if (this._finalized) {
-      throw new DocxWriteError("StreamingDocxWriter: cannot add elements after finalize()");
+      throw new DocxWriteError("Stream.DocumentWriter: cannot add elements after commit()");
     }
 
     // Sink-mode early failure: if a previous chunk already failed to
@@ -391,7 +528,7 @@ export class StreamingDocxWriter {
     // disrupted by silent queueing.
     if (this._sinkAdapter && this._streamError) {
       throw new DocxWriteError(
-        `StreamingDocxWriter: sink already failed (${this._streamError.message})`,
+        `Stream.DocumentWriter: sink already failed (${this._streamError.message})`,
         { cause: this._streamError }
       );
     }
@@ -404,7 +541,7 @@ export class StreamingDocxWriter {
 
     // Register any chart/hyperlink/image references this element introduces
     // BEFORE serializing it, so the per-element renderBodyContent call has a
-    // populated WordRenderContext (chart rIds, hyperlink rIds, image remap).
+    // populated DocxRenderContext (chart rIds, hyperlink rIds, image remap).
     this._registerElementReferences(element);
 
     // ECMA-376 §17.13.5.34: a `<w:tbl>` must be followed by a paragraph
@@ -417,7 +554,7 @@ export class StreamingDocxWriter {
     }
 
     // Serialize this single element to XML and push to stream
-    this._writeBodyElement(element);
+    this._writeBodyElement(this._prepareSectionBreak(element));
     this._elementCount++;
     this._prevWasTable = element.type === "table";
 
@@ -428,11 +565,10 @@ export class StreamingDocxWriter {
     return this;
   }
 
-  /** Add multiple body elements at once. */
+  /** Add multiple body elements at once. Every one is checked before any is written. */
   addMany(elements: readonly BodyContent[]): this {
-    for (const el of elements) {
-      this.add(el);
-    }
+    checkStreamedBlocks(elements, "Stream.DocumentWriter#addMany");
+    elements.forEach((el, i) => within(`elements[${i}]`, () => this._add(el)));
     return this;
   }
 
@@ -449,7 +585,12 @@ export class StreamingDocxWriter {
    * rejection was captured into `_streamError` surface here.
    */
   async addAsync(element: BodyContent): Promise<this> {
-    this.add(element);
+    checkStreamedBlock(element, "element", "Stream.DocumentWriter#addAsync");
+    return this._addAsync(element);
+  }
+
+  private async _addAsync(element: BodyContent, field = "element"): Promise<this> {
+    within(field, () => this._add(element));
     if (this._sinkAdapter) {
       this._flushXml();
       // ZipDeflate batches small inputs. A non-final empty push flushes that
@@ -465,14 +606,19 @@ export class StreamingDocxWriter {
    * so backpressure is honoured between every body element.
    */
   async addManyAsync(elements: readonly BodyContent[]): Promise<this> {
-    for (const el of elements) {
-      await this.addAsync(el);
+    checkStreamedBlocks(elements, "Stream.DocumentWriter#addManyAsync");
+    for (let i = 0; i < elements.length; i++) {
+      await this._addAsync(elements[i]!, `elements[${i}]`);
     }
     return this;
   }
 
   /** Add a paragraph with simple text content. */
   addText(content: string, properties?: Paragraph["properties"]): this {
+    const where = "Stream.DocumentWriter#addText";
+    checkString(content, "content", where);
+    checkRecord(properties, "properties", where, { optional: true });
+    checkParagraphProperties(properties, "properties", where);
     return this.add({
       type: "paragraph",
       children: [{ content: [{ type: "text", text: content }] }],
@@ -486,22 +632,74 @@ export class StreamingDocxWriter {
   }
 
   /**
+   * Finish the document.
+   *
+   * Writes the closing body, every auxiliary part and the ZIP central
+   * directory. With `options.sink` it then drains every pending write and
+   * ends the sink; without one the bytes stay in the writer for
+   * {@link toBuffer}.
+   *
+   * @throws {DocxWriteError} If the writer was already committed, or the
+   * ZIP pipeline or the sink failed (the sink is aborted in that case).
+   */
+  async commit(): Promise<void> {
+    if (this._finalized) {
+      throw new DocxWriteError("Stream.DocumentWriter: already committed");
+    }
+    this._finalized = true;
+    this._finished = this._finish();
+    await this._finished;
+  }
+
+  /**
+   * The complete DOCX file. Commits first when {@link commit} has not been
+   * called; afterwards it may be called again and resolves to the same bytes.
+   *
+   * @throws {DocxWriteError} If the writer was given `options.sink` — the
+   * bytes went to the sink and the writer holds none — or committing failed.
+   */
+  async toBuffer(): Promise<Uint8Array<ArrayBuffer>> {
+    if (this._sinkAdapter) {
+      throw new DocxWriteError(
+        "Stream.DocumentWriter#toBuffer: the document was written to options.sink; the writer holds no bytes"
+      );
+    }
+    if (this._finished) {
+      await this._finished;
+    } else {
+      await this.commit();
+    }
+    const bytes = this._assembleOutput();
+    this._outputChunks = [bytes];
+    return asPlainBytes(bytes);
+  }
+
+  /**
    * Finalize the document.
    *
    * - Without `options.sink`: returns the assembled `Uint8Array`
    *   containing the full DOCX file.
    * - With `options.sink`: drains any pending sink writes, calls
-   *   `sink.end()`, and resolves to a zero-length `Uint8Array`. The
-   *   DOCX bytes have already been delivered to the sink — the empty
-   *   return is a sentinel signalling "writer is done; consumer keeps
-   *   the data".
+   *   `sink.end()`, and resolves to a zero-length `Uint8Array`.
+   *
+   * @deprecated Use {@link commit} to finish the document and
+   * {@link toBuffer} to obtain its bytes. Removed in 1.0.
    */
-  async finalize(): Promise<Uint8Array> {
+  async finalize(): Promise<Uint8Array<ArrayBuffer>> {
     if (this._finalized) {
-      throw new DocxWriteError("StreamingDocxWriter: already finalized");
+      throw new DocxWriteError("Stream.DocumentWriter: already finalized");
     }
     this._finalized = true;
+    this._finished = this._finish();
+    await this._finished;
+    if (this._sinkAdapter) {
+      return EMPTY_U8;
+    }
+    return asPlainBytes(this._assembleOutput());
+  }
 
+  /** Write the trailing parts and close the archive and, in sink mode, the sink. */
+  private async _finish(): Promise<void> {
     if (this._onProgress) {
       this._onProgress({ elementsWritten: this._elementCount, phase: "finalizing" });
     }
@@ -511,20 +709,27 @@ export class StreamingDocxWriter {
       this._writeDocumentHeader();
     }
 
-    // Allocate header/footer rIds NOW so the section properties we render
-    // into document.xml can use the same rIds the auxiliary parts will
-    // register later. Without this the section refs and the .rels file
-    // would disagree and Word treats the references as dangling.
-    this._allocateHeaderFooterRIds();
+    this._planFinalWatermark();
 
     // Write document.xml footer (close </w:body></w:document>)
-    this._writeDocumentFooter();
+    const previousRevisionIds = enterRevisionIds(this._renderCtx.revisionIds);
+    try {
+      this._writeDocumentFooter();
+    } finally {
+      exitRevisionIds(previousRevisionIds);
+    }
 
     // End the document.xml stream → finalizes its ZIP entry
     await this._endStream(this._documentStream);
 
-    // Add all auxiliary parts (styles, settings, etc.)
-    await this._addAuxiliaryParts();
+    // Add all auxiliary parts (styles, settings, etc.). They are rendered
+    // synchronously before the method first awaits, which is where the scope
+    // takes the writer's revision map out of effect again.
+    // Anything those parts need loaded or measured is awaited first, outside the synchronous section.
+    const watermark = this._options.watermark && (await sizeWatermark(this._options.watermark));
+    await withRevisionScope(() =>
+      this._addAuxiliaryParts(enterRevisionIds(this._renderCtx.revisionIds), watermark)
+    );
 
     // Finalize the ZIP archive. Any compression errors during the trailing
     // central-directory write are reported via the `Zip` callback into
@@ -547,7 +752,7 @@ export class StreamingDocxWriter {
       // open (and a Web stream locked) behind a failed write.
       await this._sinkAdapter?.abort(this._streamError);
       throw new DocxWriteError(
-        `StreamingDocxWriter: ZIP finalization failed (${this._streamError.message})`,
+        `Stream.DocumentWriter: ZIP finalization failed (${this._streamError.message})`,
         { cause: this._streamError }
       );
     }
@@ -556,11 +761,7 @@ export class StreamingDocxWriter {
       // Close the sink so the consumer knows the byte stream is complete.
       // Errors raised during close (e.g. underlying file system) propagate.
       await this._sinkAdapter.end();
-      return EMPTY_U8;
     }
-
-    // Buffered mode: assemble and return the DOCX bytes.
-    return this._assembleOutput();
   }
 
   /** Reset the writer for reuse. */
@@ -575,11 +776,12 @@ export class StreamingDocxWriter {
   reset(): this {
     if (this._sinkAdapter) {
       throw new DocxWriteError(
-        "StreamingDocxWriter: reset() is not supported in sink mode; create a new writer instance per document."
+        "Stream.DocumentWriter: reset() is not supported in sink mode; create a new writer instance per document."
       );
     }
     this._elementCount = 0;
     this._finalized = false;
+    this._finished = undefined;
     this._headerWritten = false;
     this._prevWasTable = false;
     this._outputChunks = [];
@@ -588,9 +790,10 @@ export class StreamingDocxWriter {
     this._nextChartSeq = 0;
     this._nextChartExSeq = 0;
     this._registeredImageRIds.clear();
-    this._headerKeyToRid.clear();
-    this._footerKeyToRid.clear();
     this._watermarkHeaderRid = undefined;
+    this._innerSectionRIds.clear();
+    this._watermarkPlan = undefined;
+    this._finalWatermarkTypes = [];
     // _registeredHyperlinks is a WeakSet; old entries become unreachable
     // along with the body model objects they referenced — no manual clear
     // is necessary. _chartNum is a WeakMap with the same property.
@@ -614,11 +817,16 @@ export class StreamingDocxWriter {
       this._sinkAdapter = new SinkAdapter(this._options.sink);
     }
     this._documentRels = createRelationships();
+    this._allocateHeaderFooterRIds();
     this._renderCtx = createRenderContext({
       securityPolicy: this._options.securityPolicy,
       chartRIds: new Map(),
       imageRIdRemap: new Map(),
-      hyperlinkRIds: new WeakMap()
+      hyperlinkRIds: new WeakMap(),
+      // Hyperlinks that body markup kept verbatim refers to (a drawing's
+      // `a:hlinkClick`) register as the markup is written; document.xml.rels
+      // is written after the body.
+      preservedLinkRId: preservedLinkRegistrar(this._documentRels)
     });
     this._zipComplete = new Promise<void>(resolve => {
       this._resolveZipComplete = resolve;
@@ -703,7 +911,7 @@ export class StreamingDocxWriter {
     // drain only after compression completes so browser output is included.
     await this._pendingDrain;
     if (this._streamError) {
-      throw new DocxWriteError(`StreamingDocxWriter: ${message} (${this._streamError.message})`, {
+      throw new DocxWriteError(`Stream.DocumentWriter: ${message} (${this._streamError.message})`, {
         cause: this._streamError
       });
     }
@@ -792,6 +1000,14 @@ export class StreamingDocxWriter {
       this._registerChartEx(element);
       return;
     }
+    // A paragraph of runs and range markers — nearly every streamed element —
+    // registers its pictures and styles without the walker.
+    if (element.type === "paragraph" && this._registerSimpleParagraph(element)) {
+      return;
+    }
+    for (const id of referencedStyleIds({ body: [element] })) {
+      this._styleRefs.add(id);
+    }
     // For paragraph-like containers we descend with the shared walker so
     // track-change wrappers (InsertedRun / MovedToRun / hyperlink children)
     // are also covered.
@@ -799,26 +1015,10 @@ export class StreamingDocxWriter {
       element.type === "paragraph" ||
       element.type === "table" ||
       element.type === "sdt" ||
-      element.type === "textBox"
+      element.type === "textBox" ||
+      element.type === "tableOfContents"
     ) {
-      walkBlocks([element], {
-        enterParagraph: para => {
-          this._registerParagraphReferences(para);
-        },
-        enterRun: run => {
-          for (const c of run.content) {
-            if (c.type === "image" && c.rId) {
-              this._registerImageRId(c.rId);
-              if (c.svgRId) {
-                this._registerImageRId(c.svgRId);
-              }
-            }
-          }
-        },
-        enterHyperlink: h => {
-          this._registerHyperlink(h);
-        }
-      });
+      walkBlocks([element], this._referenceVisitor);
       return;
     }
     if (element.type === "floatingImage" && element.rId) {
@@ -834,6 +1034,49 @@ export class StreamingDocxWriter {
     // hyperlink registration is handled by enterRun / enterHyperlink. This
     // hook exists so future paragraph-level relationships (numPicBullet,
     // tabLeader image, …) can be added without changing call sites.
+  }
+
+  /** Register the pictures a run shows. */
+  private _registerRunImages(run: Run): void {
+    for (const c of run.content) {
+      if (c.type === "image" && c.rId) {
+        this._registerImageRId(c.rId);
+        if (c.svgRId) {
+          this._registerImageRId(c.svgRId);
+        }
+      }
+    }
+  }
+
+  /**
+   * Register the references of a paragraph whose children are all runs and
+   * range markers — what the walker would register, without walking — and
+   * return `true`; return `false` for any other paragraph, which must be walked.
+   */
+  private _registerSimpleParagraph(para: Paragraph): boolean {
+    const children = para.children;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]!;
+      if ("type" in child && !isRangeMarker(child)) {
+        return false;
+      }
+    }
+    this._registerParagraphReferences(para);
+    this._addStyleRef(para.properties?.style);
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]!;
+      if (isRun(child)) {
+        this._registerRunImages(child);
+        this._addStyleRef(child.properties?.style);
+      }
+    }
+    return true;
+  }
+
+  private _addStyleRef(id: string | undefined): void {
+    if (id) {
+      this._styleRefs.add(id);
+    }
   }
 
   private _registerChart(chart: ChartContent): void {
@@ -858,7 +1101,7 @@ export class StreamingDocxWriter {
     this._bodyChartEx.push(chart);
   }
 
-  private _registerHyperlink(h: Hyperlink): void {
+  private _registerHyperlink(h: { readonly url?: string; readonly rId?: string }): void {
     if (!h.url || h.rId || this._registeredHyperlinks.has(h)) {
       return;
     }
@@ -887,14 +1130,14 @@ export class StreamingDocxWriter {
       const policy = this._options.missingImagePolicy ?? "throw";
       if (policy === "warn") {
         console.warn(
-          `[StreamingDocxWriter] image rId "${rId}" referenced by content ` +
+          `[Stream.DocumentWriter] image rId "${rId}" referenced by content ` +
             `but not present in options.images. Output will be missing this ` +
             `relationship and may not open in Word.`
         );
         return;
       }
       throw new DocxWriteError(
-        `Streaming writer: image rId "${rId}" referenced by content but ` +
+        `image rId "${rId}" referenced by content but ` +
           `not present in options.images. Add the image to options.images, ` +
           `remove the reference, or set missingImagePolicy: "warn" to ` +
           `accept a broken document.`
@@ -904,32 +1147,62 @@ export class StreamingDocxWriter {
     this._registeredImageRIds.add(rId);
   }
 
+  /** The image a key (`rId` or one of `aliasRIds`) names. */
   private _lookupImage(rId: string): ImageDef | undefined {
-    if (!this._options.images) {
+    return this._imageIndex.get(rId);
+  }
+
+  /**
+   * Register the pictures `content` shows in a part's own `.rels` and return
+   * the remap its renderer writes `r:embed` through.
+   */
+  /** Register an image watermark's picture in the rels of the header drawing it; its id there. */
+  private _registerWatermarkImage(rels: RelationshipsState): string | undefined {
+    const watermark = this._options.watermark;
+    if (watermark?.type !== "image") {
       return undefined;
     }
-    for (const img of this._options.images) {
-      if (img.rId === rId) {
-        return img;
-      }
-      // Round-tripped models may surface alias rIds populated by the
-      // reader for header/footer-local references that pointed at the
-      // same physical media file. Match those too so a header that uses
-      // its own rId still resolves to the binary.
-      if (img.aliasRIds && img.aliasRIds.includes(rId)) {
-        return img;
-      }
-    }
-    return undefined;
+    const remap = registerPartImages(rels, [watermark.rId], this._imageIndex, streamingImageTarget);
+    return remap.get(watermark.rId) ?? watermark.rId;
+  }
+
+  private _registerPartImages(rels: RelationshipsState, content: unknown): Map<string, string> {
+    const keys = new Set<string>();
+    collectImageKeys(content, this._imageIndex, keys);
+    return registerPartImages(rels, keys, this._imageIndex, streamingImageTarget);
   }
 
   private _writeDocumentFooter(): void {
     // Word rejects a `<w:body/>` that contains no `<w:p>`. Synthesise an
     // empty paragraph when the caller streamed zero elements so the
     // package opens cleanly. (Bulk packager handles this implicitly via
-    // `Document.build`'s default body element list.)
+    // `Document.create`'s default body element list.)
     if (this._elementCount === 0) {
       this._write("<w:p/>");
+    }
+
+    if (this._options.bodyRangeMarkersAfter?.length) {
+      const writer = new XmlWriter();
+      renderRangeMarkers(
+        writer,
+        this._options.bodyRangeMarkersAfter,
+        renderHelpersFor(this._renderCtx)
+      );
+      this._write(writer.xml);
+    }
+
+    // A range still open here cannot be removed, as the bulk writer removes
+    // it: its start has been streamed out already. It is closed at the end of
+    // the body instead, so the part still holds whole ranges only.
+    const unclosed = new XmlWriter();
+    for (const id of this._renderCtx.bookmarkIds?.closePart() ?? []) {
+      unclosed.leafNode("w:bookmarkEnd", { "w:id": xmlValue(id, "w:id") });
+    }
+    for (const id of this._renderCtx.permIds?.closePart() ?? []) {
+      unclosed.leafNode("w:permEnd", { "w:id": xmlValue(id, "w:id") });
+    }
+    if (unclosed.xml) {
+      this._write(unclosed.xml);
     }
 
     // Write final section properties if provided. Header/footer references
@@ -937,22 +1210,7 @@ export class StreamingDocxWriter {
     // `_allocateHeaderFooterRIds`. References whose target type cannot
     // be resolved (e.g. a custom rId for a header that isn't in the
     // options map) are dropped rather than emitted dangling.
-    const sectIn = this._options.sectionProperties;
-    let sect = sectIn ? this._rewireSectionRefs(sectIn) : undefined;
-
-    // Auto-fill: if the caller provided headers/footers but no section
-    // references, synthesize one per type. Mirrors what the bulk
-    // packager does for builder-style usage.
-    if (
-      this._options.headers &&
-      this._options.headers.size > 0 &&
-      (!sect?.headers || sect.headers.length === 0)
-    ) {
-      const synth = this._synthesizeHeaderRefs();
-      if (synth.length > 0) {
-        sect = { ...(sect ?? {}), headers: synth };
-      }
-    }
+    let sect = this._finalSectionWithHeaders();
     if (
       this._options.footers &&
       this._options.footers.size > 0 &&
@@ -963,25 +1221,25 @@ export class StreamingDocxWriter {
         sect = { ...(sect ?? {}), footers: synth };
       }
     }
-    // Watermark always needs its own header reference, but Word resolves
-    // multiple `<w:headerReference w:type="default">` children
-    // implementation-defined, so we replace any existing default-type
-    // ref instead of stacking them. (User-supplied first/even refs stay.)
-    if (this._watermarkHeaderRid) {
+    // The header types the section shows but neither names nor inherits get
+    // the watermark-only header.
+    if (this._watermarkHeaderRid && this._finalWatermarkTypes.length > 0) {
       const headers = sect?.headers ? [...sect.headers] : [];
-      const filtered = headers.filter(h => h.type !== "default");
-      filtered.push({ type: "default", rId: this._watermarkHeaderRid });
-      sect = { ...(sect ?? {}), headers: filtered };
+      for (const type of this._finalWatermarkTypes) {
+        headers.push({ type, rId: this._watermarkHeaderRid });
+      }
+      sect = { ...(sect ?? {}), headers };
     }
 
     if (sect) {
       const writer = new XmlWriter();
-      renderSectionProperties(writer, sect);
+      const section = sect;
+      within("options.sectionProperties", () => renderSectionProperties(writer, section));
       this._write(writer.xml);
     } else {
       // OOXML CT_Body requires a final <w:sectPr> so Word knows the page
       // geometry. When the caller didn't provide one, fall back to the
-      // same default that Document.build() uses (US Letter, 1" margins).
+      // same default that Document.create() uses (US Letter, 1" margins).
       const writer = new XmlWriter();
       renderSectionProperties(writer, {
         pageSize: { width: 12240, height: 15840 },
@@ -996,11 +1254,13 @@ export class StreamingDocxWriter {
 
   /**
    * Allocate header/footer relationship IDs deterministically (in the same
-   * order auxiliary parts will be emitted). Called once during finalize so
-   * `_writeDocumentFooter` and `_addAuxiliaryParts` agree on which rId
-   * points at which header/footer XML part.
+   * order auxiliary parts will be emitted), before anything is streamed: a
+   * section break inside the body is written as it streams past, and names
+   * its headers and footers by these ids.
    */
   private _allocateHeaderFooterRIds(): void {
+    this._headerKeyToRid.clear();
+    this._footerKeyToRid.clear();
     if (this._options.headers) {
       let idx = 1;
       for (const [key] of this._options.headers) {
@@ -1008,16 +1268,6 @@ export class StreamingDocxWriter {
         this._headerKeyToRid.set(key, rId);
         idx++;
       }
-      // Watermark consumes the next header slot.
-      if (this._options.watermark) {
-        this._watermarkHeaderRid = addRelationship(
-          this._documentRels,
-          RelType.Header,
-          `header${idx}.xml`
-        );
-      }
-    } else if (this._options.watermark) {
-      this._watermarkHeaderRid = addRelationship(this._documentRels, RelType.Header, "header1.xml");
     }
     if (this._options.footers) {
       let idx = 1;
@@ -1027,6 +1277,105 @@ export class StreamingDocxWriter {
         idx++;
       }
     }
+  }
+
+  /**
+   * Plan the watermark for the final section. It joins every header a
+   * section shows, as the buffered writer does; a section showing none of a
+   * type names a header part of the watermark's own, in the next header
+   * slot. The inner sections were planned as they streamed past.
+   */
+  private _planFinalWatermark(): void {
+    const plan = this._watermarkPlanFor();
+    if (!plan) {
+      return;
+    }
+    const final = this._finalSectionWithHeaders();
+    this._finalWatermarkTypes = plan.section({
+      titlePage: final?.titlePage,
+      headers: final?.headers ?? []
+    });
+    if (plan.needsWatermarkHeader) {
+      this._watermarkHeaderRid ??= this._allocateWatermarkHeaderRid();
+    }
+  }
+
+  /**
+   * The final section properties with header references resolved to the
+   * allocated rIds, synthesised for a caller who registered headers but named
+   * none. Footers are not resolved here.
+   */
+  private _finalSectionWithHeaders(): SectionProperties | undefined {
+    const sectIn = this._options.sectionProperties;
+    let sect = sectIn ? this._rewireSectionRefs(sectIn) : undefined;
+    // Auto-fill: if the caller provided headers but no section references,
+    // synthesize one per type. Mirrors what the bulk packager does for
+    // builder-style usage.
+    if (
+      this._options.headers &&
+      this._options.headers.size > 0 &&
+      (!sect?.headers || sect.headers.length === 0)
+    ) {
+      const synth = this._synthesizeHeaderRefs();
+      if (synth.length > 0) {
+        sect = { ...(sect ?? {}), headers: synth };
+      }
+    }
+    return sect;
+  }
+
+  /** The watermark plan, created on first use; `undefined` without a watermark. */
+  private _watermarkPlanFor(): WatermarkPlan | undefined {
+    if (!this._options.watermark) {
+      return undefined;
+    }
+    this._watermarkPlan ??= planWatermark(
+      this._options.settings?.evenAndOddHeaders === true,
+      WATERMARK_PART
+    );
+    return this._watermarkPlan;
+  }
+
+  private _allocateWatermarkHeaderRid(): string {
+    return addRelationship(
+      this._documentRels,
+      RelType.Header,
+      `header${(this._options.headers?.size ?? 0) + 1}.xml`
+    );
+  }
+
+  /**
+   * `element` with its section break's header and footer references resolved
+   * to the parts' ids — the break is written now — and naming the
+   * watermark-only header for the header types the break shows but neither
+   * names nor inherits, whose id is then allocated now.
+   */
+  private _prepareSectionBreak(element: BodyContent): BodyContent {
+    const sect = element.type === "paragraph" ? element.properties?.sectionProperties : undefined;
+    if (!sect || element.type !== "paragraph") {
+      return element;
+    }
+    let rewired = this._rewireSectionRefs(sect);
+    for (const ref of [...(rewired.headers ?? []), ...(rewired.footers ?? [])]) {
+      this._innerSectionRIds.add(ref.rId);
+    }
+    const plan = this._watermarkPlanFor();
+    const missing = plan ? plan.section(rewired) : [];
+    if (missing.length > 0) {
+      this._watermarkHeaderRid ??= this._allocateWatermarkHeaderRid();
+      const rId = this._watermarkHeaderRid;
+      rewired = {
+        ...rewired,
+        headers: [...(rewired.headers ?? []), ...missing.map(type => ({ type, rId }))]
+      };
+    }
+    if (rewired === sect) {
+      return element;
+    }
+    return {
+      ...element,
+      properties: { ...element.properties, sectionProperties: rewired }
+    };
   }
 
   private _rewireSectionRefs(sect: SectionProperties): SectionProperties {
@@ -1053,12 +1402,13 @@ export class StreamingDocxWriter {
     if (sect.headers) {
       const resolved: HeaderFooterRef[] = [];
       for (const ref of sect.headers) {
-        if (ref.rId && allowedHeader.has(ref.rId)) {
-          resolved.push(ref);
-          continue;
-        }
+        // A model key first: it may equal an id just given to another part.
         if (ref.rId && this._headerKeyToRid.has(ref.rId)) {
           resolved.push({ ...ref, rId: this._headerKeyToRid.get(ref.rId)! });
+          continue;
+        }
+        if (ref.rId && allowedHeader.has(ref.rId)) {
+          resolved.push(ref);
           continue;
         }
         const byType = resolveByTypeHeader(ref.type);
@@ -1077,12 +1427,13 @@ export class StreamingDocxWriter {
     if (sect.footers) {
       const resolved: HeaderFooterRef[] = [];
       for (const ref of sect.footers) {
-        if (ref.rId && allowedFooter.has(ref.rId)) {
-          resolved.push(ref);
-          continue;
-        }
+        // A model key first: it may equal an id just given to another part.
         if (ref.rId && this._footerKeyToRid.has(ref.rId)) {
           resolved.push({ ...ref, rId: this._footerKeyToRid.get(ref.rId)! });
+          continue;
+        }
+        if (ref.rId && allowedFooter.has(ref.rId)) {
+          resolved.push(ref);
           continue;
         }
         const byType = resolveByTypeFooter(ref.type);
@@ -1106,7 +1457,8 @@ export class StreamingDocxWriter {
    * keep their semantics; any other key (round-tripped rId names from
    * readDocx, custom strings) falls back to `"default"` so the header is
    * actually referenced — without this fallback header parts can sit in
-   * the package as dangling content.
+   * the package as dangling content. A part a section break inside the
+   * body names is that section's, and is left out.
    *
    * If multiple keys map to the same logical type, only the first one is
    * kept so we don't emit two `<w:headerReference w:type="default">`
@@ -1116,6 +1468,10 @@ export class StreamingDocxWriter {
     const out: HeaderFooterRef[] = [];
     const seenTypes = new Set<string>();
     for (const [key, rId] of this._headerKeyToRid) {
+      // A part a section break names is that section's, not the last's.
+      if (this._innerSectionRIds.has(rId)) {
+        continue;
+      }
       const type: HeaderFooterRef["type"] =
         key === "default" || key === "first" || key === "even" ? key : "default";
       if (seenTypes.has(type)) {
@@ -1130,6 +1486,10 @@ export class StreamingDocxWriter {
     const out: HeaderFooterRef[] = [];
     const seenTypes = new Set<string>();
     for (const [key, rId] of this._footerKeyToRid) {
+      // A part a section break names is that section's, not the last's.
+      if (this._innerSectionRIds.has(rId)) {
+        continue;
+      }
       const type: HeaderFooterRef["type"] =
         key === "default" || key === "first" || key === "even" ? key : "default";
       if (seenTypes.has(type)) {
@@ -1151,20 +1511,30 @@ export class StreamingDocxWriter {
     return modTime ?? coreProperties?.modified ?? coreProperties?.created;
   }
 
-  private async _addAuxiliaryParts(): Promise<void> {
+  /**
+   * @param previousRevisionIds - What `enterRevisionIds` returned for this write.
+   * @param watermark - The document's watermark, sized with `sizeWatermark`.
+   */
+  private async _addAuxiliaryParts(
+    previousRevisionIds: RevisionIdMap | undefined,
+    watermark: Watermark | undefined
+  ): Promise<void> {
     const level = this._options.compressionLevel ?? 6;
     const modTime = this._entryModTime();
 
     // Helper: add a complete XML file to the ZIP
+    const writtenParts: string[] = [];
     const addFile = (path: string, data: Uint8Array, compressionLevel = level): void => {
+      writtenParts.push(path);
       const file = new ZipDeflate(path, { level: compressionLevel, modTime });
       this._zip.add(file);
       this._trackCompression(file.push(data, true));
     };
+    // Every part is closed as a story part: one holding no range is unchanged.
     const addXmlFile = (path: string, renderFn: (xml: XmlWriter) => void): void => {
       const writer = new XmlWriter();
       renderFn(writer);
-      addFile(path, utf8Encoder.encode(writer.xml));
+      addFile(path, utf8Encoder.encode(closeStoryPart(writer.xml, this._renderCtx)));
     };
 
     // Content types and relationships
@@ -1203,12 +1573,21 @@ export class StreamingDocxWriter {
       addRelationship(documentRels, RelType.Numbering, "numbering.xml");
     }
 
+    // Each notes part renders r:embed through the remap of its own .rels.
+    let footnoteImageRemap = new Map<string, string>();
+    let endnoteImageRemap = new Map<string, string>();
+
     // Footnotes — including their own .rels for in-note hyperlinks/images.
     if (this._options.footnotes && this._options.footnotes.length > 0) {
       addRelationship(documentRels, RelType.Footnotes, "footnotes.xml");
       addContentTypeOverride(contentTypes, `/${PartPath.Footnotes}`, ContentType.Footnotes);
       const fnRels = createRelationships();
-      const fnLinks = collectHyperlinksFromNotes(this._options.footnotes);
+      // Pictures first, so an image keeps its own id where it can.
+      footnoteImageRemap = this._registerPartImages(fnRels, this._options.footnotes);
+      const fnLinks: readonly { readonly url?: string }[] = [
+        ...collectHyperlinksFromNotes(this._options.footnotes),
+        ...collectPreservedLinks(this._options.footnotes)
+      ];
       for (const link of fnLinks) {
         if (link.url) {
           const safe = sanitizeUrl(link.url);
@@ -1217,13 +1596,6 @@ export class StreamingDocxWriter {
           }
           const linkRId = addRelationship(fnRels, RelType.Hyperlink, safe, "External");
           this._renderCtx.hyperlinkRIds.set(link, linkRId);
-        }
-      }
-      const fnImgs = collectImageRidsFromNotes(this._options.footnotes);
-      for (const oldRid of fnImgs) {
-        const img = this._lookupImage(oldRid);
-        if (img) {
-          addRelationshipWithId(fnRels, oldRid, RelType.Image, `media/${img.fileName}`);
         }
       }
       if (getRelationshipCount(fnRels) > 0) {
@@ -1237,7 +1609,11 @@ export class StreamingDocxWriter {
       addRelationship(documentRels, RelType.Endnotes, "endnotes.xml");
       addContentTypeOverride(contentTypes, `/${PartPath.Endnotes}`, ContentType.Endnotes);
       const enRels = createRelationships();
-      const enLinks = collectHyperlinksFromNotes(this._options.endnotes);
+      endnoteImageRemap = this._registerPartImages(enRels, this._options.endnotes);
+      const enLinks: readonly { readonly url?: string }[] = [
+        ...collectHyperlinksFromNotes(this._options.endnotes),
+        ...collectPreservedLinks(this._options.endnotes)
+      ];
       for (const link of enLinks) {
         if (link.url) {
           const safe = sanitizeUrl(link.url);
@@ -1246,13 +1622,6 @@ export class StreamingDocxWriter {
           }
           const linkRId = addRelationship(enRels, RelType.Hyperlink, safe, "External");
           this._renderCtx.hyperlinkRIds.set(link, linkRId);
-        }
-      }
-      const enImgs = collectImageRidsFromNotes(this._options.endnotes);
-      for (const oldRid of enImgs) {
-        const img = this._lookupImage(oldRid);
-        if (img) {
-          addRelationshipWithId(enRels, oldRid, RelType.Image, `media/${img.fileName}`);
         }
       }
       if (getRelationshipCount(enRels) > 0) {
@@ -1268,8 +1637,12 @@ export class StreamingDocxWriter {
       // Register hyperlink/image rels BEFORE rendering comments.xml so the
       // emitted r:id values match the per-part .rels we are about to write.
       const cmtRels = createRelationships();
+      const commentImageRemap = this._registerPartImages(cmtRels, this._options.comments);
       const commentBodies = this._options.comments.map(c => ({ content: c.content }));
-      const cmtLinks = collectHyperlinksFromNotes(commentBodies);
+      const cmtLinks: readonly { readonly url?: string }[] = [
+        ...collectHyperlinksFromNotes(commentBodies),
+        ...collectPreservedLinks(commentBodies)
+      ];
       for (const link of cmtLinks) {
         if (link.url) {
           const safe = sanitizeUrl(link.url);
@@ -1280,22 +1653,17 @@ export class StreamingDocxWriter {
           this._renderCtx.hyperlinkRIds.set(link, linkRId);
         }
       }
-      const cmtImgs = collectImageRidsFromNotes(commentBodies);
-      for (const oldRid of cmtImgs) {
-        const img = this._lookupImage(oldRid);
-        if (img) {
-          addRelationshipWithId(cmtRels, oldRid, RelType.Image, `media/${img.fileName}`);
-        }
-      }
       if (getRelationshipCount(cmtRels) > 0) {
         addXmlFile(`word/_rels/comments.xml.rels`, xml => renderRelationships(cmtRels, xml));
       }
 
       addXmlFile(PartPath.Comments, xml =>
         renderComments(xml, this._options.comments!, {
-          imageRemap: this._renderCtx.imageRIdRemap,
+          imageRemap: commentImageRemap,
           hyperlinkRIds: this._renderCtx.hyperlinkRIds,
           nextDocPrId: this._renderCtx.ids.nextDocPrId,
+          bookmarkIds: this._renderCtx.bookmarkIds,
+          permIds: this._renderCtx.permIds,
           rawXmlPolicy: this._renderCtx.rawXmlPolicy
         })
       );
@@ -1327,7 +1695,7 @@ export class StreamingDocxWriter {
     // parts agree.
     let nextHeaderIdx = 1;
     if (this._options.headers) {
-      for (const [, headerDef] of this._options.headers) {
+      for (const [headerKey, headerDef] of this._options.headers) {
         const headerIdx = nextHeaderIdx++;
         const headerPath = PartPath.header(headerIdx);
         addContentTypeOverride(contentTypes, `/${headerPath}`, ContentType.Header);
@@ -1337,20 +1705,16 @@ export class StreamingDocxWriter {
         // emits dangling r:id values. addXmlFile() invokes the render
         // callback synchronously, so the order matters.
         const hRels = createRelationships();
-        // Images: register every rId referenced inside this header that the
-        // caller supplied a binary for. Header XML emits `r:embed` using the
-        // model rId, so we register under the same id.
-        const imgRids = collectImageRidsFromContent(headerDef.content);
-        for (const oldRid of imgRids) {
-          const img = this._lookupImage(oldRid);
-          if (img) {
-            addRelationshipWithId(hRels, oldRid, RelType.Image, `media/${img.fileName}`);
-          }
-        }
+        // Images: the header's own pictures, registered in its own .rels; its
+        // XML writes r:embed through the remap this returns.
+        const headerImageRemap = this._registerPartImages(hRels, headerDef.content);
         // Hyperlinks: same scheme as bulk packager — assign a fresh rId per
         // header for any URL-bearing hyperlink and surface it via
         // hyperlinkRIds so the writer emits matching r:id.
-        const hLinks = collectHyperlinksFromHeaderFooter(headerDef.content);
+        const hLinks: readonly { readonly url?: string }[] = [
+          ...collectHyperlinksFromHeaderFooter(headerDef.content),
+          ...collectPreservedLinks(headerDef.content)
+        ];
         for (const link of hLinks) {
           if (link.url) {
             const safe = sanitizeUrl(link.url);
@@ -1376,13 +1740,25 @@ export class StreamingDocxWriter {
           this._bodyCharts.push(chartContent);
         }
 
+        let headerWatermark: HeaderWatermark | undefined;
+        if (watermark && this._watermarkPlan?.hosts.has(this._headerKeyToRid.get(headerKey)!)) {
+          headerWatermark = { watermark, imageRId: this._registerWatermarkImage(hRels) };
+        }
+
         addXmlFile(headerPath, xml =>
-          renderHeader(xml, headerDef.content, {
-            imageRemap: this._renderCtx.imageRIdRemap,
-            hyperlinkRIds: this._renderCtx.hyperlinkRIds,
-            nextDocPrId: this._renderCtx.ids.nextDocPrId,
-            rawXmlPolicy: this._renderCtx.rawXmlPolicy
-          })
+          renderHeader(
+            xml,
+            headerDef.content,
+            {
+              imageRemap: headerImageRemap,
+              hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+              nextDocPrId: this._renderCtx.ids.nextDocPrId,
+              bookmarkIds: this._renderCtx.bookmarkIds,
+              permIds: this._renderCtx.permIds,
+              rawXmlPolicy: this._renderCtx.rawXmlPolicy
+            },
+            headerWatermark
+          )
         );
 
         if (getRelationshipCount(hRels) > 0) {
@@ -1393,25 +1769,21 @@ export class StreamingDocxWriter {
       }
     }
 
-    // Watermark — always rendered as its own header part appended after any
-    // user-supplied headers. Its rId was allocated during
+    // Watermark without a default header to join — its own header part,
+    // after the caller's. Its rId was allocated during
     // `_allocateHeaderFooterRIds`.
-    if (this._options.watermark) {
+    if (watermark && this._watermarkHeaderRid) {
       const watermarkIdx = nextHeaderIdx++;
       const watermarkPath = PartPath.header(watermarkIdx);
       addContentTypeOverride(contentTypes, `/${watermarkPath}`, ContentType.Header);
-      addXmlFile(watermarkPath, xml => renderWatermarkHeader(xml, this._options.watermark!));
       // Image watermarks need a per-header relationship to the image binary.
-      if (this._options.watermark.type === "image") {
-        const wmRId = this._options.watermark.rId;
-        const img = this._lookupImage(wmRId);
-        if (img) {
-          const wmRels = createRelationships();
-          addRelationshipWithId(wmRels, wmRId, RelType.Image, `media/${img.fileName}`);
-          addXmlFile(`word/_rels/header${watermarkIdx}.xml.rels`, xml =>
-            renderRelationships(wmRels, xml)
-          );
-        }
+      const wmRels = createRelationships();
+      const watermarkImageRId = this._registerWatermarkImage(wmRels);
+      addXmlFile(watermarkPath, xml => renderWatermarkHeader(xml, watermark, watermarkImageRId));
+      if (getRelationshipCount(wmRels) > 0) {
+        addXmlFile(`word/_rels/header${watermarkIdx}.xml.rels`, xml =>
+          renderRelationships(wmRels, xml)
+        );
       }
     }
 
@@ -1427,14 +1799,11 @@ export class StreamingDocxWriter {
         // callback synchronously so any hyperlink rIds the renderer needs
         // must already be in this._renderCtx.hyperlinkRIds.
         const fRels = createRelationships();
-        const imgRids = collectImageRidsFromContent(footerDef.content);
-        for (const oldRid of imgRids) {
-          const img = this._lookupImage(oldRid);
-          if (img) {
-            addRelationshipWithId(fRels, oldRid, RelType.Image, `media/${img.fileName}`);
-          }
-        }
-        const fLinks = collectHyperlinksFromHeaderFooter(footerDef.content);
+        const footerImageRemap = this._registerPartImages(fRels, footerDef.content);
+        const fLinks: readonly { readonly url?: string }[] = [
+          ...collectHyperlinksFromHeaderFooter(footerDef.content),
+          ...collectPreservedLinks(footerDef.content)
+        ];
         for (const link of fLinks) {
           if (link.url) {
             const safe = sanitizeUrl(link.url);
@@ -1460,9 +1829,11 @@ export class StreamingDocxWriter {
 
         addXmlFile(footerPath, xml =>
           renderFooter(xml, footerDef.content, {
-            imageRemap: this._renderCtx.imageRIdRemap,
+            imageRemap: footerImageRemap,
             hyperlinkRIds: this._renderCtx.hyperlinkRIds,
             nextDocPrId: this._renderCtx.ids.nextDocPrId,
+            bookmarkIds: this._renderCtx.bookmarkIds,
+            permIds: this._renderCtx.permIds,
             rawXmlPolicy: this._renderCtx.rawXmlPolicy
           })
         );
@@ -1517,6 +1888,12 @@ export class StreamingDocxWriter {
         }
       }
       addImageContentTypeDefaults(contentTypes, extensions);
+      for (const img of this._options.images) {
+        const override = imagePartOverride(img);
+        if (override) {
+          addContentTypeOverride(contentTypes, `/word/media/${img.fileName}`, override);
+        }
+      }
     }
 
     // Custom XML parts (for SDT data binding)
@@ -1600,6 +1977,11 @@ export class StreamingDocxWriter {
       const preserveOle = this._options.securityPolicy?.preserveOleObjects !== false;
       const dropSignatures = this._options.securityPolicy?.dropSignaturesOnModify !== false;
       for (const part of this._options.opaqueParts) {
+        // An empty name ending in "/" is a ZIP folder entry, not a part (OPC
+        // §9.1.1.1): never written. Anything else invalid is refused below.
+        if (part.path.endsWith("/") && part.data.length === 0) {
+          continue;
+        }
         // Honour `preserveOleObjects`: skip OLE binaries when disabled.
         if (
           !preserveOle &&
@@ -1646,8 +2028,24 @@ export class StreamingDocxWriter {
     // Write common auxiliary parts (styles, settings, fontTable, theme, numbering, properties)
     // using the shared builder to avoid duplicating render logic with docx-packager.
     const commonParts = buildCommonAuxiliaryParts({
-      docDefaults: this._options.docDefaults,
-      styles: this._options.styles,
+      // Everything this writer produces is built by the library: it states the
+      // defaults the library lays it out with (see `withStatedDefaults`).
+      docDefaults: withStatedDefaults(this._options.docDefaults),
+      // A built-in style the content uses is defined as Word defines it on
+      // first use (see `withReferencedBuiltInStyles`).
+      styles: withReferencedBuiltInStyles(this._options.styles, [
+        ...this._styleRefs,
+        ...referencedStyleIds({
+          body: [],
+          headers: this._options.headers,
+          footers: this._options.footers,
+          footnotes: this._options.footnotes,
+          endnotes: this._options.endnotes,
+          comments: this._options.comments,
+          abstractNumberings: this._options.abstractNumberings,
+          watermark: this._options.watermark
+        })
+      ]),
       settings: this._options.settings,
       fonts: this._options.fonts,
       theme: this._options.theme,
@@ -1663,9 +2061,19 @@ export class StreamingDocxWriter {
       // against footnotes.xml.rels / endnotes.xml.rels) resolve to the same
       // rIds the renderer is about to emit.
       notesHelpers: {
-        imageRemap: this._renderCtx.imageRIdRemap,
+        imageRemap: footnoteImageRemap,
         hyperlinkRIds: this._renderCtx.hyperlinkRIds,
         nextDocPrId: this._renderCtx.ids.nextDocPrId,
+        bookmarkIds: this._renderCtx.bookmarkIds,
+        permIds: this._renderCtx.permIds,
+        rawXmlPolicy: this._renderCtx.rawXmlPolicy
+      },
+      endnotesHelpers: {
+        imageRemap: endnoteImageRemap,
+        hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+        nextDocPrId: this._renderCtx.ids.nextDocPrId,
+        bookmarkIds: this._renderCtx.bookmarkIds,
+        permIds: this._renderCtx.permIds,
         rawXmlPolicy: this._renderCtx.rawXmlPolicy
       }
     });
@@ -1693,7 +2101,7 @@ export class StreamingDocxWriter {
       }
       const chartPath = `word/charts/chart${num}.xml`;
       const w = new XmlWriter();
-      renderChartPart(w, chartContent.chart);
+      renderChartPart(w, chartContent.chart, { rawXmlPolicy: this._renderCtx.rawXmlPolicy });
       const data = utf8Encoder.encode(w.xml);
       addFile(chartPath, data);
       addContentTypeOverride(contentTypes, `/${chartPath}`, ContentType.Chart);
@@ -1718,7 +2126,13 @@ export class StreamingDocxWriter {
     addXmlFile(PartPath.PackageRels, xml => renderRelationships(packageRels, xml));
 
     // Write [Content_Types].xml
+    typeUntypedParts(
+      contentTypes,
+      writtenParts.filter(path => !path.endsWith(".rels"))
+    );
     addXmlFile(PartPath.ContentTypes, xml => renderContentTypes(contentTypes, xml));
+
+    leaveRevisionIds(previousRevisionIds, this._renderCtx.revisionIds);
 
     // Every final push is asynchronous in browsers. Do not let finalize cross
     // the auxiliary-part boundary until their compression and sink output do.
@@ -1758,23 +2172,132 @@ export class StreamingDocxWriter {
 }
 
 /**
- * Create a new streaming DOCX writer.
- *
- * @example
- * ```ts
- * const writer = createDocxStream({
- *   styles: [{ type: "paragraph", styleId: "Normal", name: "Normal" }]
- * });
- *
- * for (let i = 0; i < 100000; i++) {
- *   writer.addText(`Paragraph ${i}`);
- * }
- *
- * const buffer = await writer.finalize();
- * ```
+ * The writer's own settings. The document content it is given (`sectionProperties`, `styles`,
+ * the parts) is model, checked by the same functions the `Document.*` setters use.
  */
-export function createDocxStream(options?: StreamingDocxOptions): StreamingDocxWriter {
-  return new StreamingDocxWriter(options);
+const streamingOptionsSchema = w.record({
+  ...packageOptionsShape,
+  chunkSize: w.integer({ min: 1 }).optional(),
+  sectionProperties: model<SectionProperties>(),
+  bodyRangeMarkersAfter: model<readonly RangeMarker[]>(),
+  styles: model<readonly StyleDef[]>(),
+  docDefaults: model<DocDefaults>(),
+  abstractNumberings: model<readonly AbstractNumbering[]>(),
+  numberingInstances: model<readonly NumberingInstance[]>(),
+  headers: model<ReadonlyMap<string, HeaderDef>>(),
+  footers: model<ReadonlyMap<string, FooterDef>>(),
+  footnotes: model<readonly FootnoteDef[]>(),
+  endnotes: model<readonly EndnoteDef[]>(),
+  images: model<readonly ImageDef[]>(),
+  fonts: model<readonly FontDef[]>(),
+  settings: model<DocumentSettings>(),
+  coreProperties: model<CoreProperties>(),
+  appProperties: model<AppProperties>(),
+  comments: model<readonly CommentDef[]>(),
+  background: model<DocumentBackground>(),
+  customProperties: model<readonly CustomProperty[]>(),
+  watermark: model<Watermark>(),
+  theme: model<DocumentTheme>(),
+  customXmlParts: model<readonly CustomXmlPart[]>(),
+  embeddedFonts: model<readonly EmbeddedFont[]>(),
+  opaqueParts: model<readonly OpaquePart[]>(),
+  missingImagePolicy: w.oneOf(["throw", "warn"]).optional(),
+  securityPolicy: model<DocxSecurityPolicy>(),
+  sink: model<AnySink>()
+});
+const _streamingOptionsMatch: SchemaMatches<typeof streamingOptionsSchema, StreamingDocxOptions> =
+  true;
+void _streamingOptionsMatch;
+
+/**
+ * The writer's options, each checked as the `Document.*` setter for the same
+ * field checks it — so a bad value is refused when the writer is created, not
+ * at `finalize()` after every element has streamed.
+ */
+function checkStreamingOptions(options: unknown, where: string): void {
+  checkSchema(streamingOptionsSchema.optional(), options, where);
+  const o = options as StreamingDocxOptions | undefined;
+  if (o === undefined) {
+    return;
+  }
+  if (o.sectionProperties !== undefined) {
+    checkSectionProperties(o.sectionProperties, "options.sectionProperties", where);
+  }
+  for (const kind of ["headers", "footers"] as const) {
+    const parts = o[kind];
+    if (parts === undefined) {
+      continue;
+    }
+    if (!(parts instanceof Map)) {
+      invalidArgument(where, `options.${kind}`, "a Map of key to part", parts);
+    }
+    for (const [key, part] of parts) {
+      const at = `options.${kind}.get(${JSON.stringify(key)})`;
+      checkRecord(part, at, where);
+      checkRecord(part.content, `${at}.content`, where);
+      checkNodeArray(part.content.children, `${at}.content.children`, where);
+    }
+  }
+  if (o.styles !== undefined) {
+    checkArray(o.styles, "options.styles", where);
+    o.styles.forEach((style, i) => checkStyleDef(style, `options.styles[${i}]`, where));
+  }
+  if (o.docDefaults !== undefined) {
+    checkRecord(o.docDefaults, "options.docDefaults", where);
+    checkRunProperties(o.docDefaults.runProperties, "options.docDefaults.runProperties", where);
+    checkParagraphProperties(
+      o.docDefaults.paragraphProperties,
+      "options.docDefaults.paragraphProperties",
+      where
+    );
+  }
+  if (o.coreProperties !== undefined) {
+    checkCoreProperties(o.coreProperties, "options.coreProperties", where);
+  }
+  if (o.appProperties !== undefined) {
+    checkAppProperties(o.appProperties, "options.appProperties", where);
+  }
+  if (o.settings !== undefined) {
+    checkDocumentSettings(o.settings, "options.settings", where);
+  }
+  if (o.watermark !== undefined) {
+    checkWatermark(o.watermark, "options.watermark", where);
+  }
+  for (const key of [
+    "abstractNumberings",
+    "numberingInstances",
+    "footnotes",
+    "endnotes",
+    "images",
+    "fonts",
+    "comments",
+    "customProperties",
+    "customXmlParts",
+    "embeddedFonts",
+    "opaqueParts"
+  ] as const) {
+    checkNodeArray(o[key], `options.${key}`, where, { optional: true });
+  }
+  checkRecord(o.background, "options.background", where, { optional: true });
+}
+
+/**
+ * `options` with the switches a first-page or even-page header needs to be
+ * shown, as `Document.setHeader` sets them: the final section's title page
+ * for a part stored under `"first"`, and `settings.evenAndOddHeaders` for one
+ * under `"even"` — unless the caller stated the switch.
+ */
+function withHeaderSwitches(options: StreamingDocxOptions): StreamingDocxOptions {
+  const has = (type: string): boolean =>
+    options.headers?.has(type) === true || options.footers?.has(type) === true;
+  let next = options;
+  if (has("first") && options.sectionProperties?.titlePage === undefined) {
+    next = { ...next, sectionProperties: { ...next.sectionProperties, titlePage: true } };
+  }
+  if (has("even") && options.settings?.evenAndOddHeaders === undefined) {
+    next = { ...next, settings: { ...next.settings, evenAndOddHeaders: true } };
+  }
+  return next;
 }
 
 /**
@@ -1792,8 +2315,13 @@ function sanitizeStreamingOptions(options: StreamingDocxOptions): StreamingDocxO
   if (options.images && options.images.length > 0) {
     const used = new Set<string>();
     let mutated = false;
-    const images = options.images.map(img => {
+    const images = options.images.map((img, i) => {
       const safe = uniqueSanitizedName(img.fileName, used, "image.bin");
+      assertWritableImage(
+        { fileName: safe, mediaType: img.mediaType, contentType: img.contentType },
+        "new Stream.DocumentWriter",
+        `options.images[${i}]`
+      );
       if (safe !== img.fileName) {
         mutated = true;
         return { ...img, fileName: safe };

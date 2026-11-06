@@ -16,6 +16,7 @@ import { WorksheetReader } from "@excel/stream/worksheet-reader";
  * buffered reader rather than assumed, and the reason `row` is the only event kind emitted here.
  */
 import { streamXlsbRows } from "@excel/stream/xlsb-worksheet-reader";
+import { xlsbPartError } from "@excel/utils/file-content-errors";
 
 /** What the workbook reader must supply for a binary sheet's cells to be resolvable. */
 export interface XlsbWorksheetContext {
@@ -30,6 +31,11 @@ export interface XlsbWorksheetContext {
 }
 
 class XlsbWorksheetReader extends WorksheetReader {
+  /** A position in the binary part is its `XlsbParseError`, as the buffered XLSB reader reports it. */
+  protected override partError(error: unknown): unknown {
+    return xlsbPartError(error, this.xlsbContext?.part ?? `xl/worksheets/sheet${this.sheetNo}.bin`);
+  }
+
   /**
    * Set by the workbook reader after construction.
    *
@@ -45,7 +51,7 @@ class XlsbWorksheetReader extends WorksheetReader {
    * container writes one loop. `worksheets: "ignore"` returns immediately, which is what makes a package's other
    * sheets skippable without decoding them.
    */
-  async *parse(): AsyncIterableIterator<WorksheetEvent[]> {
+  protected override async *_parseEvents(): AsyncIterableIterator<WorksheetEvent[]> {
     if (this.options.worksheets !== "emit") {
       return;
     }

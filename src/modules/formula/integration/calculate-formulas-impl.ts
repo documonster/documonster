@@ -52,6 +52,7 @@ import {
 import {
   buildWritebackPlan,
   isGhostUnmodified,
+  withStoredSpills,
   shouldPreserveCompileFailure
 } from "@formula/materialize/build-writeback-plan";
 import type { WritebackPlan } from "@formula/materialize/writeback-plan";
@@ -72,6 +73,7 @@ import {
 import type { AstNode } from "@formula/syntax/ast";
 import { parse } from "@formula/syntax/parser";
 import { tokenize } from "@formula/syntax/tokenizer";
+import { sheetNameKey } from "@utils/name-key";
 
 // ============================================================================
 // AST Cache
@@ -116,6 +118,8 @@ export function calculateFormulasImpl(
   const astCache = state.astCache;
   const compiledMap = new Map<string, CompiledFormula>();
   const volatileHostFunctions = new Set<string>();
+  // The host's functions by upper-case name, each with whether it returns an array — what the spill decision reads.
+  const registered = hostFunctions === undefined ? undefined : upperCaseNames(hostFunctions);
   for (const [name, descriptor] of hostFunctions ?? []) {
     if (descriptor.volatile) {
       volatileHostFunctions.add(name.toUpperCase());
@@ -125,7 +129,7 @@ export function calculateFormulasImpl(
   const results = new Map<string, RuntimeValue>();
   for (const inst of instances) {
     const ast = parseFormulaText(inst.sourceText, astCache);
-    const compiled = compileFormula(inst, ast, snapshot, volatileHostFunctions);
+    const compiled = compileFormula(inst, ast, snapshot, volatileHostFunctions, registered);
     const key = formulaCellKey(inst.sheetName, inst.row, inst.col);
     if ("reason" in compiled) {
       failedInstances.push(inst);
@@ -144,6 +148,8 @@ export function calculateFormulasImpl(
   //   (b) previous-cycle spill ghost cells
   // correctly get ordered after their producing formula.
   const producerMap = new Map<string, string>();
+  // The previous calculation's spills, and the spill a file stored for a dynamic array not calculated since.
+  const previousSpills = withStoredSpills(state.spillRegions, [...compiledMap.values()]);
 
   // CSE: distribute targetRef across all slave cells → master key
   for (const [masterKey, cf] of compiledMap) {
@@ -167,8 +173,7 @@ export function calculateFormulasImpl(
   // for dependency ordering. The actual spill may differ this cycle — if the
   // master formula is no longer a dynamic-array producer, skip it so stale
   // ghost cells don't introduce false edges.
-  const persistentSpills = state.spillRegions;
-  for (const [, region] of persistentSpills) {
+  for (const [, region] of previousSpills) {
     const ws = snapshot.worksheetsById.get(region.worksheetId);
     if (!ws) {
       continue;
@@ -205,7 +210,7 @@ export function calculateFormulasImpl(
   // Previous ghosts that still match the engine-owned value are logically
   // absent during this pass. A new spill may overwrite them; if its footprint
   // shrinks, downstream formulas must see blank rather than stale snapshot data.
-  for (const region of state.spillRegions.values()) {
+  for (const region of previousSpills.values()) {
     const ws = snapshot.worksheetsById.get(region.worksheetId);
     if (!ws) {
       continue;
@@ -239,7 +244,7 @@ export function calculateFormulasImpl(
       continue;
     }
     const cached = snapshot.worksheetsByName
-      .get(inst.sheetName.toLowerCase())
+      .get(sheetNameKey(inst.sheetName))
       ?.cells.get(snapshotCellKey(inst.row, inst.col))?.value;
     const seeded =
       value.kind === RVKind.Error &&
@@ -316,7 +321,6 @@ export function calculateFormulasImpl(
   }
 
   // ── Step 7: Materialize (Build Writeback Plan) ──
-  const previousSpills = state.spillRegions;
   const plan = buildWritebackPlan(
     snapshot,
     [...compiledMap.values()],
@@ -632,11 +636,22 @@ type CompileFailure =
   | { reason: "parse"; formula: string }
   | { reason: "bind"; formula: string; sheet: string };
 
+function upperCaseNames(
+  functions: ReadonlyMap<string, FormulaFunction>
+): ReadonlyMap<string, FormulaFunction> {
+  const out = new Map<string, FormulaFunction>();
+  for (const [name, descriptor] of functions) {
+    out.set(name.toUpperCase(), descriptor);
+  }
+  return out;
+}
+
 function compileFormula(
   inst: FormulaInstance,
   ast: AstNode | null,
   snapshot: WorkbookSnapshot,
-  volatileHostFunctions: ReadonlySet<string>
+  volatileHostFunctions: ReadonlySet<string>,
+  registered: ReadonlyMap<string, FormulaFunction> | undefined
 ): CompiledFormula | CompileFailure {
   if (!ast) {
     return { reason: "parse", formula: inst.sourceText };
@@ -653,9 +668,9 @@ function compileFormula(
     // Build a name resolver that parses formula-based defined names
     // so their deps and dynamic-ref flags propagate to the outer formula.
     const nameDepCache = new Map<string, ReturnType<NameDepResolver>>();
-    const nameResolver: NameDepResolver = upperName => {
+    const nameResolver: NameDepResolver = nameKey => {
       // Include sheet in cache key for scope-aware resolution
-      const cacheKey = `${upperName}\0${inst.sheetName}`;
+      const cacheKey = `${nameKey}\0${inst.sheetName}`;
       if (nameDepCache.has(cacheKey)) {
         return nameDepCache.get(cacheKey);
       }
@@ -663,7 +678,7 @@ function compileFormula(
       nameDepCache.set(cacheKey, undefined);
 
       // Use scope-aware resolution (sheet-local → workbook-global)
-      const dn = resolveDefinedName(snapshot.definedNames, upperName, inst.sheetName);
+      const dn = resolveDefinedName(snapshot.definedNames, nameKey, inst.sheetName);
       if (!dn || dn.ranges.length !== 1) {
         return undefined;
       }
@@ -703,7 +718,10 @@ function compileFormula(
       isVolatile: analysis.isVolatile,
       hasDynamicRefs: analysis.hasDynamicRefs,
       containsLambda: analysis.containsLambda,
-      isDynamicArrayFunction: detectDynamicArrayFunction(ast, bound),
+      // Inferred only where the host did not decide: a host that stores the formula as an ordinary one has Excel
+      // intersect its result, and the engine has to as well.
+      isDynamicArrayFunction:
+        inst.isDynamicArrayDeclared !== true && detectDynamicArrayFunction(ast, bound, registered),
       isSubtotalOutput: detectSubtotalOutput(ast, bound)
     };
   } catch {

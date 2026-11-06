@@ -1,5 +1,5 @@
 import { createBufferReader } from "@archive/io/random-access";
-import { RemoteZipReader, Crc32MismatchError } from "@archive/unzip/remote-zip-reader";
+import { RemoteZipReader, ZipCrc32MismatchError } from "@archive/unzip/remote-zip-reader";
 import type { ZipEntry } from "@archive/zip/zip-bytes";
 import { createZip } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
@@ -127,12 +127,12 @@ describe("RemoteZipReader", () => {
       await reader.close();
     });
 
-    it("should return null for non-existent entry", async () => {
+    it("should return undefined for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "exists.txt": "data" }));
       const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.extract("not-exists.txt");
-      expect(result).toBeNull();
+      expect(result).toBeUndefined();
 
       await reader.close();
     });
@@ -382,6 +382,34 @@ describe("RemoteZipReader", () => {
 
       await reader.close();
     });
+
+    it("matches globs by the shared rules: **/ includes the root, ? stays in one segment", async () => {
+      const zipData = await createZip(
+        toEntries({
+          "data.json": "1",
+          "a/data.json": "2",
+          "a/b/data.json": "3",
+          "ab/x": "4",
+          "a/x": "5",
+          ".hidden.txt": "6",
+          "q+(1).txt": "7"
+        })
+      );
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
+      const paths = (pattern: string) =>
+        reader
+          .findEntries(pattern)
+          .map(e => e.path)
+          .sort();
+
+      expect(paths("**/data.json")).toEqual(["a/b/data.json", "a/data.json", "data.json"]);
+      expect(paths("a?x")).toEqual([]);
+      expect(paths("a?/x")).toEqual(["ab/x"]);
+      expect(paths("*.txt")).toEqual([".hidden.txt", "q+(1).txt"]);
+      expect(paths("q+(1).txt")).toEqual(["q+(1).txt"]);
+
+      await reader.close();
+    });
   });
 
   describe("getStats", () => {
@@ -449,7 +477,7 @@ describe("RemoteZipReader", () => {
       });
       const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
-      const data = await reader.extract("secret.txt", password);
+      const data = await reader.extract("secret.txt", { password });
       expect(new TextDecoder().decode(data!)).toBe(content);
 
       await reader.close();
@@ -673,7 +701,7 @@ describe("RemoteZipReader.open", () => {
       expect(result).toBe(true);
 
       const notFound = await reader.verifyCrc32("missing.txt");
-      expect(notFound).toBeNull();
+      expect(notFound).toBeUndefined();
 
       await reader.close();
     });
@@ -900,11 +928,11 @@ describe("RemoteZipReader.open", () => {
     });
   });
 
-  describe("Crc32MismatchError", () => {
+  describe("ZipCrc32MismatchError", () => {
     it("should have correct error properties", () => {
-      const error = new Crc32MismatchError("test.txt", 0x12345678, 0xabcdef01);
+      const error = new ZipCrc32MismatchError("test.txt", 0x12345678, 0xabcdef01);
 
-      expect(error.name).toBe("Crc32MismatchError");
+      expect(error.name).toBe("ZipCrc32MismatchError");
       expect(error.path).toBe("test.txt");
       expect(error.expected).toBe(0x12345678);
       expect(error.actual).toBe(0xabcdef01);
@@ -925,12 +953,12 @@ describe("RemoteZipReader.open", () => {
       await reader.close();
     });
 
-    it("should return null for non-existent entry", async () => {
+    it("should return undefined for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "content" }));
       const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.verifyCrc32("missing.txt");
-      expect(result).toBeNull();
+      expect(result).toBeUndefined();
 
       await reader.close();
     });

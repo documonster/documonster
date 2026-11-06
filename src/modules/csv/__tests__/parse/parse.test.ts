@@ -13,7 +13,7 @@
  * 6. Spaces are part of the field and should not be trimmed
  */
 
-import { Csv } from "@csv/index";
+import { Csv, CsvError, CsvLimitExceededError } from "@csv/index";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
@@ -389,6 +389,21 @@ describe("Max Row Bytes", () => {
     );
   });
 
+  it.each([false, true])(
+    "reports the limit as a CsvLimitExceededError naming it (fastMode: %s)",
+    fastMode => {
+      let error: unknown;
+      try {
+        Csv.parse("a,b,c\n123456789,data,more", { maxRowBytes: 10, fastMode });
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(CsvLimitExceededError);
+      expect(error).toBeInstanceOf(CsvError);
+      expect(error).toMatchObject({ limit: "maxRowBytes", allowed: 10 });
+    }
+  );
+
   it("should allow rows under maxRowBytes limit", () => {
     const input = "a,b,c\n1,2,3";
     const result = Csv.parse(input, { maxRowBytes: 100 });
@@ -457,13 +472,13 @@ describe("fastMode", () => {
 });
 
 // =============================================================================
-// Csv.parseRows (Async Generator)
+// Csv.parseStream (Async Generator)
 // =============================================================================
 describe("parseCsvRows", () => {
   it("should parse CSV with async generator", async () => {
     const input = "a,b,c\n1,2,3\n4,5,6";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input)) {
+    for await (const row of Csv.parseStream(input)) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -476,7 +491,7 @@ describe("parseCsvRows", () => {
   it("should support headers in async generator", async () => {
     const input = "name,age\nAlice,30\nBob,25";
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(input, { headers: true })) {
+    for await (const row of Csv.parseStream(input, { headers: true })) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -492,7 +507,7 @@ describe("parseCsvRows", () => {
       yield "4,5,6";
     }
     const rows: any[] = [];
-    for await (const row of Csv.parseRows(generateChunks())) {
+    for await (const row of Csv.parseStream(generateChunks())) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -514,7 +529,7 @@ describe("parseCsvRows", () => {
       }
     }
 
-    const iterator = Csv.parseRows(generateChunks())[Symbol.asyncIterator]();
+    const iterator = Csv.parseStream(generateChunks())[Symbol.asyncIterator]();
     await iterator.next();
     await new Promise(resolve => setTimeout(resolve, 100));
     const readAhead = produced;
@@ -524,7 +539,7 @@ describe("parseCsvRows", () => {
     expect(readAhead).toBeLessThan(total / 4);
 
     let consumed = 0;
-    for await (const _row of Csv.parseRows(generateChunks())) {
+    for await (const _row of Csv.parseStream(generateChunks())) {
       consumed++;
     }
     expect(consumed).toBe(total);

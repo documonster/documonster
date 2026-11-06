@@ -6,19 +6,46 @@
  * opaque chart drawings with parsed Chart instances.
  */
 
+import { NS_A, NS_C_CHART, NS_R } from "@word/constants";
+import { WRITTEN, readToken } from "@word/core/argument-checks";
+import {
+  axisKeys,
+  chartGroupKey,
+  chartKeys,
+  chartSpaceKeys,
+  groupDataLabelsKeys,
+  legendKeys,
+  plotAreaKeys,
+  pointKey,
+  scalingKeys,
+  seriesDataLabelsKeys,
+  seriesKeys,
+  titleKeys
+} from "@word/core/chart-kept";
+import type { ChartFieldKeys } from "@word/core/chart-kept";
 import type { Mutable } from "@word/core/internal-utils";
 import { DocxLimitExceededError } from "@word/errors";
+import { frameFieldsOf, readDrawingFrame } from "@word/reader/drawing-frame";
 import {
   findChildLocal as findChartChild,
   findChildrenLocal as findAllChartChildren,
   localName
 } from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
+import {
+  namespacesInScope,
+  preservedRootXml,
+  serializeSelfContained
+} from "@word/reader/preserved-xml";
 import type {
   BodyContent,
   Chart,
   ChartAxis,
   ChartContent,
+  ChartKept,
+  ChartKeptAxis,
+  ChartKeptElement,
+  ChartKeptNode,
   ChartDataLabelPosition,
   ChartDataLabels,
   ChartErrorBarDirection,
@@ -33,10 +60,23 @@ import type {
   ChartTrendlineType,
   ChartType,
   Emu,
-  OpaqueDrawing
+  OpaqueDrawing,
+  OpaqueRelationship,
+  PreservedXml
 } from "@word/types";
 import { textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
+
+/** The `ST_DLblPos` values the model names, by the part's value. */
+const DATA_LABEL_POSITION_FROM_PART: Readonly<Record<string, ChartDataLabelPosition>> = {
+  outEnd: "outsideEnd",
+  ctr: "center",
+  inEnd: "insideEnd",
+  bestFit: "bestFit"
+};
+const DATA_LABEL_POSITIONS_READ: ReadonlySet<string> = new Set(
+  Object.keys(DATA_LABEL_POSITION_FROM_PART)
+);
 
 // =============================================================================
 // Chart Reader
@@ -75,6 +115,45 @@ function extractDrawingExtent(rawXml: string): { width: Emu; height: Emu } | und
   return { width: cx, height: cy };
 }
 
+/**
+ * `content` with the name, alt text and frame of the drawing `rawXml` (a
+ * `w:drawing`) it was read from, so the chart is written back in the frame it
+ * had — anchored or inline, with its spacing and extent.
+ */
+function withChartFrame<T extends ChartContent | ChartExContent>(
+  content: T,
+  rawXml: string,
+  size: (content: T) => { width?: number; height?: number }
+): T {
+  let frameEl: XmlElement | undefined;
+  try {
+    const root = parsePartXml(rawXml, undefined).root;
+    frameEl = root.children.find(
+      (c): c is XmlElement =>
+        c.type === "element" && (c.name === "wp:inline" || c.name === "wp:anchor")
+    );
+  } catch {
+    return content;
+  }
+  if (!frameEl) {
+    return content;
+  }
+  const docPr = frameEl.children.find(
+    (c): c is XmlElement => c.type === "element" && c.name === "wp:docPr"
+  );
+  const named: T = {
+    ...content,
+    ...(content.name === undefined && docPr?.attributes["name"] !== undefined
+      ? { name: docPr.attributes["name"] }
+      : {}),
+    ...(content.altText === undefined && docPr?.attributes["descr"] !== undefined
+      ? { altText: docPr.attributes["descr"] }
+      : {})
+  };
+  const fields = { ...size(named), name: named.name, altText: named.altText };
+  return { ...named, _frame: readDrawingFrame(frameEl, frameFieldsOf(fields)) };
+}
+
 /** Replace OpaqueDrawing items referencing chart rIds with ChartContent. */
 function replaceOpaqueCharts(body: BodyContent[], chartRIdToChart: Map<string, Chart>): void {
   for (let i = 0; i < body.length; i++) {
@@ -94,7 +173,11 @@ function replaceOpaqueCharts(body: BodyContent[], chartRIdToChart: Map<string, C
           extent && chart.width == null && chart.height == null
             ? { ...chart, width: extent.width, height: extent.height }
             : chart;
-        body[i] = { type: "chart", chart: enrichedChart } as ChartContent;
+        body[i] = withChartFrame(
+          { type: "chart", chart: enrichedChart } as ChartContent,
+          item.rawXml,
+          content => ({ width: content.chart.width, height: content.chart.height })
+        );
       }
     }
   }
@@ -124,7 +207,10 @@ function replaceOpaqueChartExDrawings(
       for (const rId of item.referencedRIds) {
         if (chartExRIdToContent.has(rId)) {
           const content = chartExRIdToContent.get(rId)!;
-          body[i] = content;
+          body[i] = withChartFrame(content, item.rawXml, c => ({
+            width: c.width,
+            height: c.height
+          }));
           break;
         }
       }
@@ -181,8 +267,90 @@ function resolveChartType(
   }
 }
 
-/** Parse a chart part XML string into a Chart object. */
-function parseChartXml(xmlStr: string, maxDepth?: number): Chart | undefined {
+/** The chart group elements the model reads, by local name. */
+const CHART_TAGS: ReadonlySet<string> = new Set([
+  "barChart",
+  "bar3DChart",
+  "lineChart",
+  "line3DChart",
+  "areaChart",
+  "area3DChart",
+  "pieChart",
+  "pie3DChart",
+  "doughnutChart",
+  "scatterChart",
+  "radarChart",
+  "bubbleChart",
+  "stockChart",
+  "surfaceChart",
+  "surface3DChart"
+]);
+
+const AXIS_TAGS: ReadonlySet<string> = new Set(["catAx", "valAx", "dateAx", "serAx"]);
+
+type Scope = Readonly<Record<string, string>>;
+
+/** A chart group as read: its element, type, axes and series elements. */
+interface ReadGroup {
+  readonly el: XmlElement;
+  readonly scope: Scope;
+  readonly type: ChartType;
+  readonly axIds: readonly string[];
+  readonly secondary: boolean;
+  readonly seriesEls: readonly XmlElement[];
+}
+
+function readGroupType(el: XmlElement, seriesEls: readonly XmlElement[]): ChartType {
+  const tag = localName(el.name);
+  const val = (name: string) => findChartChild(el, name)?.attributes["val"];
+  const wireframe = val("wireframe") === "1" || val("wireframe") === "true";
+  let type = resolveChartType(tag, val("grouping"), val("barDir"), {
+    radarStyle: val("radarStyle"),
+    wireframe
+  });
+  const marked = seriesEls.some(ser => {
+    const symbol = findChartChild(findChartChild(ser, "marker") ?? ser, "symbol");
+    return symbol !== undefined && symbol.attributes["val"] !== "none";
+  });
+  if (type === "line" && marked) {
+    type = "lineMarked";
+  }
+  if (tag === "scatterChart" && val("scatterStyle") === "smoothMarker") {
+    type = "scatterSmooth";
+  }
+  return type;
+}
+
+/** The `val` of `el`'s `c:style`, `c14:style` or `mc:AlternateContent`-wrapped style. */
+function readStyle(root: XmlElement): number | undefined {
+  const parse = (el: XmlElement | undefined): number | undefined => {
+    const n = parseInt(el?.attributes["val"] ?? "", 10);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const direct = parse(findChartChild(root, "style"));
+  if (direct !== undefined) {
+    return direct;
+  }
+  const alternate = findChartChild(root, "AlternateContent");
+  if (!alternate) {
+    return undefined;
+  }
+  return (
+    parse(findChartChild(findChartChild(alternate, "Choice") ?? alternate, "style")) ??
+    parse(findChartChild(findChartChild(alternate, "Fallback") ?? alternate, "style"))
+  );
+}
+
+/**
+ * Parse a chart part XML string into a Chart object. Every element the model
+ * has no field for is kept on `_kept` (see `ChartKept`), with
+ * `relationships`, the part's own relationships.
+ */
+function parseChartXml(
+  xmlStr: string,
+  maxDepth?: number,
+  relationships?: readonly OpaqueRelationship[]
+): Chart | undefined {
   let doc: ReturnType<typeof parsePartXml>;
   try {
     doc = parsePartXml(xmlStr, maxDepth);
@@ -199,203 +367,126 @@ function parseChartXml(xmlStr: string, maxDepth?: number): Chart | undefined {
   if (!chartEl) {
     return undefined;
   }
-
-  // Title
-  const titleEl = findChartChild(chartEl, "title");
-  let title: string | undefined;
-  if (titleEl) {
-    title = extractChartText(titleEl);
-  }
-
-  // 3D view
-  const view3dEl = findChartChild(chartEl, "view3D");
-  const view3d = !!view3dEl;
-
-  // Plot area
   const plotAreaEl = findChartChild(chartEl, "plotArea");
   if (!plotAreaEl) {
     return undefined;
   }
+  const rootScope = namespacesInScope({}, root);
+  const keeper = createKeeper(rootScope);
+  const chartScope = namespacesInScope(rootScope, chartEl);
+  const plotAreaScope = namespacesInScope(chartScope, plotAreaEl);
 
-  // Find the chart type element within plotArea
-  const CHART_TAGS = [
-    "barChart",
-    "bar3DChart",
-    "lineChart",
-    "line3DChart",
-    "areaChart",
-    "area3DChart",
-    "pieChart",
-    "pie3DChart",
-    "doughnutChart",
-    "scatterChart",
-    "radarChart",
-    "bubbleChart",
-    "stockChart",
-    "surfaceChart",
-    "surface3DChart"
-  ];
-  let chartTypeEl: XmlElement | undefined;
-  let chartTag = "";
-  for (const tag of CHART_TAGS) {
-    chartTypeEl = findChartChild(plotAreaEl, tag);
-    if (chartTypeEl) {
-      chartTag = tag;
-      break;
+  // Chart groups: the first gives the chart's type and primary axes; a group
+  // on other axes is on the secondary ones.
+  const groups: ReadGroup[] = [];
+  for (const el of elementChildren(plotAreaEl)) {
+    if (!CHART_TAGS.has(localName(el.name))) {
+      continue;
     }
+    const seriesEls = elementChildren(el).filter(child => localName(child.name) === "ser");
+    const axIds = elementChildren(el)
+      .filter(child => localName(child.name) === "axId")
+      .map(child => child.attributes["val"] ?? "");
+    const primary = groups[0]?.axIds;
+    const secondary = primary !== undefined && (axIds[0] !== primary[0] || axIds[1] !== primary[1]);
+    groups.push({
+      el,
+      scope: namespacesInScope(plotAreaScope, el),
+      type: readGroupType(el, seriesEls),
+      axIds,
+      secondary,
+      seriesEls
+    });
   }
-
-  if (!chartTypeEl) {
+  const first = groups[0];
+  if (!first) {
     return undefined;
   }
+  const chartType = first.type;
 
-  // Grouping and direction
-  const groupingEl = findChartChild(chartTypeEl, "grouping");
-  const grouping = groupingEl?.attributes["val"] ?? undefined;
-  const barDirEl = findChartChild(chartTypeEl, "barDir");
-  const direction = barDirEl?.attributes["val"] ?? undefined;
-
-  // Detect radar style (filled vs standard)
-  const radarStyleEl = findChartChild(chartTypeEl, "radarStyle");
-  const radarStyle = radarStyleEl?.attributes["val"] ?? undefined;
-
-  // Detect wireframe (surface charts)
-  const wireframeEl = findChartChild(chartTypeEl, "wireframe");
-  const wireframe =
-    wireframeEl?.attributes["val"] === "1" || wireframeEl?.attributes["val"] === "true";
-
-  // Detect marked line (marker symbol != "none")
-  let isMarked = false;
-
-  // Parse series
-  const series: ChartSeries[] = [];
-  for (const child of chartTypeEl.children) {
-    if (child.type !== "element") {
-      continue;
-    }
-    if (localName(child.name) !== "ser") {
-      continue;
-    }
-    const s = parseChartSeries(child, chartTag);
-    if (s) {
-      series.push(s);
-      // Detect marked line
-      const markerEl = findChartChild(child, "marker");
-      if (markerEl) {
-        const symbolEl = findChartChild(markerEl, "symbol");
-        if (symbolEl && symbolEl.attributes["val"] !== "none") {
-          isMarked = true;
-        }
+  // Series, with the type and axis of their group where it is not the chart's.
+  const series: { series: ChartSeries; el: XmlElement; group: ReadGroup }[] = [];
+  for (const group of groups) {
+    for (const el of group.seriesEls) {
+      const s = parseChartSeries(el, localName(group.el.name));
+      if (s) {
+        series.push({
+          series: {
+            ...s,
+            ...(group.type !== chartType && { chartType: group.type }),
+            ...(group.secondary && { plotOnSecondaryAxis: true })
+          },
+          el,
+          group
+        });
       }
     }
   }
 
-  // Resolve chart type
-  let chartType = resolveChartType(chartTag, grouping, direction, { radarStyle, wireframe });
-  if (chartType === "line" && isMarked) {
-    chartType = "lineMarked";
-  }
+  // Axes, by the role their id plays in the groups.
+  const secondaryIds = groups.find(g => g.secondary)?.axIds;
+  const roleOf = (id: string): ChartKeptAxis["role"] =>
+    id === first.axIds[0]
+      ? "category"
+      : id === first.axIds[1]
+        ? "value"
+        : secondaryIds && id === secondaryIds[0]
+          ? "secondaryCategory"
+          : secondaryIds && id === secondaryIds[1]
+            ? "secondaryValue"
+            : undefined;
+  const axisEls = elementChildren(plotAreaEl)
+    .filter(el => AXIS_TAGS.has(localName(el.name)))
+    .map(el => {
+      const id = findChartChild(el, "axId")?.attributes["val"] ?? "";
+      const role = localName(el.name) === "serAx" ? undefined : roleOf(id);
+      return { el, id, role, axis: role === "secondaryCategory" ? undefined : parseChartAxis(el) };
+    });
+  const axisFor = (role: ChartKeptAxis["role"]) => axisEls.find(a => a.role === role)?.axis;
+  const categoryAxis = axisFor("category");
+  const valueAxis = axisFor("value");
+  const secondaryValueAxis = axisFor("secondaryValue");
 
-  // Scatter smooth detection
-  if (chartTag === "scatterChart") {
-    const styleEl = findChartChild(chartTypeEl, "scatterStyle");
-    if (styleEl?.attributes["val"] === "smoothMarker") {
-      chartType = "scatterSmooth";
-    }
-  }
+  // Title
+  const titleEl = findChartChild(chartEl, "title");
+  const title = titleEl ? extractChartText(titleEl) : undefined;
 
-  // Parse axes
-  const catAxEl = findChartChild(plotAreaEl, "catAx") ?? findChartChild(plotAreaEl, "dateAx");
-  const valAxEl = findChartChild(plotAreaEl, "valAx");
-  const categoryAxis = catAxEl ? parseChartAxis(catAxEl) : undefined;
-  const valueAxis = valAxEl ? parseChartAxis(valAxEl) : undefined;
+  // 3D view
+  const view3d = !!findChartChild(chartEl, "view3D");
 
-  // Secondary value axis (second c:valAx in plotArea)
-  let secondaryValueAxis: ChartAxis | undefined;
-  const allValAxEls: XmlElement[] = [];
-  for (const child of plotAreaEl.children) {
-    if (child.type === "element" && localName(child.name) === "valAx") {
-      allValAxEls.push(child);
-    }
-  }
-  if (allValAxEls.length >= 2) {
-    secondaryValueAxis = parseChartAxis(allValAxEls[1]);
-  }
-
-  // Chart-level data labels (from chart type element)
-  let dataLabels: ChartDataLabels | undefined;
-  const chartDLblsEl = findChartChild(chartTypeEl, "dLbls");
-  if (chartDLblsEl) {
-    const dl: Mutable<ChartDataLabels> = {};
-    let hasDl = false;
-    const showValEl2 = findChartChild(chartDLblsEl, "showVal");
-    if (showValEl2?.attributes["val"] === "1") {
-      dl.showValue = true;
-      hasDl = true;
-    }
-    const showCatEl = findChartChild(chartDLblsEl, "showCatName");
-    if (showCatEl?.attributes["val"] === "1") {
-      dl.showCategory = true;
-      hasDl = true;
-    }
-    const showSerEl = findChartChild(chartDLblsEl, "showSerName");
-    if (showSerEl?.attributes["val"] === "1") {
-      dl.showSerName = true;
-      hasDl = true;
-    }
-    const showPctEl = findChartChild(chartDLblsEl, "showPercent");
-    if (showPctEl?.attributes["val"] === "1") {
-      dl.showPercent = true;
-      hasDl = true;
-    }
-    const dlPosEl = findChartChild(chartDLblsEl, "dLblPos");
-    if (dlPosEl?.attributes["val"]) {
-      dl.position = dlPosEl.attributes["val"] as ChartDataLabelPosition;
-      hasDl = true;
-    }
-    if (hasDl) {
-      dataLabels = dl;
-    }
-  }
+  // Chart-level data labels (from the first group)
+  const dataLabels = readGroupDataLabels(findChartChild(first.el, "dLbls"));
 
   // Legend
   const legendEl = findChartChild(chartEl, "legend");
-  let legend: ChartLegendPosition | undefined;
+  // A chart without `c:legend` shows none: read as "none", or the writer's
+  // default would give it one.
+  let legend: ChartLegendPosition | undefined = "none";
+  const unrecognized: object = {};
   if (legendEl) {
     const posEl = findChartChild(legendEl, "legendPos");
-    legend = (posEl?.attributes["val"] as ChartLegendPosition) ?? "r";
+    legend = readToken(
+      posEl?.attributes["val"] ?? "r",
+      WRITTEN.legendPosition,
+      unrecognized,
+      "legend"
+    ) as ChartLegendPosition | undefined;
   }
 
   // Plot area color
-  let plotAreaColor: string | undefined;
   const plotSpPrEl = findChartChild(plotAreaEl, "spPr");
-  if (plotSpPrEl) {
-    plotAreaColor = extractSolidFillColor(plotSpPrEl);
-  }
+  const plotAreaColor = plotSpPrEl ? extractSolidFillColor(plotSpPrEl) : undefined;
 
   // Chart area color (from c:chartSpace > c:spPr)
-  let chartAreaColor: string | undefined;
   const chartSpPrEl = findChartChild(root, "spPr");
-  if (chartSpPrEl) {
-    chartAreaColor = extractSolidFillColor(chartSpPrEl);
-  }
+  const chartAreaColor = chartSpPrEl ? extractSolidFillColor(chartSpPrEl) : undefined;
 
-  // Style
-  let style: number | undefined;
-  const styleEl = findChartChild(root, "style");
-  if (styleEl) {
-    const v = styleEl.attributes["val"];
-    if (v) {
-      const n = parseInt(v, 10);
-      if (Number.isFinite(n)) {
-        style = n;
-      }
-    }
-  }
+  const style = readStyle(root);
 
   const chart: Chart = {
+    ...unrecognized,
     type: chartType,
-    series,
+    series: series.map(s => s.series),
     ...(title !== undefined && { title }),
     ...(legend !== undefined && { legend }),
     ...(dataLabels !== undefined && { dataLabels }),
@@ -408,7 +499,134 @@ function parseChartXml(xmlStr: string, maxDepth?: number): Chart | undefined {
     ...(style !== undefined && { style })
   };
 
-  return chart;
+  // Everything else, keyed by the fields just read (see `core/chart-kept.ts`).
+  const keptSeries = series.map(({ series: s, el, group }, index) => {
+    const node = keeper.node(el, group.scope, ["dLbls"], seriesKeys(s, index, group.type));
+    const serScope = namespacesInScope(group.scope, el);
+    const dLblsEl = findChartChild(el, "dLbls");
+    const dataLabelsNode = dLblsEl
+      ? keeper.node(dLblsEl, serScope, [], seriesDataLabelsKeys(s))
+      : undefined;
+    const withPoints: ChartKeptNode = {
+      ...node,
+      children: node.children.map((child, i) => {
+        if (child.name !== "dPt") {
+          return child;
+        }
+        const dPt = elementChildren(el)[i]!;
+        const pointIdx = pointIndex(dPt);
+        const spPr = findChartChild(dPt, "spPr");
+        const spPrXml = spPr
+          ? keeper.element(spPr, namespacesInScope(serScope, dPt)).xml
+          : undefined;
+        return {
+          ...child,
+          ...(pointIdx !== undefined && { index: pointIdx, read: pointKey(s, pointIdx) }),
+          ...(spPrXml !== undefined && { spPr: spPrXml })
+        };
+      })
+    };
+    return {
+      ...s,
+      _kept: { node: withPoints, ...(dataLabelsNode && { dataLabels: dataLabelsNode }) }
+    };
+  });
+
+  const legendNode = legendEl
+    ? keeper.node(legendEl, chartScope, [], legendKeys(chart))
+    : undefined;
+  const titleNode = titleEl ? keeper.node(titleEl, chartScope, [], titleKeys(title)) : undefined;
+  const declarations = rootDeclarations(root);
+  const kept: ChartKept = {
+    ...(declarations && { root: declarations }),
+    space: keeper.node(root, {}, ["chart"], chartSpaceKeys(chart)),
+    chart: keeper.node(chartEl, rootScope, ["title", "plotArea", "legend"], chartKeys(chart)),
+    ...(titleNode && { title: titleNode }),
+    plotArea: keeper.node(
+      plotAreaEl,
+      chartScope,
+      [...CHART_TAGS, ...AXIS_TAGS],
+      plotAreaKeys(chart)
+    ),
+    ...(legendNode && { legend: legendNode }),
+    groups: groups.map(group => {
+      const dLblsEl = findChartChild(group.el, "dLbls");
+      return {
+        key: chartGroupKey(group.type, group.secondary),
+        node: keeper.node(group.el, plotAreaScope, ["ser", "dLbls"], {}),
+        ...(dLblsEl && {
+          dataLabels: keeper.node(dLblsEl, group.scope, [], groupDataLabelsKeys(dataLabels))
+        })
+      };
+    }),
+    axes: axisEls.map(({ el, id, role, axis }) => {
+      if (role === undefined) {
+        const verbatim = keeper.element(el, plotAreaScope);
+        return {
+          id,
+          node: keeper.node(el, plotAreaScope, [], {}),
+          xml: verbatim.xml,
+          ...(verbatim.rIds && { rIds: verbatim.rIds })
+        };
+      }
+      const axisScope = namespacesInScope(plotAreaScope, el);
+      const scalingEl = findChartChild(el, "scaling");
+      const axisTitleEl = findChartChild(el, "title");
+      return {
+        id,
+        role,
+        node: keeper.node(el, plotAreaScope, ["scaling", "title"], axisKeys(axis, role)),
+        ...(scalingEl && { scaling: keeper.node(scalingEl, axisScope, [], scalingKeys(axis)) }),
+        ...(axisTitleEl && {
+          title: keeper.node(axisTitleEl, axisScope, [], titleKeys(axis?.title))
+        })
+      };
+    }),
+    ...(relationships && relationships.length > 0 && { relationships })
+  };
+
+  return { ...chart, series: keptSeries, _kept: kept };
+}
+
+/** The chart-level data labels a group's `c:dLbls` sets. */
+function readGroupDataLabels(chartDLblsEl: XmlElement | undefined): ChartDataLabels | undefined {
+  if (!chartDLblsEl) {
+    return undefined;
+  }
+  const dl: Mutable<ChartDataLabels> = {};
+  let hasDl = false;
+  const on = (name: string) => findChartChild(chartDLblsEl, name)?.attributes["val"] === "1";
+  if (on("showVal")) {
+    dl.showValue = true;
+    hasDl = true;
+  }
+  if (on("showCatName")) {
+    dl.showCategory = true;
+    hasDl = true;
+  }
+  if (on("showSerName")) {
+    dl.showSerName = true;
+    hasDl = true;
+  }
+  if (on("showPercent")) {
+    dl.showPercent = true;
+    hasDl = true;
+  }
+  const dlPosEl = findChartChild(chartDLblsEl, "dLblPos");
+  if (dlPosEl?.attributes["val"]) {
+    // The part holds `ST_DLblPos`; the model names four of its values.
+    const position = readToken(
+      dlPosEl.attributes["val"],
+      DATA_LABEL_POSITIONS_READ,
+      dl,
+      "position"
+    );
+    if (position !== undefined) {
+      dl.position = DATA_LABEL_POSITION_FROM_PART[position];
+    }
+    hasDl = true;
+  }
+  return hasDl ? dl : undefined;
 }
 
 /** Extract text from a chart title element. */
@@ -528,21 +746,22 @@ function parseChartSeries(serEl: XmlElement, chartTag: string): ChartSeries | un
   const spPrEl = findChartChild(serEl, "spPr");
   const color = spPrEl ? extractSolidFillColor(spPrEl) : undefined;
 
-  // Per-point colors
+  // Per-point colors, by `c:idx`: entry i is point i's colour, a point with
+  // none of its own is a hole. An index past the series' points colours
+  // nothing (and would grow the array without bound); the `c:dPt` is kept.
+  const pointCount = Math.max(values.length, categories.length);
   const pointColors: string[] = [];
+  let hasPointColor = false;
   for (const child of serEl.children) {
-    if (child.type !== "element") {
+    if (child.type !== "element" || localName(child.name) !== "dPt") {
       continue;
     }
-    if (localName(child.name) !== "dPt") {
-      continue;
-    }
+    const index = pointIndex(child);
     const ptSpPr = findChartChild(child, "spPr");
-    if (ptSpPr) {
-      const c = extractSolidFillColor(ptSpPr);
-      if (c) {
-        pointColors.push(c);
-      }
+    const c = ptSpPr ? extractSolidFillColor(ptSpPr) : undefined;
+    if (c !== undefined && index !== undefined && index < pointCount) {
+      pointColors[index] = c;
+      hasPointColor = true;
     }
   }
 
@@ -606,7 +825,7 @@ function parseChartSeries(serEl: XmlElement, chartTag: string): ChartSeries | un
     categories,
     values,
     ...(color !== undefined && { color }),
-    ...(pointColors.length > 0 && { pointColors }),
+    ...(hasPointColor && { pointColors }),
     ...(showDataLabels && { showDataLabels }),
     ...(trendline !== undefined && { trendline }),
     ...(errorBars !== undefined && { errorBars })
@@ -704,6 +923,93 @@ function parseChartAxis(axEl: XmlElement): ChartAxis | undefined {
   }
 
   return hasAny ? axis : undefined;
+}
+
+/** The namespaces the chart writer declares on `c:chartSpace` itself. */
+const WRITER_ROOT_NAMESPACES: Readonly<Record<string, string>> = {
+  c: NS_C_CHART,
+  a: NS_A,
+  r: NS_R
+};
+
+function elementChildren(el: XmlElement): XmlElement[] {
+  return el.children.filter((child): child is XmlElement => child.type === "element");
+}
+
+/** A `c:dPt`'s `c:idx`, or `undefined` when it has no usable one. */
+function pointIndex(dPt: XmlElement): number | undefined {
+  const raw = findChartChild(dPt, "idx")?.attributes["val"];
+  const index = raw === undefined || !/^\d+$/.test(raw) ? Number.NaN : Number(raw);
+  return Number.isSafeInteger(index) ? index : undefined;
+}
+
+/** The part root's namespace declarations and `mc:Ignorable`, which the writer re-declares. */
+function rootDeclarations(root: XmlElement): PreservedXml | undefined {
+  return preservedRootXml(root, () => true);
+}
+
+/**
+ * Serializes kept chart elements. Each declares the namespace prefixes it
+ * uses that the written root will not — the writer declares `c`, `a`, `r`
+ * and the source root's own declarations — and records the relationships it
+ * refers to, so the writer can drop it when a target is gone.
+ */
+function createKeeper(rootScope: Scope) {
+  const written: Record<string, string> = { ...rootScope, ...WRITER_ROOT_NAMESPACES };
+  const element = (el: XmlElement, scope: Scope): ChartKeptElement => {
+    const inScope = namespacesInScope(scope, el);
+    const undeclared: Record<string, string> = {};
+    for (const [prefix, uri] of Object.entries(scope)) {
+      if (written[prefix] !== uri) {
+        undeclared[prefix] = uri;
+      }
+    }
+    const rIds = new Set<string>();
+    collectRelationshipIds(el, inScope, rIds);
+    return {
+      name: localName(el.name),
+      xml: serializeSelfContained(el, undeclared),
+      ...(rIds.size > 0 && { rIds: [...rIds] })
+    };
+  };
+  const node = (
+    el: XmlElement,
+    outerScope: Scope,
+    containers: readonly string[],
+    read: ChartFieldKeys
+  ): ChartKeptNode => {
+    const scope = namespacesInScope(outerScope, el);
+    const attrs = Object.fromEntries(
+      Object.entries(el.attributes).filter(
+        ([name]) => name !== "xmlns" && !name.startsWith("xmlns:")
+      )
+    );
+    return {
+      name: el.name,
+      ...(Object.keys(attrs).length > 0 && { attrs }),
+      children: elementChildren(el).map(child =>
+        containers.includes(localName(child.name))
+          ? { name: localName(child.name), xml: "" }
+          : element(child, scope)
+      ),
+      read
+    };
+  };
+  return { element, node };
+}
+
+/** The values of every attribute under `el` in the relationships namespace. */
+function collectRelationshipIds(el: XmlElement, outerScope: Scope, out: Set<string>): void {
+  const scope = namespacesInScope(outerScope, el);
+  for (const [name, value] of Object.entries(el.attributes)) {
+    const colon = name.indexOf(":");
+    if (colon > 0 && name.slice(0, colon) !== "xmlns" && scope[name.slice(0, colon)] === NS_R) {
+      out.add(value);
+    }
+  }
+  for (const child of elementChildren(el)) {
+    collectRelationshipIds(child, scope, out);
+  }
 }
 
 /** Extract solid fill color from a spPr element. */

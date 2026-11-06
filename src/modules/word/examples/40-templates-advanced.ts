@@ -2,9 +2,9 @@
  * Word Example 40 — Templates: advanced workflows
  *
  * Goes beyond `16-templates.ts` to cover:
- *   - compileTemplate / patchTemplate — pre-parse a .docx once, reuse for
- *     hundreds of patch operations (much faster than patchDocument in a loop).
- *   - fillTemplateFromBuffer — read .docx + fillTemplate + write in one call.
+ *   - Package.compileTemplate / Package.patchTemplate — pre-parse a .docx once, reuse for
+ *     hundreds of patch operations (much faster than Package.patch in a loop).
+ *   - fillTemplateFromBuffer — read .docx + Template.fill + write in one call.
  *   - bindChartData — fill chart series from runtime data (ChartTemplateData).
  *   - createCompositeDataSource — combine JSON + XML + CSV sources, with array
  *     merge semantics.
@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Template, Units } from "../index";
+import { Document, Build, Package, Template, Units } from "../index";
 import type { ChartBinding } from "../index";
 
 const outDir = path.resolve(
@@ -33,18 +33,18 @@ function buildTemplateBytes(): Promise<Uint8Array> {
   Document.addHeading(d, "Invoice {{invoiceNo}}", 1);
   Document.addParagraph(d, "Customer: {{customer}}");
   Document.addParagraph(d, "Total: {{total}}");
-  return Io.toBuffer(Document.build(d));
+  return Document.toBuffer(d);
 }
 const templateBytes = await buildTemplateBytes();
 fs.writeFileSync(path.join(outDir, "00-template.docx"), templateBytes);
 
 // ---------------------------------------------------------------------------
-// 2. compileTemplate + patchTemplate — bulk fill in a tight loop
+// 2. Package.compileTemplate + Package.patchTemplate — bulk fill in a tight loop
 // ---------------------------------------------------------------------------
-const compiled = await Io.compileTemplate(templateBytes);
+const compiled = await Package.compileTemplate(templateBytes);
 const t0 = performance.now();
 for (let i = 1; i <= 5; i++) {
-  const patched = await Io.patchTemplate(compiled, [
+  const patched = await Package.patchTemplate(compiled, [
     { placeholder: "{{invoiceNo}}", content: { type: "text", text: `INV-${1000 + i}` } },
     { placeholder: "{{customer}}", content: { type: "text", text: `Customer #${i}` } },
     { placeholder: "{{total}}", content: { type: "text", text: `$${i * 100}` } }
@@ -52,13 +52,13 @@ for (let i = 1; i <= 5; i++) {
   fs.writeFileSync(path.join(outDir, `01-bulk-${i}.docx`), patched);
 }
 console.log(
-  `  patchTemplate × 5: ${(performance.now() - t0).toFixed(0)} ms (parsing happens once)`
+  `  Package.patchTemplate × 5: ${(performance.now() - t0).toFixed(0)} ms (parsing happens once)`
 );
 
 // ---------------------------------------------------------------------------
 // 3. fillTemplateFromBuffer — single-shot fill using {{var}} placeholders
 // ---------------------------------------------------------------------------
-const filled = await Io.fillTemplateFromBuffer(templateBytes, {
+const filled = await Package.fillTemplate(templateBytes, {
   invoiceNo: "INV-9999",
   customer: "From-Buffer Co.",
   total: "$1,234.56"
@@ -87,10 +87,10 @@ const csv = Template.createCsvDataSource("name,price\nWidget,10\nGadget,25", {
 const composite = Template.createCompositeDataSource([json, xml, csv], { mergeArrays: false });
 console.log(`  composite.getData() keys: ${Object.keys(composite.getData()).join(", ")}`);
 
-const compositeFilled = Template.fillTemplateFromSource(compiled._doc, composite, {
+const compositeFilled = Template.fillFromSource(compiled._doc, composite, {
   strict: false
 });
-const compositeBytes = await Io.toBuffer(compositeFilled);
+const compositeBytes = await Document.toBuffer(compositeFilled);
 fs.writeFileSync(path.join(outDir, "03-composite.docx"), compositeBytes);
 console.log(`  → 03-composite.docx (${compositeBytes.length} bytes)`);
 
@@ -119,7 +119,7 @@ const chartTemplate = (() => {
       ]
     })
   );
-  return Document.build(dd);
+  return dd;
 })();
 
 const bindings: ChartBinding[] = [
@@ -134,7 +134,7 @@ const bindings: ChartBinding[] = [
   }
 ];
 const boundDoc = Template.bindChartData(chartTemplate, bindings);
-fs.writeFileSync(path.join(outDir, "04-chart-bound.docx"), await Io.toBuffer(boundDoc));
+fs.writeFileSync(path.join(outDir, "04-chart-bound.docx"), await Document.toBuffer(boundDoc));
 console.log(`  → 04-chart-bound.docx`);
 
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ const noChartDoc = (() => {
   const dd = Document.create();
   Document.useDefaultStyles(dd);
   Document.addParagraph(dd, "no charts here");
-  return Document.build(dd);
+  return dd;
 })();
 const stillNoChart = Template.bindChartData(noChartDoc, bindings);
 console.log(`  bindChartData on no-chart doc: body length unchanged=${stillNoChart.body.length}`);

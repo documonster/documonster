@@ -117,40 +117,118 @@ function buildNtfsTimestampExtraField(modTime: Date, extra?: ZipExtraTimestamps)
 
 /**
  * DOS date/time helpers for ZIP files.
+ *
+ * The DOS fields are wall-clock time with no zone: every common writer (Info-ZIP, 7-Zip,
+ * Windows, Python's `zipfile`) fills them from local time and reads them back as local
+ * time, and so does this module. They hold 1980-01-01 00:00:00 to 2107-12-31 23:59:58 in
+ * two-second steps.
  */
+
+/** The first and last moments the DOS fields can hold, as local time. */
+const DOS_MIN_YEAR = 1980;
+const DOS_MAX_YEAR = 2107;
+
+/** Seconds since 1970 the Info-ZIP UT field (an unsigned 32-bit count) can hold. */
+const UT_MAX_SECONDS = 0xffffffff;
+
+function inDosRange(date: Date): boolean {
+  const year = date.getFullYear();
+  return year >= DOS_MIN_YEAR && year <= DOS_MAX_YEAR;
+}
+
+function inUtRange(date: Date): boolean {
+  const seconds = Math.floor(date.getTime() / 1000);
+  return seconds >= 0 && seconds <= UT_MAX_SECONDS;
+}
 
 /**
- * Convert Date to DOS time/date fields.
- *
- * Note: uses local time fields (getHours/getMinutes/getSeconds),
- * which matches common ZIP writer behavior.
+ * Whether the DOS fields read back as `date`, to their two seconds: false outside their
+ * range, and for a wall-clock time the zone repeats (the hour a DST change goes back), which
+ * reads back as its first occurrence.
+ */
+function dosRoundTrips(date: Date): boolean {
+  if (!inDosRange(date)) {
+    return false;
+  }
+  const [dosTime, dosDate] = dateToDos(date);
+  return parseDosDateTime(dosDate, dosTime).getTime() === Math.floor(date.getTime() / 2000) * 2000;
+}
+
+/**
+ * Whether an entry modified at `date` carries a UT field: always when `mode` asks for one,
+ * and with `"dos"` whenever the DOS fields alone would not read back as the date — out of
+ * their range, or in a repeated DST hour — since the UT field then stores it exactly. Never
+ * when the UT field cannot hold the date: the DOS fields alone are then the best there is,
+ * and a clamped UT field would win on reading.
+ */
+function writesUtField(date: Date, mode: ZipTimestampMode): boolean {
+  return inUtRange(date) && (mode !== "dos" || !dosRoundTrips(date));
+}
+
+/**
+ * Why `date` cannot be stored exactly (to the DOS fields' two seconds) as an entry's
+ * modification time, or `undefined` when it can: the DOS fields hold 1980–2107 local time
+ * and the UT field 1970-01-01T00:00:00Z to 2106-02-07T06:28:15Z, and a date either holds is
+ * written so that it reads back. `mode` does not narrow this — `"dos"` adds a UT field to an
+ * entry whose DOS fields would not read back as its date (see `writesUtField`).
+ */
+export function zipModTimeProblem(date: Date): string | undefined {
+  return inDosRange(date) || inUtRange(date)
+    ? undefined
+    : `${date.toISOString()} is outside what a ZIP can store ` +
+        `(1970-01-01T00:00:00Z to ${DOS_MAX_YEAR}-12-31 local time)`;
+}
+
+/**
+ * `date` if a ZIP can store it, else the nearest date it can. For a stamp the caller did not
+ * choose — a document's own created/modified date — where refusing to write would be worse
+ * than moving the stamp.
+ */
+export function fitZipModTime(date: Date | undefined): Date | undefined {
+  if (date === undefined || Number.isNaN(date.getTime()) || zipModTimeProblem(date) === undefined) {
+    return date;
+  }
+  return date.getTime() < 0 ? new Date(0) : new Date(DOS_MAX_YEAR, 11, 31, 23, 59, 58);
+}
+
+/**
+ * Convert a Date to DOS time/date fields from its local time fields. A date outside the
+ * DOS range is clamped to the nearest end (it is never wrapped); a caller-given `modTime`
+ * is checked with {@link zipModTimeProblem} before it gets here, so only times taken from
+ * files on disk are clamped — as Info-ZIP clamps them.
  */
 export function dateToDos(date: Date): [number, number] {
+  const year = date.getFullYear();
+  const clamped =
+    year < DOS_MIN_YEAR
+      ? new Date(DOS_MIN_YEAR, 0, 1, 0, 0, 0)
+      : year > DOS_MAX_YEAR
+        ? new Date(DOS_MAX_YEAR, 11, 31, 23, 59, 58)
+        : date;
+
   const dosTime =
-    ((date.getHours() & 0x1f) << 11) |
-    ((date.getMinutes() & 0x3f) << 5) |
-    ((date.getSeconds() >> 1) & 0x1f);
+    (clamped.getHours() << 11) | (clamped.getMinutes() << 5) | (clamped.getSeconds() >> 1);
 
   const dosDate =
-    (((date.getFullYear() - 1980) & 0x7f) << 9) |
-    (((date.getMonth() + 1) & 0x0f) << 5) |
-    (date.getDate() & 0x1f);
+    ((clamped.getFullYear() - DOS_MIN_YEAR) << 9) |
+    ((clamped.getMonth() + 1) << 5) |
+    clamped.getDate();
 
   return [dosTime, dosDate];
 }
 
 /**
- * Parse DOS date/time to JS Date.
+ * Parse DOS date/time fields to a Date, as local time — the inverse of {@link dateToDos}.
  */
-export function parseDosDateTimeUTC(date: number, time?: number): Date {
+export function parseDosDateTime(date: number, time?: number): Date {
   const day = date & 0x1f;
   const month = (date >> 5) & 0x0f;
-  const year = ((date >> 9) & 0x7f) + 1980;
+  const year = ((date >> 9) & 0x7f) + DOS_MIN_YEAR;
   const seconds = time ? (time & 0x1f) * 2 : 0;
   const minutes = time ? (time >> 5) & 0x3f : 0;
   const hours = time ? time >> 11 : 0;
 
-  return new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds));
+  return new Date(year, month - 1, day, hours, minutes, seconds);
 }
 
 /**
@@ -172,7 +250,7 @@ export function resolveZipLastModifiedDateFromUnixSeconds(
   mtimeUnixSeconds?: number
 ): Date {
   if (mtimeUnixSeconds === undefined) {
-    return parseDosDateTimeUTC(dosDate, dosTime);
+    return parseDosDateTime(dosDate, dosTime);
   }
   return new Date(mtimeUnixSeconds * 1000);
 }
@@ -182,11 +260,10 @@ export function buildZipTimestampExtraField(
   mode: ZipTimestampMode,
   extra?: ZipExtraTimestamps
 ): Uint8Array {
-  if (mode === "dos") {
-    return new Uint8Array(0);
+  const parts: Uint8Array[] = [];
+  if (writesUtField(modTime, mode)) {
+    parts.push(buildExtendedTimestampExtraField(modTime, extra));
   }
-
-  const parts: Uint8Array[] = [buildExtendedTimestampExtraField(modTime, extra)];
   if (mode === "dos+utc+ntfs") {
     parts.push(buildNtfsTimestampExtraField(modTime, extra));
   }

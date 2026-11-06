@@ -7,7 +7,7 @@
  * chart, it is a wrong one. These tests are therefore mostly about the numbers.
  */
 import type { DrawNode } from "@draw/types";
-import { mermaidToDrawList, parseMermaid } from "@mermaid/index";
+import { Mermaid } from "@mermaid/index";
 import { axisTicks, formatAxisDate, parseDate, parseDuration } from "@mermaid/parse/dates";
 import type {
   GanttDiagram,
@@ -57,7 +57,7 @@ describe("dates", () => {
 });
 
 describe("gantt", () => {
-  const parse = (source: string): GanttDiagram => parseMermaid(source) as GanttDiagram;
+  const parse = (source: string): GanttDiagram => Mermaid.parse(source) as GanttDiagram;
 
   it("classifies fields by what they say, not by where they sit", () => {
     // `Task : a1, 2024-01-01, 30d` and `Task : 2024-01-01, 30d` have the same shape until
@@ -121,7 +121,7 @@ describe("gantt", () => {
   });
 
   it("draws a diamond for a milestone and a bar for a task", () => {
-    const list = mermaidToDrawList("gantt\n section S\n A :2024-01-01, 5d\n B :milestone, 0d");
+    const list = Mermaid.toDrawList("gantt\n section S\n A :2024-01-01, 5d\n B :milestone, 0d");
     const diamonds = list.children.filter(
       node => node.kind === "polyline" && node.closed === true && node.points.length === 4
     );
@@ -129,7 +129,7 @@ describe("gantt", () => {
   });
 
   it("scales bars to the span, so a longer task is a wider bar", () => {
-    const list = mermaidToDrawList(`gantt
+    const list = Mermaid.toDrawList(`gantt
       section S
       Short :2024-01-01, 5d
       Long :2024-01-01, 20d`);
@@ -142,7 +142,7 @@ describe("gantt", () => {
 });
 
 describe("timeline", () => {
-  const parse = (source: string): TimelineDiagram => parseMermaid(source) as TimelineDiagram;
+  const parse = (source: string): TimelineDiagram => Mermaid.parse(source) as TimelineDiagram;
 
   it("reads several events against one period", () => {
     const period = parse("timeline\n 2004 : Facebook : Google").periods[0];
@@ -167,7 +167,7 @@ describe("timeline", () => {
   });
 
   it("stacks a period's events instead of overlapping them", () => {
-    const list = mermaidToDrawList("timeline\n 2004 : One : Two : Three");
+    const list = Mermaid.toDrawList("timeline\n 2004 : One : Two : Three");
     const boxes = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "rect" }> => node.kind === "rect" && node.rx === 4
     );
@@ -180,7 +180,7 @@ describe("timeline", () => {
 });
 
 describe("journey", () => {
-  const parse = (source: string): JourneyDiagram => parseMermaid(source) as JourneyDiagram;
+  const parse = (source: string): JourneyDiagram => Mermaid.parse(source) as JourneyDiagram;
 
   it("reads the score and the cast", () => {
     const task = parse("journey\n Make tea: 5: Me, Cat").tasks[0];
@@ -194,7 +194,7 @@ describe("journey", () => {
   });
 
   it("plots a higher score higher up", () => {
-    const list = mermaidToDrawList("journey\n Low: 1: Me\n High: 5: Me");
+    const list = Mermaid.toDrawList("journey\n Low: 1: Me\n High: 5: Me");
     const dots = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "ellipse" }> =>
         node.kind === "ellipse" && node.rx === 9
@@ -205,7 +205,7 @@ describe("journey", () => {
 });
 
 describe("mindmap", () => {
-  const parse = (source: string): MindmapDiagram => parseMermaid(source) as MindmapDiagram;
+  const parse = (source: string): MindmapDiagram => Mermaid.parse(source) as MindmapDiagram;
 
   it("takes its structure from the indentation", () => {
     const diagram = parse(`mindmap
@@ -244,7 +244,7 @@ describe("mindmap", () => {
 
   it("splits the root's children between the two sides", () => {
     // Growing outwards from the middle is what makes it a mind map rather than a tree.
-    const list = mermaidToDrawList("mindmap\n root\n  A\n  B\n  C\n  D");
+    const list = Mermaid.toDrawList("mindmap\n root\n  A\n  B\n  C\n  D");
     const boxes = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "rect" }> => node.kind === "rect"
     );
@@ -256,7 +256,7 @@ describe("mindmap", () => {
 });
 
 describe("gitGraph", () => {
-  const parse = (source: string): GitGraphDiagram => parseMermaid(source) as GitGraphDiagram;
+  const parse = (source: string): GitGraphDiagram => Mermaid.parse(source) as GitGraphDiagram;
 
   it("switches to a branch as it creates it", () => {
     const diagram = parse("gitGraph\n commit\n branch dev\n commit");
@@ -292,7 +292,7 @@ describe("gitGraph", () => {
   });
 
   it("gives each branch its own lane", () => {
-    const list = mermaidToDrawList("gitGraph\n commit\n branch dev\n commit");
+    const list = Mermaid.toDrawList("gitGraph\n commit\n branch dev\n commit");
     const dots = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "ellipse" }> => node.kind === "ellipse"
     );
@@ -301,8 +301,8 @@ describe("gitGraph", () => {
   });
 
   it("draws an arc from the branch a merge came from", () => {
-    const plain = mermaidToDrawList("gitGraph\n commit\n branch dev\n commit");
-    const merged = mermaidToDrawList(
+    const plain = Mermaid.toDrawList("gitGraph\n commit\n branch dev\n commit");
+    const merged = Mermaid.toDrawList(
       "gitGraph\n commit\n branch dev\n commit\n checkout main\n merge dev"
     );
     const paths = (list: typeof plain): number =>

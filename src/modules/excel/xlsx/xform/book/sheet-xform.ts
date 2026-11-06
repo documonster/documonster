@@ -1,8 +1,9 @@
 import type { WorksheetState } from "@excel/types";
+import { SHEET_STATES } from "@excel/utils/sheet-settings-checks";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-const VALID_STATES: Set<string> = new Set(["visible", "hidden", "veryHidden"]);
+const VALID_STATES: ReadonlySet<string> = new Set(SHEET_STATES);
 
 const RELATIONSHIPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 

@@ -32,7 +32,7 @@ describe("Table", () => {
     await Workbook.read(wb2, template);
 
     const ws2: any = Workbook.getWorksheet(wb2, "Data")!;
-    const table2 = Table.get(ws2, "TestTable");
+    const table2 = Table.get(ws2, "TestTable")!;
 
     // The key workflow: addRow should update the worksheet and table refs without requiring
     // the caller to manually call tableCommit(table).
@@ -57,7 +57,7 @@ describe("Table", () => {
     const wb3 = Workbook.create();
     await Workbook.read(wb3, out);
     const ws3: any = Workbook.getWorksheet(wb3, "Data")!;
-    const table3 = Table.get(ws3, "TestTable");
+    const table3 = Table.get(ws3, "TestTable")!;
 
     expect(tableModel(table3).tableRef).toBe("A1:B4");
     expect(tableModel(table3).autoFilterRef).toBe("A1:B4");
@@ -148,13 +148,12 @@ describe("Table", () => {
     ).toThrow(/already exists/i);
   });
 
-  it("throws when sanitized table names collide on the same worksheet", () => {
+  it("throws when table names collide on the same worksheet, compared as Excel compares them", () => {
     const wb = Workbook.create();
     const ws: any = Workbook.addWorksheet(wb, "Sheet1");
 
-    // "My Table" sanitizes to "My_Table" (spaces become underscores)
     Table.add(ws, {
-      name: "My Table",
+      name: "My_Table",
       ref: "A1",
       columns: [{ name: "Col1", filterButton: true }],
       rows: [["data"]]
@@ -162,7 +161,7 @@ describe("Table", () => {
 
     expect(() =>
       Table.add(ws, {
-        name: "My_Table",
+        name: "MY_TABLE",
         ref: "D1",
         columns: [{ name: "Col2", filterButton: true }],
         rows: [["other"]]

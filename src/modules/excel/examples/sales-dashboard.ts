@@ -43,6 +43,7 @@ import {
   Cell,
   Chart,
   Column,
+  ConditionalFormatting,
   Pivot,
   Row,
   Sparkline,
@@ -284,7 +285,7 @@ async function main(): Promise<void> {
   });
 
   // Data bar on revenue
-  Worksheet.addConditionalFormatting(txSheet, {
+  ConditionalFormatting.add(txSheet, {
     ref: `L2:L${txns.length + 1}`,
     rules: [
       {
@@ -296,7 +297,7 @@ async function main(): Promise<void> {
     ]
   });
 
-  console.log(`Transactions table: ${Table.model(txnTable).name}`);
+  console.log(`Transactions table: ${Table.getModel(txnTable).name}`);
 
   // =========================================================================
   // Sheet 2 — Pivot Core (pivot tables + pivot charts)
@@ -332,34 +333,30 @@ async function main(): Promise<void> {
   });
 
   // Pivot chart on that pivot — bar + data labels
-  Chart.addPivot(
-    pivotSheet,
-    regionYearPivot,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Revenue by region × year",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Transactions[Region]",
-          values: "Transactions[Revenue]",
-          dataLabels: { showVal: true, numFmt: "$#,##0", position: "outEnd" }
-        }
-      ],
-      pivotChartOptions: {
-        dropZonesVisible: true,
-        dropZoneFilter: true,
-        dropZoneCategories: true,
-        dropZoneData: true,
-        dropZoneSeries: true,
-        refreshOnOpen: true,
-        showExpandCollapseFieldButtons: true
+  Chart.place(pivotSheet, "A4:P33", {
+    pivotTable: regionYearPivot,
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Revenue by region × year",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Transactions[Region]",
+        values: "Transactions[Revenue]",
+        dataLabels: { showVal: true, numFmt: "$#,##0", position: "outEnd" }
       }
-    },
-    "A4:P33"
-  );
+    ],
+    pivotChartOptions: {
+      dropZonesVisible: true,
+      dropZoneFilter: true,
+      dropZoneCategories: true,
+      dropZoneData: true,
+      dropZoneSeries: true,
+      refreshOnOpen: true,
+      showExpandCollapseFieldButtons: true
+    }
+  });
 
   // Pivot 2: Product family × Channel — anchored far enough below Pivot 1
   // that its expanded size (~20 rows × 6 cols) does not collide.
@@ -372,30 +369,26 @@ async function main(): Promise<void> {
     ref: "A20"
   });
 
-  Chart.addPivot(
-    pivotSheet,
-    prodChannelPivot,
-    {
-      type: "pie",
-      varyColors: true,
-      title: "Revenue share by product family",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Transactions[ProductFamily]",
-          values: "Transactions[Revenue]",
-          dataLabels: {
-            showPercent: true,
-            showCatName: true,
-            position: "outEnd",
-            separator: " • "
-          }
+  Chart.place(pivotSheet, "A35:P64", {
+    pivotTable: prodChannelPivot,
+    type: "pie",
+    varyColors: true,
+    title: "Revenue share by product family",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Transactions[ProductFamily]",
+        values: "Transactions[Revenue]",
+        dataLabels: {
+          showPercent: true,
+          showCatName: true,
+          position: "outEnd",
+          separator: " • "
         }
-      ],
-      pivotChartOptions: { refreshOnOpen: true, showExpandCollapseFieldButtons: true }
-    },
-    "A35:P64"
-  );
+      }
+    ],
+    pivotChartOptions: { refreshOnOpen: true, showExpandCollapseFieldButtons: true }
+  });
 
   // Pivot 3: Segment × Region with page filter on Year. Anchored below Pivot 2;
   // the `Year` page filter lives at row 45, a blank separator follows, and
@@ -410,75 +403,67 @@ async function main(): Promise<void> {
     ref: "A45"
   });
 
-  Chart.addPivot(
-    pivotSheet,
-    segmentRegionPivot,
-    {
-      type: "bar",
-      barDir: "bar",
-      grouping: "stacked",
-      title: "Revenue by segment × region (stacked)",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Transactions[Segment]",
-          values: "Transactions[Revenue]"
-        },
-        {
-          name: "Profit",
-          categories: "Transactions[Segment]",
-          values: "Transactions[Profit]"
-        }
-      ],
-      pivotChartOptions: {
-        dropZonesVisible: true,
-        dropZoneFilter: true,
-        dropZoneCategories: true,
-        dropZoneSeries: true,
-        dropZoneData: true,
-        refreshOnOpen: true
+  Chart.place(pivotSheet, "A66:P95", {
+    pivotTable: segmentRegionPivot,
+    type: "bar",
+    barDir: "bar",
+    grouping: "stacked",
+    title: "Revenue by segment × region (stacked)",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Transactions[Segment]",
+        values: "Transactions[Revenue]"
+      },
+      {
+        name: "Profit",
+        categories: "Transactions[Segment]",
+        values: "Transactions[Profit]"
       }
-    },
-    "A66:P95"
-  );
+    ],
+    pivotChartOptions: {
+      dropZonesVisible: true,
+      dropZoneFilter: true,
+      dropZoneCategories: true,
+      dropZoneSeries: true,
+      dropZoneData: true,
+      refreshOnOpen: true
+    }
+  });
 
   // Combo pivot chart — revenue bars + YoY growth line (secondary axis)
-  Chart.addPivotCombo(
-    pivotSheet,
-    regionYearPivot,
-    {
-      title: "Revenue (bars) + growth (line, secondary)",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          series: [
-            {
-              name: "Revenue",
-              categories: "Transactions[Region]",
-              values: "Transactions[Revenue]",
-              fill: "4472C4"
-            }
-          ]
-        },
-        {
-          type: "line",
-          useSecondaryAxis: true,
-          series: [
-            {
-              name: "Profit",
-              categories: "Transactions[Region]",
-              values: "Transactions[Profit]",
-              line: "ED7D31",
-              lineWidth: 2.5,
-              marker: { symbol: "diamond", size: 8, fill: "ED7D31", border: "FFFFFF" }
-            }
-          ]
-        }
-      ]
-    },
-    "A97:P126"
-  );
+  Chart.place(pivotSheet, "A97:P126", {
+    pivotTable: regionYearPivot,
+    title: "Revenue (bars) + growth (line, secondary)",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        series: [
+          {
+            name: "Revenue",
+            categories: "Transactions[Region]",
+            values: "Transactions[Revenue]",
+            fill: "4472C4"
+          }
+        ]
+      },
+      {
+        type: "line",
+        useSecondaryAxis: true,
+        series: [
+          {
+            name: "Profit",
+            categories: "Transactions[Region]",
+            values: "Transactions[Profit]",
+            line: "ED7D31",
+            lineWidth: 2.5,
+            marker: { symbol: "diamond", size: 8, fill: "ED7D31", border: "FFFFFF" }
+          }
+        ]
+      }
+    ]
+  });
 
   // =========================================================================
   // Sheet 3 — Funnel + Treemap + Sunburst
@@ -499,25 +484,22 @@ async function main(): Promise<void> {
   const funnelHidden = Workbook.addWorksheet(wb, "Pipeline-Data", { state: "hidden" });
   Row.setValues(funnelHidden, 1, ["Stage", "Count"]);
   FUNNEL_STAGES.forEach((stage, i) => {
-    Worksheet.addRow(funnelHidden, [stage, funnelValues[i]]);
+    Row.add(funnelHidden, [stage, funnelValues[i]]);
   });
 
   Cell.setValue(funnelSheet, "A3", "Conversion funnel — FY25");
   Cell.setStyle(funnelSheet, "A3", { font: { bold: true } });
-  Chart.addFunnel(
-    funnelSheet,
-    {
-      title: "FY25 sales conversion funnel",
-      categories: `'Pipeline-Data'!$A$2:$A$${1 + FUNNEL_STAGES.length}`,
-      series: [
-        {
-          name: "Count",
-          values: `'Pipeline-Data'!$B$2:$B$${1 + FUNNEL_STAGES.length}`
-        }
-      ]
-    },
-    "A4:P33"
-  );
+  Chart.place(funnelSheet, "A4:P33", {
+    type: "funnel",
+    title: "FY25 sales conversion funnel",
+    categories: `'Pipeline-Data'!$A$2:$A$${1 + FUNNEL_STAGES.length}`,
+    series: [
+      {
+        name: "Count",
+        values: `'Pipeline-Data'!$B$2:$B$${1 + FUNNEL_STAGES.length}`
+      }
+    ]
+  });
 
   // Treemap — product line nested under family
   const treemapHidden = Workbook.addWorksheet(wb, "Treemap-Data", { state: "hidden" });
@@ -531,26 +513,23 @@ async function main(): Promise<void> {
     const [family, line] = k.split("|");
     return [family, line, Math.round(v * 100) / 100] as const;
   });
-  treemapEntries.forEach(row => Worksheet.addRow(treemapHidden, [row[0], row[1], row[2]]));
+  treemapEntries.forEach(row => Row.add(treemapHidden, [row[0], row[1], row[2]]));
 
   Cell.setValue(funnelSheet, "A35", "Product hierarchy (treemap)");
   Cell.setStyle(funnelSheet, "A35", { font: { bold: true } });
-  Chart.addTreemap(
-    funnelSheet,
-    {
-      title: "Revenue by product family → line",
-      categories: `'Treemap-Data'!$B$2:$B$${1 + treemapEntries.length}`,
-      series: [
-        {
-          name: "Revenue",
-          values: `'Treemap-Data'!$C$2:$C$${1 + treemapEntries.length}`,
-          hierarchy: [`'Treemap-Data'!$A$2:$A$${1 + treemapEntries.length}`]
-        }
-      ],
-      layout: { parentLabelLayout: "banner" }
-    },
-    "A36:P65"
-  );
+  Chart.place(funnelSheet, "A36:P65", {
+    type: "treemap",
+    title: "Revenue by product family → line",
+    categories: `'Treemap-Data'!$B$2:$B$${1 + treemapEntries.length}`,
+    series: [
+      {
+        name: "Revenue",
+        values: `'Treemap-Data'!$C$2:$C$${1 + treemapEntries.length}`,
+        hierarchy: [`'Treemap-Data'!$A$2:$A$${1 + treemapEntries.length}`]
+      }
+    ],
+    layout: { parentLabelLayout: "banner" }
+  });
 
   // Sunburst — region → country → revenue
   const sunburstHidden = Workbook.addWorksheet(wb, "Sunburst-Data", { state: "hidden" });
@@ -564,25 +543,22 @@ async function main(): Promise<void> {
     const [region, country] = k.split("|");
     return [region, country, Math.round(v * 100) / 100] as const;
   });
-  sunburstEntries.forEach(row => Worksheet.addRow(sunburstHidden, [row[0], row[1], row[2]]));
+  sunburstEntries.forEach(row => Row.add(sunburstHidden, [row[0], row[1], row[2]]));
 
   Cell.setValue(funnelSheet, "A67", "Region → country sunburst");
   Cell.setStyle(funnelSheet, "A67", { font: { bold: true } });
-  Chart.addSunburst(
-    funnelSheet,
-    {
-      title: "Revenue by region → country",
-      categories: `'Sunburst-Data'!$B$2:$B$${1 + sunburstEntries.length}`,
-      series: [
-        {
-          name: "Revenue",
-          values: `'Sunburst-Data'!$C$2:$C$${1 + sunburstEntries.length}`,
-          hierarchy: [`'Sunburst-Data'!$A$2:$A$${1 + sunburstEntries.length}`]
-        }
-      ]
-    },
-    "A68:P97"
-  );
+  Chart.place(funnelSheet, "A68:P97", {
+    type: "sunburst",
+    title: "Revenue by region → country",
+    categories: `'Sunburst-Data'!$B$2:$B$${1 + sunburstEntries.length}`,
+    series: [
+      {
+        name: "Revenue",
+        values: `'Sunburst-Data'!$C$2:$C$${1 + sunburstEntries.length}`,
+        hierarchy: [`'Sunburst-Data'!$A$2:$A$${1 + sunburstEntries.length}`]
+      }
+    ]
+  });
 
   // Region map — revenue per country
   const mapHidden = Workbook.addWorksheet(wb, "Map-Data", { state: "hidden" });
@@ -593,26 +569,23 @@ async function main(): Promise<void> {
   }
   const mapEntries = Array.from(byCountry.entries());
   mapEntries.forEach(([country, rev]) =>
-    Worksheet.addRow(mapHidden, [country, Math.round(rev * 100) / 100])
+    Row.add(mapHidden, [country, Math.round(rev * 100) / 100])
   );
 
   Cell.setValue(funnelSheet, "A99", "Revenue by country (region map)");
   Cell.setStyle(funnelSheet, "A99", { font: { bold: true } });
-  Chart.addRegionMap(
-    funnelSheet,
-    {
-      title: "Revenue by country",
-      categories: `'Map-Data'!$A$2:$A$${1 + mapEntries.length}`,
-      series: [
-        {
-          name: "Revenue",
-          values: `'Map-Data'!$B$2:$B$${1 + mapEntries.length}`
-        }
-      ],
-      layout: { projection: "robinson", regionLabels: "bestFit", geoMappingLevel: "country" }
-    },
-    "A100:P129"
-  );
+  Chart.place(funnelSheet, "A100:P129", {
+    type: "regionMap",
+    title: "Revenue by country",
+    categories: `'Map-Data'!$A$2:$A$${1 + mapEntries.length}`,
+    series: [
+      {
+        name: "Revenue",
+        values: `'Map-Data'!$B$2:$B$${1 + mapEntries.length}`
+      }
+    ],
+    layout: { projection: "robinson", regionLabels: "bestFit", geoMappingLevel: "country" }
+  });
 
   // =========================================================================
   // Sheet 4 — Cohort retention matrix
@@ -646,8 +619,8 @@ async function main(): Promise<void> {
   const cohorts = ["2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4", "2025-Q1", "2025-Q2", "2025-Q3"];
   cohorts.forEach((c, ci) => {
     const row = 3 + ci;
-    Cell.setValue(cohort, row, 1, c);
-    Cell.setStyle(cohort, row, 1, { font: { bold: true } });
+    Cell.setValue(cohort, { row, col: 1 }, c);
+    Cell.setStyle(cohort, { row, col: 1 }, { font: { bold: true } });
     for (let m = 0; m <= 11; m++) {
       // Cells beyond what has "happened yet" stay blank.
       if (m + ci * 3 > 20) {
@@ -656,14 +629,14 @@ async function main(): Promise<void> {
       // Base retention: 100%, 85%, 72%, 65%, 58%, 54%, 51%, 48%, 46%, 45%, 44%, 43%
       const decay = [1, 0.85, 0.72, 0.65, 0.58, 0.54, 0.51, 0.48, 0.46, 0.45, 0.44, 0.43];
       const value = decay[m] * (0.95 + rng() * 0.1);
-      Cell.setValue(cohort, row, 2 + m, Math.round(value * 1000) / 1000);
-      Cell.setStyle(cohort, row, 2 + m, { numFmt: "0.0%" });
-      Cell.setStyle(cohort, row, 2 + m, { alignment: { horizontal: "center" } });
+      Cell.setValue(cohort, { row, col: 2 + m }, Math.round(value * 1000) / 1000);
+      Cell.setStyle(cohort, { row, col: 2 + m }, { numFmt: "0.0%" });
+      Cell.setStyle(cohort, { row, col: 2 + m }, { alignment: { horizontal: "center" } });
     }
   });
 
   // Classic BI heat map — color scale across the whole matrix.
-  Worksheet.addConditionalFormatting(cohort, {
+  ConditionalFormatting.add(cohort, {
     ref: `B3:M${2 + cohorts.length}`,
     rules: [
       {
@@ -729,14 +702,14 @@ async function main(): Promise<void> {
   // Aggregate 2025 revenue per region × month
   REGIONS.forEach((region, ri) => {
     const row = 3 + ri;
-    Cell.setValue(regional, row, 1, region);
-    Cell.setStyle(regional, row, 1, { font: { bold: true } });
+    Cell.setValue(regional, { row, col: 1 }, region);
+    Cell.setStyle(regional, { row, col: 1 }, { font: { bold: true } });
     for (let m = 0; m < 12; m++) {
       const v = txns
         .filter(t => t.Region === region && t.Year === 2025 && t.Month === monthHeaders[m])
         .reduce((s, t) => s + t.Revenue, 0);
-      Cell.setValue(regional, row, 2 + m, v);
-      Cell.setStyle(regional, row, 2 + m, { numFmt: "$#,##0" });
+      Cell.setValue(regional, { row, col: 2 + m }, v);
+      Cell.setStyle(regional, { row, col: 2 + m }, { numFmt: "$#,##0" });
     }
   });
 
@@ -784,7 +757,7 @@ async function main(): Promise<void> {
     }
     const signs = monthly.slice(1).map((v, i) => Math.sign(v - monthly[i]));
     signs.forEach((sign, i) => {
-      Cell.setValue(deltaSheet, ri + 1, i + 1, sign);
+      Cell.setValue(deltaSheet, { row: ri + 1, col: i + 1 }, sign);
     });
   });
   Sparkline.add(regional, {
@@ -803,10 +776,14 @@ async function main(): Promise<void> {
   // KPI cards row — show each segment's revenue + rating
   const kpiRow = 3 + REGIONS.length + 3;
   Worksheet.merge(regional, kpiRow - 1, 1, kpiRow - 1, 12);
-  Cell.setValue(regional, kpiRow - 1, 1, "Segment KPI cards (with icon ratings)");
-  Cell.setStyle(regional, kpiRow - 1, 1, {
-    font: { size: 12, bold: true, color: { argb: "FF2F5496" } }
-  });
+  Cell.setValue(regional, { row: kpiRow - 1, col: 1 }, "Segment KPI cards (with icon ratings)");
+  Cell.setStyle(
+    regional,
+    { row: kpiRow - 1, col: 1 },
+    {
+      font: { size: 12, bold: true, color: { argb: "FF2F5496" } }
+    }
+  );
 
   Row.setValues(regional, kpiRow, ["Segment", "Revenue", "YoY vs FY24", "Rating"]);
   Row.setFont(regional, kpiRow, { bold: true });
@@ -826,17 +803,17 @@ async function main(): Promise<void> {
       .filter(t => t.Segment === segment && t.Year === 2024)
       .reduce((s, t) => s + t.Revenue, 0);
     const yoy = fy24 ? (fy25 - fy24) / fy24 : 0;
-    Cell.setValue(regional, row, 1, segment);
-    Cell.setValue(regional, row, 2, fy25);
-    Cell.setStyle(regional, row, 2, { numFmt: "$#,##0" });
-    Cell.setValue(regional, row, 3, yoy);
-    Cell.setStyle(regional, row, 3, { numFmt: "+0.0%;-0.0%" });
+    Cell.setValue(regional, { row, col: 1 }, segment);
+    Cell.setValue(regional, { row, col: 2 }, fy25);
+    Cell.setStyle(regional, { row, col: 2 }, { numFmt: "$#,##0" });
+    Cell.setValue(regional, { row, col: 3 }, yoy);
+    Cell.setStyle(regional, { row, col: 3 }, { numFmt: "+0.0%;-0.0%" });
     // Rating = normalised YoY
-    Cell.setValue(regional, row, 4, yoy);
-    Cell.setStyle(regional, row, 4, { numFmt: "" });
+    Cell.setValue(regional, { row, col: 4 }, yoy);
+    Cell.setStyle(regional, { row, col: 4 }, { numFmt: "" });
     ratingValues.push(yoy);
   });
-  Worksheet.addConditionalFormatting(regional, {
+  ConditionalFormatting.add(regional, {
     ref: `D${kpiRow + 1}:D${kpiRow + SEGMENTS.length}`,
     rules: [
       {
@@ -915,8 +892,8 @@ async function main(): Promise<void> {
     const cellAddr = `${Address.encodeCol(2 - 1)}${row}`;
     Cell.setValue(nav, cellAddr, { text: link.label, hyperlink: `#'${link.sheet}'!A1` });
     Cell.setFont(nav, cellAddr, { size: 13, color: { argb: "FF0563C1" }, underline: true });
-    Cell.setValue(nav, row, 3, link.desc);
-    Cell.setStyle(nav, row, 3, { font: { color: { argb: "FF595959" } } });
+    Cell.setValue(nav, { row, col: 3 }, link.desc);
+    Cell.setStyle(nav, { row, col: 3 }, { font: { color: { argb: "FF595959" } } });
   });
 
   wb.views = [
@@ -926,7 +903,7 @@ async function main(): Promise<void> {
       width: 30000,
       height: 18000,
       firstSheet: 0,
-      activeTab: Workbook.getWorksheets(wb).findIndex(ws => Worksheet.getName(ws) === "Start"),
+      activeTab: Workbook.listWorksheets(wb).findIndex(ws => Worksheet.getName(ws) === "Start"),
       visibility: "visible"
     }
   ];
@@ -1010,15 +987,15 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets           : ${Workbook.getWorksheets(wb).length}`);
-  console.log(`  chartsheets      : ${Workbook.getChartsheets(wb).length}`);
+  console.log(`  sheets           : ${Workbook.listWorksheets(wb).length}`);
+  console.log(`  chartsheets      : ${Workbook.listChartsheets(wb).length}`);
   console.log(`  transactions     : ${txns.length}`);
   console.log(`  pivot tables     : ${pivotSheet.pivotTables?.length ?? 3} (Pivot Core sheet)`);
   console.log(
-    `  charts           : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
+    `  charts           : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Chart.list(ws).length, 0)}`
   );
   console.log(
-    `  sparkline groups : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)}`
+    `  sparkline groups : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)}`
   );
 }
 

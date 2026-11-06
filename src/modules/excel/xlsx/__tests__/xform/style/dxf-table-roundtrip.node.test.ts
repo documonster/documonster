@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 
 import { extractAll } from "@archive/unzip/extract";
 import { createZipSync } from "@archive/zip/zip-bytes";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, ConditionalFormatting, Workbook } from "@excel/index";
 import { makeTestDataPath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
@@ -115,7 +115,7 @@ describe("pivot table <format dxfId> (#237)", () => {
 
   it("appends a new conditional format after the source table rather than over it", async () => {
     const wb = await load(PIVOT_FIXTURE);
-    Worksheet.addConditionalFormatting(Workbook.getWorksheet(wb, 1)!, {
+    ConditionalFormatting.add(Workbook.getWorksheet(wb, 1)!, {
       ref: "A1:A3",
       rules: [
         { type: "expression", formulae: ["TRUE"], priority: 1, style: { font: { italic: true } } }
@@ -138,7 +138,7 @@ describe("<colorFilter dxfId> and conditional formatting sharing one table", () 
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "h");
     Cell.setValue(ws, "A2", 1);
-    Worksheet.addConditionalFormatting(ws, {
+    ConditionalFormatting.add(ws, {
       ref: "A2:A5",
       rules: [
         {
@@ -199,7 +199,7 @@ describe("useStyles: false", () => {
   it("writes a conditional format's style instead of throwing", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addConditionalFormatting(ws, {
+    ConditionalFormatting.add(ws, {
       ref: "A1",
       rules: [
         {
@@ -225,7 +225,7 @@ describe("a differential number format of General", () => {
   it("is written, although its built-in id is 0", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addConditionalFormatting(ws, {
+    ConditionalFormatting.add(ws, {
       ref: "A1",
       rules: [{ type: "expression", formulae: ["TRUE"], priority: 1, style: { numFmt: "General" } }]
     });
@@ -239,7 +239,7 @@ describe("a differential number format's id", () => {
   // it must not be written onto the caller's style, which is routinely shared between workbooks.
   function withRules(styles: Record<string, unknown>[]): WorkbookHandle {
     const wb = Workbook.create();
-    Worksheet.addConditionalFormatting(Workbook.addWorksheet(wb, "S"), {
+    ConditionalFormatting.add(Workbook.addWorksheet(wb, "S"), {
       ref: "A1",
       rules: styles.map((style, index) => ({
         type: "expression",

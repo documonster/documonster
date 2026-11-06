@@ -2,8 +2,8 @@ import { testUtils } from "@excel/__tests__/shared";
 import { cellGetValue, cellMaster, cellSetValue, cellType } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
 import { rangeBottom, rangeCreate, rangeLeft, rangeRight, rangeTop } from "@excel/core/range";
-import { getCell, getSheetModel } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getCell, getSheetModel, insertRow, duplicateRow } from "@excel/core/worksheet";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {
@@ -155,10 +155,10 @@ describe("Worksheet", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "testMergeAfterInsert");
 
-      Worksheet.addRow(ws, [1, 2]);
-      Worksheet.addRow(ws, [3, 4]);
+      Row.add(ws, [1, 2]);
+      Row.add(ws, [3, 4]);
       Worksheet.merge(ws, "A1:B2");
-      Worksheet.insertRow(ws, 1, ["Inserted Row Text"]);
+      insertRow(ws, 1, ["Inserted Row Text"]);
 
       // After insert, the merged area should now be A2:B3
       // A2 is master (type=Number with value 1), B2, A3, B3 are merge cells
@@ -190,7 +190,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A3:C4");
 
       // Insert 2 rows at row 1 (above the merge)
-      Worksheet.spliceRows(ws, 1, 0, ["x"], ["y"]);
+      Row.splice(ws, 1, 0, ["x"], ["y"]);
 
       // Merge should shift down by 2: A3:C4 -> A5:C6
       const model = getSheetModel(ws);
@@ -199,23 +199,23 @@ describe("Worksheet", () => {
       // Cell-level merge references should also be correct
       expect(Cell.getValue(ws, "A5")).toBe("hello");
       expect(Cell.getType(ws, "B5")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "B5").address).toBe("A5");
+      expect(Cell.getMergeMasterAddress(ws, "B5")).toBe("A5");
       expect(Cell.getType(ws, "C6")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "C6").address).toBe("A5");
+      expect(Cell.getMergeMasterAddress(ws, "C6")).toBe("A5");
     });
 
     it("spliceRows updates _merges after deleting rows above a merge", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "sheet");
 
-      Worksheet.addRow(ws, ["filler1"]);
-      Worksheet.addRow(ws, ["filler2"]);
-      Worksheet.addRow(ws, ["filler3"]);
+      Row.add(ws, ["filler1"]);
+      Row.add(ws, ["filler2"]);
+      Row.add(ws, ["filler3"]);
       Cell.setValue(ws, "A4", "hello");
       Worksheet.merge(ws, "A4:B5");
 
       // Delete rows 1-2 (above the merge)
-      Worksheet.spliceRows(ws, 1, 2);
+      Row.splice(ws, 1, 2);
 
       // Merge should shift up by 2: A4:B5 -> A2:B3
       const model = getSheetModel(ws);
@@ -223,20 +223,20 @@ describe("Worksheet", () => {
 
       expect(Cell.getValue(ws, "A2")).toBe("hello");
       expect(Cell.getType(ws, "B3")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "B3").address).toBe("A2");
+      expect(Cell.getMergeMasterAddress(ws, "B3")).toBe("A2");
     });
 
     it("spliceRows removes merges entirely within deleted rows", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "sheet");
 
-      Worksheet.addRow(ws, ["filler"]);
+      Row.add(ws, ["filler"]);
       Cell.setValue(ws, "A2", "merged");
       Worksheet.merge(ws, "A2:B3");
-      Worksheet.addRow(ws, ["below"]);
+      Row.add(ws, ["below"]);
 
       // Delete rows 2-3 which contain the entire merge
-      Worksheet.spliceRows(ws, 2, 2);
+      Row.splice(ws, 2, 2);
 
       const model = getSheetModel(ws);
       expect(model.mergeCells).toEqual([]);
@@ -250,7 +250,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A1:B4");
 
       // Delete row 3 (within the merge)
-      Worksheet.spliceRows(ws, 3, 1);
+      Row.splice(ws, 3, 1);
 
       // Merge should shrink: A1:B4 -> A1:B3
       const model = getSheetModel(ws);
@@ -266,7 +266,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A1:C1");
 
       // Duplicate row 1, inserting 2 copies below
-      Worksheet.duplicateRow(ws, 1, 2, true);
+      duplicateRow(ws, 1, 2, true);
 
       const model = getSheetModel(ws);
       // Should have 3 merges: original A1:C1, plus A2:C2 and A3:C3
@@ -278,13 +278,13 @@ describe("Worksheet", () => {
       // Verify cell-level merge references in duplicated rows
       expect(Cell.getValue(ws, "A2")).toBe("merged");
       expect(Cell.getType(ws, "B2")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "B2").address).toBe("A2");
+      expect(Cell.getMergeMasterAddress(ws, "B2")).toBe("A2");
       expect(Cell.getType(ws, "C2")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "C2").address).toBe("A2");
+      expect(Cell.getMergeMasterAddress(ws, "C2")).toBe("A2");
 
       expect(Cell.getValue(ws, "A3")).toBe("merged");
       expect(Cell.getType(ws, "B3")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "B3").address).toBe("A3");
+      expect(Cell.getMergeMasterAddress(ws, "B3")).toBe("A3");
     });
 
     it("duplicateRow preserves multi-row merges", () => {
@@ -296,7 +296,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws, "C1", "outside");
 
       // Duplicate row 1 once with insert
-      Worksheet.duplicateRow(ws, 1, 1, true);
+      duplicateRow(ws, 1, 1, true);
 
       const model = getSheetModel(ws);
       // Original merge A1:B3 stays at A1:B3
@@ -327,7 +327,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A2:D2");
 
       // Duplicate row 1 over row 2 (overwrite mode, insert=false)
-      Worksheet.duplicateRow(ws, 1, 1, false);
+      duplicateRow(ws, 1, 1, false);
 
       const model = getSheetModel(ws);
       // Original merge A1:C1 should remain
@@ -345,7 +345,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws, "D1", "solo");
       Worksheet.merge(ws, "A1:C1");
 
-      Worksheet.duplicateRow(ws, 1, 2, true);
+      duplicateRow(ws, 1, 2, true);
 
       // Write to buffer and read back
       const buffer = await Workbook.toBuffer(wb);
@@ -369,7 +369,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A1:B1");
       Worksheet.merge(ws, "D1:F1");
 
-      Worksheet.duplicateRow(ws, 1, 2, true);
+      duplicateRow(ws, 1, 2, true);
 
       const model = getSheetModel(ws);
       // 3 rows × 2 merges = 6 total merges
@@ -393,7 +393,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "C1:E1");
 
       // Insert 2 columns at column 2 (before the merge)
-      Worksheet.spliceColumns(ws, 2, 0, [], []);
+      Column.splice(ws, 2, 0, [], []);
 
       const model = getSheetModel(ws);
       // Merge should shift right by 2: C1:E1 → E1:G1
@@ -415,7 +415,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "D1:F1");
 
       // Delete 2 columns at column 1 (cols 1-2 removed)
-      Worksheet.spliceColumns(ws, 1, 2);
+      Column.splice(ws, 1, 2);
 
       const model = getSheetModel(ws);
       // Merge should shift left by 2: D1:F1 → B1:D1
@@ -441,7 +441,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "E1:F1");
 
       // Delete columns 2-3 (removes B1:C1 entirely)
-      Worksheet.spliceColumns(ws, 2, 2);
+      Column.splice(ws, 2, 2);
 
       const model = getSheetModel(ws);
       // B1:C1 removed, E1:F1 shifts left by 2 → C1:D1
@@ -461,7 +461,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "B1:F1");
 
       // Delete columns 4-5 (2 columns from the middle of the merge)
-      Worksheet.spliceColumns(ws, 4, 2);
+      Column.splice(ws, 4, 2);
 
       const model = getSheetModel(ws);
       // Merge should shrink: B1:F1 → B1:D1 (right reduced by 2)
@@ -484,7 +484,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A2:C2");
 
       // insertRow at row 1 pushes merge down by 1
-      Worksheet.insertRow(ws, 1, ["new"]);
+      insertRow(ws, 1, ["new"]);
 
       const model = getSheetModel(ws);
       // Merge should shift down: A2:C2 → A3:C3
@@ -506,7 +506,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A2:B3");
 
       // Replace rows 2-3 with new data (delete 2, insert 2 -> nExpand=0)
-      Worksheet.spliceRows(ws, 2, 2, ["new1", "val1"], ["new2", "val2"]);
+      Row.splice(ws, 2, 2, ["new1", "val1"], ["new2", "val2"]);
 
       // The merge A2:B3 was entirely within the deleted range, so it should be removed
       const model = getSheetModel(ws);
@@ -530,7 +530,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A2:B3");
 
       // Replace rows 2-3 (delete 2, insert 2 -> nExpand=0)
-      Worksheet.spliceRows(ws, 2, 2, ["r2"], ["r3"]);
+      Row.splice(ws, 2, 2, ["r2"], ["r3"]);
 
       const model = getSheetModel(ws);
       // A2:B3 entirely within deleted range -> removed
@@ -552,7 +552,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws, "B3", "row3B");
 
       // Insert a row at row 2 — this shifts row 3 down to row 4
-      Worksheet.spliceRows(ws, 2, 0, ["inserted"]);
+      Row.splice(ws, 2, 0, ["inserted"]);
 
       // Verify row 4 has the original row 3 values (not corrupted by merge proxy)
       expect(Cell.getValue(ws, "A4")).toBe("row3A");
@@ -567,7 +567,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A1:A3"); // vertical merge, 3 rows, 1 column
 
       // Delete rows 2-3 -> merge would shrink to A1:A1
-      Worksheet.spliceRows(ws, 2, 2);
+      Row.splice(ws, 2, 2);
 
       const model = getSheetModel(ws);
       // 1x1 merge should be removed
@@ -583,7 +583,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A1:C1"); // horizontal merge, 1 row, 3 columns
 
       // Delete columns 2-3 -> merge would shrink to A1:A1
-      Worksheet.spliceColumns(ws, 2, 2);
+      Column.splice(ws, 2, 2);
 
       const model = getSheetModel(ws);
       expect(model.mergeCells).toEqual([]);
@@ -598,7 +598,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A1:B4");
 
       // Delete row 3 -> merge shrinks from A1:B4 to A1:B3
-      Worksheet.spliceRows(ws, 3, 1);
+      Row.splice(ws, 3, 1);
 
       const model = getSheetModel(ws);
       expect(model.mergeCells).toEqual(["A1:B3"]);
@@ -606,11 +606,11 @@ describe("Worksheet", () => {
       // Verify cells in new range are correct
       expect(Cell.getValue(ws, "A1")).toBe("master");
       expect(Cell.getType(ws, "B1")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "B1").address).toBe("A1");
+      expect(Cell.getMergeMasterAddress(ws, "B1")).toBe("A1");
       expect(Cell.getType(ws, "A3")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "A3").address).toBe("A1");
+      expect(Cell.getMergeMasterAddress(ws, "A3")).toBe("A1");
       expect(Cell.getType(ws, "B3")).toBe(Enums.ValueType.Merge);
-      expect(Cell.getMergeMaster(ws, "B3").address).toBe("A1");
+      expect(Cell.getMergeMasterAddress(ws, "B3")).toBe("A1");
     });
 
     it("Bug #5: insertRow preserves style of merged cells", () => {
@@ -629,7 +629,7 @@ describe("Worksheet", () => {
       getCell(ws, "A1").style = borderStyle;
       getCell(ws, "B1").style = borderStyle;
 
-      Worksheet.insertRow(ws, 2, []);
+      insertRow(ws, 2, []);
 
       // A1 (master) style should be preserved
       expect(Cell.getStyle(ws, "A1").border).toEqual(borderStyle.border);
@@ -652,7 +652,7 @@ describe("Worksheet", () => {
       getCell(ws, "A1").style = fillStyle;
       getCell(ws, "A2").style = fillStyle;
 
-      Worksheet.spliceColumns(ws, 2, 0, []);
+      Column.splice(ws, 2, 0, []);
 
       // A1 (master) style should be preserved
       expect(Cell.getStyle(ws, "A1").fill).toEqual(fillStyle.fill);
@@ -672,7 +672,7 @@ describe("Worksheet", () => {
       Worksheet.merge(ws, "A2:B3");
 
       // Overwrite row 2 with row 1's data
-      Worksheet.duplicateRow(ws, 1, 1, false);
+      duplicateRow(ws, 1, 1, false);
 
       const model = getSheetModel(ws);
       // Original A1:C1 should remain
@@ -766,7 +766,7 @@ describe("Worksheet", () => {
         // 3x3 merge B2:D4
         for (let r = 2; r <= 4; r++) {
           for (let c = 2; c <= 4; c++) {
-            Cell.setStyle(ws, r, c, { border: { ...thinBorder } });
+            Cell.setStyle(ws, { row: r, col: c }, { border: { ...thinBorder } });
           }
         }
 
@@ -1052,7 +1052,7 @@ describe("Worksheet", () => {
           if (col === 12) {
             border.right = { style: "thin" };
           }
-          Cell.setStyle(ws, 21, col, { border: border });
+          Cell.setStyle(ws, { row: 21, col }, { border: border });
         }
 
         Worksheet.merge(ws, "C21:L21");
@@ -1071,7 +1071,7 @@ describe("Worksheet", () => {
         });
         // Interior cells (D21-K21) should only have top+bottom
         for (let col = 4; col <= 11; col++) {
-          expect(Cell.getStyle(ws, 21, col).border).toEqual({
+          expect(Cell.getStyle(ws, { row: 21, col }).border).toEqual({
             top: { style: "thin" },
             bottom: { style: "thin" }
           });

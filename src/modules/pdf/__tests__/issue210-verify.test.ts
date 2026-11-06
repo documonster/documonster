@@ -1,4 +1,4 @@
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { readPdf } from "@pdf/reader/pdf-reader";
 import { CELL_PADDING_V } from "@pdf/render/constants";
@@ -13,8 +13,8 @@ function buildTestWorkbook() {
   const ws = Workbook.addWorksheet(workbook, "TestSheet");
   const defRowHeight = 80;
 
-  let curRow = Worksheet.addRow(ws, ["left_top", "left_middle", "left_bottom"]);
-  curRow.height = defRowHeight;
+  let curRow = Row.add(ws, ["left_top", "left_middle", "left_bottom"]);
+  Row.setHeight(ws, curRow, defRowHeight);
   Cell.setAlignment(ws, "A1", { horizontal: "left", vertical: "top" });
   Cell.setFont(ws, "A1", { name: "Consolas", size: 11, bold: false });
   Cell.setAlignment(ws, "B1", { horizontal: "left", vertical: "middle" });
@@ -22,14 +22,14 @@ function buildTestWorkbook() {
   Cell.setAlignment(ws, "C1", { horizontal: "left", vertical: "bottom" });
   Cell.setFont(ws, "C1", { name: "Consolas", size: 11, bold: false });
 
-  curRow = Worksheet.addRow(ws, ["center_top", "center_middle", "center_bottom"]);
-  curRow.height = defRowHeight;
+  curRow = Row.add(ws, ["center_top", "center_middle", "center_bottom"]);
+  Row.setHeight(ws, curRow, defRowHeight);
   Cell.setAlignment(ws, "A2", { horizontal: "center", vertical: "top" });
   Cell.setAlignment(ws, "B2", { horizontal: "center", vertical: "middle" });
   Cell.setAlignment(ws, "C2", { horizontal: "center", vertical: "bottom" });
 
-  curRow = Worksheet.addRow(ws, ["right_top", "right_middle", "right_bottom"]);
-  curRow.height = defRowHeight;
+  curRow = Row.add(ws, ["right_top", "right_middle", "right_bottom"]);
+  Row.setHeight(ws, curRow, defRowHeight);
   Cell.setAlignment(ws, "A3", { horizontal: "right", vertical: "top" });
   Cell.setAlignment(ws, "B3", { horizontal: "right", vertical: "middle" });
   Cell.setAlignment(ws, "C3", { horizontal: "right", vertical: "bottom" });

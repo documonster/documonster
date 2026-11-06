@@ -452,14 +452,15 @@ describe("structured references", () => {
     expect(back.get("E1")).toBe("COUNTA(Sales[])");
   });
 
-  it("normalises a column span into a column list", async () => {
-    // A real difference from XLSX, and not a codec fault: `[[Qty]:[Note]]` and `[[Qty],[Note]]` parse to
-    // the same `StructuredRefNode`, so the AST cannot tell them apart and `printAst` prints the comma
-    // form. XLSX stores the formula as text and returns it verbatim; XLSB stores tokens.
-    //
-    // Asserted rather than left undocumented, because a caller comparing the two containers will see it.
-    const back = await withTable([["E1", "SUM(Sales[[Qty]:[Note]])"]]);
-    expect(back.get("E1")).toBe("SUM(Sales[[Qty],[Note]])");
+  it("round-trips a column span", async () => {
+    // `columns = 2` is a span from `colFirst` to `colLast`, which Excel spells `[[Qty]:[Note]]`. This used to read
+    // back as `[[Qty],[Note]]` — not a reference Excel accepts — and this test pinned that.
+    const back = await withTable([
+      ["E1", "SUM(Sales[[Qty]:[Note]])"],
+      ["E2", "ROWS(Sales[[#Headers],[Qty]:[Note]])"]
+    ]);
+    expect(back.get("E1")).toBe("SUM(Sales[[Qty]:[Note]])");
+    expect(back.get("E2")).toBe("ROWS(Sales[[#Headers],[Qty]:[Note]])");
   });
 
   it("refuses a reference to a table the workbook does not define", async () => {

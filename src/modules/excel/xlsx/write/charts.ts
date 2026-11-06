@@ -1,10 +1,3 @@
-/**
- * Chart and chartEx parts: rendering a structured chart, byte-preserving a loaded one, and patching a
- * loaded one in place when only patchable fields were edited.
- *
- * The largest part of the writer, and loaded by `writeXlsxPackage` only when the package has a chart. The
- * XLSB writer imports it too, since a chart part is XML in both containers.
- */
 import type {
   ChartExData,
   ChartExEntry,
@@ -45,8 +38,16 @@ import {
 } from "@excel/chart/serialize/chart-ex-serialize";
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
 import { themeIndexToName } from "@excel/chart/shared/chart-utils";
+/**
+ * Chart and chartEx parts: rendering a structured chart, byte-preserving a loaded one, and patching a
+ * loaded one in place when only patchable fields were edited.
+ *
+ * The largest part of the writer, and loaded by `writeXlsxPackage` only when the package has a chart. The
+ * XLSB writer imports it too, since a chart part is XML in both containers.
+ */
+import { chartColorTransformList, colorTransformsXml } from "@excel/chart/shared/color-transforms";
 import { definedNamesAddHidden, definedNamesModel } from "@excel/core/defined-names";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
 import {
   chartPath,
   chartRelsPath,
@@ -69,7 +70,7 @@ import type { IZipWriter } from "@excel/xlsx/types";
 import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { appendToZip, renderToZip } from "@excel/xlsx/zip-writer";
-import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
+import { xmlEncode, xmlEncodeAttr, xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
@@ -2564,7 +2565,7 @@ function buildRawShapePropertiesXml(
   if (spPr.line) {
     const attrs: Record<string, string> = {};
     if (spPr.line.width) {
-      attrs.w = String(spPr.line.width);
+      attrs.w = xmlValue(spPr.line.width, "w");
     }
     if (spPr.line.cap) {
       attrs.cap = spPr.line.cap;
@@ -2622,7 +2623,7 @@ function buildRawTextPropertiesXml(
   writer.openNode(`${namespace}:txPr`);
   writer.leafNode(
     "a:bodyPr",
-    txPr.rotation !== undefined ? { rot: String(txPr.rotation) } : undefined
+    txPr.rotation !== undefined ? { rot: xmlValue(txPr.rotation, "rot") } : undefined
   );
   writer.leafNode("a:lstStyle");
   writer.openNode("a:p");
@@ -2644,7 +2645,7 @@ function normalizeRawNamespace(rawXml: string, localName: string, namespace: "c"
 function writeRawRunProperties(writer: XmlWriter, props: ChartTextProperties, tag: string): void {
   const attrs: Record<string, string> = {};
   if (props.size !== undefined) {
-    attrs.sz = String(props.size);
+    attrs.sz = xmlValue(props.size, "sz");
   }
   if (props.bold !== undefined) {
     attrs.b = props.bold ? "1" : "0";
@@ -2660,16 +2661,16 @@ function writeRawRunProperties(writer: XmlWriter, props: ChartTextProperties, ta
     attrs.strike = props.strike;
   }
   if (props.rotation !== undefined) {
-    attrs.rot = String(props.rotation);
+    attrs.rot = xmlValue(props.rotation, "rot");
   }
   if (props.baseline !== undefined) {
-    attrs.baseline = String(props.baseline);
+    attrs.baseline = xmlValue(props.baseline, "baseline");
   }
   if (props.kern !== undefined) {
-    attrs.kern = String(props.kern);
+    attrs.kern = xmlValue(props.kern, "kern");
   }
   if (props.spacing !== undefined) {
-    attrs.spc = String(props.spacing);
+    attrs.spc = xmlValue(props.spacing, "spc");
   }
   if (props.cap) {
     attrs.cap = props.cap;
@@ -2763,7 +2764,7 @@ function writeRawGradientFill(
     // 100× too small and produced gradients in Excel at wildly
     // wrong positions.
     const encoded = Math.max(0, Math.min(100000, Math.round(stop.position * 100000)));
-    writer.openNode("a:gs", { pos: String(encoded) });
+    writer.openNode("a:gs", { pos: xmlValue(encoded, "pos") });
     writeRawColor(writer, stop.color);
     writer.closeNode();
   }
@@ -2784,10 +2785,10 @@ function writeRawGradientFill(
     };
     writer.openNode("a:path", { path: gradient.type });
     writer.leafNode("a:fillToRect", {
-      l: String(pct(rect?.left, 50000)),
-      t: String(pct(rect?.top, 50000)),
-      r: String(pct(rect?.right, 50000)),
-      b: String(pct(rect?.bottom, 50000))
+      l: xmlValue(pct(rect?.left, 50000), "l"),
+      t: xmlValue(pct(rect?.top, 50000), "t"),
+      r: xmlValue(pct(rect?.right, 50000), "r"),
+      b: xmlValue(pct(rect?.bottom, 50000), "b")
     });
     writer.closeNode();
   } else {
@@ -2800,7 +2801,7 @@ function writeRawGradientFill(
     // mode. The OOXML default is `false` per `CT_LinearShadeProperties`,
     // so omitting it when absent is lossless.
     const linAttrs: Record<string, string> = {
-      ang: String(Math.round((gradient.angle ?? 0) * 60000))
+      ang: xmlValue(Math.round((gradient.angle ?? 0) * 60000), "ang")
     };
     if (gradient.scaled !== undefined) {
       linAttrs.scaled = gradient.scaled ? "1" : "0";
@@ -2815,7 +2816,7 @@ function writeRawEffectList(writer: XmlWriter, effects: EffectList): void {
   if (effects.blur) {
     const attrs: Record<string, string> = {};
     if (effects.blur.radius !== undefined) {
-      attrs.rad = String(effects.blur.radius);
+      attrs.rad = xmlValue(effects.blur.radius, "rad");
     }
     if (effects.blur.grow !== undefined) {
       attrs.grow = effects.blur.grow ? "1" : "0";
@@ -2832,10 +2833,10 @@ function writeRawEffectList(writer: XmlWriter, effects: EffectList): void {
     const ps = effects.presetShadow;
     const attrs: Record<string, string> = { prst: ps.preset };
     if (ps.distance !== undefined) {
-      attrs.dist = String(ps.distance);
+      attrs.dist = xmlValue(ps.distance, "dist");
     }
     if (ps.direction !== undefined) {
-      attrs.dir = String(ps.direction);
+      attrs.dir = xmlValue(ps.direction, "dir");
     }
     writer.openNode("a:prstShdw", attrs);
     if (ps.color) {
@@ -2844,12 +2845,12 @@ function writeRawEffectList(writer: XmlWriter, effects: EffectList): void {
     writer.closeNode();
   }
   if (effects.glow) {
-    writer.openNode("a:glow", { rad: String(effects.glow.radius) });
+    writer.openNode("a:glow", { rad: xmlValue(effects.glow.radius, "rad") });
     writeRawColor(writer, effects.glow.color);
     writer.closeNode();
   }
   if (effects.softEdge) {
-    writer.leafNode("a:softEdge", { rad: String(effects.softEdge.radius) });
+    writer.leafNode("a:softEdge", { rad: xmlValue(effects.softEdge.radius, "rad") });
   }
   if (effects.reflection) {
     const reflection = effects.reflection;
@@ -2907,17 +2908,17 @@ function writeRawScene3D(writer: XmlWriter, scene: Scene3D): void {
     const camera = scene.camera;
     const attrs: Record<string, string> = { prst: camera.preset };
     if (camera.fov !== undefined) {
-      attrs.fov = String(camera.fov);
+      attrs.fov = xmlValue(camera.fov, "fov");
     }
     if (camera.zoom !== undefined) {
-      attrs.zoom = String(camera.zoom);
+      attrs.zoom = xmlValue(camera.zoom, "zoom");
     }
     if (camera.rotation) {
       writer.openNode("a:camera", attrs);
       writer.leafNode("a:rot", {
-        lat: String(camera.rotation.lat),
-        lon: String(camera.rotation.lon),
-        rev: String(camera.rotation.rev)
+        lat: xmlValue(camera.rotation.lat, "lat"),
+        lon: xmlValue(camera.rotation.lon, "lon"),
+        rev: xmlValue(camera.rotation.rev, "rev")
       });
       writer.closeNode();
     } else {
@@ -2930,9 +2931,9 @@ function writeRawScene3D(writer: XmlWriter, scene: Scene3D): void {
     if (lightRig.rotation) {
       writer.openNode("a:lightRig", attrs);
       writer.leafNode("a:rot", {
-        lat: String(lightRig.rotation.lat),
-        lon: String(lightRig.rotation.lon),
-        rev: String(lightRig.rotation.rev)
+        lat: xmlValue(lightRig.rotation.lat, "lat"),
+        lon: xmlValue(lightRig.rotation.lon, "lon"),
+        rev: xmlValue(lightRig.rotation.rev, "rev")
       });
       writer.closeNode();
     } else {
@@ -2945,13 +2946,13 @@ function writeRawScene3D(writer: XmlWriter, scene: Scene3D): void {
 function writeRawSp3D(writer: XmlWriter, sp3d: ShapeProperties3D): void {
   const attrs: Record<string, string> = {};
   if (sp3d.z !== undefined) {
-    attrs.z = String(sp3d.z);
+    attrs.z = xmlValue(sp3d.z, "z");
   }
   if (sp3d.extrusionHeight !== undefined) {
-    attrs.extrusionH = String(sp3d.extrusionHeight);
+    attrs.extrusionH = xmlValue(sp3d.extrusionHeight, "extrusionH");
   }
   if (sp3d.contourWidth !== undefined) {
-    attrs.contourW = String(sp3d.contourWidth);
+    attrs.contourW = xmlValue(sp3d.contourWidth, "contourW");
   }
   if (sp3d.material) {
     attrs.prstMaterial = sp3d.material;
@@ -2989,10 +2990,10 @@ function writeRawSp3D(writer: XmlWriter, sp3d: ShapeProperties3D): void {
 function writeRawBevel(writer: XmlWriter, tag: string, bevel: Bevel): void {
   const attrs: Record<string, string> = {};
   if (bevel.width !== undefined) {
-    attrs.w = String(bevel.width);
+    attrs.w = xmlValue(bevel.width, "w");
   }
   if (bevel.height !== undefined) {
-    attrs.h = String(bevel.height);
+    attrs.h = xmlValue(bevel.height, "h");
   }
   if (bevel.preset) {
     attrs.prst = bevel.preset;
@@ -3001,6 +3002,11 @@ function writeRawBevel(writer: XmlWriter, tag: string, bevel: Bevel): void {
 }
 
 function buildRawColorModifiersXml(color: ChartColor): string {
+  // The ordered list, when the colour carries one (`ChartColor.transforms`).
+  const list = chartColorTransformList(color);
+  if (list !== undefined) {
+    return colorTransformsXml(list);
+  }
   // Each modifier must serialise as `<a:* val="N"/>` where `N` is a
   // valid `xsd:int`. Previously the raw patcher interpolated model
   // values directly, so `NaN` / `Infinity` / unrounded floats leaked
@@ -4109,7 +4115,7 @@ export async function addCharts(
         await appendToZip(zip, patched, { name: chartPath(n) });
       } else {
         if (requireRawPatch) {
-          throw new ChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
+          throw new ExcelChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
         }
         // Render via buffered path so we can splice preserved leading
         // XML comments (e.g. vendor provenance markers) from the
@@ -4293,7 +4299,9 @@ export async function addChartExEntries(
         await appendToZip(zip, patched, { name: chartExPath(n) });
       } else {
         if (requireRawPatch) {
-          throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
+          throw new ExcelChartOptionsError(
+            buildChartExStrictFailureMessage(n, structuredEntry.model)
+          );
         }
         const renderedXml = renderChartEx(stripChartExRawXml(structuredEntry.model));
         // Splice preserved leading XML comments from original raw

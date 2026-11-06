@@ -8,7 +8,7 @@
  * element's technology, a block's column span.
  */
 import type { DrawNode } from "@draw/types";
-import { mermaidToDrawList, parseMermaid } from "@mermaid/index";
+import { Mermaid } from "@mermaid/index";
 import type {
   BlockDiagram,
   C4Diagram,
@@ -31,7 +31,7 @@ const ellipses = (list: {
   );
 
 describe("quadrantChart", () => {
-  const parse = (source: string): QuadrantDiagram => parseMermaid(source) as QuadrantDiagram;
+  const parse = (source: string): QuadrantDiagram => Mermaid.parse(source) as QuadrantDiagram;
 
   it("reads both ends of an axis", () => {
     const diagram = parse("quadrantChart\n x-axis Low --> High\n y-axis Bad --> Good");
@@ -54,7 +54,7 @@ describe("quadrantChart", () => {
   });
 
   it("places a point at its own fraction of the frame, with y upwards", () => {
-    const list = mermaidToDrawList("quadrantChart\n Low: [0.25, 0.25]\n High: [0.75, 0.75]");
+    const list = Mermaid.toDrawList("quadrantChart\n Low: [0.25, 0.25]\n High: [0.75, 0.75]");
     const dots = ellipses(list).filter(node => node.rx === 6);
     expect(dots).toHaveLength(2);
     expect(dots[1].cx).toBeGreaterThan(dots[0].cx);
@@ -66,7 +66,7 @@ describe("quadrantChart", () => {
 });
 
 describe("xychart", () => {
-  const parse = (source: string): XyDiagram => parseMermaid(source) as XyDiagram;
+  const parse = (source: string): XyDiagram => Mermaid.parse(source) as XyDiagram;
 
   it("reads categories, bounds and both series types", () => {
     const diagram = parse(`xychart-beta
@@ -85,14 +85,14 @@ describe("xychart", () => {
   });
 
   it("scales a bar to its value", () => {
-    const list = mermaidToDrawList("xychart-beta\n y-axis 0 --> 100\n bar [25, 50]");
+    const list = Mermaid.toDrawList("xychart-beta\n y-axis 0 --> 100\n bar [25, 50]");
     const bars = rects(list).filter(node => node.rx === 2);
     expect(bars).toHaveLength(2);
     expect(bars[1].height).toBeCloseTo(bars[0].height * 2, 0);
   });
 
   it("draws a line series as one polyline through its points", () => {
-    const list = mermaidToDrawList("xychart-beta\n line [1, 2, 3, 4]");
+    const list = Mermaid.toDrawList("xychart-beta\n line [1, 2, 3, 4]");
     const lines = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "polyline" }> =>
         node.kind === "polyline" && node.points.length === 4
@@ -104,7 +104,7 @@ describe("xychart", () => {
 });
 
 describe("sankey", () => {
-  const parse = (source: string): SankeyDiagram => parseMermaid(source) as SankeyDiagram;
+  const parse = (source: string): SankeyDiagram => Mermaid.parse(source) as SankeyDiagram;
 
   it("reads CSV rows", () => {
     expect(parse("sankey-beta\n A,B,10\n B,C,4").links).toEqual([
@@ -125,7 +125,7 @@ describe("sankey", () => {
   });
 
   it("makes a ribbon's thickness proportional to its value", () => {
-    const list = mermaidToDrawList("sankey-beta\n A,B,10\n A,C,20");
+    const list = Mermaid.toDrawList("sankey-beta\n A,B,10\n A,C,20");
     const ribbons = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "path" }> => node.kind === "path"
     );
@@ -142,7 +142,7 @@ describe("sankey", () => {
   });
 
   it("puts a node to the right of everything that feeds it", () => {
-    const list = mermaidToDrawList("sankey-beta\n A,B,10\n B,C,10");
+    const list = Mermaid.toDrawList("sankey-beta\n A,B,10\n B,C,10");
     const nodes = rects(list).filter(node => node.width === 16);
     expect(nodes).toHaveLength(3);
     const xs = nodes.map(node => node.x).sort((a, b) => a - b);
@@ -151,7 +151,7 @@ describe("sankey", () => {
 });
 
 describe("requirementDiagram", () => {
-  const parse = (source: string): RequirementDiagram => parseMermaid(source) as RequirementDiagram;
+  const parse = (source: string): RequirementDiagram => Mermaid.parse(source) as RequirementDiagram;
 
   it("collects a requirement's fields from its block", () => {
     const requirement = parse(`requirementDiagram
@@ -186,7 +186,7 @@ describe("requirementDiagram", () => {
   });
 
   it("draws the verb on the edge", () => {
-    const list = mermaidToDrawList("requirementDiagram\n a - satisfies -> b");
+    const list = Mermaid.toDrawList("requirementDiagram\n a - satisfies -> b");
     const labels = list.children
       .filter((node): node is Extract<DrawNode, { kind: "text" }> => node.kind === "text")
       .flatMap(node => node.lines.map(line => line.text));
@@ -195,7 +195,7 @@ describe("requirementDiagram", () => {
 });
 
 describe("C4", () => {
-  const parse = (source: string): C4Diagram => parseMermaid(source) as C4Diagram;
+  const parse = (source: string): C4Diagram => Mermaid.parse(source) as C4Diagram;
 
   it("reads an element's label and description", () => {
     const element = parse('C4Context\n Person(a, "Customer", "Buys things")').elements[0];
@@ -229,7 +229,7 @@ describe("C4", () => {
   it("turns a Rel_Back around", () => {
     const relation = parse('C4Context\n Rel_Back(a, b, "Uses")').relations[0];
     expect(relation.reversed).toBe(true);
-    const list = mermaidToDrawList(
+    const list = Mermaid.toDrawList(
       'C4Context\n Person(a, "A")\n Person(b, "B")\n Rel_Back(a, b, "Uses")'
     );
     expect(list.children.length).toBeGreaterThan(2);
@@ -237,7 +237,7 @@ describe("C4", () => {
 });
 
 describe("block", () => {
-  const parse = (source: string): BlockDiagram => parseMermaid(source) as BlockDiagram;
+  const parse = (source: string): BlockDiagram => Mermaid.parse(source) as BlockDiagram;
 
   it("reads the column count and each cell's span", () => {
     const diagram = parse("block-beta\n columns 3\n a b c\n d:2 e");
@@ -255,12 +255,12 @@ describe("block", () => {
     const diagram = parse("block-beta\n columns 3\n a space b");
     expect(diagram.cells[1].spacer).toBe(true);
     // Two boxes drawn, three cells placed.
-    const list = mermaidToDrawList("block-beta\n columns 3\n a space b");
+    const list = Mermaid.toDrawList("block-beta\n columns 3\n a space b");
     expect(rects(list).filter(node => node.rx === 4)).toHaveLength(2);
   });
 
   it("wraps at the declared column count", () => {
-    const list = mermaidToDrawList("block-beta\n columns 2\n a b c d");
+    const list = Mermaid.toDrawList("block-beta\n columns 2\n a b c d");
     const boxes = rects(list).filter(node => node.rx === 4);
     expect(boxes).toHaveLength(4);
     // Two rows of two.
@@ -268,15 +268,15 @@ describe("block", () => {
   });
 
   it("gives a spanning cell the width of the columns it covers", () => {
-    const list = mermaidToDrawList("block-beta\n columns 2\n a b\n c:2");
+    const list = Mermaid.toDrawList("block-beta\n columns 2\n a b\n c:2");
     const boxes = rects(list).filter(node => node.rx === 4);
     const wide = boxes.find(box => box.width > boxes[0].width * 1.5);
     expect(wide).toBeDefined();
   });
 
   it("draws a connection between two cells", () => {
-    const plain = mermaidToDrawList("block-beta\n columns 2\n a b");
-    const linked = mermaidToDrawList("block-beta\n columns 2\n a b\n a --> b");
+    const plain = Mermaid.toDrawList("block-beta\n columns 2\n a b");
+    const linked = Mermaid.toDrawList("block-beta\n columns 2\n a b\n a --> b");
     expect(linked.children.length).toBeGreaterThan(plain.children.length);
   });
 });
@@ -284,7 +284,7 @@ describe("block", () => {
 describe("what the source states, the picture shows", () => {
   /** Every visible word of the source, and whether it reached the display list. */
   const undrawn = (source: string, words: readonly string[]): string[] => {
-    const drawn = mermaidToDrawList(source)
+    const drawn = Mermaid.toDrawList(source)
       .children.filter((node): node is Extract<DrawNode, { kind: "text" }> => node.kind === "text")
       .flatMap(node => node.lines.map(line => line.text))
       .join(" | ");
@@ -321,8 +321,8 @@ describe("what the source states, the picture shows", () => {
 
   it("sizes a block cell from its font", () => {
     // A constant cell height meant a larger font simply overflowed the box.
-    const small = mermaidToDrawList("block-beta\n columns 2\n aaaa bbbb", { fontSize: 10 });
-    const large = mermaidToDrawList("block-beta\n columns 2\n aaaa bbbb", { fontSize: 30 });
+    const small = Mermaid.toDrawList("block-beta\n columns 2\n aaaa bbbb", { fontSize: 10 });
+    const large = Mermaid.toDrawList("block-beta\n columns 2\n aaaa bbbb", { fontSize: 30 });
     expect(large.height).toBeGreaterThan(small.height);
     const cell = rects(large).find(node => node.rx === 4)!;
     expect(cell.height).toBeGreaterThan(30);

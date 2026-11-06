@@ -4,8 +4,8 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Io } from "../index";
-import type { DocxDocument, Run } from "../types";
+import { Build, Io, Transform } from "../index";
+import type { DocxDocument, Paragraph, ParagraphChild, Run, StructuredDocumentTag } from "../types";
 
 // Helper to create a minimal document with paragraphs
 function createDoc(texts: string[], options?: Partial<DocxDocument>): DocxDocument {
@@ -42,20 +42,20 @@ function extractTexts(doc: DocxDocument): string[] {
 
 describe("mergeDocuments", () => {
   it("returns empty document for empty array", () => {
-    const result = Io.merge([]);
+    const result = Transform.merge([]);
     expect(result.body).toEqual([]);
   });
 
   it("returns the document itself for single-element array", () => {
     const doc = createDoc(["Hello"]);
-    const result = Io.merge([doc]);
+    const result = Transform.merge([doc]);
     expect(result.body).toBe(doc.body);
   });
 
   it("merges two documents with section break between them", () => {
     const doc1 = createDoc(["First doc"]);
     const doc2 = createDoc(["Second doc"]);
-    const result = Io.merge([doc1, doc2]);
+    const result = Transform.merge([doc1, doc2]);
 
     // Should have content from both documents
     const texts = extractTexts(result);
@@ -67,7 +67,7 @@ describe("mergeDocuments", () => {
     const doc1 = createDoc(["A"]);
     const doc2 = createDoc(["B"]);
     const doc3 = createDoc(["C"]);
-    const result = Io.merge([doc1, doc2, doc3]);
+    const result = Transform.merge([doc1, doc2, doc3]);
 
     const texts = extractTexts(result);
     expect(texts).toContain("A");
@@ -78,7 +78,7 @@ describe("mergeDocuments", () => {
   it("uses 'continuous' section break when specified", () => {
     const doc1 = createDoc(["First"]);
     const doc2 = createDoc(["Second"]);
-    const result = Io.merge([doc1, doc2], { sectionBreak: "continuous" });
+    const result = Transform.merge([doc1, doc2], { sectionBreak: "continuous" });
 
     // The break opens the second document's section.
     expect(result.sectionProperties?.breakType).toBe("continuous");
@@ -87,7 +87,7 @@ describe("mergeDocuments", () => {
   it("uses 'nextPage' section break by default", () => {
     const doc1 = createDoc(["First"]);
     const doc2 = createDoc(["Second"]);
-    const result = Io.merge([doc1, doc2]);
+    const result = Transform.merge([doc1, doc2]);
 
     expect(result.sectionProperties?.breakType).toBe("nextPage");
   });
@@ -96,7 +96,7 @@ describe("mergeDocuments", () => {
     const style1 = { styleId: "Heading1", name: "Heading 1", type: "paragraph" };
     const doc1 = createDoc(["First"], { styles: [style1 as any] });
     const doc2 = createDoc(["Second"]);
-    const result = Io.merge([doc1, doc2]);
+    const result = Transform.merge([doc1, doc2]);
 
     expect(result.styles).toBeDefined();
     expect(result.styles!.some((s: any) => s.styleId === "Heading1")).toBe(true);
@@ -106,7 +106,7 @@ describe("mergeDocuments", () => {
     const style = { styleId: "Normal", name: "Normal", type: "paragraph" };
     const doc1 = createDoc(["First"], { styles: [style as any] });
     const doc2 = createDoc(["Second"], { styles: [style as any] });
-    const result = Io.merge([doc1, doc2]);
+    const result = Transform.merge([doc1, doc2]);
 
     const normalStyles = result.styles?.filter((s: any) => s.styleId === "Normal");
     expect(normalStyles?.length).toBe(1);
@@ -120,7 +120,7 @@ describe("mergeDocuments", () => {
     };
     const doc1 = createDoc(["First"], { images: [img1 as any] });
     const doc2 = createDoc(["Second"], { images: [img1 as any] });
-    const result = Io.merge([doc1, doc2]);
+    const result = Transform.merge([doc1, doc2]);
 
     expect(result.images?.length).toBe(1);
   });
@@ -130,7 +130,7 @@ describe("mergeDocuments", () => {
     const img2 = { fileName: "image2.png", data: new Uint8Array([2]), mediaType: "image/png" };
     const doc1 = createDoc(["First"], { images: [img1 as any] });
     const doc2 = createDoc(["Second"], { images: [img2 as any] });
-    const result = Io.merge([doc1, doc2]);
+    const result = Transform.merge([doc1, doc2]);
 
     expect(result.images?.length).toBe(2);
   });
@@ -169,7 +169,7 @@ describe("mergeDocuments", () => {
       numberingInstances: [{ numId: 1, abstractNumId: 0 }]
     } as unknown as DocxDocument;
 
-    const merged = Io.merge([doc1, doc2]);
+    const merged = Transform.merge([doc1, doc2]);
 
     // We should now have two distinct numId values and two distinct abstractNumIds.
     expect(merged.numberingInstances?.length).toBe(2);
@@ -214,7 +214,7 @@ describe("mergeDocuments", () => {
       numberingInstances: [{ numId: 1, abstractNumId: 0 }]
     } as DocxDocument;
 
-    Io.merge([doc1WithList, doc2]);
+    Transform.merge([doc1WithList, doc2]);
 
     // doc2's body paragraph numbering should NOT have been mutated.
     expect((doc2.body[0] as any).properties.numbering.numId).toBe(1);
@@ -255,7 +255,7 @@ describe("mergeDocuments", () => {
       images: [img2]
     } as unknown as DocxDocument;
 
-    const merged = Io.merge([doc1, doc2]);
+    const merged = Transform.merge([doc1, doc2]);
     expect(merged.images!.length).toBe(2);
 
     // Find the rId of the new image (image2.png).
@@ -309,7 +309,7 @@ describe("mergeDocuments", () => {
       ]
     } as unknown as DocxDocument;
 
-    const merged = Io.merge([doc1, doc2]);
+    const merged = Transform.merge([doc1, doc2]);
     // Both footnotes survived.
     expect(merged.footnotes!.length).toBe(2);
     // doc2's footnote got a fresh id (3), and doc2's body ref now points there.
@@ -326,7 +326,7 @@ describe("mergeDocuments — section breaks (matches Word)", () => {
   const LANDSCAPE = { pageSize: { width: 15840, height: 12240 } };
 
   it("puts the break on the section it opens and keeps each document's page setup", () => {
-    const result = Io.merge(
+    const result = Transform.merge(
       [
         createDoc(["First"], { sectionProperties: A4 }),
         createDoc(["Second"], { sectionProperties: LANDSCAPE })
@@ -345,7 +345,7 @@ describe("mergeDocuments — section breaks (matches Word)", () => {
       ...inner,
       body: [{ ...inner.body[0], properties: { sectionProperties: A4 } }, inner.body[1]]
     } as DocxDocument;
-    const result = Io.merge([createDoc(["Base"]), withBreak], { sectionBreak: "evenPage" });
+    const result = Transform.merge([createDoc(["Base"]), withBreak], { sectionBreak: "evenPage" });
     const sects = result.body.flatMap(b =>
       b.type === "paragraph" && b.properties?.sectionProperties
         ? [b.properties.sectionProperties]
@@ -362,11 +362,166 @@ describe("mergeDocuments — section breaks (matches Word)", () => {
       body: [{ ...ending.body[0], properties: { sectionProperties: A4 } }],
       sectionProperties: LANDSCAPE
     } as DocxDocument;
-    const result = Io.merge([closed, createDoc(["Next"])]);
+    const result = Transform.merge([closed, createDoc(["Next"])]);
     expect(result.body).toHaveLength(3);
     const carrier = result.body[1];
     expect(carrier.type === "paragraph" && carrier.properties?.sectionProperties).toEqual(
       LANDSCAPE
     );
+  });
+});
+
+describe("mergeDocuments — bookmark names", () => {
+  /** A document whose one paragraph is the bookmark `name`, plus `extra` children. */
+  function bookmarked(name: string, extra: readonly ParagraphChild[] = []): DocxDocument {
+    return {
+      body: [
+        Build.paragraph([
+          Build.bookmarkStart(0, name),
+          Build.text(name),
+          Build.bookmarkEnd(0),
+          ...extra
+        ])
+      ]
+    };
+  }
+
+  /** Every bookmark name, hyperlink anchor and field instruction, in order. */
+  function references(doc: DocxDocument): string[] {
+    const out: string[] = [];
+    const visit = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (!node || typeof node !== "object") {
+        return;
+      }
+      const o = node as Record<string, unknown>;
+      if (o.type === "bookmarkStart") {
+        out.push(`bm:${String(o.name)}`);
+      } else if (o.type === "hyperlink" && o.anchor) {
+        out.push(`link:${String(o.anchor)}`);
+      } else if (o.type === "field") {
+        out.push(`field:${String(o.instruction)}`);
+      } else if (typeof o.rawXml === "string") {
+        out.push(`raw:${o.rawXml}`);
+      }
+      Object.values(o).forEach(visit);
+    };
+    visit(doc.body);
+    visit(doc.footnotes);
+    return out;
+  }
+
+  it("renames a name an earlier document already uses, and what refers to it", () => {
+    const ref: ParagraphChild = { content: [{ type: "field", instruction: "REF _Toc1 \\h" }] };
+    const link = Build.hyperlink("go", { anchor: "_Toc1" });
+    const merged = Transform.merge([bookmarked("_Toc1"), bookmarked("_Toc1", [ref, link])]);
+    expect(references(merged)).toEqual([
+      "bm:_Toc1",
+      "bm:_Toc1_2",
+      "field:REF _Toc1_2 \\h",
+      "link:_Toc1_2"
+    ]);
+  });
+
+  it("leaves names that do not collide, and never picks one a document already has", () => {
+    const merged = Transform.merge([
+      bookmarked("a"),
+      { body: [...bookmarked("a").body, ...bookmarked("a_2").body] },
+      bookmarked("b")
+    ]);
+    expect(references(merged).filter(r => r.startsWith("bm:"))).toEqual([
+      "bm:a",
+      "bm:a_3",
+      "bm:a_2",
+      "bm:b"
+    ]);
+  });
+
+  it("renames every field kind that names a bookmark, quoted or not", () => {
+    const fields = [
+      "PAGEREF x \\h",
+      'REF "x" \\p',
+      "NOTEREF x",
+      'HYPERLINK \\l "x"',
+      "GOTOBUTTON x Click",
+      "REF xy"
+    ].map((instruction): ParagraphChild => ({ content: [{ type: "field", instruction }] }));
+    const merged = Transform.merge([bookmarked("x"), bookmarked("x", fields)]);
+    expect(references(merged).filter(r => r.startsWith("field:"))).toEqual([
+      "field:PAGEREF x_2 \\h",
+      'field:REF "x_2" \\p',
+      "field:NOTEREF x_2",
+      'field:HYPERLINK \\l "x_2"',
+      "field:GOTOBUTTON x_2 Click",
+      "field:REF xy"
+    ]);
+  });
+
+  it("renames bookmarks in preserved raw XML and in merged notes", () => {
+    const raw = {
+      type: "opaqueParagraphChild",
+      rawXml:
+        '<w:bdo w:val="rtl"><w:bookmarkStart w:id="3" w:name="x"/><w:hyperlink w:anchor="x"/></w:bdo>'
+    } as ParagraphChild;
+    const second: DocxDocument = {
+      ...bookmarked("y", [raw]),
+      footnotes: [{ id: 1, content: [Build.paragraph([Build.bookmarkStart(5, "x")])] }]
+    };
+    const merged = Transform.merge([bookmarked("x"), second]);
+    const refs = references(merged);
+    expect(refs).toContain(
+      'raw:<w:bdo w:val="rtl"><w:bookmarkStart w:id="3" w:name="x_2"/><w:hyperlink w:anchor="x_2"/></w:bdo>'
+    );
+    expect(refs.filter(r => r === "bm:x_2")).toHaveLength(1);
+    // The input documents are not modified.
+    expect(references(second)).toContain("bm:x");
+  });
+
+  it("writes a package whose bookmark names are unique when a document is merged with itself", async () => {
+    const doc = bookmarked("_GoBack");
+    const parts = await Io.toBuffer(Transform.merge([doc, doc]));
+    const read = await Io.read(parts);
+    const names = references(read).filter(r => r.startsWith("bm:"));
+    expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+describe("mergeDocuments — comment ids on markers after the content", () => {
+  it("remaps a comment range end held after a paragraph's children or an SDT's content", () => {
+    const withComment = (): DocxDocument => ({
+      body: [
+        {
+          type: "paragraph",
+          children: [{ type: "commentRangeStart", id: 0 }, Build.text("p")],
+          rangeMarkersAfter: [{ type: "commentRangeEnd", id: 0 }]
+        },
+        {
+          type: "sdt",
+          content: [Build.paragraph([{ type: "commentRangeStart", id: 1 }, Build.text("s")])],
+          contentRangeMarkersAfter: [{ type: "commentRangeEnd", id: 1 }]
+        }
+      ],
+      comments: [
+        { id: 0, author: "a", content: [] },
+        { id: 1, author: "a", content: [] }
+      ]
+    });
+    const merged = Transform.merge([withComment(), withComment()]);
+    const [, , , para, sdt] = merged.body as [
+      unknown,
+      unknown,
+      unknown,
+      Paragraph,
+      StructuredDocumentTag
+    ];
+    const startId = (para.children[0] as { id: number }).id;
+    expect(startId).not.toBe(0);
+    expect(para.rangeMarkersAfter).toEqual([{ type: "commentRangeEnd", id: startId }]);
+    const sdtStart = ((sdt.content[0] as Paragraph).children[0] as { id: number }).id;
+    expect(sdtStart).not.toBe(1);
+    expect(sdt.contentRangeMarkersAfter).toEqual([{ type: "commentRangeEnd", id: sdtStart }]);
   });
 });

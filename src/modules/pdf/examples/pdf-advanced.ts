@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -36,7 +36,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const wb1 = Workbook.create();
 const ws1 = Workbook.addWorksheet(wb1, "Inventory");
-Worksheet.setColumns(ws1, [
+Column.setDefinitions(ws1, [
   { header: "ID", key: "id", width: 8 },
   { header: "Product Name", key: "name", width: 25 },
   { header: "Category", key: "category", width: 15 },
@@ -56,7 +56,7 @@ Row.setAlignment(ws1, 1, { horizontal: "center" });
 // Add 100 rows to force pagination
 const categories = ["Electronics", "Clothing", "Food", "Tools", "Books"];
 for (let i = 1; i <= 100; i++) {
-  Worksheet.addRow(ws1, {
+  Row.add(ws1, {
     id: i,
     name: `Product ${i}`,
     category: categories[i % categories.length],
@@ -119,12 +119,12 @@ const ws3 = Workbook.addWorksheet(wb3, "Wide Data");
 // 20 columns × 30 rows — will need horizontal page splits
 for (let c = 1; c <= 20; c++) {
   Column.setWidth(ws3, c, 12);
-  Cell.setValue(ws3, 1, c, `Col ${c}`);
-  Cell.setStyle(ws3, 1, c, { font: { bold: true } });
+  Cell.setValue(ws3, { row: 1, col: c }, `Col ${c}`);
+  Cell.setStyle(ws3, { row: 1, col: c }, { font: { bold: true } });
 }
 for (let r = 2; r <= 30; r++) {
   for (let c = 1; c <= 20; c++) {
-    Cell.setValue(ws3, r, c, (r - 1) * c);
+    Cell.setValue(ws3, { row: r, col: c }, (r - 1) * c);
   }
 }
 
@@ -292,7 +292,7 @@ const wb9 = Workbook.create();
 const ws9 = Workbook.addWorksheet(wb9, "GridColors");
 for (let r = 1; r <= 5; r++) {
   for (let c = 1; c <= 5; c++) {
-    Cell.setValue(ws9, r, c, `${r},${c}`);
+    Cell.setValue(ws9, { row: r, col: c }, `${r},${c}`);
   }
 }
 

@@ -14,34 +14,45 @@ import {
   NS_CX_CHART,
   NS_WPS
 } from "@word/constants";
+import { atNode, unwritableNode, within } from "@word/core/node-path";
 import { DocxRawXmlPolicyError, DocxWriteError } from "@word/errors";
 import type {
   DocxDocument,
   BodyContent,
   StructuredDocumentTag,
   CheckBox,
+  DrawingFrame,
   DrawingShape,
   OpaqueDrawing,
   ChartContent,
-  ChartExContent
+  ChartExContent,
+  FloatingImage
 } from "@word/types";
 import {
   DEFAULT_CHART_HEIGHT_EMU,
   DEFAULT_CHART_EX_HEIGHT_EMU,
-  DEFAULT_CHART_WIDTH_EMU,
-  DEFAULT_RELATIVE_HEIGHT,
-  DEFAULT_WRAP_MARGIN_EMU
+  DEFAULT_CHART_WIDTH_EMU
 } from "@word/units";
+import { checkWritableChart } from "@word/writer/chart-checks";
 import { renderCheckBox } from "@word/writer/checkbox-writer";
-import { renderFloatingImage } from "@word/writer/image-writer";
+import { closeDrawingFrame, frameModel, openDrawingFrame } from "@word/writer/drawing-frame";
+import { renderFloatingImage, renderFloatingImageRun } from "@word/writer/image-writer";
 import { renderMathBlock } from "@word/writer/math-writer";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import { renderDocumentBackground } from "@word/writer/parts-writer";
-import type { RenderHelpers, WordRenderContext } from "@word/writer/render-context";
-import { createRenderContext } from "@word/writer/render-context";
+import { renderRangeMarkers } from "@word/writer/range-marker-writer";
+import type { RenderHelpers, DocxRenderContext } from "@word/writer/render-context";
+import {
+  createRenderContext,
+  enterRevisionIds,
+  exitRevisionIds,
+  prepareRawMarkup,
+  renderHelpersFor
+} from "@word/writer/render-context";
 import { renderRun } from "@word/writer/run-writer";
 import { renderSdtPr } from "@word/writer/sdt-writer";
 import { renderSectionProperties } from "@word/writer/section-writer";
+import { renderShapeBody } from "@word/writer/shape-markup";
 import { renderTable } from "@word/writer/table-writer";
 import { renderTextBox } from "@word/writer/textbox-writer";
 import { renderTableOfContents } from "@word/writer/toc-writer";
@@ -59,7 +70,7 @@ import type { XmlSink } from "@xml/types";
 export function renderSdt(
   xml: XmlSink,
   sdt: StructuredDocumentTag,
-  ctx: WordRenderContext | undefined,
+  ctx: DocxRenderContext | undefined,
   helpers?: RenderHelpers
 ): void {
   xml.openNode("w:sdt");
@@ -72,12 +83,7 @@ export function renderSdt(
   const sdtHelpers: RenderHelpers | undefined = helpers
     ? helpers
     : ctx
-      ? {
-          imageRemap: ctx.imageRIdRemap,
-          hyperlinkRIds: ctx.hyperlinkRIds,
-          nextDocPrId: ctx.ids.nextDocPrId,
-          rawXmlPolicy: ctx.rawXmlPolicy
-        }
+      ? renderHelpersFor(ctx)
       : undefined;
   for (const child of sdt.content) {
     if ("type" in child) {
@@ -94,30 +100,55 @@ export function renderSdt(
       // parser in this module) preserve a w:r directly inside w:sdtContent
       // for run-level structured document tags. Render the run directly so
       // round-tripping does not silently drop its text.
+      renderRangeMarkers(xml, child.rangeMarkersBefore, sdtHelpers);
       renderRun(xml, child, sdtHelpers);
     }
   }
+  renderRangeMarkers(xml, sdt.contentRangeMarkersAfter, sdtHelpers);
   xml.closeNode();
 
   xml.closeNode();
+}
+
+/** A floating image whose anchor belongs among the preceding paragraph's text. */
+function isSharedFloat(item: BodyContent | undefined): boolean {
+  return item?.type === "floatingImage" && item.inPrecedingParagraph === true;
 }
 
 /** Render a single body content element (paragraph, table, image, etc.). */
 export function renderBodyContent(
   xml: XmlSink,
   content: BodyContent,
-  ctx?: WordRenderContext
+  ctx?: DocxRenderContext
 ): void {
-  // Ensure id counters and helpers are local to this call when no ctx
-  // was provided, so callers without a shared context don't accidentally
-  // share module-global state across unrelated render passes.
-  const renderCtx = ctx ?? createRenderContext();
-  const helpers: RenderHelpers = {
-    imageRemap: renderCtx.imageRIdRemap,
-    hyperlinkRIds: renderCtx.hyperlinkRIds,
-    nextDocPrId: renderCtx.ids.nextDocPrId,
-    rawXmlPolicy: renderCtx.rawXmlPolicy
-  };
+  // Without a context the content is rendered on its own, or as part of
+  // whatever write is in effect: its revision ids follow that write's map.
+  if (!ctx) {
+    renderBodyContentIn(xml, content, createRenderContext());
+    return;
+  }
+  const previous = enterRevisionIds(ctx.revisionIds);
+  try {
+    renderBodyContentIn(xml, content, ctx);
+  } finally {
+    exitRevisionIds(previous);
+  }
+}
+
+function renderBodyContentIn(
+  xml: XmlSink,
+  content: BodyContent,
+  renderCtx: DocxRenderContext
+): void {
+  if (typeof content !== "object" || content === null) {
+    unwritableNode("", "a body block", content);
+  }
+  const helpers = renderHelpersFor(renderCtx);
+  // Range markers between this block and the previous one. A paragraph and a
+  // table write their own, as they are also rendered outside the body.
+  if (content.type !== "paragraph" && content.type !== "table") {
+    renderRangeMarkers(xml, content.rangeMarkersBefore, helpers);
+  }
   switch (content.type) {
     case "paragraph":
       renderParagraph(xml, content, helpers);
@@ -126,16 +157,16 @@ export function renderBodyContent(
       renderTable(xml, content, helpers);
       break;
     case "floatingImage":
-      renderFloatingImage(xml, content, renderCtx.imageRIdRemap, renderCtx.ids.nextDocPrId);
+      renderFloatingImage(xml, content, renderHelpersFor(renderCtx));
       break;
     case "tableOfContents":
-      renderTableOfContents(xml, content);
+      renderTableOfContents(xml, content, helpers);
       break;
     case "math":
       renderMathBlock(xml, content);
       break;
     case "textBox":
-      renderTextBox(xml, content);
+      renderTextBox(xml, content, helpers);
       break;
     case "sdt":
       renderSdt(xml, content, renderCtx);
@@ -172,15 +203,25 @@ export function renderBodyContent(
       }
       break;
     }
+    default:
+      unwritableNode("type", "a body block kind", (content as { type?: unknown }).type);
   }
 }
 
 /** Render the complete word/document.xml. */
-export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRenderContext): void {
+export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: DocxRenderContext): void {
   // If no ctx provided (e.g. minimal renders), create a fresh one so id
   // counters are local to this call rather than module-global.
   const renderCtx = ctx ?? createRenderContext();
+  const previous = enterRevisionIds(renderCtx.revisionIds);
+  try {
+    renderDocumentIn(xml, doc, renderCtx);
+  } finally {
+    exitRevisionIds(previous);
+  }
+}
 
+function renderDocumentIn(xml: XmlSink, doc: DocxDocument, renderCtx: DocxRenderContext): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:document", DOCUMENT_NAMESPACES);
 
@@ -201,16 +242,46 @@ export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRender
   // Word does not see `<w:body/>`.
   let prevWasTable = false;
   let bodyHadAnything = false;
-  for (const content of doc.body) {
-    const isTable = content.type === "table";
-    if (isTable && prevWasTable) {
-      xml.openNode("w:p");
-      xml.closeNode();
+  for (let i = 0; i < doc.body.length; i++) {
+    const content = doc.body[i]!;
+    try {
+      const isTable = content.type === "table";
+      if (isTable && prevWasTable) {
+        xml.openNode("w:p");
+        xml.closeNode();
+      }
+      // Floating images read from among a paragraph's text go back into it.
+      let shared = 0;
+      while (content.type === "paragraph" && isSharedFloat(doc.body[i + 1 + shared])) {
+        shared++;
+      }
+      if (shared > 0 && content.type === "paragraph") {
+        const floats = doc.body.slice(i + 1, i + 1 + shared) as FloatingImage[];
+        const helpers = renderHelpersFor(renderCtx);
+        const previous = enterRevisionIds(renderCtx.revisionIds);
+        try {
+          renderParagraph(xml, content, helpers, sink => {
+            for (const float of floats) {
+              renderRangeMarkers(sink, float.rangeMarkersBefore, helpers);
+              renderFloatingImageRun(sink, float, helpers);
+            }
+          });
+        } finally {
+          exitRevisionIds(previous);
+        }
+        i += shared;
+      } else {
+        renderBodyContent(xml, content, renderCtx);
+      }
+      prevWasTable = isTable;
+      bodyHadAnything = true;
+    } catch (error) {
+      throw atNode(`body[${i}]`, error);
     }
-    renderBodyContent(xml, content, renderCtx);
-    prevWasTable = isTable;
-    bodyHadAnything = true;
   }
+
+  // Range markers after the last block close the body, before its sectPr.
+  renderRangeMarkers(xml, doc.bodyRangeMarkersAfter, renderHelpersFor(renderCtx));
 
   // If the model produced no body content at all, write one empty
   // paragraph so the body satisfies CT_Body's "ends with a paragraph or
@@ -226,7 +297,11 @@ export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRender
   // some Word builds open the document but render every paragraph at
   // page-zero size, while LibreOffice silently rejects the package.
   if (doc.sectionProperties) {
-    renderSectionProperties(xml, doc.sectionProperties);
+    try {
+      renderSectionProperties(xml, doc.sectionProperties);
+    } catch (error) {
+      throw atNode("sectionProperties", error);
+    }
   } else {
     renderSectionProperties(xml, {
       pageSize: { width: 12240, height: 15840 },
@@ -242,7 +317,7 @@ export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRender
 // DrawingML Shape Writer
 // =============================================================================
 
-function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderContext): void {
+function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: DocxRenderContext): void {
   // Wrap in w:p > w:r > w:drawing > wp:anchor > a:graphic > a:graphicData > wps:wsp
   // Note: shape.rawXml (if present) carries advanced DrawingML fragments that
   // belong inside wps:spPr (gradient/pattern fills, effect lists, etc.). It is
@@ -252,216 +327,19 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
   xml.openNode("w:r");
   xml.openNode("w:drawing");
 
-  const anchorAttrs: Record<string, string> = {
-    distT: "0",
-    distB: "0",
-    distL: String(DEFAULT_WRAP_MARGIN_EMU),
-    distR: String(DEFAULT_WRAP_MARGIN_EMU),
-    simplePos: "0",
-    relativeHeight: String(DEFAULT_RELATIVE_HEIGHT),
-    behindDoc: shape.behindDoc ? "1" : "0",
-    locked: "0",
-    layoutInCell: "1",
-    allowOverlap: "1"
-  };
-  xml.openNode("wp:anchor", anchorAttrs);
-
-  xml.leafNode("wp:simplePos", { x: "0", y: "0" });
-
-  // Horizontal position
-  const hp = shape.horizontalPosition;
-  xml.openNode("wp:positionH", {
-    relativeFrom: hp?.relativeTo ?? "column"
-  });
-  if (hp?.align) {
-    xml.openNode("wp:align");
-    xml.writeText(hp.align);
-    xml.closeNode();
-  } else {
-    xml.openNode("wp:posOffset");
-    xml.writeText(String(hp?.offset ?? 0));
-    xml.closeNode();
-  }
-  xml.closeNode(); // wp:positionH
-
-  // Vertical position
-  const vp = shape.verticalPosition;
-  xml.openNode("wp:positionV", {
-    relativeFrom: vp?.relativeTo ?? "paragraph"
-  });
-  if (vp?.align) {
-    xml.openNode("wp:align");
-    xml.writeText(vp.align);
-    xml.closeNode();
-  } else {
-    xml.openNode("wp:posOffset");
-    xml.writeText(String(vp?.offset ?? 0));
-    xml.closeNode();
-  }
-  xml.closeNode(); // wp:positionV
-
-  xml.leafNode("wp:extent", {
-    cx: String(shape.width),
-    cy: String(shape.height)
-  });
-  xml.leafNode("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" });
-
-  // Wrap
-  const wrap = shape.wrap;
-  if (!wrap || wrap.style === "none") {
-    xml.leafNode("wp:wrapNone");
-  } else if (wrap.style === "square") {
-    xml.leafNode("wp:wrapSquare", { wrapText: wrap.side ?? "bothSides" });
-  } else if (wrap.style === "tight") {
-    xml.leafNode("wp:wrapTight", { wrapText: wrap.side ?? "bothSides" });
-  } else if (wrap.style === "topAndBottom") {
-    xml.leafNode("wp:wrapTopAndBottom");
-  }
-
   const drawingId = ctx.ids.nextDocPrId();
-  const docPrAttrs: Record<string, string> = {
-    id: String(drawingId),
-    name: shape.name ?? "Shape"
-  };
-  if (shape.altText) {
-    docPrAttrs["descr"] = shape.altText;
-  }
-  xml.leafNode("wp:docPr", docPrAttrs);
-
-  // wp:cNvGraphicFramePr is optional in the schema but Word and
-  // LibreOffice expect it on every wp:anchor; without it some readers
-  // refuse to load the drawing. Empty content is sufficient.
-  xml.leafNode("wp:cNvGraphicFramePr");
+  const helpers = renderHelpersFor(ctx);
+  const frame = frameModel("anchor", "shape", shape, "Shape");
+  const then = shape._frame ? frameModel("anchor", "shape", shape._frame.read, "Shape") : undefined;
+  openDrawingFrame(xml, frame, shape._frame, then, drawingId, helpers);
 
   xml.openNode("a:graphic", { "xmlns:a": NS_A });
   xml.openNode("a:graphicData", { uri: NS_WPS });
 
-  xml.openNode("wps:wsp");
-
-  // Non-visual properties — required by the wordprocessingShape schema
-  // (CT_WordprocessingShape.cNvPr + cNvSpPr). The id must match
-  // wp:docPr/@id so Word treats them as the same logical object.
-  xml.leafNode("wps:cNvPr", {
-    id: String(drawingId),
-    name: shape.name ?? "Shape"
-  });
-  xml.leafNode("wps:cNvSpPr");
-
-  // Shape properties
-  xml.openNode("wps:spPr");
-
-  // Transform
-  const xfrmAttrs: Record<string, string> = {};
-  if (shape.rotation) {
-    xfrmAttrs["rot"] = String(shape.rotation);
-  }
-  if (shape.flipHorizontal) {
-    xfrmAttrs["flipH"] = "1";
-  }
-  if (shape.flipVertical) {
-    xfrmAttrs["flipV"] = "1";
-  }
-  xml.openNode("a:xfrm", Object.keys(xfrmAttrs).length > 0 ? xfrmAttrs : {});
-  xml.leafNode("a:off", { x: "0", y: "0" });
-  xml.leafNode("a:ext", { cx: String(shape.width), cy: String(shape.height) });
-  xml.closeNode(); // a:xfrm
-
-  // Preset geometry
-  xml.openNode("a:prstGeom", { prst: shape.shapeType });
-  xml.leafNode("a:avLst");
-  xml.closeNode(); // a:prstGeom
-
-  // Fill (basic + advanced). The OOXML schema requires fill children of
-  // spPr to appear before a:ln, hence advanced gradient/pattern fills are
-  // injected here rather than alongside effects.
-  if (shape.noFill) {
-    xml.leafNode("a:noFill");
-  } else if (shape.fillColor) {
-    xml.openNode("a:solidFill");
-    xml.leafNode("a:srgbClr", { val: shape.fillColor });
-    xml.closeNode();
-  }
-  if (shape._advancedFillXml) {
-    if (ctx.rawXmlPolicy === "reject") {
-      throw new DocxRawXmlPolicyError("drawingShape._advancedFillXml");
-    }
-    if (ctx.rawXmlPolicy !== "strip") {
-      xml.writeRaw(shape._advancedFillXml);
-    }
-  }
-
-  // Outline
-  const lnAttrs: Record<string, string> = {};
-  if (shape.outlineWidth) {
-    lnAttrs["w"] = String(shape.outlineWidth);
-  }
-  if (shape.outlineColor || shape.noOutline) {
-    xml.openNode("a:ln", lnAttrs);
-    if (shape.noOutline) {
-      xml.leafNode("a:noFill");
-    } else if (shape.outlineColor) {
-      xml.openNode("a:solidFill");
-      xml.leafNode("a:srgbClr", { val: shape.outlineColor });
-      xml.closeNode();
-    }
-    xml.closeNode(); // a:ln
-  }
-
-  // Advanced effects (a:effectLst, a:scene3d, a:sp3d) follow a:ln per the
-  // OOXML schema. They were previously interleaved with fill via a single
-  // rawXml string which produced documents that violated the schema order.
-  if (shape._advancedEffectsXml) {
-    if (ctx.rawXmlPolicy === "reject") {
-      throw new DocxRawXmlPolicyError("drawingShape._advancedEffectsXml");
-    }
-    if (ctx.rawXmlPolicy !== "strip") {
-      xml.writeRaw(shape._advancedEffectsXml);
-    }
-  } else if (shape.rawXml && !shape._advancedFillXml) {
-    // Backwards-compat: if the caller provided an opaque rawXml without the
-    // split fields (e.g. round-tripped from a reader), drop it after a:ln.
-    // This preserves the previous "rawXml → spPr tail" behaviour for shapes
-    // that don't go through createShape().
-    if (ctx.rawXmlPolicy === "reject") {
-      throw new DocxRawXmlPolicyError("drawingShape.rawXml");
-    }
-    if (ctx.rawXmlPolicy !== "strip") {
-      xml.writeRaw(shape.rawXml);
-    }
-  }
-
-  xml.closeNode(); // wps:spPr
-
-  // Text body
-  if (shape.textContent && shape.textContent.length > 0) {
-    xml.openNode("wps:txbx");
-    xml.openNode("w:txbxContent");
-    const txbxHelpers: RenderHelpers | undefined = ctx
-      ? {
-          imageRemap: ctx.imageRIdRemap,
-          hyperlinkRIds: ctx.hyperlinkRIds,
-          nextDocPrId: ctx.ids.nextDocPrId,
-          rawXmlPolicy: ctx.rawXmlPolicy
-        }
-      : undefined;
-    for (const para of shape.textContent) {
-      renderParagraph(xml, para, txbxHelpers);
-    }
-    xml.closeNode(); // w:txbxContent
-    xml.closeNode(); // wps:txbx
-  }
-
-  // Body properties (required). The vertical text anchor lives on a:bodyPr/@anchor.
-  if (shape.textBodyAnchor) {
-    xml.leafNode("wps:bodyPr", { anchor: shape.textBodyAnchor });
-  } else {
-    xml.leafNode("wps:bodyPr");
-  }
-
-  xml.closeNode(); // wps:wsp
+  renderShapeBody(xml, shape, drawingId, ctx);
   xml.closeNode(); // a:graphicData
   xml.closeNode(); // a:graphic
-  xml.closeNode(); // wp:anchor
+  closeDrawingFrame(xml, frame, shape._frame, helpers); // wp:anchor
   xml.closeNode(); // w:drawing
   xml.closeNode(); // w:r
   xml.closeNode(); // w:p
@@ -471,7 +349,7 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
 // Opaque Drawing Writer
 // =============================================================================
 
-function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing, ctx: WordRenderContext): void {
+function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing, ctx: DocxRenderContext): void {
   if (ctx.rawXmlPolicy === "reject") {
     throw new DocxRawXmlPolicyError("opaqueDrawing");
   }
@@ -483,7 +361,7 @@ function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing, ctx: WordRend
   }
   xml.openNode("w:p");
   xml.openNode("w:r");
-  xml.writeRaw(drawing.rawXml);
+  xml.writeRaw(prepareRawMarkup(drawing.rawXml, renderHelpersFor(ctx)));
   xml.closeNode(); // w:r
   xml.closeNode(); // w:p
 }
@@ -512,25 +390,25 @@ interface InlineChartOptions {
   readonly leafXmlnsValue: string;
   /** The relationship ID pointing at the chart part. */
   readonly rId: string;
+  /** The frame the chart was read with. */
+  readonly frame?: DrawingFrame;
 }
 
 function renderInlineChartDrawing(
   xml: XmlSink,
-  ctx: WordRenderContext,
+  ctx: DocxRenderContext,
   opts: InlineChartOptions
 ): void {
   xml.openNode("w:p");
   xml.openNode("w:r");
   xml.openNode("w:drawing");
-  xml.openNode("wp:inline", { distT: "0", distB: "0", distL: "0", distR: "0" });
-  xml.leafNode("wp:extent", { cx: String(opts.cx), cy: String(opts.cy) });
-  xml.leafNode("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" });
-  xml.leafNode("wp:docPr", {
-    id: String(ctx.ids.nextDocPrId()),
-    name: opts.name,
-    ...(opts.altText ? { descr: opts.altText } : {})
-  });
-  xml.leafNode("wp:cNvGraphicFramePr");
+  // A chart read anchored stays anchored; one built is inline.
+  const kind = opts.frame?.kind ?? "inline";
+  const fields = { width: opts.cx, height: opts.cy, name: opts.name, altText: opts.altText };
+  const frame = frameModel(kind, "chart", fields, "Chart");
+  const then = opts.frame ? frameModel(kind, "chart", opts.frame.read, "Chart") : undefined;
+  const helpers = renderHelpersFor(ctx);
+  openDrawingFrame(xml, frame, opts.frame, then, ctx.ids.nextDocPrId(), helpers);
   xml.openNode("a:graphic", {
     "xmlns:a": NS_A
   });
@@ -542,13 +420,16 @@ function renderInlineChartDrawing(
   });
   xml.closeNode(); // a:graphicData
   xml.closeNode(); // a:graphic
-  xml.closeNode(); // wp:inline
+  closeDrawingFrame(xml, frame, opts.frame, helpers); // wp:inline / wp:anchor
   xml.closeNode(); // w:drawing
   xml.closeNode(); // w:r
   xml.closeNode(); // w:p
 }
 
-function renderChartDrawing(xml: XmlSink, content: ChartContent, ctx: WordRenderContext): void {
+function renderChartDrawing(xml: XmlSink, content: ChartContent, ctx: DocxRenderContext): void {
+  // The chart part is written apart from the body; its model checks run here,
+  // where the chart's place in the document is known.
+  within("chart", () => checkWritableChart(content.chart));
   const rId = ctx.chartRIds.get(content);
   if (!rId) {
     throw new DocxWriteError(
@@ -566,11 +447,12 @@ function renderChartDrawing(xml: XmlSink, content: ChartContent, ctx: WordRender
     leafName: "c:chart",
     leafXmlnsAttr: "xmlns:c",
     leafXmlnsValue: NS_C_CHART,
-    rId
+    rId,
+    frame: content._frame
   });
 }
 
-function renderChartExDrawing(xml: XmlSink, content: ChartExContent, ctx: WordRenderContext): void {
+function renderChartExDrawing(xml: XmlSink, content: ChartExContent, ctx: DocxRenderContext): void {
   const rId = ctx.chartRIds.get(content);
   if (!rId) {
     throw new DocxWriteError(
@@ -588,6 +470,7 @@ function renderChartExDrawing(xml: XmlSink, content: ChartExContent, ctx: WordRe
     leafName: "cx:chart",
     leafXmlnsAttr: "xmlns:cx",
     leafXmlnsValue: NS_CX_CHART,
-    rId
+    rId,
+    frame: content._frame
   });
 }

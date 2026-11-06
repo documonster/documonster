@@ -102,7 +102,7 @@ describe("Font embedding", () => {
 
   describe("addEmbeddedFonts", () => {
     it("adds fonts to document model", () => {
-      const doc = Document.build(Document.create());
+      const doc = Document.create();
       const result = Font.embed({
         name: "NewFont",
         data: createFakeTtfData(),

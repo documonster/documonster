@@ -10,8 +10,8 @@ import { calculateFormulas } from "@excel/core/formula-adapter";
 import { captureFormulaSnapshot } from "@excel/core/formula-capture";
 import { applyFormulaWriteback } from "@excel/core/formula-writeback";
 import { getDefinedNames } from "@excel/core/workbook";
-import { getCell, getSheetModel } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getCell, getSheetModel, duplicateRow } from "@excel/core/worksheet";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import type { WriteOperation } from "@formula/materialize/writeback-plan";
 import { describe, it, expect } from "vitest";
 
@@ -350,7 +350,7 @@ describe("formula writeback roundtrip: spill visibility", () => {
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)", result: 0 });
     calculateFormulas(wb);
 
-    Worksheet.spliceRows(ws, 1, 0, []);
+    Row.splice(ws, 1, 0, []);
     calculateFormulas(wb);
 
     expect(Cell.getResult(ws, "A2")).toBe(1);
@@ -364,7 +364,7 @@ describe("formula writeback roundtrip: spill visibility", () => {
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(1,3)", result: 0 });
     calculateFormulas(wb);
 
-    Worksheet.spliceColumns(ws, 1, 0, []);
+    Column.splice(ws, 1, 0, []);
     calculateFormulas(wb);
 
     expect(Cell.getResult(ws, "B1")).toBe(1);
@@ -378,7 +378,7 @@ describe("formula writeback roundtrip: spill visibility", () => {
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(1,3)", result: 0 });
     calculateFormulas(wb);
 
-    Worksheet.duplicateRow(ws, 1, 1, true);
+    duplicateRow(ws, 1, 1, true);
     calculateFormulas(wb);
 
     expect(Cell.getResult(ws, "A2")).toBe(1);

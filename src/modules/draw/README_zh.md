@@ -5,7 +5,7 @@
 共享绘图引擎:一份结构化显示列表,一个遍历器,多个后端。零依赖。
 
 ```typescript
-import { toSvg, rasterizeToRgba, type DrawList } from "documonster/draw";
+import { Draw, type DrawList } from "documonster/draw";
 ```
 
 ## 特性
@@ -13,7 +13,7 @@ import { toSvg, rasterizeToRgba, type DrawList } from "documonster/draw";
 - **一份列表,所有后端** —— 构建一次 `DrawList`,即可得到标记、像素或 PDF 页面
 - **没有往返** —— 渲染器之间不再传递 SVG 字符串,任何后端都不必重新解析另一个后端的输出
 - **绝对坐标** —— 遍历器负责合成变换,交给后端的已是变换后的数值,因此新增一个后端只需几十行,而不是再造一个平行渲染器
-- **自带文本测量** —— `measureText` / `wrapText`,生产者在构建列表之前就能确定盒子尺寸
+- **自带文本测量** —— `Draw.measureText` / `Draw.wrapText`,生产者在构建列表之前就能确定盒子尺寸
 - **零依赖** —— 纯 TypeScript,无外部包
 - **跨平台** —— Node.js 与浏览器 API 一致
 
@@ -22,7 +22,7 @@ import { toSvg, rasterizeToRgba, type DrawList } from "documonster/draw";
 ## 快速开始
 
 ```typescript
-import { rasterizeToRgba, toSvg, type DrawList } from "documonster/draw";
+import { Draw, type DrawList } from "documonster/draw";
 
 const list: DrawList = {
   width: 120,
@@ -51,20 +51,21 @@ const list: DrawList = {
   ]
 };
 
-const svg = toSvg(list); // 标记
-const image = rasterizeToRgba(list, { scale: 2 }); // { width, height, data }
+const svg = Draw.toSvg(list); // 标记
+const { png } = Draw.toPng(list, { scale: 2 }); // PNG 文件
+const image = Draw.toRgba(list, { scale: 2 }); // { width, height, data } —— 原始像素
 ```
 
 同一份列表画到 PDF 页面上 —— 第三个后端,它住在拥有"页面"这一概念的模块里:
 
 ```typescript
-import { renderDrawList } from "documonster/draw";
-import { Pdf, createPdfDrawSurface } from "documonster/pdf";
+import { Draw } from "documonster/draw";
+import { Pdf } from "documonster/pdf";
 
 const doc = new Pdf.Builder();
 const page = doc.addPage({ width: 595, height: 842 });
-renderDrawList(list, createPdfDrawSurface(page, { x: 72, y: 700, width: 120, height: 60 }));
-const bytes = await doc.build();
+Draw.render(list, Pdf.createDrawSurface(page, { x: 72, y: 700, width: 120, height: 60 }));
+const bytes = await doc.toBuffer();
 ```
 
 ---
@@ -102,29 +103,37 @@ interface DrawList {
 
 ```typescript
 interface DrawPaint {
-  readonly fill?: Rgba01;
-  readonly stroke?: Rgba01;
+  readonly fill?: DrawRgba01;
+  readonly stroke?: DrawRgba01;
   readonly strokeWidth?: number; // 用户单位,有描边时默认 1
   readonly dash?: readonly number[]; // 交替的实/虚,SVG 语义
   readonly fillRule?: "nonzero" | "evenodd";
 }
 ```
 
-颜色是 `Rgba01` —— 各通道取值 `0..1`,含 alpha。`cssColour("#3366cc")` 把 CSS 记号解析成它;`translucent("#3366cc", 0.5)` 一步完成解析并设置 alpha。
+颜色是 `DrawRgba01` —— 各通道取值 `0..1`,含 alpha。`Draw.parseColor("#3366cc")` 把 CSS 记号解析成它 —— 十六进制、`rgb()`、`hsl()` 或颜色名;`none` 与 `transparent` 为完全透明,读不懂的记号为黑色。`Draw.withAlpha("#3366cc", 0.5)` 一步完成解析并设置 alpha。
+
+没有 `style.fill` 的文字节点在任何后端都不绘制 —— 与没有 `fill` 的 paint 规则相同。
+
+### 错误
+
+`Draw.toSvg`、`Draw.toRgba`、`Draw.render` 等公开函数会检查传入的值,遇到没有合理含义的值(`NaN` 坐标、不是 `0..1` 的 `{ r, g, b, a }` 颜色、未知的节点 `kind`)时抛出 `DrawArgumentError`(属于 `DrawError`,带出错的 `field`)。输出超出像素上限时 `Draw.toRgba` 抛出 `DrawError`,字节不是 TrueType 字体时 `Draw.parseRasterFont` 同样抛出。`isDrawError(err)` 是对应的类型守卫。消息以你写下的调用开头(`Draw.toRgba: …`、`Draw.Geometry.flattenPath: …`),`field` 是从该调用参数名开始的路径——`list.children[2].paint.fill.r`、`options.scale`。
+
+背景在 `Draw.toSvg` 与 `Draw.toRgba` 中都可以是 CSS 颜色字符串(`"#fff"`、`"white"`、`"transparent"` 等)或 IR 颜色 `{ r, g, b, a }`;两种都读不出的字符串会被拒绝。
 
 ### 文本
 
 文本按**基线**定位,因为这是所有后端都能如实表达的方式。垂直居中是生产者自己做的算术,不是它能请求的可移植属性。
 
 ```typescript
-import { measureText, wrapText, POINTS_PER_PIXEL } from "documonster/draw";
+import { Draw, POINTS_PER_PIXEL } from "documonster/draw";
 
 const style = { size: 14, family: "Arial" };
-const width = measureText("Revenue by region", style);
-const lines = wrapText("A longer label that has to fit", style, 120);
+const width = Draw.measureText("Revenue by region", style);
+const lines = Draw.wrapText("A longer label that has to fit", style, 120);
 ```
 
-注意单位:`measureText` 针对磅值返回用户单位,内部已应用 `POINTS_PER_PIXEL`。跳过这次换算会让每个标签宽出 4/3 —— 图例过宽、居中标题偏左就是这么来的。
+注意单位:`Draw.measureText` 针对磅值返回用户单位,内部已应用 `POINTS_PER_PIXEL`。跳过这次换算会让每个标签宽出 4/3 —— 图例过宽、居中标题偏左就是这么来的。
 
 ### 裁剪
 
@@ -132,48 +141,46 @@ const lines = wrapText("A longer label that has to fit", style, 120);
 
 ### 变换
 
-`DrawMatrix` 辅助函数:`IDENTITY`、`translate`、`scale`、`uniformScale`、`rotate`、`multiply`、`apply`、`rotationOf`。路径辅助函数:`arcToCubics`、`flattenPath`、`roundedRectToPath`、`sectorToPath`、`rectNode`。
+`DrawMatrix` 辅助函数:`Matrix.IDENTITY`、`translate`、`scale`、`getUniformScale`、`rotate`、`multiply`、`apply`、`getRotation`(位于 `Matrix` 命名空间)。路径辅助函数位于底层命名空间 `Draw.Geometry`:`arcToCubics`、`flattenPath`、`roundedRectToPath`、`sectorToPath`、`createRectNode`。`toSvg`/`toRgba` 之下的底层构件 —— `SvgSurface`、`BasicRasterCanvas`、`createRasterSurface`、`renderNode`、`downsample`、`normalizeSamples`、`fontHasGlyph` —— 位于 `Draw.Backend`。
 
 ---
 
 ## 后端
 
-| 表面     | 位置                                      | 输出                                  |
-| -------- | ----------------------------------------- | ------------------------------------- |
-| SVG      | `documonster/draw`(`toSvg`)               | 标记                                  |
-| 光栅     | `documonster/draw`(`rasterizeToRgba`)     | 经 `BasicRasterCanvas` 得到 RGBA 像素 |
-| PDF 矢量 | `documonster/pdf`(`createPdfDrawSurface`) | 页面算子;Y 轴翻转由它独家负责         |
+| 表面     | 位置                                            | 输出                                               |
+| -------- | ----------------------------------------------- | -------------------------------------------------- |
+| SVG      | `documonster/draw`(`Draw.toSvg`)                | 标记                                               |
+| 光栅     | `documonster/draw`(`Draw.toPng`、`Draw.toRgba`) | PNG 文件,或经 `BasicRasterCanvas` 得到的 RGBA 像素 |
+| PDF 矢量 | `documonster/pdf`(`Pdf.createDrawSurface`)      | 页面算子;Y 轴翻转由它独家负责                      |
 
 当一个表面只需要显示列表时,它与引擎住在一起;当它要画到引擎无从知晓的东西上时,它就住在目标旁边 —— 这就是 PDF 那个表面在 PDF 模块里的原因。
 
 再写一个后端就是实现 `DrawSurface`。遍历器负责变换合成、描边与虚线缩放、文本旋转,所以表面只管落笔。`pushClip` / `popClip` 是可选的;省略它们会导致不裁剪地绘制,而不是丢弃内容。
 
-### 是像素,不是 PNG
+### PNG,或者像素
 
-`rasterizeToRgba` 返回 `RgbaImage` —— `{ width, height, data }`,`width * height * 4` 字节的直通 alpha RGBA —— 而不是编码后的文件。编码 PNG 需要 DEFLATE,它位于本模块之上一层;把压缩库拉下来会让绘图引擎的每个使用者都为此付费。
-
-所以接缝定在图像上,而配对只有两行。`documonster/archive` 拥有 DEFLATE 和 CRC-32,而 PNG 就是这两样东西:
+`Draw.toPng` 返回 PNG 文件,以及光栅化器的报告 —— `uncoveredCodePoints` 和 `textWarnings`,与 `Draw.toRgba` 给出的完全一样,因为某种文字的字形处留了空洞的 PNG,看上去和正确的没有区别:
 
 ```typescript
-import { rasterizeToRgba } from "documonster/draw";
-import { encodePng } from "documonster/archive";
+import { Draw } from "documonster/draw";
 
-const image = rasterizeToRgba(list, { scale: 2 });
-const png = encodePng(image.data, image.width, image.height, { dpi: 192 });
+const { png, uncoveredCodePoints } = Draw.toPng(list, { scale: 2, dpi: 192 });
 ```
 
-在浏览器里你可能更愿意用平台自带的编码器 —— 用 `putImageData` 把像素放进 canvas,再调 `toBlob`。无论哪种方式,绘图引擎都不参与。
+`Draw.toRgba` 返回 `DrawRgbaImage` —— `{ width, height, data }`,`width * height * 4` 字节的直通 alpha RGBA —— 供任意其他编码器使用。在浏览器里你可能更愿意用平台自带的编码器:用 `putImageData` 把像素放进 canvas,再调 `toBlob`。
+
+使用 rolldown 或 rspack 时,只有 `Draw.toPng` 会把 DEFLATE 带进打包产物;`Draw.toSvg` 和 `Draw.toRgba` 不会。esbuild 会保留所导入命名空间的全部成员,所以在 esbuild 下,无论调用哪个成员,`Draw` 命名空间都会带上编码器。
 
 ### 字体,以及中日韩文字是怎么画出来的
 
-SVG 只写下字体名,由查看器去解析。光栅化必须拿到真实的字形轮廓,所以 `rasterizeToRgba` 会去找一张能覆盖该文本的已安装字体 —— 和 PDF 内嵌用的是同一套发现逻辑 —— 并且**逐字符沿一条字体链解析**,因为没有哪一张字体能同时覆盖 `Mixed 混合 ABC`。
+SVG 只写下字体名,由查看器去解析。光栅化必须拿到真实的字形轮廓,所以 `Draw.toRgba` 会去找一张能覆盖该文本的已安装字体 —— 和 PDF 内嵌用的是同一套发现逻辑 —— 并且**逐字符沿一条字体链解析**,因为没有哪一张字体能同时覆盖 `Mixed 混合 ABC`。
 
 由此有两件事,而且都是可上报的,不是静默的:
 
 ```typescript
-import { rasterizeToRgba } from "documonster/draw";
+import { Draw } from "documonster/draw";
 
-const image = rasterizeToRgba(list);
+const image = Draw.toRgba(list);
 if (image.uncoveredCodePoints.length > 0) {
   // 本机没有任何字体能画这些码点。它们是图上的空洞,而不是一个错误。
   console.warn(image.uncoveredCodePoints.map(cp => cp.toString(16)));
@@ -183,28 +190,30 @@ if (image.uncoveredCodePoints.length > 0) {
 当你无法依赖宿主环境时就直接给字节 —— **在浏览器里这是拿到 ASCII 以外字形的唯一途径**,因为没有字体目录可搜,而内置的笔画字体只覆盖 ASCII 32–126,其余一律画成 `?`:
 
 ```typescript
-const image = rasterizeToRgba(list, { fonts: [notoSansScBytes] });
+const image = Draw.toRgba(list, { fonts: [notoSansScBytes] });
 ```
 
 `fonts` 同样接受已解析的字体和字体集合中的某一 face。反复渲染时请先解析一次:传字节的话每次调用都会重新解析,对中日韩字体意味着每次重建一张 43000 条目的 `cmap`,而且新对象还会错过字形缓存。
 
 ```typescript
-import { parseRasterFont } from "documonster/draw";
+import { Draw } from "documonster/draw";
 
-const regular = parseRasterFont(songtiTtcBytes, 3); // .ttc 中的某一 face
-const image = rasterizeToRgba(list, { fonts: [regular] });
+const regular = Draw.parseRasterFont({ data: songtiTtcBytes, collectionIndex: 3 }); // .ttc 中的某一 face
+const image = Draw.toRgba(list, { fonts: [regular] });
 
 // 不想自己解析时,等价写法:
-rasterizeToRgba(list, { fonts: [{ data: songtiTtcBytes, collectionIndex: 3 }] });
+Draw.toRgba(list, { fonts: [{ data: songtiTtcBytes, collectionIndex: 3 }] });
 ```
 
 再加上 `useSystemFonts: false`,输出就**只**取决于你传入的字体。快照测试和可复现构建需要这一点 —— 字体发现无法保证两台机器给出相同的像素:
 
 ```typescript
-const image = rasterizeToRgba(list, { fonts: [notoSansScBytes], useSystemFonts: false });
+const image = Draw.toRgba(list, { fonts: [notoSansScBytes], useSystemFonts: false });
 ```
 
 字体属于一次渲染,或属于一张画布(`BasicRasterCanvas.setFonts`)—— 刻意没有进程级注册表,这样一个调用方就无法改变另一个调用方画布所用的字体。
+
+传入的字体读不出时会被跳过而不是让渲染失败——传入 CFF 字体的调用方仍能得到拉丁文字——并在 `textWarnings` 中报告(`fonts[0] could not be read (…) and was skipped.`);`collectionIndex` 超出字体集合末尾时同样报告,并用第 0 个字形集绘制。
 
 格式控制字符永远不会被上报:变体选择符、连接符、bidi 隔离符在任何字体里都没有字形,所以它们不会被查找、不占宽度,也不会出现在 `uncoveredCodePoints` 里。制表符是那个恰好相反的例外 —— 它不落墨,但确实占位,所以笔位仍会推进。
 
@@ -217,7 +226,7 @@ const image = rasterizeToRgba(list, { fonts: [notoSansScBytes], useSystemFonts: 
 仍然缺的那部分需要字体自己的 GSUB 与 GPOS 表:合体连字仍按独立字形绘制,叠加符号没有定位。这一点选择上报,而不是假装:
 
 ```typescript
-const image = rasterizeToRgba(list);
+const image = Draw.toRgba(list);
 for (const warning of image.textWarnings) {
   console.warn(warning); // "Text contains Arabic. This rasteriser applies contextual forms…"
 }
@@ -225,7 +234,7 @@ for (const warning of image.textWarnings) {
 
 与 `uncoveredCodePoints` 不同,提供字体在这里没有帮助 —— 每个字形其实都画出来了。正因为它**看不出**坏掉,才必须上报。
 
-**`toSvg` 和 DOCX 写入器对这些文字仍然是完全正确的**,因为两者都原样携带文本,把 shaping 交给查看器或 Word。**PDF 写入器现在也做 shaping。** 两者都只在某张字体确实能画出该形态时才替换:很多字体提供基础字母而完全不提供 presentation form,不加判断地替换在 PDF 里代价是 `.notdef` 豆腐块,而在光栅化器里 —— 因为它没有 notdef 可退 —— 代价是**整行空白**。所以两个后端都可能顺序正确却仍未连写,并各自上报自己实际做到了哪一半。
+**`Draw.toSvg` 和 DOCX 写入器对这些文字仍然是完全正确的**,因为两者都原样携带文本,把 shaping 交给查看器或 Word。**PDF 写入器现在也做 shaping。** 两者都只在某张字体确实能画出该形态时才替换:很多字体提供基础字母而完全不提供 presentation form,不加判断地替换在 PDF 里代价是 `.notdef` 豆腐块,而在光栅化器里 —— 因为它没有 notdef 可退 —— 代价是**整行空白**。所以两个后端都可能顺序正确却仍未连写,并各自上报自己实际做到了哪一半。
 
 每段文本要做两个决定,而它们由不同的谓词把关。shaping 在文本**可能**需要时运行;而字形 advance 是否归一化到测量宽度,取决于内置 advance 表是否描述得了这段文本 —— 它只覆盖拉丁、CJK、西里尔和希腊字母,对泰米尔文报出的宽度约为真实值的一半,所以复杂文字改用字体自身的 advance 来排布。用同一个谓词决定这两件事,会在一个方向上把泰米尔文挤成重叠,在另一个方向上让夹有双向控制符的拉丁文整体位移。
 

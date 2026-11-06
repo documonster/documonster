@@ -20,6 +20,8 @@
  * "Public types" section below and the "Types" section of the module README.
  */
 
+import type { AddAoaOptions, AddJsonOptions, SheetToJsonOptions } from "@excel/core/worksheet";
+
 // --- Domain namespaces (platform-independent) ---
 export * as Worksheet from "@excel/surface/worksheet";
 export * as Cell from "@excel/surface/cell";
@@ -35,12 +37,18 @@ export * as Form from "@excel/surface/form";
 export * as Chartsheet from "@excel/surface/chartsheet";
 export * as DataValidation from "@excel/surface/data-validation";
 export * as DefinedNames from "@excel/surface/defined-names";
+/**
+ * @deprecated A cell's note is read and written through `Cell` — `Cell.setNote(ws, addr, note, { author })`,
+ * `Cell.getNote`, `Cell.getNoteAuthor`, `Cell.removeNote`; a note record is needed only by the deprecated
+ * `Cell.setComment`. Removed in 1.0.
+ */
 export * as Note from "@excel/surface/note";
 export * as Address from "@excel/surface/address";
 export * as Anchor from "@excel/surface/anchor";
 export * as Watermark from "@excel/surface/watermark";
 export * as HeaderFooterImage from "@excel/surface/header-footer-image";
 export * as Format from "@excel/surface/format";
+export * as ConditionalFormatting from "@excel/surface/conditional-formatting";
 
 // ---------------------------------------------------------------------------
 // Public types (platform-independent)
@@ -56,12 +64,13 @@ export * as Format from "@excel/surface/format";
 // the same type would be worse than none. Cell / row / column handles have no
 // such alias, so their declared names are public (see below).
 //
-// The two platform-specific groups (workbook IO / streaming option types) are
-// added by `index.ts` and `index.browser.ts`, next to their namespaces.
+// The workbook IO and streaming option types are listed here too: they are the
+// same type on every platform, so only the `Workbook` and `Stream` namespaces
+// differ between `index.ts` and `index.browser.ts`.
 // ---------------------------------------------------------------------------
 
 // Style vocabulary — `Cell.setStyle`, `Row.setStyle`, `Column.setStyle`,
-// `Table` column styles and `Workbook.defineCellStyle` all speak these.
+// `Table` column styles and `Workbook.addCellStyle` all speak these.
 export type {
   Style,
   Alignment,
@@ -83,9 +92,9 @@ export type {
   RichText
 } from "@excel/types";
 export type { NamedStyleEntry } from "@excel/core/workbook-core";
-/** Recursively `readonly` view of a type — see `ColumnView` / `CellView`. */
+/** Recursively `readonly` view of a type — see {@link CellView}. */
 export type { DeepReadonly } from "@utils/types";
-export type { BuiltinCellStyle } from "@excel/core/builtin-cell-styles";
+export type { BuiltInCellStyle, BuiltinCellStyle } from "@excel/core/builtin-cell-styles";
 
 // Cell values — what `Cell.getValue` returns and `Cell.setValue` accepts.
 export type {
@@ -123,18 +132,18 @@ export type {
  * a date-time is how a `[h]:mm:ss` cell came back as a moment in 1899.
  */
 export type { DateFormatKind } from "@excel/utils/cell-format";
-// `CellData` / `RowData` / `ColumnData` are the cell/row/column handles. Unlike
-// the other handles they have no `X.Handle` alias, so the declared name is the
-// public one. Handles that DO have one (`Worksheet.Handle`, `Workbook.Handle`,
-// `Table.Handle`, …) are deliberately NOT re-exported flat: one type, one name.
-export type {
-  CellData,
-  CellModel,
-  CellValueType,
-  CellValueInputType,
-  CellView,
-  FormulaResult
-} from "@excel/core/cell";
+export type { CellModel, FormulaResult } from "@excel/core/cell";
+/** @deprecated Use {@link CellValue}. Removed in 1.0. */
+export type { CellValueType } from "@excel/core/cell";
+/** @deprecated Use {@link CellValueInput}. Removed in 1.0. */
+export type { CellValueInputType } from "@excel/core/cell";
+// The cell / row handles belong to the streaming API, where they are published as
+// `Stream.CellHandle` and `Stream.RowHandle`. These flat names stay nameable while
+// deprecated members still mention them.
+/** @deprecated Use `Stream.CellHandle`. Removed in 1.0. */
+export type { CellData } from "@excel/core/cell";
+/** A read-only, allocation-free projection of one cell — what `Cell.getView` returns. */
+export type { CellView } from "@excel/core/cell";
 /**
  * The cell-value kinds (`Cell.getType` / `Cell.getEffectiveType`), the formula
  * kinds (`CellModel.formulaType`) and the Excel error strings. Each is a plain
@@ -148,17 +157,24 @@ export { PaperSize } from "@excel/types";
 
 // Rows and columns.
 export type { RowObject, RowValues } from "@excel/types";
-export type { RowData, RowModel } from "@excel/core/row";
-export type {
-  ColumnData,
-  ColumnDefn,
-  ColumnHeaderValue,
-  ColumnModel,
-  ColumnView
-} from "@excel/core/column";
+export type { RowDimensions, RowModel } from "@excel/core/row";
+/** @deprecated Use `Stream.RowHandle`. Removed in 1.0. */
+export type { RowData } from "@excel/core/row";
+export type { ColumnDefn, ColumnHeaderValue, ColumnModel } from "@excel/core/column";
+/**
+ * @deprecated Address columns by key, letter or number through the `Column` namespace; a streamed sheet's column is a
+ * `Stream.ColumnHandle`. Removed in 1.0.
+ */
+export type { ColumnData } from "@excel/core/column";
+/**
+ * @deprecated Only the deprecated `Worksheet.columns` / `lastColumn` return it; every field
+ * is read through the `Column` namespace (`Column.getDefinition`, `Column.getNumber`, …).
+ * Removed in 1.0.
+ */
+export type { ColumnView } from "@excel/core/column";
 
 // Addresses and ranges.
-export type { DecodedAddress } from "@excel/types";
+export type { CellPosition, DecodedAddress } from "@excel/types";
 export type { CellAddress, Origin, SheetRange } from "@excel/utils/address";
 export type { DecodedRange } from "@excel/utils/col-cache";
 export type { RangeInput } from "@excel/core/range";
@@ -172,6 +188,10 @@ export type {
   Location,
   Margins,
   PageSetup,
+  PageSetupCellComments,
+  PageSetupErrors,
+  PageSetupOrder,
+  PageSetupOrientation,
   RowBreak,
   WorksheetProperties,
   WorksheetProtection,
@@ -182,16 +202,32 @@ export type {
   WorksheetViewNormal,
   WorksheetViewSplit
 } from "@excel/types";
-export type { AutoFilterCriteria, SheetProtection } from "@excel/core/worksheet-core";
 export type {
-  AddAOAOptions,
-  AddJSONOptions,
+  AutoFilterCriteria,
+  FreezePanesOptions,
+  FrozenPanes,
+  SheetProtection,
+  SplitPanes,
+  SplitPanesOptions,
+  WorksheetPanes
+} from "@excel/core/worksheet-core";
+export type {
+  AddAoaOptions,
+  AddJsonOptions,
   AutoFitColumnOptions,
-  SheetToJSONOptions,
+  FillFormulaOptions,
+  ProtectSheetOptions,
+  SheetToJsonOptions,
   WorksheetModel
 } from "@excel/core/worksheet";
+/** @deprecated Use {@link AddAoaOptions}. Removed in 1.0. */
+export type AddAOAOptions = AddAoaOptions;
+/** @deprecated Use {@link AddJsonOptions}. Removed in 1.0. */
+export type AddJSONOptions = AddJsonOptions;
+/** @deprecated Use {@link SheetToJsonOptions}. Removed in 1.0. */
+export type SheetToJSONOptions = SheetToJsonOptions;
 
-// Conditional formatting — `Worksheet.addConditionalFormatting`.
+// Conditional formatting — the `ConditionalFormatting` namespace.
 export type {
   AboveAverageRuleType,
   CellIsOperators,
@@ -236,7 +272,7 @@ export type { NoteConfig, NoteModel, NoteText } from "@excel/core/cell";
 
 // Tables.
 export type { TableColumnProperties, TableProperties, TableStyleProperties } from "@excel/types";
-export type { TableColumnView, TableModel } from "@excel/core/table";
+export type { TableColumnView, TableModel, TableRowEditOptions } from "@excel/core/table";
 
 // Images, shapes, drawing anchors, watermarks.
 export type {
@@ -303,9 +339,21 @@ export type {
 } from "@excel/types";
 export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/core/xlsx-io";
 export type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
+export type { WorkbookWritable } from "@excel/core/xlsx-sink";
+// The browser build's deprecated `Workbook.readStream(wb, stream)` takes this event-emitter shape.
+export type { XlsxParseStream } from "@excel/xlsx/types";
 export type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 // Format-aware IO. `WorkbookFormat` is the choice; the option bags are what carry it.
 export type { WorkbookFormat } from "@excel/core/workbook-format";
+export type {
+  // The `encryption` write option: the same type Word's `Document.toBuffer` and `WordCrypto.encrypt` take (`DocxEncryptOptions`).
+  // `Workbook`-prefixed like the option bag carrying it, because it applies to XLSX and XLSB alike.
+  WorkbookEncryptOptions,
+  UnrecognizedValue,
+  WorkbookCreateOptions,
+  WorkbookStreamInput
+} from "@excel/core/workbook-io-types";
+export type { DiscardUnrecognizedValuesOptions } from "@excel/core/workbook.browser";
 export type {
   WorkbookDiagnosticReadOptions,
   WorkbookReadOptions,
@@ -313,9 +361,13 @@ export type {
   WorkbookWriteOptions
 } from "@excel/core/xlsx-io";
 export type {
+  AddExternalLinkOptions,
   ExternalLinkCachedSheet,
   ExternalLinkModel,
   WorkbookMedia,
+  ProtectWorkbookOptions,
+  RegisterFunctionOptions,
+  RegisterPersonOptions,
   WorkbookModel,
   WorkbookProtectionModel
 } from "@excel/core/workbook.browser";
@@ -337,21 +389,39 @@ export type { StyledBlankRangeModel } from "@excel/core/styled-blanks";
 export {
   ExcelError,
   isExcelError,
+  ExcelWorksheetNameError,
+  ExcelInvalidAddressError,
+  ExcelColumnOutOfBoundsError,
+  ExcelRowOutOfBoundsError,
+  ExcelMergeConflictError,
+  ExcelInvalidValueTypeError,
+  ExcelArgumentError,
+  ExcelUnsupportedFeatureError,
+  ExcelDecryptionError,
+  ExcelEncryptedError,
+  ExcelFileError,
+  ExcelStreamStateError,
+  ExcelDownloadError,
+  ExcelPivotTableError,
+  ExcelChartOptionsError,
+  ExcelTableError,
+  ExcelDefinedNameError,
+  ExcelImageError,
+  ExcelLimitExceededError,
+  // Deprecated names (pre-prefix, or renamed to match the other modules); removed in 1.0.
   WorksheetNameError,
   InvalidAddressError,
   ColumnOutOfBoundsError,
   RowOutOfBoundsError,
   MergeConflictError,
   InvalidValueTypeError,
-  ExcelNotSupportedError,
-  ExcelFileError,
-  ExcelStreamStateError,
-  ExcelDownloadError,
   PivotTableError,
   ChartOptionsError,
   TableError,
+  DefinedNameError,
   ImageError,
   MaxItemsExceededError,
+  ExcelNotSupportedError,
   // Thrown by the XLSB reader for a malformed record stream, and reachable now that
   // `Workbook.read` dispatches to it.
   XlsbParseError,
@@ -360,5 +430,20 @@ export {
   // The option's documentation tells a caller to expect this type, and its own tests use `instanceof` — but the class was
   // only exported from the internal `@excel/errors` path, so a consumer of `documonster/excel` could not name it and had
   // to match on the message. An error a public option promises has to be part of the public surface.
-  XlsbFormulaDecodeError
+  XlsbFormulaDecodeError,
+  // The XLSX reader's counterpart of `XlsbParseError`, thrown for a malformed part — reachable through every
+  // `Workbook.read*`, so a caller has to be able to name it.
+  XlsxParseError
+} from "@excel/errors";
+// The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
+export type { BaseErrorOptions } from "@utils/errors";
+export type {
+  ExcelFileErrorOptions,
+  ExcelInvalidValueTypeErrorOptions,
+  ExcelLimit,
+  ExcelLimitExceededErrorOptions,
+  ExcelPositionErrorOptions,
+  // Deprecated pre-prefix names; removed in 1.0.
+  InvalidValueTypeErrorOptions,
+  PositionErrorOptions
 } from "@excel/errors";

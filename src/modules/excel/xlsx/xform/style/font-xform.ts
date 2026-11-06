@@ -40,6 +40,8 @@ interface FontOptions {
 class FontXform extends BaseXform {
   declare private options: FontOptions;
   declare public parser?: BaseXform;
+  /** The model property the active child parser fills — taken when it opened, since a close tag may not match. */
+  declare private parserProp?: string;
   declare private renderOrder: string[];
 
   constructor(options?: FontOptions) {
@@ -87,7 +89,13 @@ class FontXform extends BaseXform {
       },
       { tag: "family", prop: "family", xform: new IntegerXform({ tag: "family", attr: "val" }) },
       { tag: "scheme", prop: "scheme", xform: new StringXform({ tag: "scheme", attr: "val" }) },
-      { tag: "charset", prop: "charset", xform: new IntegerXform({ tag: "charset", attr: "val" }) },
+      // `0` is ANSI_CHARSET, a value like any other: dropping it left the font without one, and the next write
+      // inferred 134 for a Chinese face name the file had declared Western.
+      {
+        tag: "charset",
+        prop: "charset",
+        xform: new IntegerXform({ tag: "charset", attr: "val", writeZero: true })
+      },
       {
         tag: "vertAlign",
         prop: "vertAlign",
@@ -156,6 +164,7 @@ class FontXform extends BaseXform {
     if (this.map![node.name]) {
       const parser = this.map![node.name].xform;
       this.parser = parser;
+      this.parserProp = this.map![node.name].prop;
       // The child xform reports whether it consumed the node (void → false).
       return parser.parseOpen(node) ?? false;
     }
@@ -176,11 +185,13 @@ class FontXform extends BaseXform {
 
   parseClose(name: string): boolean {
     if (this.parser && !this.parser.parseClose(name)) {
-      const item = this.map![name];
       // `!== undefined`, not truthiness: `<b val="0"/>` parses to `false`, and in a differential format that
       // is an instruction to remove bold, not the absence of one.
-      if (this.parser.model !== undefined) {
-        this.model[item.prop] = this.parser.model;
+      //
+      // The property is the one recorded when the child opened, not looked up by the closing tag's name: in a
+      // malformed part the two differ, and the lookup was `undefined` and threw a raw `TypeError`.
+      if (this.parser.model !== undefined && this.parserProp !== undefined) {
+        this.model[this.parserProp] = this.parser.model;
       }
       this.parser = undefined;
       return true;

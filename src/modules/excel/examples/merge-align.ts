@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -16,10 +16,10 @@ const filename = process.argv[2] ?? path.join(outDir, "merge-align.xlsx");
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "blort");
 
-Worksheet.addRow(ws, [1, 2, 3, 4]);
-Worksheet.addRow(ws, ["one", "two", "three", "four"]);
-Worksheet.addRow(ws, ["une", "deux", "trois", "quatre"]);
-Worksheet.addRow(ws, ["uno", "due", "tre", "quatro"]);
+Row.add(ws, [1, 2, 3, 4]);
+Row.add(ws, ["one", "two", "three", "four"]);
+Row.add(ws, ["une", "deux", "trois", "quatre"]);
+Row.add(ws, ["uno", "due", "tre", "quatro"]);
 
 Worksheet.merge(ws, "B2:C3");
 Cell.setStyle(ws, "B2", { alignment: { horizontal: "center", vertical: "middle" } });

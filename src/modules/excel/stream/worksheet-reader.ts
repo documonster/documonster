@@ -19,13 +19,16 @@ import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.bro
 import type { WorksheetState, Style } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import { xlsxPartError } from "@excel/utils/file-content-errors";
+import { createPartDecoder } from "@excel/utils/part-decoder";
 import { slideFormula } from "@excel/utils/shared-formula";
 import type { SharedStringValue } from "@excel/utils/shared-strings";
+import { createPrefixNormalizer } from "@excel/xlsx/xform/namespace-prefixes";
 import { readCellColumn, readRowNumber } from "@excel/xlsx/xform/sheet/cell-reference";
 import { CellXform, formulaResultAsValue } from "@excel/xlsx/xform/sheet/cell-xform";
 import { EventEmitter } from "@utils/event-emitter";
 import { SaxParser } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
+import type { ParseOpenTag, XmlSaxTag } from "@xml/types";
 
 // ============================================================================
 // Internal Types
@@ -104,6 +107,11 @@ function applyCellModel(cell: CellData, model: CellModel, style: Partial<Style> 
   }
 }
 
+/**
+ * One sheet of a streaming workbook reader. `parse()` yields its rows in batches as they are read; `read()` raises a
+ * `row` event for each instead. The sheet's part is read once: read it before asking the workbook reader for the
+ * next event.
+ */
 class WorksheetReader extends EventEmitter {
   workbook: WorksheetReaderWorkbook;
   id: number | string;
@@ -225,7 +233,25 @@ class WorksheetReader extends EventEmitter {
     }
   }
 
+  /**
+   * The sheet's rows as event batches. A position the part's content puts outside the grid, or not where it is
+   * written, is reported as the part's parse error ({@link partError}), not as the argument error it is at an API call.
+   */
   async *parse(): AsyncIterableIterator<WorksheetEvent[]> {
+    try {
+      yield* this._parseEvents();
+    } catch (error) {
+      throw this.partError(error);
+    }
+  }
+
+  /** The error a read of this sheet's part reports for `error` — `XlsxParseError` for a position in the file. */
+  protected partError(error: unknown): unknown {
+    return xlsxPartError(error, `xl/worksheets/sheet${this.sheetNo}.xml`);
+  }
+
+  /** {@link parse}, before a bad position is reported as the part's. */
+  protected async *_parseEvents(): AsyncIterableIterator<WorksheetEvent[]> {
     const { iterator, options } = this;
     let emitSheet = false;
     let emitHyperlinks = false;
@@ -375,11 +401,28 @@ class WorksheetReader extends EventEmitter {
     };
 
     const parser = new SaxParser({ position: false, invalidCharHandling: "skip" });
+    // Prefixes normalised to the ones matched below — see `namespace-prefixes.ts`.
+    const parserPrefixes = createPrefixNormalizer({ lazy: true, hinted: true });
+    let normalize = false;
+    // See `parseXformStream`: the parser counts prefixed attribute names so the normaliser need not search for them.
+    let prefixedAttributes = 0;
 
-    parser.on("opentag", (node: SaxTag) => {
+    parser.on("opentag", (rawNode: XmlSaxTag) => {
+      let node: XmlSaxTag | ParseOpenTag = rawNode;
+      if (normalize) {
+        const count = parser.prefixedAttributes;
+        node = parserPrefixes.open(rawNode, count !== prefixedAttributes);
+        prefixedAttributes = count;
+      }
       if (cellCol !== 0) {
-        cellXform.parseOpen(node);
-        return;
+        if (node.name !== "c") {
+          cellXform.parseOpen(node);
+          return;
+        }
+        // A `<c>` inside a cell ends that cell, as in `RowXform`; the surplus `</c>` then closes nothing.
+        cellXform.parseClose("c");
+        finishCell(cellXform.model as CellModel, cellCol);
+        cellCol = 0;
       }
       if (emitSheet) {
         switch (node.name) {
@@ -474,7 +517,8 @@ class WorksheetReader extends EventEmitter {
       }
     });
 
-    parser.on("closetag", (tag: SaxTag) => {
+    parser.on("closetag", (rawTag: XmlSaxTag) => {
+      const tag = normalize ? { name: parserPrefixes.close(rawTag.name) } : rawTag;
       if (cellCol !== 0) {
         cellXform.parseClose(tag.name);
         // Ended by its own close tag, not by `parseClose` returning false: that also answers for a child element
@@ -521,14 +565,24 @@ class WorksheetReader extends EventEmitter {
       }
     });
 
+    const scanPrefixes = (text: string): void => {
+      if (parserPrefixes.scan(text) && !normalize) {
+        normalize = true;
+        parser.countPrefixedAttributes = true;
+        // A tag the parser is part-way through may have read a prefixed name uncounted; this makes it report one.
+        prefixedAttributes = -1;
+      }
+    };
+
     // Drive the SAX parser synchronously per chunk, yield events after each chunk.
     // SAX parser.write() is synchronous: all callbacks fire within the write() call.
     // This eliminates async queue overhead entirely.
-    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const decoder = createPartDecoder();
 
     for await (const chunk of iterator) {
       const chunkStr =
         typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
+      scanPrefixes(chunkStr);
       parser.write(chunkStr);
       // After each chunk, flush accumulated events (callbacks set worksheetEvents synchronously)
       const batch = worksheetEvents as WorksheetEvent[] | null;
@@ -541,6 +595,7 @@ class WorksheetReader extends EventEmitter {
     // Flush any trailing bytes from the streaming decoder (catches truncated UTF-8)
     const trailing = decoder.decode();
     if (trailing) {
+      scanPrefixes(trailing);
       parser.write(trailing);
     }
 

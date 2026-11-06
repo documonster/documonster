@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import { extractAll } from "@archive/unzip/extract";
 import { ZipArchive } from "@archive/zip";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook } from "@excel/index";
 import { validateXlsbBuffer } from "@excel/utils/xlsb-validator";
 import { encodeBiffRecords, iterateBiffRecords } from "@excel/xlsb/binary";
 import { recordSpec } from "@excel/xlsb/spec/records";
@@ -35,9 +35,9 @@ const filename = process.argv[2] ?? path.join(outDir, "xlsb-validate.xlsb");
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Checked");
-Worksheet.addRow(ws, ["Item", "Amount"]);
-Worksheet.addRow(ws, ["Widget", 19.99]);
-Worksheet.addRow(ws, ["Gadget", 24.5]);
+Row.add(ws, ["Item", "Amount"]);
+Row.add(ws, ["Widget", 19.99]);
+Row.add(ws, ["Gadget", 24.5]);
 Cell.setValue(ws, "B4", { formula: "SUM(B2:B3)", result: 44.49 });
 Cell.setStyle(ws, "A1", { font: { bold: true } });
 await Workbook.writeFile(wb, filename);
@@ -81,7 +81,7 @@ for (const [part, file] of source) {
   damaged.add(part, encodeBiffRecords(records));
 }
 
-const broken = await validateXlsbBuffer(await damaged.bytes(), { includeWarnings: true });
+const broken = await validateXlsbBuffer(await damaged.toBuffer(), { includeWarnings: true });
 console.log(`\nwith every BrtRowHdr shortened to twelve bytes: ${broken.ok ? "ok" : "not ok"}`);
 for (const problem of broken.problems.slice(0, 3)) {
   console.log(`  ${problem.severity} ${problem.kind}: ${problem.message.slice(0, 84)}`);

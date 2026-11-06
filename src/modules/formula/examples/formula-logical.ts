@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -49,7 +49,7 @@ Cell.setValue(ws, "E1", {
 // CHOOSE — index-based dispatch (1-based)
 Cell.setValue(ws, "E2", { formula: 'CHOOSE(2, "low", "mid", "high")' }); // "mid"
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of ["B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2"]) {
   console.log(

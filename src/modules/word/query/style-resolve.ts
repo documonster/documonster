@@ -4,6 +4,7 @@
  * Resolve the effective style for a paragraph by walking the style inheritance chain.
  */
 
+import { checkHandle, checkNode } from "@word/core/argument-checks";
 import type {
   DocxDocument,
   Paragraph,
@@ -13,8 +14,11 @@ import type {
   Shading,
   StyleDef,
   Table,
+  TabStop,
   TableCell,
   TableLook,
+  LevelJustification,
+  NumberFormat,
   NumberingLevel,
   NumberingRef,
   TableProperties,
@@ -30,6 +34,7 @@ import type {
 export interface StyleResolveContext {
   /** If the paragraph is inside a table, provide table context. */
   readonly tableContext?: {
+    /** The table's `w:tblStyle`; omitted, the document's default table style. */
     readonly tableStyleId?: string;
     readonly tblLook?: TableLook;
     readonly rowIndex: number;
@@ -66,6 +71,7 @@ export type StyleIndex = ReadonlyMap<string, StyleDef>;
 
 /** Index `doc.styles` by `styleId` (later duplicates win, as before). */
 export function indexStyles(doc: DocxDocument): StyleIndex {
+  checkHandle(doc, "document", "doc", "Query.createStyleIndex");
   const map = new Map<string, StyleDef>();
   for (const s of doc.styles ?? []) {
     map.set(s.styleId, s);
@@ -94,15 +100,23 @@ export function resolveStyle(
 
   // Walk the chain from paragraph's style to root
   const chain: string[] = [];
-  const styleId = para.properties?.style;
+  // A paragraph naming no style — or a style the document does not define —
+  // takes the default paragraph style, as Word does (ECMA-376 §17.7.4.17).
+  const named = para.properties?.style;
+  const styleId =
+    named && styleMap.has(named) ? named : findDefaultStyle(doc.styles, "paragraph")?.styleId;
   if (styleId) {
     let current: string | undefined = styleId;
     const visited = new Set<string>();
     while (current && !visited.has(current)) {
       visited.add(current);
-      chain.push(current);
       const def = styleMap.get(current);
-      current = def?.basedOn;
+      // A `basedOn` naming a style the document does not define ends the chain there.
+      if (!def) {
+        break;
+      }
+      chain.push(current);
+      current = def.basedOn;
     }
   }
 
@@ -126,6 +140,22 @@ export function resolveStyle(
   const docDefaultRProps: Record<string, unknown> = mergedRProps;
   let paragraphStyleLevel: Record<string, unknown> = {};
   let tableStyleLevel: Record<string, unknown> = {};
+
+  // A paragraph in a table takes its table style's paragraph and run
+  // properties above the document defaults and below its own paragraph style
+  // (ECMA-376 §17.7.2). A table naming no style uses the default table style.
+  const tblCtx = context?.tableContext;
+  const tableChain = tblCtx ? tableStyleChain(doc, tblCtx.tableStyleId, styleMap) : [];
+  for (let i = tableChain.length - 1; i >= 0; i--) {
+    const def = tableChain[i];
+    if (def.paragraphProperties) {
+      mergedPProps = mergeProperties(mergedPProps, def.paragraphProperties);
+    }
+    if (def.runProperties) {
+      mergedRProps = mergeProperties(mergedRProps, def.runProperties);
+      tableStyleLevel = mergeProperties(tableStyleLevel, def.runProperties);
+    }
+  }
 
   // Apply style chain (from base to most specific)
   for (let i = chain.length - 1; i >= 0; i--) {
@@ -153,23 +183,27 @@ export function resolveStyle(
   }
 
   // Apply table conditional format overlay (higher priority than base table/paragraph style,
-  // but lower priority than paragraph's own direct properties).
-  if (context?.tableContext?.tableStyleId) {
-    const tblCtx = context.tableContext;
-    const tableStyleId: string = tblCtx.tableStyleId!;
-    const tblStyleDef = styleMap.get(tableStyleId);
-    if (tblStyleDef?.tableStyleConditions) {
+  // but lower priority than paragraph's own direct properties), base style first.
+  if (tblCtx && tableChain.length > 0) {
+    let rowBand = tblCtx.rowBandSize;
+    let colBand = tblCtx.colBandSize;
+    for (let i = tableChain.length - 1; i >= 0; i--) {
+      rowBand = rowBand ?? tableChain[i].tableProperties?.rowBandSize;
+      colBand = colBand ?? tableChain[i].tableProperties?.colBandSize;
+    }
+    for (let i = tableChain.length - 1; i >= 0; i--) {
+      const conditions = tableChain[i].tableStyleConditions;
+      if (!conditions) {
+        continue;
+      }
       const matchingConditions = getMatchingTableConditions(
-        tblStyleDef.tableStyleConditions,
+        conditions,
         tblCtx.tblLook,
         tblCtx.rowIndex,
         tblCtx.colIndex,
         tblCtx.totalRows,
         tblCtx.totalCols,
-        {
-          row: tblCtx.rowBandSize ?? tblStyleDef.tableProperties?.rowBandSize,
-          column: tblCtx.colBandSize ?? tblStyleDef.tableProperties?.colBandSize
-        }
+        { row: rowBand, column: colBand }
       );
       for (const cond of matchingConditions) {
         if (cond.paragraphProperties) {
@@ -261,6 +295,10 @@ function mergeProperties(base: Record<string, unknown>, override: object): Recor
       continue;
     }
     const existing = result[key];
+    if (key === "tabs" && Array.isArray(existing) && Array.isArray(value)) {
+      result[key] = mergeTabStops(existing as readonly TabStop[], value as readonly TabStop[]);
+      continue;
+    }
     if (MERGEABLE_PROPERTY_KEYS.has(key) && isPropertyBag(existing) && isPropertyBag(value)) {
       result[key] = mergeProperties(existing, value);
       continue;
@@ -268,6 +306,21 @@ function mergeProperties(base: Record<string, unknown>, override: object): Recor
     result[key] = value;
   }
   return result;
+}
+
+/**
+ * Tab stops accumulate down the style hierarchy, one position at a time: a
+ * level's stop replaces the one below at the same position, and its `clear`
+ * removes it (ECMA-376 §17.3.1.37). Replacing the whole list dropped the stops
+ * a style set — the Header style's centre and right stops under a paragraph
+ * that added one of its own.
+ */
+function mergeTabStops(base: readonly TabStop[], override: readonly TabStop[]): TabStop[] {
+  const at = new Set(override.map(t => t.position));
+  return [
+    ...base.filter(t => !at.has(t.position)),
+    ...override.filter(t => t.type !== "clear")
+  ].sort((a, b) => a.position - b.position);
 }
 
 /**
@@ -403,6 +456,101 @@ export interface ResolvedTableCellStyle {
   readonly shading?: Shading;
 }
 
+/** The default table style of each style index (`w:default="1"`), found once. */
+const defaultTableStyles = new WeakMap<StyleIndex, StyleDef | null>();
+
+/**
+ * The table style a table uses: the one it names (`w:tblStyle`), or — for a
+ * table that names none — the document's default table style
+ * (`w:default="1"`), which Word applies to such a table exactly as if it named
+ * it. Undefined when there is neither. This is the one place that rule lives;
+ * everything that applies a table style goes through it.
+ */
+export function resolveEffectiveTableStyleId(
+  doc: DocxDocument,
+  tableStyleId: string | undefined,
+  styles?: StyleIndex
+): string | undefined {
+  if (tableStyleId || !doc.styles) {
+    return tableStyleId;
+  }
+  const styleMap = styles ?? indexStyles(doc);
+  let fallback = defaultTableStyles.get(styleMap);
+  if (fallback === undefined) {
+    fallback = findDefaultStyle(doc.styles, "table") ?? null;
+    defaultTableStyles.set(styleMap, fallback);
+  }
+  return fallback?.styleId;
+}
+
+/**
+ * The default style of `type` — the one marked `w:default="1"`. A document may
+ * mark more than one; Word takes the last (Word for Mac 16.114: two default
+ * table styles, the tables take the second's formatting), so this does too.
+ */
+export function findDefaultStyle(
+  styles: readonly StyleDef[] | undefined,
+  type: StyleDef["type"]
+): StyleDef | undefined {
+  return styles?.findLast(s => s.type === type && s.isDefault === true);
+}
+
+/**
+ * The style chain of a table, most specific first, starting from
+ * {@link resolveEffectiveTableStyleId}. Empty when the table has no style.
+ */
+function tableStyleChain(
+  doc: DocxDocument,
+  tableStyleId: string | undefined,
+  styles?: StyleIndex
+): StyleDef[] {
+  if (!doc.styles) {
+    return [];
+  }
+  const styleMap = styles ?? indexStyles(doc);
+  let current = resolveEffectiveTableStyleId(doc, tableStyleId, styleMap);
+  const chain: StyleDef[] = [];
+  const visited = new Set<string>();
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const def = styleMap.get(current);
+    if (!def) {
+      break;
+    }
+    chain.push(def);
+    current = def.basedOn;
+  }
+  return chain;
+}
+
+/**
+ * A table's effective properties: its style chain's `w:tblPr` (from
+ * {@link resolveEffectiveTableStyleId}, base first), then its own on top,
+ * merged attribute by attribute — with `style` set to the effective style id.
+ * Returns `table.properties` itself when the table has no style.
+ */
+export function resolveTableProperties(
+  doc: DocxDocument,
+  table: Table,
+  styles?: StyleIndex
+): TableProperties | undefined {
+  const chain = tableStyleChain(doc, table.properties?.style, styles);
+  if (chain.length === 0) {
+    return table.properties;
+  }
+  let merged: Record<string, unknown> = {};
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const own = chain[i].tableProperties;
+    if (own) {
+      merged = mergeProperties(merged, own);
+    }
+  }
+  if (table.properties) {
+    merged = mergeProperties(merged, table.properties);
+  }
+  return { ...(merged as TableProperties), style: chain[0].styleId };
+}
+
 /**
  * Resolve the cell-level formatting a table style contributes at one position.
  *
@@ -428,23 +576,9 @@ export function resolveTableCellStyle(
   bandSize?: { readonly row?: number; readonly column?: number },
   styles?: StyleIndex
 ): ResolvedTableCellStyle {
-  if (!tableStyleId || !doc.styles) {
+  const chain = tableStyleChain(doc, tableStyleId, styles);
+  if (chain.length === 0) {
     return {};
-  }
-  const styleMap = styles ?? indexStyles(doc);
-
-  // Style chain, most specific first.
-  const chain: StyleDef[] = [];
-  let current: string | undefined = tableStyleId;
-  const visited = new Set<string>();
-  while (current && !visited.has(current)) {
-    visited.add(current);
-    const def = styleMap.get(current);
-    if (!def) {
-      break;
-    }
-    chain.push(def);
-    current = def.basedOn;
   }
 
   let shading: Shading | undefined;
@@ -735,15 +869,21 @@ export function resolveRunStyle(
 
   // Build chain from run's character style
   const chain: string[] = [];
-  const runStyleId = run.properties?.style;
+  // A run naming no character style takes the default one, as a paragraph does.
+  const named = run.properties?.style;
+  const runStyleId =
+    named && styleMap.has(named) ? named : findDefaultStyle(doc.styles, "character")?.styleId;
   if (runStyleId) {
     let current: string | undefined = runStyleId;
     const visited = new Set<string>();
     while (current && !visited.has(current)) {
       visited.add(current);
-      chain.push(current);
       const def = styleMap.get(current);
-      current = def?.basedOn;
+      if (!def) {
+        break;
+      }
+      chain.push(current);
+      current = def.basedOn;
     }
   }
 
@@ -802,11 +942,11 @@ export interface ResolvedNumberingLevel {
   /** Start value (with any `w:startOverride` applied). */
   readonly start?: number;
   /** Number format. */
-  readonly format?: string;
+  readonly format?: NumberFormat;
   /** Level text template (e.g. `"%1."`). */
   readonly text?: string;
   /** Justification. */
-  readonly justification?: string;
+  readonly justification?: LevelJustification;
   /** Run properties for the numbering text itself (bullet/number marker). */
   readonly runProperties?: RunProperties;
   /** Paragraph properties from the level (indent, alignment, etc.). */
@@ -910,6 +1050,8 @@ export function resolveNumberingLevel(
   doc: DocxDocument,
   para: Paragraph
 ): ResolvedNumberingLevel | undefined {
+  checkHandle(doc, "document", "doc", "Query.getNumberingLevel");
+  checkNode(para, "paragraph", "para", "Query.getNumberingLevel");
   const numRef = resolveParagraphNumbering(doc, para);
   if (!numRef) {
     return undefined;
@@ -928,6 +1070,18 @@ export function resolveNumberingLevel(
     runProperties: levelDef.runProperties,
     paragraphProperties: levelDef.paragraphProperties
   };
+}
+
+/** A table style resolved along its `basedOn` chain (`Query.getTableStyle`). */
+export interface ResolvedTableStyle {
+  /** The style chain (from most specific to base). */
+  readonly chain: readonly string[];
+  /** Merged paragraph properties of the chain. */
+  readonly paragraphProperties: ParagraphProperties;
+  /** Merged run properties of the chain. */
+  readonly runProperties: RunProperties;
+  /** Merged table properties of the chain, if any style sets them. */
+  readonly tableProperties?: TableProperties;
 }
 
 /**
@@ -956,9 +1110,14 @@ export function resolveTableStyle(
   const visited = new Set<string>();
   while (current && !visited.has(current)) {
     visited.add(current);
-    chain.push(current);
     const def = styleMap.get(current);
-    current = def?.basedOn;
+    // An id the document does not define is not part of the chain: a
+    // misspelt id resolves to the document defaults, with an empty chain.
+    if (!def) {
+      break;
+    }
+    chain.push(current);
+    current = def.basedOn;
   }
 
   let pProps: Record<string, unknown> = {};

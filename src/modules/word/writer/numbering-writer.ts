@@ -6,6 +6,8 @@
  */
 
 import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { within } from "@word/core/node-path";
+import { rebindRelationshipIds } from "@word/core/relationship-ids";
 import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   AbstractNumbering,
@@ -16,22 +18,23 @@ import type {
 import { EMU_PER_POINT } from "@word/units";
 import { renderParagraphProperties } from "@word/writer/paragraph-writer";
 import { renderRunProperties } from "@word/writer/run-writer";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /** Render a single numbering level. */
 function renderLevel(xml: XmlSink, level: NumberingLevel): void {
-  xml.openNode("w:lvl", { "w:ilvl": String(level.level) });
+  xml.openNode("w:lvl", { "w:ilvl": xmlValue(level.level, "w:ilvl") });
 
   // Per ECMA-376 CT_Lvl order:
   // start → numFmt → lvlRestart → pStyle → isLgl → suff → lvlText → lvlPicBulletId → legacy → lvlJc → pPr → rPr
   if (level.start !== undefined) {
-    xml.leafNode("w:start", { "w:val": String(level.start) });
+    xml.leafNode("w:start", { "w:val": xmlValue(level.start, "w:val") });
   }
 
   xml.leafNode("w:numFmt", { "w:val": level.format });
 
   if (level.restartAfterLevel !== undefined) {
-    xml.leafNode("w:lvlRestart", { "w:val": String(level.restartAfterLevel) });
+    xml.leafNode("w:lvlRestart", { "w:val": xmlValue(level.restartAfterLevel, "w:val") });
   }
 
   if (level.paragraphStyle) {
@@ -49,7 +52,7 @@ function renderLevel(xml: XmlSink, level: NumberingLevel): void {
   xml.leafNode("w:lvlText", { "w:val": level.text });
 
   if (level.picBulletId !== undefined) {
-    xml.leafNode("w:lvlPicBulletId", { "w:val": String(level.picBulletId) });
+    xml.leafNode("w:lvlPicBulletId", { "w:val": xmlValue(level.picBulletId, "w:val") });
   }
 
   if (level.justification) {
@@ -57,11 +60,13 @@ function renderLevel(xml: XmlSink, level: NumberingLevel): void {
   }
 
   if (level.paragraphProperties) {
-    renderParagraphProperties(xml, level.paragraphProperties);
+    const paragraph = level.paragraphProperties;
+    within("paragraphProperties", () => renderParagraphProperties(xml, paragraph));
   }
 
   if (level.runProperties) {
-    renderRunProperties(xml, level.runProperties);
+    const run = level.runProperties;
+    within("runProperties", () => renderRunProperties(xml, run));
   }
 
   xml.closeNode();
@@ -73,7 +78,8 @@ export function renderNumbering(
   abstractNums?: readonly AbstractNumbering[],
   instances?: readonly NumberingInstance[],
   numPicBullets?: readonly NumPicBullet[],
-  rawXmlPolicy?: "preserve" | "strip" | "reject"
+  rawXmlPolicy?: "preserve" | "strip" | "reject",
+  imageRemap?: ReadonlyMap<string, string>
 ): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:numbering", {
@@ -86,14 +92,14 @@ export function renderNumbering(
   // Picture bullets come first
   if (numPicBullets) {
     for (const pb of numPicBullets) {
-      xml.openNode("w:numPicBullet", { "w:numPicBulletId": String(pb.id) });
+      xml.openNode("w:numPicBullet", { "w:numPicBulletId": xmlValue(pb.id, "w:numPicBulletId") });
       if (pb.rawVmlXml) {
         if (rawXmlPolicy === "reject") {
           throw new DocxRawXmlPolicyError("numPicBullet.rawVmlXml");
         }
         if (rawXmlPolicy !== "strip") {
           // Use raw VML for full fidelity
-          xml.writeRaw(pb.rawVmlXml);
+          xml.writeRaw(rebindRelationshipIds(pb.rawVmlXml, imageRemap));
         }
       } else if (pb.rId) {
         // Default VML shape with image fill
@@ -112,7 +118,7 @@ export function renderNumbering(
           type: "#_x0000_t75",
           style: `width:${pb.width ? Math.round(pb.width / EMU_PER_POINT) : 12}pt;height:${pb.height ? Math.round(pb.height / EMU_PER_POINT) : 12}pt`
         });
-        xml.leafNode("v:imagedata", { "r:id": pb.rId, "o:title": "" });
+        xml.leafNode("v:imagedata", { "r:id": imageRemap?.get(pb.rId) ?? pb.rId, "o:title": "" });
         xml.closeNode();
         xml.closeNode();
       }
@@ -121,8 +127,10 @@ export function renderNumbering(
   }
 
   if (abstractNums) {
-    for (const abs of abstractNums) {
-      xml.openNode("w:abstractNum", { "w:abstractNumId": String(abs.abstractNumId) });
+    abstractNums.forEach((abs, a) => {
+      xml.openNode("w:abstractNum", {
+        "w:abstractNumId": xmlValue(abs.abstractNumId, "w:abstractNumId")
+      });
       if (abs.multiLevelType) {
         xml.leafNode("w:multiLevelType", { "w:val": abs.multiLevelType });
       }
@@ -132,31 +140,34 @@ export function renderNumbering(
       if (abs.styleLink) {
         xml.leafNode("w:styleLink", { "w:val": abs.styleLink });
       }
-      for (const level of abs.levels) {
-        renderLevel(xml, level);
-      }
+      abs.levels.forEach((level, l) =>
+        within(`abstractNumberings[${a}].levels[${l}]`, () => renderLevel(xml, level))
+      );
       xml.closeNode();
-    }
+    });
   }
 
   if (instances) {
-    for (const inst of instances) {
-      xml.openNode("w:num", { "w:numId": String(inst.numId) });
-      xml.leafNode("w:abstractNumId", { "w:val": String(inst.abstractNumId) });
+    instances.forEach((inst, n) => {
+      xml.openNode("w:num", { "w:numId": xmlValue(inst.numId, "w:numId") });
+      xml.leafNode("w:abstractNumId", { "w:val": xmlValue(inst.abstractNumId, "w:val") });
       if (inst.overrides) {
-        for (const ov of inst.overrides) {
-          xml.openNode("w:lvlOverride", { "w:ilvl": String(ov.level) });
+        inst.overrides.forEach((ov, o) => {
+          xml.openNode("w:lvlOverride", { "w:ilvl": xmlValue(ov.level, "w:ilvl") });
           if (ov.startOverride !== undefined) {
-            xml.leafNode("w:startOverride", { "w:val": String(ov.startOverride) });
+            xml.leafNode("w:startOverride", { "w:val": xmlValue(ov.startOverride, "w:val") });
           }
           if (ov.levelDef) {
-            renderLevel(xml, ov.levelDef);
+            const levelDef = ov.levelDef;
+            within(`numberingInstances[${n}].overrides[${o}].levelDef`, () =>
+              renderLevel(xml, levelDef)
+            );
           }
           xml.closeNode();
-        }
+        });
       }
       xml.closeNode();
-    }
+    });
   }
 
   xml.closeNode();

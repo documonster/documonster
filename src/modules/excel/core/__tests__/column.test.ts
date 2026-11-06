@@ -28,7 +28,8 @@ import {
   getColumn,
   rowSetValues
 } from "@excel/core/worksheet";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Column", () => {
@@ -50,7 +51,7 @@ describe("Column", () => {
     expect(cellGetValue(getCell(sheet, 1, 1))).toBe("Col 1");
     expect(getColumn(sheet, "id1")).toBe(getColumn(sheet, 1));
 
-    rowSetValues(Worksheet.getRow(sheet, 2), { id1: "Hello, World!" });
+    rowSetValues(getRow(sheet, 2), { id1: "Hello, World!" });
     expect(cellGetValue(getCell(sheet, 2, 1))).toBe("Hello, World!");
   });
 
@@ -76,7 +77,7 @@ describe("Column", () => {
     expect(cellGetValue(getCell(sheet, 1, 1))).toBe("Col A1");
     expect(cellGetValue(getCell(sheet, 2, 1))).toBe("Col A2");
 
-    rowSetValues(Worksheet.getRow(sheet, 3), { id1: "Hello, World!" });
+    rowSetValues(getRow(sheet, 3), { id1: "Hello, World!" });
     expect(cellGetValue(getCell(sheet, 3, 1))).toBe("Hello, World!");
   });
 
@@ -174,7 +175,10 @@ describe("Column", () => {
   // Width & Defaults
   // ===========================================================================
 
-  it("sets default column width when no explicit width given", () => {
+  // The third column pinned `width: 9` for a column never given one. Writing that default made the file claim a width
+  // nobody chose, and a column read without one came back with `width="9"` on the next write — so it stays absent. A
+  // definition is different: `setDefinitions` gives a column without a width the default, as it always has.
+  it("sets default column width from a definition, and none for a column only styled", () => {
     const sheet = testUtils.createSheetMock();
 
     columnSetDefn(getColumn(sheet, 1), { header: "Col 1", key: "id1", style: { numFmt: "0.00%" } });
@@ -188,9 +192,9 @@ describe("Column", () => {
 
     const model = columnToModel(sheet._columns);
     expect(model!.length).toBe(3);
-    expect(model![0].width).toBe(9); // default
+    expect(model![0].width).toBe(9); // default, from the definition
     expect(model![1].width).toBe(10); // explicit
-    expect(model![2].width).toBe(9); // default
+    expect(model![2].width).toBeUndefined(); // never given one
   });
 
   it("isCustomWidth is true when width differs from default", () => {
@@ -331,12 +335,12 @@ describe("Column", () => {
   it("column properties survive XLSX round-trip", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "test");
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "ID", key: "id", width: 10 },
       { header: "Name", key: "name", width: 32 },
       { header: "DOB", key: "dob", width: 15, outlineLevel: 1 }
     ]);
-    Worksheet.addRow(ws, { id: 1, name: "Alice", dob: new Date(1990, 0, 1) });
+    Row.add(ws, { id: 1, name: "Alice", dob: new Date(1990, 0, 1) });
 
     const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
@@ -384,19 +388,19 @@ describe("Column", () => {
   });
 
   // ===========================================================================
-  // Nested column-key paths (addRow / Row.values(row) with dotted keys)
+  // Nested column-key paths (addRow / Row.getValues(row, { base: 1 }) with dotted keys)
   // ===========================================================================
 
   describe("nested column key paths", () => {
     it("resolves dotted keys against nested objects", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "City", key: "address.city", width: 20 },
         { header: "Zip", key: "address.zip", width: 10 }
       ]);
-      Worksheet.addRow(ws, { name: "Alice", address: { city: "Sydney", zip: "2000" } });
+      Row.add(ws, { name: "Alice", address: { city: "Sydney", zip: "2000" } });
 
       expect(Cell.getValue(ws, "A2")).toBe("Alice");
       expect(Cell.getValue(ws, "B2")).toBe("Sydney");
@@ -406,8 +410,8 @@ describe("Column", () => {
     it("resolves deeply nested keys (three levels)", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [{ header: "Country", key: "address.geo.country", width: 20 }]);
-      Worksheet.addRow(ws, { address: { geo: { country: "AU" } } });
+      Column.setDefinitions(ws, [{ header: "Country", key: "address.geo.country", width: 20 }]);
+      Row.add(ws, { address: { geo: { country: "AU" } } });
 
       expect(Cell.getValue(ws, "A2")).toBe("AU");
     });
@@ -415,12 +419,12 @@ describe("Column", () => {
     it("skips the cell when a nested path segment is missing", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "City", key: "address.city", width: 20 }
       ]);
       // No `address` at all → the dotted column simply has no value.
-      Worksheet.addRow(ws, { name: "Bob" });
+      Row.add(ws, { name: "Bob" });
 
       expect(Cell.getValue(ws, "A2")).toBe("Bob");
       expect(Cell.getValue(ws, "B2")).toBeNull();
@@ -429,9 +433,9 @@ describe("Column", () => {
     it("skips the cell when an intermediate segment is not an object", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [{ header: "City", key: "address.city", width: 20 }]);
+      Column.setDefinitions(ws, [{ header: "City", key: "address.city", width: 20 }]);
       // `address` is a primitive, so `.city` cannot be followed.
-      Worksheet.addRow(ws, { address: "not-an-object" } as any);
+      Row.add(ws, { address: "not-an-object" } as any);
 
       expect(Cell.getValue(ws, "A2")).toBeNull();
     });
@@ -439,9 +443,9 @@ describe("Column", () => {
     it("prefers a literal flat key containing a dot over nested traversal", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [{ header: "Dotted", key: "a.b", width: 20 }]);
+      Column.setDefinitions(ws, [{ header: "Dotted", key: "a.b", width: 20 }]);
       // A flat property literally named "a.b" wins over walking a → b.
-      Worksheet.addRow(ws, { "a.b": "flat-wins", a: { b: "nested-loses" } } as any);
+      Row.add(ws, { "a.b": "flat-wins", a: { b: "nested-loses" } } as any);
 
       expect(Cell.getValue(ws, "A2")).toBe("flat-wins");
     });
@@ -449,11 +453,11 @@ describe("Column", () => {
     it("leaves plain (non-dotted) keys behaving exactly as before", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "ID", key: "id", width: 10 },
         { header: "Name", key: "name", width: 20 }
       ]);
-      Worksheet.addRow(ws, { id: 7, name: "Carol" });
+      Row.add(ws, { id: 7, name: "Carol" });
 
       expect(Cell.getValue(ws, "A2")).toBe(7);
       expect(Cell.getValue(ws, "B2")).toBe("Carol");
@@ -462,11 +466,11 @@ describe("Column", () => {
     it("round-trips nested-key values through XLSX", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "City", key: "address.city", width: 20 }
       ]);
-      Worksheet.addRow(ws, { name: "Dave", address: { city: "Perth" } });
+      Row.add(ws, { name: "Dave", address: { city: "Perth" } });
 
       const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();

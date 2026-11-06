@@ -285,8 +285,8 @@ describe("detectDelimiter", () => {
 
   describe("custom delimiters", () => {
     it("detects custom delimiter from provided list", () => {
-      expect(detectDelimiter("a:b:c\n1:2:3", '"', [":"])).toBe(":");
-      expect(detectDelimiter("a~b~c\n1~2~3", '"', ["~"])).toBe("~");
+      expect(detectDelimiter("a:b:c\n1:2:3", { delimitersToGuess: [":"] })).toBe(":");
+      expect(detectDelimiter("a~b~c\n1~2~3", { delimitersToGuess: ["~"] })).toBe("~");
     });
   });
 
@@ -312,12 +312,12 @@ describe("detectDelimiter", () => {
   describe("with options", () => {
     it("skips comment lines", () => {
       const csv = "#header\na,b,c\n1,2,3";
-      expect(detectDelimiter(csv, '"', undefined, "#")).toBe(",");
+      expect(detectDelimiter(csv, { comment: "#" })).toBe(",");
     });
 
-    it("handles skipEmptyLines", () => {
+    it("ignores empty lines", () => {
       const csv = "a,b,c\n\n\n1,2,3";
-      expect(detectDelimiter(csv, '"', undefined, undefined, true)).toBe(",");
+      expect(detectDelimiter(csv)).toBe(",");
     });
   });
 

@@ -5,7 +5,11 @@
  */
 
 import { isEastAsianTypeface } from "@utils/cjk-typefaces";
+import { unrecognizedEntry } from "@utils/unrecognized-values";
 import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "@word/constants";
+import { WRITTEN, writtenToken } from "@word/core/argument-checks";
+import { drawingInteger } from "@word/core/drawing-geometry";
+import { atNode, unwritableNode, within, writableList } from "@word/core/node-path";
 import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   RunProperties,
@@ -20,21 +24,26 @@ import type {
   UnderlineSpec,
   ColorSpec
 } from "@word/types";
+import { closeDrawingFrame, frameModel, openDrawingFrame } from "@word/writer/drawing-frame";
+import { renderRangeMarker } from "@word/writer/range-marker-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
+import { prepareRawMarkup, writtenRevisionId } from "@word/writer/render-context";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
+import { XmlWriter } from "@xml/writer";
 
 /** Render a single border element. */
 export function renderBorderElement(xml: XmlSink, tagName: string, border: Border): void {
   const attrs: Record<string, string> = { "w:val": border.style };
   if (border.size !== undefined) {
-    attrs["w:sz"] = String(border.size);
+    attrs["w:sz"] = xmlValue(border.size, "w:sz");
   }
   if (border.space !== undefined) {
     // `w:space` is ST_PointMeasure — a whole number of points. Callers work in
     // real points (a CSS length converted to pt is rarely integral), so round
     // here at the schema boundary rather than emitting `w:space="12.571…"`,
     // which strict consumers reject.
-    attrs["w:space"] = String(Math.max(0, Math.round(border.space)));
+    attrs["w:space"] = xmlValue(Math.max(0, Math.round(border.space)), "w:space");
   }
   if (border.color) {
     attrs["w:color"] = border.color;
@@ -125,8 +134,9 @@ export function renderRunPropertiesContents(
       if (f.cs) {
         attrs["w:cs"] = f.cs;
       }
-      if (f.hint) {
-        attrs["w:hint"] = f.hint;
+      const hint = writtenToken(f, "hint", WRITTEN.fontHint, "font.hint");
+      if (hint) {
+        attrs["w:hint"] = hint;
       }
       if (f.asciiTheme) {
         attrs["w:asciiTheme"] = f.asciiTheme;
@@ -230,40 +240,51 @@ export function renderRunPropertiesContents(
 
   // 12. spacing, w (scale), kern, position
   if (rPr.spacing !== undefined) {
-    xml.leafNode("w:spacing", { "w:val": String(rPr.spacing) });
+    xml.leafNode("w:spacing", { "w:val": xmlValue(rPr.spacing, "w:val") });
   }
   if (rPr.scale !== undefined) {
-    xml.leafNode("w:w", { "w:val": String(rPr.scale) });
+    xml.leafNode("w:w", { "w:val": xmlValue(rPr.scale, "w:val") });
   }
   if (rPr.kern !== undefined) {
-    xml.leafNode("w:kern", { "w:val": String(rPr.kern) });
+    xml.leafNode("w:kern", { "w:val": xmlValue(rPr.kern, "w:val") });
   }
   if (rPr.position !== undefined) {
-    xml.leafNode("w:position", { "w:val": String(rPr.position) });
+    xml.leafNode("w:position", { "w:val": xmlValue(rPr.position, "w:val") });
   }
 
   // 13. sz, szCs
   if (rPr.size !== undefined) {
-    xml.leafNode("w:sz", { "w:val": String(rPr.size) });
+    xml.leafNode("w:sz", { "w:val": xmlValue(rPr.size, "w:val") });
   }
   if (rPr.sizeCs !== undefined) {
-    xml.leafNode("w:szCs", { "w:val": String(rPr.sizeCs) });
+    xml.leafNode("w:szCs", { "w:val": xmlValue(rPr.sizeCs, "w:val") });
   }
 
   // 14. highlight
-  if (rPr.highlight) {
-    xml.leafNode("w:highlight", { "w:val": rPr.highlight });
+  const highlight = writtenToken(rPr, "highlight", WRITTEN.highlight, "highlight");
+  if (highlight !== undefined) {
+    xml.leafNode("w:highlight", { "w:val": highlight });
   }
 
   // 15. u (underline)
-  if (rPr.underline !== undefined) {
+  const keptUnderline = unrecognizedEntry(rPr, "underline");
+  if (keptUnderline !== undefined) {
+    xml.leafNode("w:u", {
+      "w:val": keptUnderline.value,
+      ...(keptUnderline.with?.color === undefined ? {} : { "w:color": keptUnderline.with.color })
+    });
+  } else if (rPr.underline !== undefined) {
     if (typeof rPr.underline === "boolean") {
       xml.leafNode("w:u", { "w:val": rPr.underline ? "single" : "none" });
     } else if (typeof rPr.underline === "string") {
-      xml.leafNode("w:u", { "w:val": rPr.underline });
+      xml.leafNode("w:u", {
+        "w:val": writtenToken(rPr, "underline", WRITTEN.underline, "underline")!
+      });
     } else {
       const spec = rPr.underline as UnderlineSpec;
-      const attrs: Record<string, string> = { "w:val": spec.style };
+      const attrs: Record<string, string> = {
+        "w:val": writtenToken(spec, "style", WRITTEN.underline, "underline.style")!
+      };
       if (spec.color) {
         attrs["w:color"] = spec.color;
       }
@@ -272,8 +293,9 @@ export function renderRunPropertiesContents(
   }
 
   // 16. effect (text animation)
-  if (rPr.effect) {
-    xml.leafNode("w:effect", { "w:val": rPr.effect });
+  const effect = writtenToken(rPr, "effect", WRITTEN.effect, "effect");
+  if (effect !== undefined) {
+    xml.leafNode("w:effect", { "w:val": effect });
   }
 
   // 17. bdr (character border)
@@ -283,21 +305,23 @@ export function renderRunPropertiesContents(
 
   // 18. shd
   if (rPr.shading) {
-    renderShading(xml, rPr.shading);
+    const shading = rPr.shading;
+    within("shading", () => renderShading(xml, shading));
   }
 
   // 19. fitText
   if (rPr.fitText) {
-    const attrs: Record<string, string> = { "w:val": String(rPr.fitText.val) };
+    const attrs: Record<string, string> = { "w:val": xmlValue(rPr.fitText.val, "w:val") };
     if (rPr.fitText.id !== undefined) {
-      attrs["w:id"] = String(rPr.fitText.id);
+      attrs["w:id"] = xmlValue(rPr.fitText.id, "w:id");
     }
     xml.leafNode("w:fitText", attrs);
   }
 
   // 20. vertAlign
-  if (rPr.vertAlign) {
-    xml.leafNode("w:vertAlign", { "w:val": rPr.vertAlign });
+  const vertAlign = writtenToken(rPr, "vertAlign", WRITTEN.vertAlign, "vertAlign");
+  if (vertAlign !== undefined) {
+    xml.leafNode("w:vertAlign", { "w:val": vertAlign });
   }
 
   // 21. rtl
@@ -311,8 +335,9 @@ export function renderRunPropertiesContents(
   }
 
   // 23. em (emphasis mark)
-  if (rPr.emphasisMark) {
-    xml.leafNode("w:em", { "w:val": rPr.emphasisMark });
+  const emphasisMark = writtenToken(rPr, "emphasisMark", WRITTEN.emphasisMark, "emphasisMark");
+  if (emphasisMark !== undefined) {
+    xml.leafNode("w:em", { "w:val": emphasisMark });
   }
 
   // 24. lang
@@ -335,13 +360,19 @@ export function renderRunPropertiesContents(
     const ea = rPr.eastAsianLayout;
     const attrs: Record<string, string> = {};
     if (ea.id != null) {
-      attrs["w:id"] = String(ea.id);
+      attrs["w:id"] = xmlValue(ea.id, "w:id");
     }
     if (ea.combine) {
       attrs["w:combine"] = "1";
     }
-    if (ea.combineBrackets) {
-      attrs["w:combineBrackets"] = ea.combineBrackets;
+    const combineBrackets = writtenToken(
+      ea,
+      "combineBrackets",
+      WRITTEN.combineBrackets,
+      "eastAsianLayout.combineBrackets"
+    );
+    if (combineBrackets !== undefined) {
+      attrs["w:combineBrackets"] = combineBrackets;
     }
     if (ea.vert) {
       attrs["w:vert"] = "1";
@@ -368,7 +399,7 @@ export function renderRunPropertiesContents(
   if (!insidePropertyChange && rPr.propertyChange) {
     const rev = rPr.propertyChange.revision;
     const attrs: Record<string, string> = {
-      "w:id": String(rev.id),
+      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
       "w:author": rev.author
     };
     if (rev.date) {
@@ -376,7 +407,8 @@ export function renderRunPropertiesContents(
     }
     xml.openNode("w:rPrChange", attrs);
     if (rPr.propertyChange.previousProperties) {
-      renderRunProperties(xml, rPr.propertyChange.previousProperties, true);
+      const previous = rPr.propertyChange.previousProperties;
+      within("propertyChange.previousProperties", () => renderRunProperties(xml, previous, true));
     } else {
       xml.openNode("w:rPr");
       xml.closeNode();
@@ -388,7 +420,7 @@ export function renderRunPropertiesContents(
 /** Render w:shd element. */
 export function renderShading(xml: XmlSink, shd: Shading): void {
   xml.leafNode("w:shd", {
-    "w:val": shd.pattern ?? "clear",
+    "w:val": writtenToken(shd, "pattern", WRITTEN.shading, "pattern") ?? "clear",
     "w:color": shd.color ?? "auto",
     "w:fill": shd.fill
   });
@@ -398,10 +430,10 @@ export function renderShading(xml: XmlSink, shd: Shading): void {
 function renderInlineImage(
   xml: XmlSink,
   img: InlineImageContent,
-  imageRemap?: ReadonlyMap<string, string>,
-  nextDocPrId?: () => number
+  helpers: RenderHelpers | undefined
 ): void {
-  const drawingId = nextDocPrId?.() ?? img.drawingId ?? 1;
+  const imageRemap = helpers?.imageRemap;
+  const drawingId = helpers?.nextDocPrId?.() ?? img.drawingId ?? 1;
   const name = img.name ?? "Picture";
 
   // Resolve the relationship id used in r:embed: prefer a packager-provided
@@ -412,24 +444,9 @@ function renderInlineImage(
   const svgEmbedRId = img.svgRId ? (imageRemap?.get(img.svgRId) ?? img.svgRId) : undefined;
 
   xml.openNode("w:drawing");
-  xml.openNode("wp:inline", {
-    distT: "0",
-    distB: "0",
-    distL: "0",
-    distR: "0"
-  });
-
-  xml.leafNode("wp:extent", { cx: String(img.width), cy: String(img.height) });
-  xml.leafNode("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" });
-  xml.leafNode("wp:docPr", {
-    id: String(drawingId),
-    name,
-    ...(img.altText ? { descr: img.altText } : {})
-  });
-
-  xml.openNode("wp:cNvGraphicFramePr");
-  xml.leafNode("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" });
-  xml.closeNode();
+  const frame = frameModel("inline", "picture", img, "Picture");
+  const then = img._frame ? frameModel("inline", "picture", img._frame.read, "Picture") : undefined;
+  openDrawingFrame(xml, frame, img._frame, then, drawingId, helpers);
 
   xml.openNode("a:graphic", { "xmlns:a": NS_A });
   xml.openNode("a:graphicData", { uri: URI_PIC });
@@ -438,7 +455,7 @@ function renderInlineImage(
 
   // nvPicPr
   xml.openNode("pic:nvPicPr");
-  xml.leafNode("pic:cNvPr", { id: String(drawingId), name });
+  xml.leafNode("pic:cNvPr", { id: xmlValue(drawingId, "id"), name });
   xml.leafNode("pic:cNvPicPr");
   xml.closeNode();
 
@@ -463,16 +480,16 @@ function renderInlineImage(
     const sr = img.srcRect;
     const srAttrs: Record<string, string> = {};
     if (sr.l !== undefined) {
-      srAttrs["l"] = String(sr.l);
+      srAttrs["l"] = drawingInteger(sr.l, "srcRect.l");
     }
     if (sr.t !== undefined) {
-      srAttrs["t"] = String(sr.t);
+      srAttrs["t"] = drawingInteger(sr.t, "srcRect.t");
     }
     if (sr.r !== undefined) {
-      srAttrs["r"] = String(sr.r);
+      srAttrs["r"] = drawingInteger(sr.r, "srcRect.r");
     }
     if (sr.b !== undefined) {
-      srAttrs["b"] = String(sr.b);
+      srAttrs["b"] = drawingInteger(sr.b, "srcRect.b");
     }
     xml.leafNode("a:srcRect", srAttrs);
   }
@@ -486,8 +503,8 @@ function renderInlineImage(
 
   // Transform with optional rotation/flip
   const xfrmAttrs: Record<string, string> = {};
-  if (img.rotation) {
-    xfrmAttrs["rot"] = String(img.rotation);
+  if (img.rotation !== undefined && img.rotation !== 0) {
+    xfrmAttrs["rot"] = drawingInteger(img.rotation, "rotation");
   }
   if (img.flipHorizontal) {
     xfrmAttrs["flipH"] = "1";
@@ -497,7 +514,10 @@ function renderInlineImage(
   }
   xml.openNode("a:xfrm", Object.keys(xfrmAttrs).length > 0 ? xfrmAttrs : undefined);
   xml.leafNode("a:off", { x: "0", y: "0" });
-  xml.leafNode("a:ext", { cx: String(img.width), cy: String(img.height) });
+  xml.leafNode("a:ext", {
+    cx: drawingInteger(img.width, "width"),
+    cy: drawingInteger(img.height, "height")
+  });
   xml.closeNode();
 
   xml.openNode("a:prstGeom", { prst: "rect" });
@@ -508,7 +528,7 @@ function renderInlineImage(
   if (img.outline) {
     const lnAttrs: Record<string, string> = {};
     if (img.outline.width !== undefined) {
-      lnAttrs["w"] = String(img.outline.width);
+      lnAttrs["w"] = drawingInteger(img.outline.width, "outline.width");
     }
     xml.openNode("a:ln", Object.keys(lnAttrs).length > 0 ? lnAttrs : undefined);
     if (img.outline.color) {
@@ -524,7 +544,7 @@ function renderInlineImage(
   xml.closeNode(); // pic:pic
   xml.closeNode(); // a:graphicData
   xml.closeNode(); // a:graphic
-  xml.closeNode(); // wp:inline
+  closeDrawingFrame(xml, frame, img._frame, helpers); // wp:inline
   xml.closeNode(); // w:drawing
 }
 
@@ -545,7 +565,7 @@ function renderFfData(xml: XmlSink, ff: FormField): void {
       xml.leafNode("w:default", { "w:val": ff.default });
     }
     if (ff.maxLength !== undefined) {
-      xml.leafNode("w:maxLength", { "w:val": String(ff.maxLength) });
+      xml.leafNode("w:maxLength", { "w:val": xmlValue(ff.maxLength, "w:val") });
     }
     if (ff.format) {
       xml.leafNode("w:format", { "w:val": ff.format });
@@ -560,7 +580,7 @@ function renderFfData(xml: XmlSink, ff: FormField): void {
   } else if (ff.type === "checkBox") {
     xml.openNode("w:checkBox");
     if (ff.size !== undefined) {
-      xml.leafNode("w:size", { "w:val": String(ff.size) });
+      xml.leafNode("w:size", { "w:val": xmlValue(ff.size, "w:val") });
     } else {
       xml.leafNode("w:sizeAuto");
     }
@@ -573,8 +593,12 @@ function renderFfData(xml: XmlSink, ff: FormField): void {
     xml.closeNode();
   } else if (ff.type === "dropDown") {
     xml.openNode("w:ddList");
+    // CT_FFDDList: result, default, listEntry* — in that order.
+    if (ff.result !== undefined) {
+      xml.leafNode("w:result", { "w:val": xmlValue(ff.result, "w:val") });
+    }
     if (ff.default !== undefined) {
-      xml.leafNode("w:default", { "w:val": String(ff.default) });
+      xml.leafNode("w:default", { "w:val": xmlValue(ff.default, "w:val") });
     }
     if (ff.entries) {
       for (const entry of ff.entries) {
@@ -625,13 +649,92 @@ function writeTextWithBreaks(xml: XmlSink, value: string): void {
 }
 
 /** Render a field code (PAGE, NUMPAGES, etc.). Inherits run properties from the containing run. */
-function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): void {
+export function renderField(
+  xml: XmlSink,
+  field: FieldContent,
+  rPr?: RunProperties,
+  helpers?: RenderHelpers,
+  deleted = false
+): void {
+  // Inside a deletion, instruction and result text are deleted text.
+  const instrText = deleted ? "w:delInstrText" : "w:instrText";
   // Helper to emit inherited rPr in each field sub-run
   const emitRPr = (): void => {
     if (rPr) {
       renderRunProperties(xml, rPr);
     }
   };
+  // A whole field's instruction is written as the reader keeps it — trimmed
+  // (see `FieldContent.instruction`) — so what is written reads back the same
+  // and writes the same again. Markers inside it move with the text.
+  const lead = field.fieldChar
+    ? 0
+    : field.instruction.length - field.instruction.trimStart().length;
+  const instruction = field.fieldChar ? field.instruction : field.instruction.trim();
+  // Write `text` as runs made by `writePiece`, with the range markers of
+  // `part` between them at their offsets.
+  const markers = (field.rangeMarkers ?? []).map(entry =>
+    entry.part === "instruction" && lead > 0
+      ? { ...entry, offset: Math.min(Math.max(entry.offset - lead, 0), instruction.length) }
+      : entry
+  );
+  const writePart = (
+    part: "instruction" | "result",
+    text: string,
+    writePiece: (piece: string) => void
+  ): void => {
+    let at = 0;
+    for (const entry of markers) {
+      if (entry.part !== part) {
+        continue;
+      }
+      const offset = Math.min(Math.max(entry.offset, at), text.length);
+      if (offset > at) {
+        writePiece(text.slice(at, offset));
+        at = offset;
+      }
+      renderRangeMarker(xml, entry.marker, helpers);
+    }
+    // An instruction is always written; a result when there is one, even empty.
+    if (
+      at < text.length ||
+      (at === 0 && (part === "instruction" || field.cachedValue !== undefined))
+    ) {
+      writePiece(text.slice(at));
+    }
+  };
+
+  // A field character on its own: the field's other characters and its
+  // result are elsewhere in the content (see `FieldContent.fieldChar`).
+  if (field.fieldChar) {
+    const writeInstruction = (): void => {
+      if (field.instruction) {
+        xml.openNode("w:r");
+        emitRPr();
+        xml.openNode(instrText, { "xml:space": "preserve" });
+        xml.writeText(field.instruction);
+        xml.closeNode();
+        xml.closeNode();
+      }
+    };
+    if (field.fieldChar !== "begin") {
+      writeInstruction();
+    }
+    xml.openNode("w:r");
+    emitRPr();
+    if (field.fieldChar === "begin" && field.formField) {
+      xml.openNode("w:fldChar", { "w:fldCharType": "begin" });
+      renderFfData(xml, field.formField);
+      xml.closeNode();
+    } else {
+      xml.leafNode("w:fldChar", { "w:fldCharType": field.fieldChar });
+    }
+    xml.closeNode();
+    if (field.fieldChar === "begin") {
+      writeInstruction();
+    }
+    return;
+  }
 
   // Begin
   xml.openNode("w:r");
@@ -646,12 +749,14 @@ function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): vo
   xml.closeNode();
 
   // Instruction
-  xml.openNode("w:r");
-  emitRPr();
-  xml.openNode("w:instrText", { "xml:space": "preserve" });
-  xml.writeText(field.instruction);
-  xml.closeNode();
-  xml.closeNode();
+  writePart("instruction", instruction, piece => {
+    xml.openNode("w:r");
+    emitRPr();
+    xml.openNode(instrText, { "xml:space": "preserve" });
+    xml.writeText(piece);
+    xml.closeNode();
+    xml.closeNode();
+  });
 
   // Separate
   xml.openNode("w:r");
@@ -660,12 +765,18 @@ function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): vo
   xml.closeNode();
 
   // Cached value
-  if (field.cachedValue !== undefined) {
+  writePart("result", field.cachedValue ?? "", piece => {
     xml.openNode("w:r");
     emitRPr();
-    writeTextWithBreaks(xml, field.cachedValue);
+    if (deleted) {
+      xml.openNode("w:delText", { "xml:space": "preserve" });
+      xml.writeText(piece);
+      xml.closeNode();
+    } else {
+      writeTextWithBreaks(xml, piece);
+    }
     xml.closeNode();
-  }
+  });
 
   // End
   xml.openNode("w:r");
@@ -678,6 +789,12 @@ function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): vo
 function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHelpers): boolean {
   switch (content.type) {
     case "text":
+      if (content.fieldCode) {
+        xml.openNode("w:instrText", { "xml:space": "preserve" });
+        xml.writeText(content.text);
+        xml.closeNode();
+        return true;
+      }
       // OOXML's <w:t> is a string with no embedded line breaks (the schema
       // forbids U+000A / U+000D inside its text node). Authors writing
       // multi-line cell labels conventionally pass `\n` in the source string;
@@ -720,13 +837,13 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
           xml.leafNode("w:rubyAlign", { "w:val": p.align });
         }
         if (p.fontSize !== undefined) {
-          xml.leafNode("w:hps", { "w:val": String(p.fontSize) });
+          xml.leafNode("w:hps", { "w:val": xmlValue(p.fontSize, "w:val") });
         }
         if (p.raise !== undefined) {
-          xml.leafNode("w:hpsRaise", { "w:val": String(p.raise) });
+          xml.leafNode("w:hpsRaise", { "w:val": xmlValue(p.raise, "w:val") });
         }
         if (p.baseFontSize !== undefined) {
-          xml.leafNode("w:hpsBaseText", { "w:val": String(p.baseFontSize) });
+          xml.leafNode("w:hpsBaseText", { "w:val": xmlValue(p.baseFontSize, "w:val") });
         }
         if (p.language) {
           xml.leafNode("w:lid", { "w:val": p.language });
@@ -754,7 +871,7 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
       return true;
 
     case "footnoteRef": {
-      const attrs: Record<string, string> = { "w:id": String(content.id) };
+      const attrs: Record<string, string> = { "w:id": xmlValue(content.id, "w:id") };
       if (content.customMarkFollows) {
         attrs["w:customMarkFollows"] = "1";
       }
@@ -763,7 +880,7 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
     }
 
     case "endnoteRef": {
-      const attrs: Record<string, string> = { "w:id": String(content.id) };
+      const attrs: Record<string, string> = { "w:id": xmlValue(content.id, "w:id") };
       if (content.customMarkFollows) {
         attrs["w:customMarkFollows"] = "1";
       }
@@ -784,7 +901,7 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
         }
         return true;
       }
-      renderInlineImage(xml, content, helpers?.imageRemap, helpers?.nextDocPrId);
+      renderInlineImage(xml, content, helpers);
       return true;
 
     case "field":
@@ -823,13 +940,13 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
       }
       if (policy !== "strip") {
         // "preserve" (default) — write verbatim.
-        xml.writeRaw(content.rawXml);
+        xml.writeRaw(prepareRawMarkup(content.rawXml, helpers));
       }
       return true;
     }
 
     default:
-      return true;
+      unwritableNode("type", "a run content kind", (content as { type?: unknown }).type);
   }
 }
 
@@ -838,9 +955,18 @@ export function renderRun(xml: XmlSink, run: Run, helpers?: RenderHelpers): void
   // Separate field content that needs its own runs
   const normalContent: RunContent[] = [];
   const fieldContent: (FieldContent | RunContent)[] = [];
+  const content = writableList(run.content, "content");
+  // Where each piece came from, to name it if it cannot be written.
+  const normalAt: number[] = [];
+  const fieldAt: number[] = [];
 
-  for (const c of run.content) {
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i]!;
+    if (typeof c !== "object" || c === null) {
+      unwritableNode(`content[${i}]`, "a run content node", c);
+    }
     if (c.type === "field") {
+      fieldAt.push(i);
       fieldContent.push(c);
     } else if (c.type === "dateField") {
       // Convert date field to field instruction.
@@ -852,8 +978,10 @@ export function renderRun(xml: XmlSink, run: Run, helpers?: RenderHelpers): void
         instruction: ` DATE \\@ "${fmt}" \\l ${lang} `,
         cachedValue: c.cachedValue ?? ""
       });
+      fieldAt.push(i);
     } else {
       normalContent.push(c);
+      normalAt.push(i);
     }
   }
 
@@ -861,18 +989,36 @@ export function renderRun(xml: XmlSink, run: Run, helpers?: RenderHelpers): void
   if (normalContent.length > 0) {
     xml.openNode("w:r");
     if (run.properties) {
-      renderRunProperties(xml, run.properties);
+      const properties = run.properties;
+      within("properties", () => renderRunProperties(xml, properties));
     }
-    for (const content of normalContent) {
-      renderRunContent(xml, content, helpers);
+    for (let k = 0; k < normalContent.length; k++) {
+      try {
+        renderRunContent(xml, normalContent[k]!, helpers);
+      } catch (error) {
+        throw atNode(`content[${normalAt[k]}]`, error);
+      }
     }
     xml.closeNode();
   }
 
+  // A field writes this run's properties into each run of its own; a run that
+  // is only fields has its properties checked here, so a bad one is named at
+  // `properties` rather than inside the field.
+  if (normalContent.length === 0 && fieldContent.length > 0 && run.properties) {
+    const properties = run.properties;
+    within("properties", () => renderRunProperties(new XmlWriter(), properties));
+  }
+
   // Render field content (each field creates multiple runs, inheriting this run's properties)
-  for (const fc of fieldContent) {
+  for (let k = 0; k < fieldContent.length; k++) {
+    const fc = fieldContent[k]!;
     if (fc.type === "field") {
-      renderField(xml, fc as FieldContent, run.properties);
+      try {
+        renderField(xml, fc as FieldContent, run.properties, helpers);
+      } catch (error) {
+        throw atNode(`content[${fieldAt[k]}]`, error);
+      }
     }
   }
 }

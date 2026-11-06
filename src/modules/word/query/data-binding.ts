@@ -5,6 +5,19 @@
  * against CustomXML parts and populating the SDT content with values.
  */
 
+import {
+  checkHandle,
+  checkNamedValues,
+  checkString,
+  namedValueField
+} from "@word/core/argument-checks";
+import { markDerived } from "@word/core/ownership";
+import {
+  arrangeParagraphChildren,
+  collectRangeMarkers,
+  keepClonedRangeMarkers,
+  repeatedRanges
+} from "@word/core/range-markers";
 import type {
   DocxDocument,
   BodyContent,
@@ -30,20 +43,29 @@ import type { XmlElement, XmlNode } from "@xml/types";
  * - Repeating sections: SDT with `repeatingSection` is duplicated per data row
  * - Conditional display: SDT is removed if XPath returns empty/false
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
  * @param doc - The document to process (returns a new modified copy).
- * @param data - Optional override data map (storeItemId → XML string). If not
- *              provided, uses the document's embedded CustomXML parts.
+ * @param data - Optional override data (storeItemId → XML string), as a `Map` or a
+ *              plain object. If not provided, uses the document's embedded CustomXML parts.
  * @returns A new document with bindings resolved.
  */
 export function resolveDataBindings(
   doc: DocxDocument,
-  data?: ReadonlyMap<string, string>
+  data?: ReadonlyMap<string, string> | Readonly<Record<string, string>>
 ): DocxDocument {
+  const where = "Transform.resolveDataBindings";
+  checkHandle(doc, "document", "doc", where);
+  const entries = data === undefined ? undefined : checkNamedValues(data, "data", where);
+  for (const [key, value] of entries ?? []) {
+    checkString(value, namedValueField("data", key), where);
+  }
   // Build a map of storeItemId → parsed XML content
   const xmlStore = new Map<string, string>();
-  if (data) {
-    for (const [key, value] of data) {
-      xmlStore.set(key.toLowerCase(), value);
+  if (entries) {
+    for (const [key, value] of entries) {
+      xmlStore.set(key.toLowerCase(), value as string);
     }
   } else if (doc.customXmlParts) {
     for (const part of doc.customXmlParts) {
@@ -56,7 +78,7 @@ export function resolveDataBindings(
   }
 
   const newBody = doc.body.map(block => resolveBlockBinding(block, xmlStore));
-  return { ...doc, body: newBody };
+  return markDerived({ ...doc, body: newBody }, doc);
 }
 
 // =============================================================================
@@ -109,7 +131,7 @@ function resolveSdtBinding(sdt: StructuredDocumentTag, xmlStore: Map<string, str
     const values = evaluateRepeatingXPath(binding, xmlStore);
     if (values.length === 0) {
       // Remove the SDT entirely if no data
-      return { type: "paragraph", children: [] };
+      return removedSdtParagraph(sdt);
     }
     // Return the SDT with repeated content, with inner bindings resolved per item
     const repeatedContent: (Paragraph | Run | Table)[] = [];
@@ -120,10 +142,18 @@ function resolveSdtBinding(sdt: StructuredDocumentTag, xmlStore: Map<string, str
     const storeId = binding.storeItemId.replace(/[{}]/g, "").toLowerCase();
     const xmlContent = xmlStore.get(storeId) ?? xmlStore.get(`{${storeId}}`);
 
+    const ranges = repeatedRanges(template);
     for (let itemIdx = 0; itemIdx < values.length; itemIdx++) {
       // Clone template content for each item
-      for (const item of template) {
-        const cloned = structuredClone(item) as Paragraph | Run | Table;
+      // One item's copy of the template holds each range once across copies.
+      const copy = keepClonedRangeMarkers(
+        structuredClone(template),
+        itemIdx,
+        values.length,
+        ranges
+      );
+      for (const item of copy) {
+        const cloned = item as Paragraph | Run | Table;
         // Resolve inner SDT bindings within this repeated item
         if (xmlContent) {
           resolveInnerBindings(cloned, parentXpath, itemIdx + 1, xmlStore);
@@ -136,15 +166,32 @@ function resolveSdtBinding(sdt: StructuredDocumentTag, xmlStore: Map<string, str
 
   if (value === null) {
     // Condition not met — remove SDT (return empty paragraph)
-    return { type: "paragraph", children: [] };
+    return removedSdtParagraph(sdt);
   }
 
   // Simple binding — replace text content of the SDT
-  const textRun: Run = {
-    content: [{ type: "text", text: value }]
-  };
-  const textPara: Paragraph = { type: "paragraph", children: [textRun] };
-  return { ...sdt, content: [textPara] };
+  const { contentRangeMarkersAfter: _after, ...rest } = sdt;
+  return { ...rest, content: [boundTextParagraph(sdt, value)] };
+}
+
+/**
+ * The paragraph that replaces an SDT's content with `value`, keeping the
+ * range markers of the old content in order around the text so every range
+ * it opened or closed stays paired.
+ */
+function boundTextParagraph(
+  sdt: Pick<StructuredDocumentTag, "content" | "contentRangeMarkersAfter">,
+  value: string
+): Paragraph {
+  const { leading, trailing } = collectRangeMarkers(sdt.content, sdt.contentRangeMarkersAfter);
+  const textRun: Run = { content: [{ type: "text", text: value }] };
+  return { type: "paragraph", ...arrangeParagraphChildren([...leading, textRun, ...trailing]) };
+}
+
+/** The empty paragraph that stands for a removed SDT, holding the range markers it held. */
+function removedSdtParagraph(sdt: StructuredDocumentTag): Paragraph {
+  const { leading, trailing } = collectRangeMarkers([sdt]);
+  return { type: "paragraph", ...arrangeParagraphChildren([...leading, ...trailing]) };
 }
 
 /**
@@ -415,9 +462,8 @@ function resolveInnerBindings(
 
     const value = evaluateSimpleXPath(modifiedBinding, xmlStore);
     if (value !== null) {
-      const textRun: Run = { content: [{ type: "text", text: value }] };
-      const textPara: Paragraph = { type: "paragraph", children: [textRun] };
-      obj.content = [textPara];
+      obj.content = [boundTextParagraph(obj as unknown as StructuredDocumentTag, value)];
+      delete obj.contentRangeMarkersAfter;
     }
     return;
   }

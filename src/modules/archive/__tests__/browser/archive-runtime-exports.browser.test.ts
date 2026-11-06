@@ -2,6 +2,7 @@ import * as archive from "@archive";
 import {
   ARCHIVE_BROWSER_EXPORTS,
   ARCHIVE_NAMESPACE_EXPORTS,
+  COMPRESSION_NAMESPACE_EXPORTS,
   getRuntimeExportKeys
 } from "@archive/__tests__/runtime/archive-runtime-exports";
 import { describe, expect, it } from "vitest";
@@ -19,8 +20,14 @@ describe("archive/index runtime exports (browser)", () => {
     expect(actual).toEqual(expected);
   });
 
+  it("should expose the expected `Compression` namespace members", () => {
+    expect(getRuntimeExportKeys(archive.Compression)).toEqual(
+      [...COMPRESSION_NAMESPACE_EXPORTS].sort()
+    );
+  });
+
   it("encodes RGBA pixels with the browser compression backend", () => {
-    const png = archive.encodePng(new Uint8Array([255, 0, 0, 255]), 1, 1, { dpi: 96 });
+    const png = archive.Archive.encodePng(new Uint8Array([255, 0, 0, 255]), 1, 1, { dpi: 96 });
     expect(Array.from(png.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
     const chunks: string[] = [];
     for (let offset = 8; offset < png.length;) {

@@ -33,6 +33,7 @@ import type {
   ShapeProperties3D,
   ShapeTransform
 } from "@excel/chart/model/types";
+import { CHART_EX_ROOT_NAMESPACES } from "@excel/chart/serialize/chart-ex-namespaces";
 import {
   needsXmlSpacePreserve,
   tickMarkToOoxml,
@@ -42,8 +43,11 @@ import {
   fmtNumText,
   themeIndexToName
 } from "@excel/chart/shared/chart-utils";
+import { chartColorTransformList, colorTransformsXml } from "@excel/chart/shared/color-transforms";
 import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
-import { ChartOptionsError } from "@excel/errors";
+import { ExcelChartOptionsError } from "@excel/errors";
+
+const REDUNDANT_ROOT_DECLARATION = /\sxmlns:([A-Za-z_][\w.-]*)="([^"]*)"/g;
 
 /**
  * Rewrite a freshly-built ChartEx model's data references to use
@@ -163,10 +167,10 @@ export function rewriteChartExDataRefsToDefinedNames(
  * the fastest and safest mode for the common "load → save" pipeline.
  *
  * Pass `{ forceStructural: true }` when the caller has mutated
- * structured fields on the model (e.g. via `setSpPrFill` /
- * `setSpPrLine` / direct assignment) and needs the writer to
+ * structured fields on the model (e.g. via `withSpPrFill` /
+ * `withSpPrLine` / direct assignment) and needs the writer to
  * rebuild from the model tree instead of reusing the stale raw bytes.
- * The `Chart.mutateChartEx` API already clears `model.rawXml` for
+ * The `Chart.mutateEx` API already clears `model.rawXml` for
  * normal mutations; `forceStructural` is the escape hatch for callers
  * that bypass that helper (e.g. low-level tests, ad-hoc scripts).
  */
@@ -192,9 +196,9 @@ export function renderChartEx(
   parts.push(
     [
       "<cx:chartSpace",
-      '  xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"',
-      '  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',
-      '  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+      `  xmlns:cx="${CHART_EX_ROOT_NAMESPACES.cx}"`,
+      `  xmlns:r="${CHART_EX_ROOT_NAMESPACES.r}"`,
+      `  xmlns:a="${CHART_EX_ROOT_NAMESPACES.a}">`
     ].join("\n")
   );
   const space = model.chartSpace;
@@ -1492,7 +1496,7 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
   // Emit the captured raw bytes only when the shape is PURELY a raw
   // capture — `_rawXml` is present AND no structured field has been
   // re-assigned. `isRawXmlShape` performs that check, matching the
-  // semantics of `setSpPrFill`/`setSpPrLine` which drop `_rawXml` on
+  // semantics of `withSpPrFill`/`withSpPrLine` which drop `_rawXml` on
   // structured mutation. Previously this test was `if (spPr._rawXml)`,
   // so `mutate(model => { model.…spPr.fill = {...} })` silently
   // produced output that still emitted the old raw XML and discarded
@@ -2044,7 +2048,9 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
     if (selfCloseMatch) {
       const rawAttrs = selfCloseMatch[2] ?? "";
       const attrs = rawAttrs
-        .replace(/\sxmlns(?::[A-Za-z_][\w.-]*)?="[^"]*"/g, "")
+        .replace(REDUNDANT_ROOT_DECLARATION, (declaration, prefix: string, uri: string) =>
+          CHART_EX_ROOT_NAMESPACES[prefix] === uri ? "" : declaration
+        )
         .replace(/\s+$/, "");
       return `${indent}<${wrapperName}${attrs}/>`;
     }
@@ -2070,15 +2076,18 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
       // broke snapshot tests; text content outside a single element
       // is out-of-spec for `_rawXml` anyway.
       //
-      // Also strip any `xmlns:…` declarations from the captured
-      // attribute list. These were legitimate on the source element
-      // (e.g. `<c:txPr xmlns:a="…">`) but may be redundant or invalid
-      // on the rewritten parent, and duplicate xmlns emission upsets
-      // strict validators. Non-namespace attributes (like
+      // Also strip the `xmlns:…` declarations the captured attribute list
+      // repeats from this writer's root (`<c:txPr xmlns:a="…">`). Any
+      // other declaration stays: a captured fragment declares on its root
+      // the prefixes it uses that its writer does not — see
+      // `fragment-namespaces.ts` — and dropping one leaves a prefix
+      // nothing declares. Non-namespace attributes (like
       // `xml:space="preserve"`) pass through.
       const rawAttrs = openMatch[2] ?? "";
       const attrs = rawAttrs
-        .replace(/\sxmlns(?::[A-Za-z_][\w.-]*)?="[^"]*"/g, "")
+        .replace(REDUNDANT_ROOT_DECLARATION, (declaration, prefix: string, uri: string) =>
+          CHART_EX_ROOT_NAMESPACES[prefix] === uri ? "" : declaration
+        )
         .replace(/\s+$/, "");
       return `${indent}<${wrapperName}${attrs}>${inner}</${wrapperName}>`;
     }
@@ -2171,8 +2180,9 @@ function renderColor(c: ChartColor): string {
   // exactly one colour child, and the caller is always in a position
   // to provide one — fail so the mistake surfaces in tests rather than
   // shipping silently-wrong colour data into the user's XLSX.
-  throw new ChartOptionsError(
-    `renderColor: ChartColor requires exactly one of srgb / theme / schemeName / sysClr / prstClr; got ${JSON.stringify(c)}.`
+  throw new ExcelChartOptionsError(
+    "model",
+    `ChartColor requires exactly one of srgb / theme / schemeName / sysClr / prstClr; got ${JSON.stringify(c)}.`
   );
 }
 
@@ -2186,6 +2196,11 @@ function renderColorModifiers(c: ChartColor): string {
   // scaled from the 0..1 fraction convention documented on
   // `ChartColor.tint`; the other modifiers are already stored as
   // OOXML integers so they pass through with just a rounding guard.
+  // The ordered list, when the colour carries one (`ChartColor.transforms`).
+  const list = chartColorTransformList(c);
+  if (list !== undefined) {
+    return colorTransformsXml(list);
+  }
   const parts: string[] = [];
   const emitInt = (tag: string, value: number | undefined): void => {
     if (value === undefined || !Number.isFinite(value)) {

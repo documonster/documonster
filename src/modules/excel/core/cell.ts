@@ -1,7 +1,7 @@
 import type { ColumnData } from "@excel/core/column";
 import { dataValidationAdd, dataValidationFind } from "@excel/core/data-validations";
 import {
-  definedNamesAddEx,
+  definedNamesAddCell,
   definedNamesGetNamesEx,
   definedNamesRemoveAllNames,
   definedNamesRemoveEx
@@ -22,7 +22,7 @@ import {
 import type { TemporalKind, TemporalPlainValue } from "@excel/core/temporal";
 import type { Workbook } from "@excel/core/workbook";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ExcelError, InvalidValueTypeError } from "@excel/errors";
+import { ExcelArgumentError, ExcelError, ExcelInvalidValueTypeError } from "@excel/errors";
 import type {
   Style,
   DecodedAddress,
@@ -46,8 +46,10 @@ import type {
 import type { DateFormatKind } from "@excel/utils/cell-format";
 import { dateFormatKind, getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache } from "@excel/utils/col-cache";
+import { copyPlain } from "@excel/utils/copy-plain";
 import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
 import { slideFormula } from "@excel/utils/shared-formula";
+import { isStoredOrdinaryFormula, markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import type { ExcelDateTimeParts } from "@utils/excel-serial";
 import {
   isExcelPhantomDay,
@@ -124,7 +126,7 @@ export interface CellModel {
 // Internal interface for Value type objects (value-boxing representation).
 interface ICellValue {
   model: CellModel;
-  value: CellValueType;
+  value: CellValue;
   type: ValueType;
   effectiveType: ValueType;
   address: string;
@@ -140,7 +142,9 @@ interface ICellValue {
   isMergedTo?(master: CellData): boolean;
 }
 
+/** @deprecated Use `CellValue`. Removed in 1.0. */
 export type CellValueType = CellValue;
+/** @deprecated Use `CellValueInput`. Removed in 1.0. */
 export type CellValueInputType = CellValueInput;
 
 /**
@@ -202,6 +206,7 @@ export interface CellData {
   row: RowData;
   column: ColumnData;
   address: string;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _value: ICellValue;
   /**
    * The cell's effective style.
@@ -224,9 +229,14 @@ export interface CellData {
    * out then has to give the cell its own copy first; see {@link cellOwnStyle}.
    */
   _sharedStyle?: boolean;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _mergeCount: number;
+  /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _comment?: NoteData;
-  /** Internal ownership marker for a formula spill ghost. */
+  /**
+   * Internal ownership marker for a formula spill ghost.
+   * @deprecated Internal state, not part of the API. Removed from the published type in 1.0.
+   */
   _formulaGhostOwner?: string;
 }
 
@@ -334,7 +344,7 @@ export function cellNumFmt(c: CellData): string | NumFmt | undefined {
   return c.style.numFmt;
 }
 
-export function cellSetNumFmt(c: CellData, value: string | undefined): void {
+export function cellSetNumFmt(c: CellData, value: string | NumFmt | undefined): void {
   ownStyleContainer(c).numFmt = value;
 }
 
@@ -536,8 +546,23 @@ export function cellToCsvString(c: CellData): string {
   return c._value.toCsvString();
 }
 
-export function cellGetValue(c: CellData): CellValueType {
+export function cellGetValue(c: CellData): CellValue {
   return c._value.value;
+}
+
+/**
+ * The cell's value as a public reader hands it out — the caller's own copy. {@link cellGetValue} is the stored value
+ * itself, for the library's own reads; handing that out let an edit to a returned rich-text run, `Date` or error
+ * object change the cell with none of `Cell.setValue`'s checks, while a hyperlink, formula or checkbox value was
+ * already a fresh object — so whether an edit reached the cell depended on the kind of value.
+ */
+export function cellReadValue(c: CellData): CellValue {
+  return ownValue(c._value.value);
+}
+
+/** `value`, or a copy of it when it is an object. */
+export function ownValue<T>(value: T): T {
+  return typeof value === "object" && value !== null ? copyPlain(value) : value;
 }
 
 /**
@@ -603,18 +628,12 @@ export function cellDate1904(cell: CellData): boolean {
   return workbook?.properties?.date1904 === true;
 }
 
-export function cellSetValue(c: CellData, v: CellValueInputType): void {
+export function cellSetValue(c: CellData, v: CellValueInput): void {
   if (cellType(c) === Types.Merge) {
     cellSetValue(c._value.master!, v);
     return;
   }
-  // Refused here rather than in `Value.getType`, which must be able to classify anything without throwing —
-  // `Cell.getType` calls it. An `Instant` reaching the model would be stored as `[object Object]`; naming it and
-  // the one call that fixes it is worth more than either guessing a timezone or failing later and elsewhere.
-  const refusal = temporalRefusal(v);
-  if (refusal !== undefined) {
-    throw new InvalidValueTypeError(String((v as object)[Symbol.toStringTag]), refusal);
-  }
+  checkCellValue(v);
   c._formulaGhostOwner = undefined;
   c._value.release();
   c._value = Value.create(Value.getType(v), c, v);
@@ -623,6 +642,305 @@ export function cellSetValue(c: CellData, v: CellValueInputType): void {
     // Only when the cell has none of its own: an explicit format the caller set is theirs, and a value assignment
     // is not the place to overrule it.
     ownStyleContainer(c).numFmt = defaultNumFmtFor(kind);
+  }
+}
+
+/**
+ * Where a cell value was given — the public call and the argument path — so its refusal names them: `where` starts the
+ * message (`Row.add`) and `field` is the path from the parameter name (`values[2]`), extended into a malformed shape
+ * (`values[2].richText[0].text`).
+ */
+export interface CellValueSite {
+  where: string;
+  field: string;
+}
+
+/** The refused value's `field`: the site's argument (or `value`) followed by the path into the value. */
+function siteField(at: CellValueSite | undefined, path: string): string {
+  const base = at?.field ?? "value";
+  return path === "" ? base : path.startsWith("[") ? `${base}${path}` : `${base}.${path}`;
+}
+
+function refuseValue(
+  at: CellValueSite | undefined,
+  valueType: string,
+  path: string,
+  message: string
+): never {
+  const field = siteField(at, path);
+  throw new ExcelInvalidValueTypeError(
+    valueType,
+    at ? `${at.where}: ${field}: ${message}` : message,
+    {
+      field
+    }
+  );
+}
+
+/**
+ * Refuse a value no cell can hold, at the call that supplied it. With `at`, the error names the call and the
+ * argument; every refusal is an {@link ExcelInvalidValueTypeError}, which is an `ExcelArgumentError`.
+ *
+ * A number that is not finite has no representation in a workbook — Excel has no `NaN` or `Infinity` — and was
+ * accepted, kept in memory, and written as an empty cell, so the value disappeared without a word. The same holds for
+ * a formula's cached result. Functions, symbols and bigints fell through to the JSON value type, where
+ * `JSON.stringify` either returns nothing to write or throws an untyped `TypeError` from inside the library.
+ */
+export function checkCellValue(v: unknown, at?: CellValueSite): void {
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) {
+      refuseValue(
+        at,
+        "number",
+        "",
+        `A cell cannot hold ${v}: a workbook has no representation for it. ` +
+          `Write an error value such as { error: "#NUM!" } instead.`
+      );
+    }
+    return;
+  }
+  if (typeof v === "function" || typeof v === "symbol" || typeof v === "bigint") {
+    refuseValue(
+      at,
+      typeof v,
+      "",
+      `A cell cannot hold a ${typeof v}` +
+        (typeof v === "bigint" ? "; convert it to a number or a string first." : ".")
+    );
+  }
+  if (isInvalidDate(v)) {
+    // Written as a serial of `NaN`, which the writer refuses — far from the call that put it here.
+    refuseValue(at, "date", "", "A cell cannot hold an invalid Date.");
+  }
+  // An `Instant` reaching the model would be stored as `[object Object]`; naming it and the one call that fixes it is
+  // worth more than either guessing a timezone or failing later and elsewhere.
+  const refusal = temporalRefusal(v);
+  if (refusal !== undefined) {
+    refuseValue(at, String((v as object)[Symbol.toStringTag]), "", refusal);
+  }
+  if (typeof v === "object" && v !== null && !(v instanceof Date)) {
+    checkValueShape(v as Record<string, unknown>, at);
+  }
+  if (typeof v === "object" && v !== null && "result" in v) {
+    checkResult((v as { result?: unknown }).result, at, "result");
+  }
+}
+
+/**
+ * One row's values for an append — a list (by column), an object (by column key), or nothing for an empty row — each
+ * value checked as {@link checkCellValue} checks it, before the row exists. A bare number or string used to add an
+ * empty row and lose the value, and a refused value used to leave a half-written row behind. `Row.add` and the
+ * streaming writer's `addRow` share it, so both refuse the same rows with the same words.
+ */
+export function checkRowValues(where: string, values: unknown, argument = "values"): void {
+  if (values === null || values === undefined) {
+    return;
+  }
+  if (typeof values !== "object" || values instanceof Date) {
+    throw new ExcelArgumentError(
+      argument,
+      `${where}: ${argument} must be an array of cell values, an object keyed by column key, or nothing; got ${typeof values}.`
+    );
+  }
+  for (const [key, value] of Object.entries(values)) {
+    checkCellValue(value, {
+      where,
+      field: Array.isArray(values) ? `${argument}[${key}]` : `${argument}.${key}`
+    });
+  }
+}
+
+/** A list of rows for a batch append, every row checked by {@link checkRowValues} before the first is added. */
+export function checkRowList(where: string, list: unknown): asserts list is readonly unknown[] {
+  if (!Array.isArray(list)) {
+    throw new ExcelArgumentError(
+      "values",
+      `${where}: values must be an array of rows; got ${typeof list}.`
+    );
+  }
+  list.forEach((values, i) => checkRowValues(where, values, `values[${i}]`));
+}
+
+/**
+ * Excel's error literals, as the formula tokenizer knows them (`formula/syntax/tokenizer.ts`). A cell holding any other
+ * `#…` text as an error was written as `t="e"` with a value Excel does not have.
+ */
+const ERROR_LITERALS: ReadonlySet<string> = new Set([
+  "#NULL!",
+  "#DIV/0!",
+  "#VALUE!",
+  "#REF!",
+  "#NAME?",
+  "#NUM!",
+  "#N/A",
+  "#GETTING_DATA",
+  "#SPILL!",
+  "#CALC!",
+  "#FIELD!",
+  "#BLOCKED!",
+  "#CONNECT!",
+  "#BUSY!",
+  "#UNKNOWN!"
+]);
+
+function refuseShape(
+  at: CellValueSite | undefined,
+  argument: string,
+  expected: string,
+  value: unknown
+): never {
+  const shown =
+    typeof value === "string"
+      ? JSON.stringify(value)
+      : Array.isArray(value)
+        ? "an array"
+        : value === null || typeof value !== "object"
+          ? String(value)
+          : "an object";
+  const field = siteField(at, argument);
+  throw new ExcelInvalidValueTypeError(
+    Array.isArray(value) ? "array" : value === null ? "null" : typeof value,
+    at
+      ? `${at.where}: ${field} must be ${expected}, got ${shown}.`
+      : `A cell value's ${argument} must be ${expected}, got ${shown}.`,
+    { field }
+  );
+}
+
+/**
+ * A value of a known shape is checked as that shape. The shape is declared by its key — `richText`, `formula`,
+ * `sharedFormula`, `hyperlink`, `error`, `checkbox` — so a malformed one is refused instead of being stored as the JSON
+ * text of the object, or failing only when the workbook is written. An object with none of those keys is stored as
+ * JSON text, as it always was.
+ */
+function checkValueShape(v: Record<string, unknown>, at: CellValueSite | undefined): void {
+  if (isTemporalPlainValue(v)) {
+    return;
+  }
+  if ("richText" in v) {
+    const runs = v.richText;
+    if (!Array.isArray(runs)) {
+      refuseShape(at, "richText", "an array of runs", runs);
+    }
+    runs.forEach((run: unknown, i) => {
+      if (typeof run !== "object" || run === null || Array.isArray(run)) {
+        refuseShape(at, `richText[${i}]`, "a run ({ text, font? })", run);
+      }
+      const { text, font } = run as { text?: unknown; font?: unknown };
+      if (typeof text !== "string") {
+        refuseShape(at, `richText[${i}].text`, "a string", text);
+      }
+      if (
+        font !== undefined &&
+        (typeof font !== "object" || font === null || Array.isArray(font))
+      ) {
+        refuseShape(at, `richText[${i}].font`, "an object", font);
+      }
+    });
+  }
+  if ("hyperlink" in v) {
+    if (typeof v.hyperlink !== "string") {
+      refuseShape(at, "hyperlink", "a string", v.hyperlink);
+    }
+    for (const key of ["text", "tooltip"]) {
+      if (v[key] !== undefined && typeof v[key] !== "string") {
+        refuseShape(at, key, "a string", v[key]);
+      }
+    }
+  }
+  for (const key of ["formula", "sharedFormula"]) {
+    if (key in v && v[key] !== undefined && (typeof v[key] !== "string" || v[key] === "")) {
+      // A number is a formula too (`<f>5</f>`) where `fillFormula` takes one; a cell value's formula is text.
+      refuseShape(at, key, "a non-empty string", v[key]);
+    }
+  }
+  if ("error" in v && !("formula" in v) && !("sharedFormula" in v)) {
+    if (typeof v.error !== "string" || !ERROR_LITERALS.has(v.error)) {
+      refuseShape(at, "error", `one of ${[...ERROR_LITERALS].join(", ")}`, v.error);
+    }
+  }
+  if ("checkbox" in v && typeof v.checkbox !== "boolean") {
+    refuseShape(at, "checkbox", "a boolean", v.checkbox);
+  }
+}
+
+/**
+ * A shared formula's master must be a formula cell of the same sheet that comes before it — above it, or to its left
+ * in the same row — because that is where the writer looks for it. Anything else failed only when the workbook was
+ * written. Checked for a value about to be set at `row`, `col` of `ws`, before the cell exists — at the boundary
+ * only: inside a structural edit a member can be moved before its master is.
+ */
+export function checkSharedFormulaAt(
+  ws: Worksheet,
+  row: number,
+  col: number,
+  v: unknown,
+  at?: CellValueSite
+): void {
+  if (typeof v !== "object" || v === null || !("sharedFormula" in v)) {
+    return;
+  }
+  const masterAddress = (v as { sharedFormula: string }).sharedFormula;
+  let master: CellData | undefined;
+  let decoded: { row: number; col: number } | undefined;
+  try {
+    decoded = colCache.decodeAddress(masterAddress.replace(/\$/g, ""));
+  } catch {
+    decoded = undefined;
+  }
+  if (decoded && Number.isInteger(decoded.row) && Number.isInteger(decoded.col)) {
+    master = ws._rows[decoded.row - 1]?.cells[decoded.col - 1];
+  }
+  const before =
+    decoded !== undefined && (decoded.row < row || (decoded.row === row && decoded.col < col));
+  if (!master || !before || cellType(master) !== Types.Formula || !cellFormula(master)) {
+    refuseShape(
+      at,
+      "sharedFormula",
+      "the address of a formula cell above or to the left of this one",
+      masterAddress
+    );
+  }
+}
+
+function isInvalidDate(v: unknown): boolean {
+  return v instanceof Date && Number.isNaN(v.getTime());
+}
+
+/** Refuse a formula's cached result no cell can hold. With `at`, the error names the call and the argument. */
+export function checkFormulaResult(result: unknown, at?: CellValueSite): void {
+  checkResult(result, at, "");
+}
+
+function checkResult(result: unknown, at: CellValueSite | undefined, path: string): void {
+  if (typeof result === "number" && !Number.isFinite(result)) {
+    refuseValue(
+      at,
+      "number",
+      path,
+      `A formula result cannot be ${result}: a workbook has no representation for it. ` +
+        `Use an error value such as { error: "#NUM!" } instead.`
+    );
+  }
+  if (isInvalidDate(result)) {
+    refuseValue(at, "date", path, "A formula result cannot be an invalid Date.");
+  }
+  // A result is a value a formula can produce — a scalar, a date or an error. Anything else (`{}`) failed only when the
+  // workbook was written.
+  const expected = "a number, a string, a boolean, a Date or an error value";
+  // The path into a cell value (`result`), or — for a result given on its own — the argument itself.
+  const name = path !== "" ? path : at ? "" : "result";
+  if (typeof result === "object" && result !== null && !(result instanceof Date)) {
+    const error = (result as { error?: unknown }).error;
+    if (typeof error !== "string" || !ERROR_LITERALS.has(error)) {
+      refuseShape(at, name, expected, result);
+    }
+  } else if (
+    typeof result === "function" ||
+    typeof result === "symbol" ||
+    typeof result === "bigint"
+  ) {
+    refuseShape(at, name, expected, result);
   }
 }
 
@@ -659,9 +977,9 @@ function daysInMonth(year: number, month: number): number {
  * formula engine reads it correctly (`MONTH(60)` is 2, `DAY(60)` is 29), because those work on serials and
  * never pass a date through a `Date`.
  */
-function validateDateParts(parts: Partial<ExcelDateTimeParts>, date1904: boolean): void {
+export function validateDateParts(parts: Partial<ExcelDateTimeParts>, date1904: boolean): void {
   const fail = (message: string): never => {
-    throw new InvalidValueTypeError("date parts", message);
+    throw new ExcelInvalidValueTypeError("date parts", message);
   };
   const entries = Object.entries(parts) as [keyof ExcelDateTimeParts, number | undefined][];
   if (entries.every(([, value]) => value === undefined)) {
@@ -819,7 +1137,7 @@ export function cellGetTemporal(c: CellData, kind?: TemporalKind): TemporalPlain
   }
   const detected = cellDateKind(c);
   if (detected === "duration") {
-    throw new InvalidValueTypeError(
+    throw new ExcelInvalidValueTypeError(
       "duration",
       "this cell's number format is an elapsed-time one, so its serial is a length of time rather than a " +
         "calendar value and has no Temporal Plain* equivalent. Use Cell.getDateParts, or pass an explicit " +
@@ -895,8 +1213,10 @@ export function cellNote(c: CellData): string | NoteConfig | undefined {
   return c._comment.note;
 }
 
-export function cellSetNote(c: CellData, note: string | NoteConfig): void {
-  c._comment = noteCreate(note);
+export function cellSetNote(c: CellData, note: string | NoteConfig, author?: string): void {
+  // A copy, as a validation rule is: the caller's configuration used to become the cell's, so editing it afterwards
+  // changed the note.
+  c._comment = noteCreate(ownValue(note), author);
 }
 
 export function cellComment(c: CellData): NoteData | undefined {
@@ -951,7 +1271,7 @@ export function cellHtml(c: CellData): string {
  * Freezing one projection while the rest stay live would be inconsistent.)
  */
 export interface CellView {
-  readonly value: CellValueType;
+  readonly value: CellValue;
   readonly numFmt: string | NumFmt | undefined;
   readonly text: string;
   /** The workbook's date system, which turning a `Date` value back into the serial it displays needs. */
@@ -1037,6 +1357,7 @@ export function cellResult(c: CellData): FormulaResult | undefined {
 }
 
 export function cellSetResult(c: CellData, value: FormulaResult | undefined): void {
+  checkFormulaResult(value);
   if (cellType(c) === Types.Formula) {
     c._value.result = value;
   }
@@ -1072,20 +1393,16 @@ export function cellSetNames(c: CellData, value: string[]): void {
   const definedNames = cellWorkbook(c)._definedNames;
   definedNamesRemoveAllNames(definedNames, cellFullAddress(c));
   value.forEach(name => {
-    definedNamesAddEx(definedNames, cellFullAddress(c), name);
+    definedNamesAddCell(definedNames, cellFullAddress(c), name);
   });
 }
 
 export function cellAddName(c: CellData, name: string): void {
-  definedNamesAddEx(cellWorkbook(c)._definedNames, cellFullAddress(c), name);
+  definedNamesAddCell(cellWorkbook(c)._definedNames, cellFullAddress(c), name);
 }
 
-export function cellRemoveName(c: CellData, name: string): void {
-  definedNamesRemoveEx(cellWorkbook(c)._definedNames, cellFullAddress(c), name);
-}
-
-export function cellRemoveAllNames(c: CellData): void {
-  definedNamesRemoveAllNames(cellWorkbook(c)._definedNames, cellFullAddress(c));
+export function cellRemoveName(c: CellData, name: string): boolean {
+  return definedNamesRemoveEx(cellWorkbook(c)._definedNames, cellFullAddress(c), name);
 }
 
 export function cellDataValidation(c: CellData): DataValidationRule | undefined {
@@ -1096,13 +1413,26 @@ export function cellSetDataValidation(c: CellData, value: DataValidationRule): v
   dataValidationAdd(cellWorksheet(c).dataValidations, c.address, value);
 }
 
+/**
+ * The cell's round-trip model: its value model with the cell's style and note.
+ *
+ * A new outer object, so reading writes nothing into the cell. It used to assign `style` and `comment` onto the
+ * stored value model, and a note removed after that — or after the first save, which reads every cell's model —
+ * stayed behind in it and came back in the next file.
+ */
 export function cellGetModel(c: CellData): CellModel {
-  const { model } = c._value;
-  model.style = c.style;
+  const stored = c._value.model as CellModel;
+  const { comment: _stale, ...model } = stored;
+  const out: CellModel = { ...model, style: c.style };
   if (c._comment) {
-    model.comment = noteModel(c._comment);
+    out.comment = noteModel(c._comment);
   }
-  return model;
+  // What is known about the stored model by identity is known about this one: the writers ask it of the model they
+  // are handed.
+  if (isStoredOrdinaryFormula(stored)) {
+    markStoredOrdinaryFormula(out);
+  }
+  return out;
 }
 
 export function cellSetModel(c: CellData, value: CellModel): void {
@@ -1303,14 +1633,16 @@ class StringValue {
 
 class RichTextValue {
   declare public model: RichTextValueModel;
+  // Stored as a copy: the caller's object used to be the cell's, so editing it afterwards — or giving it to two
+  // cells — changed what the cell wrote.
   constructor(cell: CellData, value: CellRichTextValue) {
-    this.model = { address: cell.address, type: Types.String, value };
+    this.model = { address: cell.address, type: Types.String, value: ownValue(value) };
   }
   get value(): CellRichTextValue {
     return this.model.value;
   }
   set value(value: CellRichTextValue) {
-    this.model.value = value;
+    this.model.value = ownValue(value);
   }
   toString(): string {
     return this.model.value.richText.map(t => t.text).join("");
@@ -1345,14 +1677,15 @@ class DateValue {
     this.model = {
       address: cell.address,
       type: Types.Date,
-      value: toCivilDate(value, cellDate1904(cell))
+      // A Date is mutable: stored as given, the caller's later `setDate` changed the cell.
+      value: ownValue(toCivilDate(value, cellDate1904(cell)))
     };
   }
   get value(): Date {
     return this.model.value;
   }
   set value(value: Date) {
-    this.model.value = value;
+    this.model.value = ownValue(value);
   }
   get type(): ValueType {
     return Types.Date;
@@ -1416,6 +1749,18 @@ class HyperlinkValue {
     }
     if (this.model.tooltip !== undefined) {
       out.tooltip = this.model.tooltip;
+    }
+    // A hyperlink computed by a formula (`=HYPERLINK(…)`) carries the formula too, so the value can be set on
+    // another cell — a copy, a moved row — without the formula being dropped and the link frozen as text.
+    const computed = this.model as HyperlinkValueModel & {
+      formula?: string;
+      result?: FormulaResult;
+    };
+    if (computed.formula !== undefined) {
+      Object.assign(out, {
+        formula: computed.formula,
+        ...(computed.result === undefined ? {} : { result: computed.result })
+      });
     }
     return out;
   }
@@ -1495,10 +1840,10 @@ class MergeValue {
       cellAddMergeRef(master);
     }
   }
-  get value(): CellValueType {
+  get value(): CellValue {
     return cellGetValue(this._master);
   }
-  set value(value: CellValueInputType | CellData) {
+  set value(value: CellValueInput | CellData) {
     if (isCellData(value)) {
       if (this._master) {
         cellReleaseMergeRef(this._master);
@@ -1551,7 +1896,7 @@ class FormulaValue {
       ref: value ? value.ref : undefined,
       formula: value ? value.formula : undefined,
       sharedFormula: value ? value.sharedFormula : undefined,
-      result: value ? value.result : undefined,
+      result: value ? ownValue(value.result) : undefined,
       isDynamicArray: value ? value.isDynamicArray : undefined
     };
   }
@@ -1585,7 +1930,7 @@ class FormulaValue {
       this.model.formula = value.formula;
     }
     if (value.result !== undefined) {
-      this.model.result = value.result;
+      this.model.result = ownValue(value.result);
     }
     if (value.ref) {
       this.model.ref = value.ref;
@@ -1600,7 +1945,7 @@ class FormulaValue {
       this.model.isDynamicArray = value.isDynamicArray;
     }
   }
-  validate(value: CellValueType): void {
+  validate(value: CellValue): void {
     switch (Value.getType(value)) {
       case Types.Null:
       case Types.String:
@@ -1610,7 +1955,7 @@ class FormulaValue {
       case Types.Hyperlink:
       case Types.Formula:
       default:
-        throw new InvalidValueTypeError(
+        throw new ExcelInvalidValueTypeError(
           String(Value.getType(value)),
           "Cannot process that type of result value"
         );
@@ -1822,13 +2167,13 @@ class CheckboxValue {
 class ErrorValue {
   declare public model: ErrorValueModel;
   constructor(cell: CellData, value: CellErrorValue) {
-    this.model = { address: cell.address, type: Types.Error, value };
+    this.model = { address: cell.address, type: Types.Error, value: ownValue(value) };
   }
   get value(): CellErrorValue {
     return this.model.value;
   }
   set value(value: CellErrorValue) {
-    this.model.value = value;
+    this.model.value = ownValue(value);
   }
   get type(): ValueType {
     return Types.Error;
@@ -1851,22 +2196,45 @@ class ErrorValue {
   }
 }
 
+/** A value stored as its JSON text — refused, by type, when it has none (a cycle, a `bigint` inside it). */
+function jsonText(value: unknown): string {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(value);
+  } catch (error) {
+    throw new ExcelInvalidValueTypeError(
+      "object",
+      `A cell cannot hold this object: ${(error as Error).message}`,
+      {
+        cause: error
+      }
+    );
+  }
+  if (text === undefined) {
+    throw new ExcelInvalidValueTypeError(
+      typeof value,
+      "A cell cannot hold a value with no JSON text."
+    );
+  }
+  return text;
+}
+
 class JSONValue {
   declare public model: JSONValueModel;
   constructor(cell: CellData, value: unknown) {
     this.model = {
       address: cell.address,
       type: Types.String,
-      value: JSON.stringify(value),
-      rawValue: value
+      value: jsonText(value),
+      rawValue: ownValue(value)
     };
   }
   get value(): unknown {
     return this.model.rawValue;
   }
   set value(value: unknown) {
-    this.model.rawValue = value;
-    this.model.value = JSON.stringify(value);
+    this.model.value = jsonText(value);
+    this.model.rawValue = ownValue(value);
   }
   get type(): ValueType {
     return Types.String;
@@ -1896,7 +2264,7 @@ function isCellData(v: unknown): v is CellData {
 
 // Value is a place to hold common Value type functions.
 const Value = {
-  getType(value: CellValueInputType): number {
+  getType(value: CellValueInput): number {
     if (value === null || value === undefined) {
       return Types.Null;
     }
@@ -1990,10 +2358,10 @@ const Value = {
     []
   ),
 
-  create(type: number, cell: CellData, value?: CellValueInputType | CellData): ICellValue {
+  create(type: number, cell: CellData, value?: CellValueInput | CellData): ICellValue {
     const T = this.types[type];
     if (!T) {
-      throw new InvalidValueTypeError(String(type), "Could not create Value");
+      throw new ExcelInvalidValueTypeError(String(type), "Could not create Value");
     }
     return new T(cell, value as never) as unknown as ICellValue;
   }

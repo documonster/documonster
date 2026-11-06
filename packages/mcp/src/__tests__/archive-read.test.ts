@@ -10,7 +10,7 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
@@ -50,7 +50,7 @@ async function makeZip(
   name: string,
   entries: readonly [string, string][]
 ): Promise<string> {
-  const zip = new ArchiveFile();
+  const zip = new Archive.ArchiveFile();
   for (const [entryName, content] of entries) {
     // Note the argument order: addText(content, name).
     zip.addText(content, entryName);
@@ -82,7 +82,7 @@ describe("archive_read — listing", () => {
 
   it("lists a tar.gz", async () => {
     const fx = await fixture();
-    const tar = new ArchiveFile({ format: "tar" });
+    const tar = new Archive.ArchiveFile({ format: "tar" });
     tar.addText("inside.txt", "content.txt");
     await tar.writeToFile(path.join(fx.root, "bundle.tar"));
 
@@ -162,7 +162,9 @@ describe("archive_read — extraction", () => {
 describe("archive_read — security", () => {
   it("refuses an archive containing a traversal path", async () => {
     const fx = await fixture();
-    const zip = new ArchiveFile();
+    // The library refuses a traversal name unless a `path` mode is chosen explicitly;
+    // "legacy" is the default mode, so the archive is the one this test always built.
+    const zip = new Archive.ArchiveFile({ path: { mode: "legacy" } });
     zip.addText("pwned", "../../escaped.txt");
     zip.addText("fine", "normal.txt");
     await zip.writeToFile(path.join(fx.root, "evil.zip"));
@@ -196,7 +198,7 @@ describe("archive_read — security", () => {
     // A materialised link would be a live escape hatch for later tools, so
     // extraction writes file entries only.
     const fx = await fixture();
-    const zip = new ArchiveFile();
+    const zip = new Archive.ArchiveFile();
     zip.addText("a", "regular.txt");
     zip.symlink("link.txt", "/etc/passwd");
     await zip.writeToFile(path.join(fx.root, "link.zip"));
@@ -215,7 +217,7 @@ describe("archive_read — security", () => {
     await mkdir(path.join(fx.root, "out"), { recursive: true });
     await symlink(outside, path.join(fx.root, "out/link"), "junction");
 
-    const zip = new ArchiveFile();
+    const zip = new Archive.ArchiveFile();
     zip.addText("PWNED", "link/pwn.txt");
     await zip.writeToFile(path.join(fx.root, "evil.zip"));
 

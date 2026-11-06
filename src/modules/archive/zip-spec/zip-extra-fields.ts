@@ -6,8 +6,12 @@
  */
 
 import { crc32 } from "@archive/compression/crc32";
-import type { AesKeyStrength } from "@archive/crypto/aes";
-import { AES_VENDOR_ID, AES_EXTRA_FIELD_ID, AES_STRENGTH_FROM_BYTE } from "@archive/crypto/aes";
+import type { AesKeyStrength } from "@archive/crypto/aes-format";
+import {
+  AES_VENDOR_ID,
+  AES_EXTRA_FIELD_ID,
+  AES_STRENGTH_FROM_BYTE
+} from "@archive/crypto/aes-format";
 import { EXTENDED_TIMESTAMP_ID, NTFS_TIMESTAMP_ID } from "@archive/zip-spec/timestamps";
 import { stringToUint8Array as encodeUtf8, uint8ArrayToString as decodeUtf8 } from "@utils/binary";
 

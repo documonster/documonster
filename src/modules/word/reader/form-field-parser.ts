@@ -68,6 +68,7 @@ export function parseFfData(el: XmlElement): FormField | undefined {
   const ddlEl = findChildNs(el, "ddList");
   if (ddlEl) {
     const defEl = findChildNs(ddlEl, "default");
+    const resultEl = findChildNs(ddlEl, "result");
     const entries: string[] = [];
     for (const le of findChildrenNs(ddlEl, "listEntry")) {
       const v = attrVal(le, "val");
@@ -80,6 +81,9 @@ export function parseFfData(el: XmlElement): FormField | undefined {
       name,
       entries: entries.length > 0 ? entries : undefined,
       default: defEl ? attrInt(defEl, "val") : undefined,
+      ...(resultEl && attrInt(resultEl, "val") !== undefined
+        ? { result: attrInt(resultEl, "val") }
+        : {}),
       helpText,
       statusText,
       enabled

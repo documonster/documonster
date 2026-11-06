@@ -2,17 +2,17 @@
 
 [English](README.md)
 
-一个功能完备、零依赖、用纯 TypeScript 从零构建的 PDF 引擎。使用 `Pdf.create()` 或 `Pdf.fromExcel()` 桥接 **写入** PDF。使用 `Pdf.read()` **读取** 任意 PDF —— 从所有主流 PDF 版本中提取文本、图像和元数据。使用 `Pdf.Builder` **构建** 自由排版的 PDF —— 文本、矢量图形、SVG 路径、注释和表单字段。使用 `Pdf.Editor` **编辑** 已有 PDF —— 叠加内容、填写表单、添加/删除/旋转页面、合并文档以及数字签名。所有 API 均为异步,并在页面之间让出事件循环以避免阻塞。
+一个功能完备、零依赖、用纯 TypeScript 从零构建的 PDF 引擎。使用 `Pdf.fromTable()` 或 `Pdf.fromExcel()` 桥接 **写入** PDF。使用 `Pdf.extract()` **读取** 任意 PDF —— 从所有主流 PDF 版本中提取文本、图像和元数据。使用 `Pdf.Builder` **构建** 自由排版的 PDF —— 文本、矢量图形、SVG 路径、注释和表单字段。使用 `Pdf.Editor` **编辑** 已有 PDF —— 叠加内容、填写表单、添加/删除/旋转页面、合并文档以及数字签名。所有 API 均为异步,并在页面之间让出事件循环以避免阻塞。
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-// 写入 —— 独立:           Pdf.create(rows)
+// 写入 —— 独立:           Pdf.fromTable(rows)
 // 写入 —— 来自 Excel:     await Pdf.fromExcel(workbook)
-// 读取 —— 文本/图像/元数据: Pdf.read(bytes)
+// 读取 —— 文本/图像/元数据: Pdf.extract(bytes)
 // 构建 —— 自由排版:        new Pdf.Builder()
-// 编辑 —— 叠加/表单:       new Pdf.Editor() / Pdf.Editor.load(bytes)
-// 签名 —— 数字签名:        Pdf.sign(...) / Pdf.verifySignature(...)
+// 编辑 —— 叠加/表单:       Pdf.Editor.read(bytes)
+// 签名 —— 数字签名:        builder.sign(...) / Pdf.verifySignatures(bytes)
 ```
 
 ## 特性
@@ -21,7 +21,7 @@ import { Pdf } from "documonster/pdf";
 
 - **零依赖** —— 纯 TypeScript 生成 PDF,无任何外部库
 - **PDF 2.0** —— 写入现代 PDF 2.0 格式
-- **独立引擎** —— 通过 `Pdf.create()` 使用普通数组和对象,无需依赖 Excel
+- **独立引擎** —— 通过 `Pdf.fromTable()` 使用普通数组和对象,无需依赖 Excel
 - **Excel 桥接** —— 一行 `Pdf.fromExcel(workbook)` 实现 Excel 到 PDF 的转换
 - **跨平台** —— 在 Node.js 和浏览器中使用相同 API
 - **完整样式** —— 字体、颜色、边框、填充、对齐、合并单元格
@@ -81,7 +81,7 @@ import { Pdf } from "documonster/pdf";
 
 ### 数字签名
 
-- **签名验证** —— 验证 RSA PKCS#1 v1.5 + SHA-256 签名,并完整解析 PKCS#7/CMS
+- **签名验证** —— `Pdf.verifySignatures(bytes)` 找出每个签名字段,逐一检查完整性(摘要、RSA、`/ByteRange`、是否覆盖整个文件)并报告其携带的证书 —— 不做信任评估;`Pdf.Signature.verify` 验证一个自行定位的签名
 - **签名创建** —— 创建 CMS SignedData 签名,带 ByteRange 占位符/回填
 - **ASN.1 DER 编解码** —— 解析和编码 ASN.1 结构(由验证和签名共享)
 - **X.509 证书** —— 从 DER 编码的证书中提取公钥
@@ -98,7 +98,7 @@ import { Pdf } from "documonster/pdf";
 import { readFileSync } from "fs";
 
 const bytes = readFileSync("document.pdf");
-const result = await Pdf.read(bytes);
+const result = await Pdf.extract(bytes);
 
 // 全部文本
 console.log(result.text);
@@ -141,26 +141,26 @@ for (const bm of result.bookmarks) {
 ### 读取加密 PDF
 
 ```typescript
-const result = await Pdf.read(bytes, { password: "secret" });
+const result = await Pdf.extract(bytes, { password: "secret" });
 ```
 
 ### 选择性提取
 
 ```typescript
 // 仅第 1 页和第 3 页,仅文本(不含图像)
-const result = await Pdf.read(bytes, {
+const result = await Pdf.extract(bytes, {
   pages: [1, 3],
   extractImages: false
 });
 
 // 提取书签(大纲树)
-const result = await Pdf.read(bytes, { extractBookmarks: true });
+const result = await Pdf.extract(bytes, { extractBookmarks: true });
 for (const bm of result.bookmarks) {
-  console.log(bm.title, `→ page ${bm.pageIndex + 1}`);
+  console.log(bm.title, bm.pageIndex === undefined ? "(no page)" : `→ page ${bm.pageIndex + 1}`);
 }
 
 // 提取表格(基于文本位置的启发式检测)
-const result = await Pdf.read(bytes, { extractTables: true });
+const result = await Pdf.extract(bytes, { extractTables: true });
 for (const page of result.pages) {
   for (const table of page.tables) {
     for (const row of table.rows) {
@@ -175,17 +175,17 @@ for (const page of result.pages) {
 从 Excel 工作簿生成 PDF 的最简单方式:
 
 ```typescript
-import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Column, Row, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Sales");
-Worksheet.setColumns(sheet, [
+Column.setDefinitions(sheet, [
   { header: "Product", key: "product", width: 20 },
   { header: "Revenue", key: "revenue", width: 15 }
 ]);
-Worksheet.addRow(sheet, { product: "Widget", revenue: 1000 });
-Worksheet.addRow(sheet, { product: "Gadget", revenue: 2500 });
+Row.add(sheet, { product: "Widget", revenue: 1000 });
+Row.add(sheet, { product: "Gadget", revenue: 2500 });
 Column.setStyle(sheet, "revenue", { numFmt: "$#,##0.00" });
 
 const pdf = await Pdf.fromExcel(workbook);
@@ -206,8 +206,7 @@ window.open(url);
 import { Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
-const workbook = Workbook.create();
-await Workbook.readFile(workbook, "report.xlsx");
+const workbook = await Workbook.readFile("report.xlsx");
 
 const pdf = await Pdf.fromExcel(workbook, {
   showGridLines: true,
@@ -224,14 +223,14 @@ const pdf = await Pdf.fromExcel(workbook, {
 import { Pdf } from "documonster/pdf";
 
 // 最简单 —— 传入二维数组
-const bytes = await Pdf.create([
+const bytes = await Pdf.fromTable([
   ["Product", "Revenue"],
   ["Widget", 1000],
   ["Gadget", 2500]
 ]);
 
 // 带选项
-const bytes = await Pdf.create(
+const bytes = await Pdf.fromTable(
   [
     ["Name", "Score"],
     ["Alice", 95],
@@ -241,7 +240,7 @@ const bytes = await Pdf.create(
 );
 
 // 多个工作表
-const bytes = await Pdf.create({
+const bytes = await Pdf.fromTable({
   sheets: [
     {
       name: "Sales",
@@ -261,7 +260,7 @@ const bytes = await Pdf.create({
 });
 
 // 列宽 + 带样式的单元格
-const bytes = await Pdf.create({
+const bytes = await Pdf.fromTable({
   name: "Report",
   columns: [{ width: 25 }, { width: 15 }],
   data: [
@@ -275,13 +274,17 @@ const bytes = await Pdf.create({
 });
 ```
 
+`Date` 单元格按其 UTC 字段显示,与 `Pdf.fromExcel` 显示无数字格式的日期单元格相同:UTC 零点为 `2024-01-15`,
+否则为 `2024-01-15 13:05:09`——在任何机器上都一样(以前用 `toLocaleDateString()`,随区域设置变化,
+在 UTC 以西还会差一天)。请用 `Date.UTC(…)` 构造日期。
+
 ### 水印
 
-为任何通过 `Pdf.create()` 或 `Pdf.fromExcel()` 生成的 PDF 添加文本或图像水印:
+为任何通过 `Pdf.fromTable()` 或 `Pdf.fromExcel()` 生成的 PDF 添加文本或图像水印:
 
 ```text
 // 文本水印 —— 居中、半透明、旋转
-const bytes = await Pdf.create(data, {
+const bytes = await Pdf.fromTable(data, {
   watermark: {
     type: "text",
     text: "CONFIDENTIAL",
@@ -309,7 +312,7 @@ const bytes = await Pdf.fromExcel(workbook, {
 });
 
 // 仅在指定页面或工作表上添加水印
-const bytes = await Pdf.create(data, {
+const bytes = await Pdf.fromTable(data, {
   watermark: {
     type: "text",
     text: "DRAFT",
@@ -321,6 +324,11 @@ const bytes = await Pdf.create(data, {
   }
 });
 ```
+
+`watermark.sheets` 中的名称按 Excel 的方式比较(不区分大小写),不指向任何工作表的名称以
+`PdfArgumentError` 拒绝——与 `sheets` 中的未知名称一样——而不是让所有页面都没有水印。`watermark.pages`
+中超过最后一页的页码不匹配任何页而被跳过,与 `Pdf.extract({ pages })` 中超出末尾的页码一样。
+`sheets: []` 与不传 `sheets` 一样,选择所有可见工作表。
 
 ### 构建自由排版的 PDF(PdfDocumentBuilder)
 
@@ -365,7 +373,7 @@ page.addFormField({
 // 加密
 doc.setEncryption({ ownerPassword: "admin", userPassword: "reader" });
 
-const bytes = await doc.build();
+const bytes = await doc.toBuffer();
 ```
 
 ### 编辑已有 PDF(PdfEditor)
@@ -375,7 +383,7 @@ const bytes = await doc.build();
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-const editor = Pdf.Editor.load(existingPdfBytes);
+const editor = Pdf.Editor.read(existingPdfBytes);
 
 // 在第 1 页叠加文本和图形
 const page = editor.getPage(0);
@@ -395,46 +403,132 @@ editor.setFormField("name", "Jane Doe");
 editor.setFormField("agree", "Yes");
 
 // 页面操作
-editor.removePage(2); // 删除第 3 页
+editor.removePage(2); // 删除第 3 页——可重复调用；索引指读入时的页，删除后不会移位
 editor.rotatePage(0, 90); // 旋转第 1 页
 editor.addPage(); // 添加空白页
 
-// 从另一个 PDF 复制页面
+// 从另一个 PDF 复制页面——连同其批注与表单域
 editor.copyPagesFrom(otherPdfBytes);
 
+// 文档属性:/Info 与 XMP 包同步更新
+editor.setMetadata({ title: "Q3 report", author: "Ann; Bob", keywords: "finance, Q3" });
+editor.setMetadata({ subject: null }); // null 表示删除该属性(JSON merge patch)
+
 // 保存(完整重建或增量追加)
-const result = await editor.save();
-const incremental = await editor.saveIncremental(); // 保留原始字节
+const result = await editor.toBuffer();
+const incremental = await editor.toBuffer({ incremental: true }); // 保留原始字节
 ```
 
-对已签名文档(`editor.hasSignatures`),`save()`、`sign()` 以及需要回退为完整重写的
-`saveIncremental()` 会抛出 `PdfSignatureInvalidationError`,除非传入 `{ invalidateSignatures: true }`。
-(构建器的 `doc.setMetadata({ creationDate, modDate })` 及同名导出选项可固定日期以获得可复现的输出;编辑器保留原 /CreationDate。)
+对已签名文档(`editor.hasSignatures`),`toBuffer()`、`sign()` 以及需要回退为完整重写的
+`toBuffer({ incremental: true })` 会抛出 `PdfSignatureInvalidationError`,除非传入 `{ invalidateSignatures: true }`。
+(构建器的 `doc.setMetadata({ creationDate, modDate })` 及同名导出选项可固定日期以获得可复现的输出。)
+
+`editor.setMetadata` 接受 `PdfMetadataUpdate`——一个 JSON merge patch:给值即设置,`null` 即删除
+(同时删除 `/Info` 条目与 XMP 属性,无论它在包中以何种形式出现),未给出的字段保持不变。它只修改传入的字段,`/Info` 与 XMP 包一致;编辑器不会自行添加 `/Creator` 或 `/Producer`,
+日期也只在传入时才改变(传 `modDate` 记录这次修改)。XMP 包按 XML 编辑:标题与描述只替换 `x-default` 一项,
+`author` 按 `;` 拆分为多个 `dc:creator` 条目,并更新 `xmp:MetadataDate`。无法解码或不是 XMP 的包保持原样。
+复制的页保留 MediaBox 原点、继承的旋转与裁剪框以及批注;其表单域并入本文档的表单,
+与本文档已有域重名时在写出时以 `PdfArgumentError` 拒绝。
 
 仅当签名域(`/FT /Sig`,可继承自父域)的值含 `/ByteRange` 与 `/Contents` 时才视为已签名;
-单独的 `/SigFlags` 不算。`saveIncremental()` 保留原签名字节范围,但**不会**评估认证签名
+单独的 `/SigFlags` 不算。`toBuffer({ incremental: true })` 保留原签名字节范围,但**不会**评估认证签名
 (DocMDP)与 FieldMDP 权限——认证签名禁止的修改仍会被写入。
 
-加密文档:`saveIncremental()` 用文件原有的安全处理器(RC4、AES-128 或 AES-256 R5/R6)
-加密追加的对象,结果仍用原密码打开;`save()` 会写出**已解密**、不含 `/Encrypt` 的副本。
+加密文档保持加密,并沿用文件原有的安全处理器(RC4、AES-128 或 AES-256 R5/R6):
+`toBuffer({ incremental: true })` 用它加密追加的对象;完整重写——`toBuffer()`、`sign()`、
+`splitPages()` 或回退为重写的增量更新——以原 `/Encrypt` 字典、密钥与 `/ID` 重新加密每个对象。
+无论编辑器以哪个密码打开,结果都能用原来的用户密码和所有者密码打开,权限不变。
+如需写出**已解密**、不含 `/Encrypt` 的副本,传入 `{ encryption: "remove" }`;增量更新无法去除加密,
+因此配合 `incremental: true` 时会改为完整重写,配合 `incremental: "required"` 时抛出
+`PdfIncrementalUpdateError`。若 `/Encrypt` 字典无法读取,完整重写会抛出 `PdfEncryptionError`,
+而不会写出未加密的文档。
+
+已弃用的 `save()` 照旧写出已解密的副本——已弃用的 `saveIncremental()` 回退到它时也一样;
+`toBuffer()` 默认保留加密。向二者传入 `{ encryption: "keep" }` 即可保留加密。
+
+每次写出反映调用之前的编辑:写出进行中或排在同一编辑器另一写出之后时所做的编辑,属于下一次写出。
+
+页索引从 0 开始,在编辑器的整个生命期内每页只有一个索引:`0` 到 `pageCount - 1` 是读入时的页,
+用 `addPage()` 或 `copyPagesFrom()` 添加的页按添加顺序排在其后。`getPage`、`removePage`、`rotatePage`、
+`isPageRemoved` 与 `splitPages` 都接受整个范围;凡不指向任何页的索引——越界、小数、`NaN`、非数字——都抛出
+`PdfArgumentError`,其 `field` 指明参数(`index`;`splitPages` 为 `options.pageIndices[i]`)。删除页面不会给其他页重新编号。`pageCount` 始终是读入时的页数;`outputPageCount`
+是现在写出时的页数。`getPage` 对每页返回同一个句柄:对读入或复制的页,它画在页面原有内容之上;对用
+`addPage()` 添加的页,它直接画在该页上(`addPage()` 返回的构建器也画在这一页上)。删除添加的页会把它排除在
+输出之外;旋转它会设置它的 `/Rotate`。`splitPages({ pageIndices })` 与 `copyPagesFrom(source, { pageIndices })` 指名页面,
+所以不指向任何页的索引——越界、已删除、非整数——在写出或复制任何内容之前就以 `PdfArgumentError`
+(字段 `options.pageIndices[i]`)拒绝;`splitPages` 按索引顺序每个索引返回一份。(二者已弃用的位置参数形式
+照旧跳过越界索引。)已删除的页不能再编辑:`getPage` 与 `rotatePage` 会拒绝它,
+删除前取得的页句柄(或 `addPage()` 返回的构建器)的所有绘制调用也以 `PdfArgumentError` 拒绝——以前画在上面的内容会无声消失。
+已被使用的表单域名(文档已有、已添加或由复制页带入)在引入它的 `addFormField` 或 `copyPagesFrom` 调用处即被拒绝;要把同一表单合并两次(或合并域名相同的两个表单),
+复制时传 `{ formFields: "drop" }`:复制页面及其其他批注,但不带表单域。
+读取接口(`Pdf.extract`、`Pdf.Editor.read`、`copyPagesFrom`、`Pdf.verifySignatures` 与 `Pdf.Signature.*`)接受
+`Uint8Array`、其他任何 `ArrayBufferView`(Node 的 `Buffer`、`DataView`)或 `ArrayBuffer`,直接引用而不复制。
+
+在编辑器页面上绘制的文字与构建器一样嵌入字体:`Pdf.Editor.read` 接受构建器的字体选项——`fonts`、
+`preferSystemFonts`、`textLanguage`、`disableFontAutoDiscovery` 与 `onWarning`——含义相同。不传时,
+标准字体无法编码的字符(例如中文)用在本机找到的系统字体绘制,`onWarning` 报告所选字体以及任何字体都画不了的字符:
+
+```typescript
+const editor = Pdf.Editor.read(existingPdfBytes, {
+  fonts: { default: { regular: notoSansScBytes } },
+  onWarning: message => console.warn(message)
+});
+editor.getPage(0).drawText("机密", { x: 72, y: 72 });
+```
+
+完整重写(`toBuffer()`、删除页面、`splitPages()` 的每个部分)保留目录(catalog)中的文档级条目——书签、
+命名目标、页码标签、打开动作、查看器首选项、可选内容、输出意图、附件、语言——并将引用页面的条目调整为
+实际写出的页:
+
+| 条目                                         | 完整重写后                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `/Outlines`(书签)                            | 指向已删除页的书签失去目标;其下仍有书签保留时它保留,否则删除。计数与链接重新生成。    |
+| `/Dests`、`/Names /Dests`                    | 指向已删除页的命名目标被删除。                                                        |
+| `/PageLabels`                                | 每页保留原标签;添加的页延续前一页的编号。                                             |
+| `/OpenAction`                                | 指向已删除页时删除。                                                                  |
+| `/ViewerPreferences`                         | 保留;`/PrintPageRange` 重新编号,其页面全部删除时去掉该项。                            |
+| `/Threads`                                   | 删除位于已删除页上的文章珠,其余文章珠重新串接;没有文章珠的线程被删除。每页保留 `/B`。 |
+| `/StructTreeRoot`、`/MarkInfo`、`/DPartRoot` | 未删除任何页时保留,删除页面时删除。                                                   |
+| `/Perms`、`/Legal`                           | 删除:它们涉及签名,而重写会使签名失效。                                                |
+| 其他条目                                     | 原样复制。                                                                            |
+
+`splitPages()` 的每个部分只保留指向该页的书签及其祖先。
 
 交叉引用链:更新段的 `/Prev` 取读取器实际解析的 `startxref` 偏移。最新段为 xref 流的文件以
 xref 流追加;混合引用文件(经典 trailer 含 `/XRefStm`)追加经典段并链接到该 trailer,
 仅列于 `/XRefStm` 流中的对象仍可访问(ISO 32000-1 §7.5.8.4)。若交叉引用数据是重建的
-(`PdfDocument.xrefRecovered`,如 `startxref` 错误或损坏),没有可靠的段可供链接,
-`saveIncremental()` 会回退为完整 `save()`——同样受签名保护约束。
+(`PdfDocument.xrefRecovered`,如 `startxref` 错误或损坏,或某条目未指向其所称的对象),没有可靠的段可供链接,
+`toBuffer({ incremental: true })` 会回退为完整 `toBuffer()`——同样受签名保护约束。
+
+若希望任何回退都报错,请传 `{ incremental: "required" }`:能追加时与 `true` 完全相同,否则抛出
+带原因的 `PdfIncrementalUpdateError`,不写出任何内容。
+
+填写字段还会把 AcroForm 的 `/NeedAppearances` 设为 `true`(即使原文件为 `false`)。对**混合**表单
+(AcroForm 字段加 XFA 数据包)会**移除 `/XFA`**,使支持 XFA 的查看器显示 AcroForm 中的新值,而不是过时的
+XFA 数据。**动态** XFA 表单(`/NeedsRendering true`,或有 XFA 但没有 AcroForm 字段树)完全由 XFA 定义,
+因此绝不会被剥离:向其保存已编辑的值会抛出 `PdfXfaFormError`,且不写出任何内容。未编辑字段值的保存会原样保留
+`/XFA` 和 `/NeedsRendering`。
+
+`setFormField` 与 `setFormFields` 只接受文档中已有的字段(即 `getFormFields()` 列出的字段);字段不存在,或复选框、
+单选组的值不是其控件能显示的状态(`"Off"` 或按钮自身的值)时抛出 `PdfArgumentError`。按钮按外观状态和名称值写入,
+因此显示为选中,而不只是报告为选中。通过编辑器添加的字段必须有自己的名称:与文档已有字段同名,或两个新字段同名,
+写出时都会抛出 `PdfArgumentError`。构建器在各页之间遵循同一规则。
 
 ### 数字签名
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-// 验证签名
-const result = await Pdf.verifySignature(pdfBytes, signatureHex, byteRange);
-console.log(result.valid, result.coversWholeFile);
+// 验证文件中的每一个签名
+for (const sig of await Pdf.verifySignatures(pdfBytes)) {
+  console.log(sig.fieldName, sig.claimedSigner, sig.intact, sig.coversWholeFile);
+}
 
-// 签名一个 PDF(需要 DER 编码的证书 + PKCS#8 私钥)
-const signed = await Pdf.sign(pdfWithPlaceholder, certificate, privateKey);
+// 验证一个已知 /Contents 与 /ByteRange 的签名
+const result = await Pdf.Signature.verify(pdfBytes, signatureHex, byteRange);
+
+// 填写文件中已有的签名占位符(DER 证书 + PKCS#8 私钥)
+const signed = await Pdf.Signature.fillPlaceholder(pdfWithPlaceholder, { certificate, privateKey });
 ```
 
 ---
@@ -476,7 +570,7 @@ src/modules/pdf/
 │   ├── table-extractor — 基于文本位置的启发式表格检测
 │   ├── metadata-reader — Info 字典 + XMP 元数据
 │   ├── reader-utils    — 共享的读取器工具函数
-│   └── pdf-reader      — 公共 API:Pdf.read()
+│   └── pdf-reader      — 公共 API:Pdf.extract()
 ├── types.ts            # PdfWorkbook、PdfSheetData、PdfCellData 等
 ├── excel-bridge.ts     # Excel Workbook → PdfWorkbook 转换(唯一的 @excel 依赖)
 └── index.ts
@@ -491,15 +585,15 @@ src/modules/pdf/
 
 ## 写入选项
 
-`Pdf.create()` 接受 `PdfExportOptions`。`Pdf.fromExcel()` 接受
-`ExcelToPdfOptions`,它继承相同的写入选项,并额外提供类型严格的可选公式重算回调:
+`Pdf.fromTable()` 接受 `PdfExportOptions`。`Pdf.fromExcel()` 接受
+`PdfFromExcelOptions`,它继承相同的写入选项,并额外提供类型严格的可选公式重算回调:
 
 ```typescript
-import { calculateFormulas } from "documonster/excel/formula";
-import { Pdf, type ExcelToPdfOptions } from "documonster/pdf";
+import { ExcelFormula } from "documonster/excel/formula";
+import { Pdf, type PdfFromExcelOptions } from "documonster/pdf";
 
-const options: ExcelToPdfOptions = {
-  recalculate: calculateFormulas,
+const options: PdfFromExcelOptions = {
+  recalculate: ExcelFormula.calculate,
   fitToPage: true
 };
 const bytes = await Pdf.fromExcel(workbook, options);
@@ -511,7 +605,7 @@ const bytes = await Pdf.fromExcel(workbook, options);
 ```typescript
 interface PdfExportOptions {
   // 页面布局
-  pageSize?: PageSizeName | PdfPageSize; // "A4"、"LETTER"、"A3" 等,或 { width, height }
+  pageSize?: PdfPageSizeName | PdfPageSize; // "A4"、"LETTER"、"A3" 等,或 { width, height }
   orientation?: "portrait" | "landscape";
   margins?: Partial<PdfMargins>; // { top, right, bottom, left },单位为点(72pt = 1in)
   horizontalCentered?: boolean; // 水平居中(默认:取工作表 pageSetup)
@@ -534,21 +628,23 @@ interface PdfExportOptions {
   draft?: boolean; // 省略图片与图表(默认:取工作表 pageSetup)
   errors?: "displayed" | "blank" | "dash" | "NA"; // 错误单元格的打印方式(默认:取工作表 pageSetup)
   cellComments?: "none" | "atEnd" | "asDisplayed"; // 批注打印方式(默认:取工作表 pageSetup)
-  sheets?: (string | number)[]; // 按名称或 1 基索引选择特定工作表
+  sheets?: (string | number)[]; // 工作表名;数字位置已弃用(见下文)
   ignorePrintArea?: boolean; // 导出整个已用区域,忽略每个工作表的打印区域(默认:false)
 
   // 页眉与页脚
   showSheetNames?: boolean; // 在每页顶部显示工作表名称
   showPageNumbers?: boolean; // 在每页底部显示 "Page X of Y"
 
-  // 元数据
-  title?: string;
-  author?: string;
-  subject?: string;
-  creator?: string; // PDF producer 字符串(默认:"documonster")
+  // 元数据 —— 所有转换函数共用(PdfDocumentOptions,见下文)
+  title?: string; // 默认:工作簿的标题
+  author?: string; // 默认:工作簿的创建者
+  subject?: string; // 默认:工作簿的主题
+  keywords?: string; // 默认:工作簿的关键词
+  creator?: string; // /Creator(默认:"documonster")
+  creationDate?: Date; // 固定它即可得到逐字节可复现的输出(默认:导出时间)
+  modDate?: Date;
 
   // 字体
-  font?: Uint8Array; // 旧版单 TrueType 字体快捷选项
   fonts?: PdfFontConfig; // 命名字体族、样式 face、TTC 选择和 fallback
   defaultFontFamily?: string; // 后备字体族(默认:"Helvetica")
   defaultFontSize?: number; // 后备字号(默认:11)
@@ -571,10 +667,42 @@ interface PdfExportOptions {
 }
 ```
 
+### 所有转换函数共用的选项
+
+`Pdf.fromTable`、`Pdf.fromExcel`、`Pdf.fromDocx` 与 `Pdf.fromChart` 都接受 `PdfDocumentOptions`——
+`title`、`author`、`subject`、`keywords`、`creator`、`creationDate`、`modDate`、`encryption`、`fonts`、
+`preferSystemFonts`、`disableFontAutoDiscovery`、`textLanguage` 与 `onWarning`——名称、含义与校验完全一致。
+因此 Word 文档或单个图表也能像工作簿一样加密、携带元数据,并得到逐字节可复现的输出(固定 `creationDate`):
+
+```typescript
+import { Pdf, type PdfDocumentOptions } from "documonster/pdf";
+
+const common: PdfDocumentOptions = {
+  author: "Finance",
+  keywords: "q3, report",
+  creationDate: new Date("2026-01-01T00:00:00Z"),
+  encryption: { ownerPassword: "owner", userPassword: "open" },
+  disableFontAutoDiscovery: true
+};
+await Pdf.fromExcel(workbook, common);
+await Pdf.fromDocx(doc, { ...common, margins: { top: 54 }, defaultFontFamily: "Times-Roman" });
+await Pdf.fromChart(chart, { ...common, title: "Revenue" });
+```
+
+`Pdf.fromExcel` 未给出的元数据字段取自工作簿自身的属性,`Pdf.fromDocx` 未给出的取自文档的核心属性
+(`title`、`creator`、`subject`、`keywords`)。`Pdf.fromDocx` 与 `Pdf.fromExcel` 一样,以一个
+`margins: { top, right, bottom, left }` 对象接受页边距,以 `defaultFontFamily` 接受默认字体族。
+`Pdf.fromChart` 的 `title` 是 PDF 的标题:无论走哪条路径,图表都绘制它自己的标题。
+
+请按**名称**选择工作表(`sheets: ["Summary", "Q1"]`,比较时忽略大小写;不存在的名称抛出 `PdfArgumentError`)。
+数字位置已弃用(1.0 移除):这里从 1 开始,而 `WordExcel.toDocx` 中从 0 开始,`Workbook.getWorksheet` 中则是工作表 id,
+同一个数字在三处选中的是不同的工作表。它们仍与以前完全一样可用;传入数字的调用在编辑器中显示为删除线,而类型标注为公开的
+`PdfFromExcelOptions` 的选项不会(它可能只含名称)。
+
 ## 读取选项
 
 ```typescript
-interface ReadPdfOptions {
+interface PdfExtractOptions {
   password?: string; // 加密 PDF 的密码(用户或所有者)
   pages?: number[]; // 要提取哪些页面(1 基)。省略则提取所有页面
   extractText?: boolean; // 提取文本(默认:true)
@@ -588,26 +716,36 @@ interface ReadPdfOptions {
 }
 ```
 
-超出 `maxDecodedBytes`、/Filter 链长度上限(16)或对象嵌套上限时,`Pdf.read` 抛出
-`PdfLimitExceededError`(`PdfStructureError` 子类),不会降级为页面警告,结果不会被静默截断。
+超出 `maxDecodedBytes`、/Filter 链长度上限(16)或对象嵌套上限时,`Pdf.extract` 抛出
+`PdfLimitExceededError`(`PdfStructureError` 子类),不会降级为页面警告,结果不会被静默截断。其 `limit`
+指出触发的是哪一项(`"maxDecodedBytes"`、`"filterChain"` 或 `"depth"`),`allowed` 是该上限的值。
+`maxDecodedBytes` 本身必须是 `>= 0` 的数(或 `Infinity`);其他值以 `PdfArgumentError`(字段
+`options.maxDecodedBytes`)拒绝。
+
+`Pdf.extract` 与 `Pdf.verifySignatures` 除字节(`Uint8Array`、其他 `ArrayBufferView`、`ArrayBuffer`)外,
+也接受 `Blob`——浏览器中的 `File`:
+
+```typescript
+const result = await Pdf.extract(input.files[0]);
+```
 
 ### 读取结果
 
 ```typescript
-interface ReadPdfResult {
+interface PdfExtractResult {
   text: string; // 所有页面的全部文本
-  pages: ReadPdfPage[]; // 逐页结果
+  pages: PdfExtractedPage[]; // 逐页结果
   metadata: PdfMetadata; // 文档元数据
   formFields: PdfFormField[]; // 表单字段(文档级)
   bookmarks: PdfBookmark[]; // 文档大纲 / 目录
 }
 
-interface ReadPdfPage {
+interface PdfExtractedPage {
   pageNumber: number; // 1 基
   text: string; // 页面文本
-  textLines: TextLine[]; // 带位置的结构化行
-  textFragments: TextFragment[]; // 带精确坐标的原始片段
-  images: ExtractedImage[]; // 提取的图像
+  textLines: PdfTextLine[]; // 带位置的结构化行
+  textFragments: PdfTextFragment[]; // 带精确坐标的原始片段
+  images: PdfExtractedImage[]; // 提取的图像
   annotations: PdfAnnotation[]; // 注释(链接、批注、高亮)
   width: number; // 页宽,单位为点
   height: number; // 页高,单位为点
@@ -616,7 +754,7 @@ interface ReadPdfPage {
 
 interface PdfAnnotation {
   subtype: string; // "Link"、"Text"、"Highlight"、"FreeText"、"Stamp" 等
-  rect: PdfRect; // 边界矩形 { x1, y1, x2, y2 }
+  rect: PdfAnnotationRect; // 边界矩形 { x1, y1, x2, y2 }
   contents: string; // 文本内容
   author: string; // 作者 / 标题
   uri: string; // 对于 Link:目标 URI
@@ -637,17 +775,22 @@ interface PdfFormField {
 }
 
 interface PdfMetadata {
-  title?: string;
-  author?: string;
-  subject?: string;
-  keywords?: string;
-  creator?: string;
-  producer?: string;
+  // 文本字段:文档未提供时为 ""。
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  creator: string;
+  producer: string;
+  // 文档未提供(或不是有效日期)时字段不存在。
   creationDate?: Date;
-  modificationDate?: Date;
+  modDate?: Date;
+  pageSize?: { width: number; height: number }; // 第一页,单位为点
+  xmpXml?: string; // 原始 XMP 数据包
   pdfVersion: string;
   pageCount: number;
   encrypted: boolean;
+  custom: Record<string, string>; // Info 字典中的其他条目
 }
 ```
 
@@ -743,34 +886,6 @@ worksheet.pageSetup.fitToWidth = 1;
 > 行高只在未缩放时测量一次,二分时按线性缩放。这对**所有**单元格都是精确的,包括换行
 > 单元格:换行计算会同步缩放列宽、内边距与字号,因此换行行数不随打印缩放变化。
 
-### 重复表头行与列
-
-```typescript
-await Pdf.fromExcel(workbook, { repeatRows: 2, repeatCols: 1 });
-```
-
-或通过工作表的页面设置:
-
-```typescript
-worksheet.pageSetup.printTitlesRow = "1:2"; // 每页重复第 1-2 行
-worksheet.pageSetup.printTitlesColumn = "A"; // 每页重复 A 列
-```
-
-显式传 `false` 可抑制工作表的打印标题。
-
-打印标题是**绝对**的,与打印区域无关(与 Excel 一致):打印 `E1:T3` 的工作表仍会在每页
-左侧重复 `A:B`。若标题带**位于打印范围内部**,它仍会在第一页之后的每页重复,只是不会被
-提到最左侧 —— 那样会打乱第一页的列序。
-
-### 页顺序
-
-对应 Excel 的**页面设置 → 工作表 → 打印顺序**,用于同时纵横分页的工作表。默认与
-Excel 相同,为 `downThenOver`:先自上而下打完一个列带,再向右移动。
-
-```typescript
-await Pdf.fromExcel(workbook, { pageOrder: "overThenDown" });
-```
-
 ### 行号与列标
 
 对应 Excel 的**工作表 → 行号列标**。标题带保持固定字号,不随打印缩放变化,
@@ -847,6 +962,34 @@ worksheet.pageSetup.verticalCentered = true;
 ```
 
 显式导出选项始终优先于工作表设置;选项按工作表逐个解析,因此同一工作簿内各表可以不同。
+
+### 重复表头行与列
+
+```typescript
+await Pdf.fromExcel(workbook, { repeatRows: 2, repeatCols: 1 });
+```
+
+或通过工作表的页面设置:
+
+```typescript
+worksheet.pageSetup.printTitlesRow = "1:2"; // 每页重复第 1-2 行
+worksheet.pageSetup.printTitlesColumn = "A"; // 每页重复 A 列
+```
+
+显式传 `false` 可抑制工作表的打印标题。
+
+打印标题是**绝对**的,与打印区域无关(与 Excel 一致):打印 `E1:T3` 的工作表仍会在每页
+左侧重复 `A:B`。若标题带**位于打印范围内部**,它仍会在第一页之后的每页重复,只是不会被
+提到最左侧 —— 那样会打乱第一页的列序。
+
+### 页顺序
+
+对应 Excel 的**页面设置 → 工作表 → 打印顺序**,用于同时纵横分页的工作表。默认与
+Excel 相同,为 `downThenOver`:先自上而下打完一个列带,再向右移动。
+
+```typescript
+await Pdf.fromExcel(workbook, { pageOrder: "overThenDown" });
+```
 
 ### 手动分页
 
@@ -945,7 +1088,7 @@ const pdf = await Pdf.fromExcel(workbook, {
 
 ```typescript
 // 自动检测加密类型
-const result = await Pdf.read(encryptedBytes, { password: "secret" });
+const result = await Pdf.extract(encryptedBytes, { password: "secret" });
 ```
 
 ---
@@ -991,7 +1134,7 @@ const fonts: PdfFontConfig = {
 
 ```typescript
 // 独立数据或 Excel 工作簿
-const tablePdf = await Pdf.create(rows, { fonts });
+const tablePdf = await Pdf.fromTable(rows, { fonts });
 const workbookPdf = await Pdf.fromExcel(workbook, { fonts });
 
 // Word 文档;同一字体配置同时用于布局测量和 PDF 渲染
@@ -1006,7 +1149,7 @@ const page = builder.addPage();
 page.drawText("报告", { x: 72, y: 760, fontFamily: "Noto Sans CJK SC" });
 ```
 
-`Pdf.create()` 和 `Pdf.fromExcel()` 仍支持 `font?: Uint8Array`,作为旧版单字体快捷选项;它相当于仅配置一个默认 regular face,不能与 `fonts` 同时使用。`Builder.embedFont(bytes)` 是对应的兼容方法,并会替换 Builder 之前的字体配置。`embedFont()` 和 `embedFonts()` 必须在所有页面的首个文本命令之前调用。可以先调用 `addPage()`,前提是尚未绘制文本。
+`Builder.embedFont(source)` 是单字体快捷方法:等同于 `embedFonts({ default: { regular: source } })`,`source` 为字体字节,或用 `{ data, collectionIndex }` 选择 `.ttc` 中的某个 face;它会替换 Builder 之前的字体配置。`embedFont()` 和 `embedFonts()` 必须在所有页面的首个文本命令之前调用。可以先调用 `addPage()`,前提是尚未绘制文本。
 
 如果所有已配置 face 都缺少某字符,PDF 会显示该 face 的 `.notdef` 字形,但 ToUnicode 仍保留原始 Unicode 序列,供复制、搜索、无障碍和文本提取使用。每个嵌入 face 在单个 PDF 中最多编码 65,535 个不同 Unicode 序列。
 
@@ -1045,7 +1188,7 @@ Unicode Han Unification 让中日韩共用汉字使用同一码位,但字形并�
 
 ```typescript
 await Pdf.fromExcel(workbook, { textLanguage: "zh-Hans" }); // 也可以是 zh-Hant / ja / ko
-new Pdf.Builder().textLanguage("zh-Hant");
+new Pdf.Builder().setTextLanguage("zh-Hant");
 ```
 
 未指定时,语言由内容推断:出现假名即判定日文,出现谚文即判定韩文,只在简体或繁体之一中存在的字用于区分简繁。若文本全部由中日韩共通字形组成(如日期、专有名词),则没有任何证据可用,此时优先简体中文字体族——这是**默认值**而非检测结果,也正是知道语言时应当显式指定的原因。
@@ -1120,7 +1263,9 @@ PDF 模块完全可摇树优化。如果你不导入任何 PDF 导出项,该模�
 ```typescript
 // 仅导入 Excel 核心 —— PDF 模块不会被包含
 import { Workbook } from "documonster/excel";
+```
 
+```typescript
 // 导入 Excel + PDF 桥接
 import { Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
@@ -1161,15 +1306,15 @@ pnpm example --filter pdf-signatures
 
 ## API 参考
 
-### `Pdf.read(data, options?)`
+### `Pdf.extract(data, options?)`
 
-读取 PDF 文件并提取文本、图像和元数据。返回 `Promise<ReadPdfResult>`。
+读取 PDF 文件并提取文本、图像和元数据。返回 `Promise<PdfExtractResult>`。
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
 // 基本
-const result = await Pdf.read(pdfBytes);
+const result = await Pdf.extract(pdfBytes);
 console.log(result.text);
 console.log(result.pages[0].images);
 console.log(result.pages[0].annotations);
@@ -1177,32 +1322,32 @@ console.log(result.formFields);
 console.log(result.metadata);
 
 // 加密
-const result = await Pdf.read(pdfBytes, { password: "secret" });
+const result = await Pdf.extract(pdfBytes, { password: "secret" });
 
 // 选择性
-const result = await Pdf.read(pdfBytes, {
+const result = await Pdf.extract(pdfBytes, {
   pages: [1, 3],
   extractImages: false,
   extractMetadata: false
 });
 ```
 
-### `Pdf.create(input, options?)`
+### `Pdf.fromTable(input, options?)`
 
 从普通数据生成 PDF。返回 `Promise<Uint8Array>`。
 
 ```typescript
 // 二维数组
-await Pdf.create([
+await Pdf.fromTable([
   ["Name", "Age"],
   ["Alice", 30]
 ]);
 
 // 带列宽的单个工作表
-await Pdf.create({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
+await Pdf.fromTable({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
 
 // 多个工作表
-await Pdf.create({
+await Pdf.fromTable({
   sheets: [
     { name: "S1", data: [["A"]] },
     { name: "S2", data: [["B"]] }
@@ -1210,7 +1355,7 @@ await Pdf.create({
 });
 
 // 带选项
-await Pdf.create([["A", 1]], { showGridLines: true, pageSize: "A4" });
+await Pdf.fromTable([["A", 1]], { showGridLines: true, pageSize: "A4" });
 ```
 
 ### `Pdf.fromExcel(workbook, options?)`
@@ -1234,10 +1379,10 @@ const bytes = await Pdf.fromExcel(workbook, { showGridLines: true });
 import { Pdf } from "documonster/pdf";
 
 const doc = new Pdf.Builder();
-doc.setMetadata({ title, author, subject, creator });
+doc.setMetadata({ title, author, subject, keywords, creator, producer });
 doc.setEncryption({ ownerPassword, userPassword?, permissions? });
 doc.setPdfACompliance();       // 启用 PDF/A-1b
-doc.embedFont(fontBytes);      // 旧版单默认字体兼容 API
+doc.embedFont(fontBytes);      // 一个默认 face:字节,或 .ttc 用 { data, collectionIndex }
 // 或:doc.embedFonts(fonts);   // 完整 PdfFontConfig;后一次调用替换之前的配置
 
 const page = doc.addPage({ width?, height? }); // 返回 Pdf.PageBuilder
@@ -1257,7 +1402,7 @@ page.addFormField({ type, name, rect, ...options });
 doc.addBookmark(title, pageIndex, parent?);
 doc.generateTableOfContents({ title?, fontSize?, indent? });
 
-const bytes = await doc.build(); // 返回 Promise<Uint8Array>
+const bytes = await doc.toBuffer(); // 返回 Promise<Uint8Array>
 ```
 
 ### `Pdf.Editor`
@@ -1265,11 +1410,11 @@ const bytes = await doc.build(); // 返回 Promise<Uint8Array>
 编辑已有 PDF —— 叠加内容、填写表单、合并、拆分和签名。
 
 ```text
-const editor = Pdf.Editor.load(pdfBytes, { password? });
+const editor = Pdf.Editor.read(pdfBytes, { password? });
 
 // 页面访问
 const page = editor.getPage(index);    // 返回 PdfEditorPage
-const count = editor.pageCount;         // getter,而非方法
+const count = editor.pageCount;         // 读入时的页数(getter);outputPageCount:写出的页数
 
 // PdfEditorPage 方法(与 PdfPageBuilder 相同的绘图 API):
 page.drawText(text, options);
@@ -1284,43 +1429,77 @@ page.addFormField(options);
 
 // 页面操作
 editor.addPage(options?);              // 返回 Pdf.PageBuilder
-editor.removePage(index);
+editor.removePage(index);             // 读入或添加的任意页；可重复调用，其他页索引不变
+editor.isPageRemoved(index);
 editor.rotatePage(index, degrees);     // 90, 180, 270
-editor.copyPagesFrom(otherPdfBytes);
+editor.copyPagesFrom(otherPdfBytes, { pageIndices: [0, 2] });
 
 // 填写表单
 editor.setFormField(name, value);
 editor.setFormFields({ name: value, ... });
 
 // 保存
-const full = await editor.save();             // 完整重建
-const incr = await editor.saveIncremental();  // 仅追加
-const pages = await editor.splitPages();      // 拆分为多个独立 PDF
+const full = await editor.toBuffer();             // 完整重建
+const incr = await editor.toBuffer({ incremental: true });  // 仅追加
+const pages = await editor.splitPages();      // 按 toBuffer() 将写出的文档逐页拆分为独立 PDF
 ```
 
-### `Pdf.verifySignature(pdfData, signatureHex, byteRange)`
+### `Pdf.verifySignatures(pdfData, options?)`
 
-验证数字签名。返回 `Promise<SignatureVerificationResult>`。
+找出 PDF 中的所有签名并逐一验证。返回 `Promise<PdfSignatureReport[]>`——每个签名字段一项,
+未签名文件返回 `[]`。签名通过 AcroForm 字段树定位(值带有 `/ByteRange` 与 `/Contents` 的
+`/FT /Sig` 字段),而不是在字节中搜索。
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-const result = await Pdf.verifySignature(pdfBytes, sigHex, [0, off1, off2, len2]);
-// result.valid            — boolean
-// result.coversWholeFile  — boolean(无未签名间隙)
-// result.digestAlgorithm  — OID 字符串
-// result.reason           — 失败原因(若 !valid)
+const reports = await Pdf.verifySignatures(pdfBytes, { password: "optional" });
+for (const r of reports) {
+  // r.fieldName        — 完整字段名,例如 "Signature1"
+  // r.intact           — 摘要一致,且签名能用 SignerInfo 指明的内嵌证书验证通过(仅完整性,不含信任)
+  // r.byteRangeValid   — 范围从 0 开始、位于文件内,且恰好包围 /Contents
+  // r.coversWholeFile  — 签名后又追加了字节(增量更新)时为 false
+  // r.certificate      — 签名人证书(DER),供你自行做信任评估
+  // r.claimedSigner    — 证书通用名 —— 在你信任该证书之前只是声明
+  // r.certificateValidity — 证书声明的 { notBefore, notAfter }
+  // r.name / r.reason / r.location / r.contactInfo / r.signingTime
+  //                    — 取自签名字典(未经认证)
+  // r.failure          — 签名不完整的原因(若 !intact)
+}
 ```
 
-### `Pdf.sign(pdfBytes, certificate, privateKey)`
+**不做任何信任评估。** `intact` 不构建证书链、不检查吊销、不处理时间戳,也不判断有效期 ——
+自签名证书可以写任何名字。相信 `claimedSigner` 之前,请用你自己的信任库评估 `r.certificate`。
 
-签名一个包含签名占位符的 PDF。返回 `Promise<Uint8Array>`。
+`intact` 但不 `coversWholeFile` 的签名签的是较早的修订版:已签名的字节未变,其后的内容未签名。
+该后续更新是否为 `/DocMDP` 或 `/FieldMDP` 所允许,不做评估。
+
+### `Pdf.Signature.verify(pdfData, signatureHex, byteRange)`
+
+验证数字签名。返回 `Promise<PdfSignatureCheck>`,字段名与 `Pdf.verifySignatures` 的报告一致。
+
+```typescript
+import { Pdf } from "documonster/pdf";
+
+const result = await Pdf.Signature.verify(pdfBytes, sigHex, [0, off1, off2, len2]);
+// result.intact           — boolean
+// result.coversWholeFile  — boolean(无未签名间隙)
+// result.digestAlgorithm  — OID 字符串
+// result.failure          — 不完整的原因(若 !intact)
+```
+
+### `Pdf.Signature.fillPlaceholder(pdfBytes, { certificate, privateKey })`
+
+填写 PDF 中已有的签名占位符 —— 只是签名的最后一步。返回 `Promise<Uint8Array>`;文件中没有占位符时抛出
+`PdfSignaturePlaceholderMissingError`(属于 `PdfStructureError`);证书不是 DER X.509、或私钥不是 DER PKCS#8
+RSA 私钥时抛出 `PdfArgumentError`——`Pdf.Builder#sign` 和 `Pdf.Editor#sign` 在调用时做同样的检查。
+`Pdf.Builder#sign` 和 `Pdf.Editor#sign` 一步写入并填写占位符。
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
 // 步骤 1:构建占位符
-const { dictString, placeholder } = Pdf.buildSignatureDictPlaceholder({
+const { dictString, placeholder } = Pdf.Signature.buildDictPlaceholder({
   name: "Alice",
   reason: "Approval",
   location: "London",
@@ -1328,12 +1507,25 @@ const { dictString, placeholder } = Pdf.buildSignatureDictPlaceholder({
 });
 
 // 步骤 2:签名(certificate = DER X.509, privateKey = DER PKCS#8)
-const signed = await Pdf.sign(pdfWithPlaceholder, certificate, privateKey);
+const signed = await Pdf.Signature.fillPlaceholder(pdfWithPlaceholder, { certificate, privateKey });
+```
+
+### `Pdf.createDrawSurface(page, rect, options?)`
+
+`documonster/draw` 的 PDF 后端:把显示列表绘制到页面上,其左上角对齐 `rect` 的左上角(单位为 PDF 点,`y` 为底边)。`options.scale` 为列表坐标的缩放倍数。绘制内容不会被裁剪或缩放到 `rect` 内——内容流的 `q`/`Q` 必须配对,而绘制表面不会得知列表何时结束——因此请把 rect 设为列表尺寸乘以缩放倍数。
+
+```typescript
+import { Draw } from "documonster/draw";
+import { Pdf } from "documonster/pdf";
+
+const doc = new Pdf.Builder();
+const page = doc.addPage();
+Draw.render(list, Pdf.createDrawSurface(page, { x: 72, y: 500, width: 200, height: 100 }));
 ```
 
 ### `Pdf.parseSvgPath(d)`
 
-将 SVG 路径 `d` 属性解析为 `PathOp` 对象数组,供 `drawPath()` 使用。
+将 SVG 路径 `d` 属性解析为 `PdfPathOp` 对象数组,供 `drawPath()` 使用。
 
 ```typescript
 import { Pdf } from "documonster/pdf";
@@ -1350,14 +1542,22 @@ import {
   PdfRenderError, // 布局/渲染失败
   PdfFontError, // 字体解析/嵌入失败
   PdfStructureError, // PDF 结构组装失败
+  PdfPasswordError, // 属于 PdfStructureError:所给密码无法打开加密文件
+  PdfLimitExceededError, // 属于 PdfStructureError:读取时触及资源上限(.limit、.allowed)
+  PdfSignaturePlaceholderMissingError, // 属于 PdfStructureError:没有可填写的签名占位符
+  PdfArgumentError, // 构建器/编辑器/转换器参数无效（.field 指明字段）
   isPdfError // 类型守卫: (err: unknown) => err is PdfError
 } from "documonster/pdf";
 ```
 
+`PdfArgumentError` 的消息以你写下的调用开头(`Pdf.fromExcel: …`、`Pdf.PageBuilder#drawText: …`、
+`Pdf.Editor#splitPages: …`),`field` 是从该调用参数名开始的路径:`options.fontSize`、
+`options.watermark.pages[0]`、`metadata.title`、`data`。
+
 所有错误均继承自 `BaseError`,并支持 `cause` 链:
 
 ```typescript
-import { Pdf } from "documonster/pdf";
+import { isPdfError, Pdf } from "documonster/pdf";
 
 try {
   await Pdf.fromExcel(workbook);

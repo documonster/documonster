@@ -16,6 +16,7 @@
  * `WorkbookSnapshot` by hand (no live workbook objects are involved).
  */
 
+import { excelNameKey } from "@utils/name-key";
 import { describe, it, expect } from "vitest";
 
 import type {
@@ -251,7 +252,7 @@ describe("binder — sheet existence checks", () => {
 describe("binder — defined names", () => {
   it("resolves a workbook-scoped name pointing at a single cell", () => {
     const defined = new Map<string, DefinedNameSnapshot>();
-    defined.set("TOTAL", { name: "Total", ranges: ["Sheet1!$A$1"] });
+    defined.set(excelNameKey("Total"), { name: "Total", ranges: ["Sheet1!$A$1"] });
     const snapshot = makeSnapshot([{ name: "Sheet1" }], defined);
 
     const out = bindFormula("Total", snapshot, "Sheet1") as BoundCellRef;
@@ -263,7 +264,7 @@ describe("binder — defined names", () => {
 
   it("resolves a defined name pointing at a range", () => {
     const defined = new Map<string, DefinedNameSnapshot>();
-    defined.set("DATA", { name: "Data", ranges: ["Sheet1!$A$1:$B$3"] });
+    defined.set(excelNameKey("Data"), { name: "Data", ranges: ["Sheet1!$A$1:$B$3"] });
     const snapshot = makeSnapshot([{ name: "Sheet1" }], defined);
 
     const out = bindFormula("Data", snapshot, "Sheet1") as BoundAreaRef;
@@ -275,7 +276,7 @@ describe("binder — defined names", () => {
 
   it("prefers a sheet-scoped name over a global with the same name", () => {
     const defined = new Map<string, DefinedNameSnapshot>();
-    defined.set("TOTAL", { name: "Total", ranges: ["Sheet1!$A$1"] });
+    defined.set(excelNameKey("Total"), { name: "Total", ranges: ["Sheet1!$A$1"] });
     defined.set(scopedNameKey("Sheet1", "Total"), {
       name: "Total",
       ranges: ["Sheet1!$Z$9"],
@@ -293,12 +294,20 @@ describe("binder — defined names", () => {
     const out = bindFormula("Unknown", snapshot, "Sheet1") as BoundNameExpr;
     expect(out.kind).toBe(BoundExprKind.NameExpr);
     expect(out.name).toBe("Unknown");
+    expect(out.nameKey).toBe("unknown");
+    // Deprecated but still populated, as before the keys existed.
     expect(out.upperName).toBe("UNKNOWN");
+  });
+
+  it("still accepts a BoundNameExpr written in the published shape it had before the keys", () => {
+    // Compile-time as much as runtime: the keys are optional additions, not replacements.
+    const legacy: BoundNameExpr = { kind: BoundExprKind.NameExpr, name: "Rate", upperName: "RATE" };
+    expect(legacy.nameKey).toBeUndefined();
   });
 
   it("returns BoundNameExpr for a formula-valued defined name (e.g. LAMBDA body)", () => {
     const defined = new Map<string, DefinedNameSnapshot>();
-    defined.set("ADD", { name: "Add", ranges: ["LAMBDA(x,y,x+y)"] });
+    defined.set(excelNameKey("Add"), { name: "Add", ranges: ["LAMBDA(x,y,x+y)"] });
     const snapshot = makeSnapshot([{ name: "Sheet1" }], defined);
 
     const out = bindFormula("Add", snapshot, "Sheet1") as BoundNameExpr;
@@ -308,7 +317,7 @@ describe("binder — defined names", () => {
 
   it("returns #NAME? for a defined name with no ranges", () => {
     const defined = new Map<string, DefinedNameSnapshot>();
-    defined.set("EMPTY", { name: "Empty", ranges: [] });
+    defined.set(excelNameKey("Empty"), { name: "Empty", ranges: [] });
     const snapshot = makeSnapshot([{ name: "Sheet1" }], defined);
 
     const out = bindFormula("Empty", snapshot, "Sheet1") as BoundLiteral;
@@ -318,7 +327,7 @@ describe("binder — defined names", () => {
 
   it("returns #VALUE! for a multi-area defined name", () => {
     const defined = new Map<string, DefinedNameSnapshot>();
-    defined.set("MULTI", { name: "Multi", ranges: ["Sheet1!$A$1", "Sheet1!$B$2"] });
+    defined.set(excelNameKey("Multi"), { name: "Multi", ranges: ["Sheet1!$A$1", "Sheet1!$B$2"] });
     const snapshot = makeSnapshot([{ name: "Sheet1" }], defined);
 
     const out = bindFormula("Multi", snapshot, "Sheet1") as BoundLiteral;
@@ -407,7 +416,7 @@ describe("binder — function calls", () => {
   it("binds LAMBDA(x,y,x+y) as a BoundLambda with parameter list and body", () => {
     const out = bindFormula("LAMBDA(x,y,x+y)", snapshot, "Sheet1") as BoundLambda;
     expect(out.kind).toBe(BoundExprKind.Lambda);
-    expect(out.params).toEqual(["X", "Y"]);
+    expect(out.params).toEqual(["x", "y"]);
     expect(out.body.kind).toBe(BoundExprKind.BinaryOp);
   });
 

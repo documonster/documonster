@@ -13,14 +13,14 @@
  * Usage: pnpm example --filter 09-chunked-builder
  */
 
-import { ChunkedBuilder, TransactionalChunkedBuilder } from "@stream";
+import { Streams } from "@stream";
 
 const decoder = new TextDecoder();
 
 /** ChunkedBuilder: accumulate pieces and materialize the final string. */
 export function exampleChunkedBuilder(): void {
   // chunkSize controls how many pieces accumulate before consolidation.
-  const builder = new ChunkedBuilder({ chunkSize: 3 });
+  const builder = new Streams.ChunkedBuilder({ chunkSize: 3 });
 
   console.log("ChunkedBuilder isEmpty (initial):", builder.isEmpty);
 
@@ -40,7 +40,7 @@ export function exampleChunkedBuilder(): void {
 
 /** TransactionalChunkedBuilder: commit a staged run of appends. */
 export function exampleTransactionalCommit(): void {
-  const builder = new TransactionalChunkedBuilder();
+  const builder = new Streams.TransactionalChunkedBuilder();
   builder.push("base");
 
   builder.snapshot();
@@ -55,7 +55,7 @@ export function exampleTransactionalCommit(): void {
 
 /** TransactionalChunkedBuilder: discard a staged run of appends. */
 export function exampleTransactionalRollback(): void {
-  const builder = new TransactionalChunkedBuilder();
+  const builder = new Streams.TransactionalChunkedBuilder();
   builder.push("keep-this");
 
   builder.snapshot();

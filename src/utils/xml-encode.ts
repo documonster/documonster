@@ -46,7 +46,9 @@ const ENCODE_ACTION = /* @__PURE__ */ (() => {
     t[i] = 2;
   }
   t[0x7f] = 2; // DEL
-  // Entity-encode chars
+  // Entity-encode chars. A literal CR in content is read back as LF (XML 1.0 §2.11 end-of-line
+  // handling), so it is written as a reference to survive.
+  t[0x0d] = 1;
   t[0x22] = 1; // "
   t[0x26] = 1; // &
   t[0x27] = 1; // '
@@ -56,6 +58,7 @@ const ENCODE_ACTION = /* @__PURE__ */ (() => {
 })();
 
 const ENCODE_ENTITIES: Record<number, string> = {
+  0x0d: "&#xD;",
   0x22: "&quot;",
   0x26: "&amp;",
   0x27: "&apos;",
@@ -146,7 +149,8 @@ export function xmlDecode(text: string): string {
 /**
  * Encode special characters for XML output.
  *
- * Escapes `<`, `>`, `&`, `"`, `'` to their entity equivalents.
+ * Escapes `<`, `>`, `&`, `"`, `'` to their entity equivalents, and a carriage return to
+ * `&#xD;` — a parser reads a literal CR as LF (XML 1.0 §2.11), so it would not round-trip.
  * Strips invalid XML control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F)
  * and lone surrogates (0xD800-0xDFFF without a pair).
  *

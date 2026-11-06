@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -18,12 +18,12 @@ const ws = Workbook.addWorksheet(wb, "Stats");
 // Sample dataset
 const nums = [12, 15, 14, 10, 18, 22, 19, 24, 13, 21];
 for (let i = 0; i < nums.length; i++) {
-  Cell.setValue(ws, i + 1, 1, nums[i]); // A1:A10
+  Cell.setValue(ws, { row: i + 1, col: 1 }, nums[i]); // A1:A10
 }
 // Second dataset for correlation
 const ys = [30, 33, 31, 29, 40, 42, 39, 45, 32, 44];
 for (let i = 0; i < ys.length; i++) {
-  Cell.setValue(ws, i + 1, 2, ys[i]); // B1:B10
+  Cell.setValue(ws, { row: i + 1, col: 2 }, ys[i]); // B1:B10
 }
 
 // Descriptive
@@ -62,7 +62,7 @@ Cell.setValue(ws, "H4", { formula: "FORECAST(16, B1:B10, A1:A10)" });
 Cell.setValue(ws, "I1", { formula: "NORM.DIST(1, 0, 1, TRUE)" }); // ≈ 0.8413
 Cell.setValue(ws, "I2", { formula: "NORM.INV(0.975, 0, 1)" }); // ≈ 1.96
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const row of [1, 2, 3, 4, 5]) {
   for (const col of ["D", "E", "F", "G", "H", "I"]) {

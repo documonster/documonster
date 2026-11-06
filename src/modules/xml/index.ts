@@ -33,24 +33,33 @@ export type {
   XmlSink,
 
   // SAX types
-  SaxTag,
-  SaxEvent,
-  SaxEventAny,
-  SaxHandlers,
-  SaxOptions,
+  XmlSaxTag,
+  XmlSaxEvent,
+  XmlSaxEventAny,
+  XmlSaxHandlers,
+  XmlSaxOptions,
 
   // Invalid character handling
-  InvalidCharHandling,
+  XmlInvalidCharHandling,
 
   // Stream writer types
-  WritableTarget,
+  XmlWritableTarget,
 
   // Parse options
   XmlParseOptions,
 
   // Conversion options
+  XmlToPlainObjectOptions,
+  XmlParseToObjectOptions,
   ToPlainObjectOptions,
-  ParseXmlToObjectOptions
+  ParseXmlToObjectOptions,
+  InvalidCharHandling,
+  WritableTarget,
+  SaxTag,
+  SaxEvent,
+  SaxEventAny,
+  SaxHandlers,
+  SaxOptions
 } from "@xml/types";
 
 // =============================================================================
@@ -64,5 +73,16 @@ export * as Xml from "@xml/surface/xml";
 // Errors
 // =============================================================================
 
-export { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "@xml/errors";
+export {
+  XmlError,
+  XmlArgumentError,
+  XmlParseError,
+  XmlLimitExceededError,
+  XmlWriteError,
+  isXmlError,
+  isXmlParseError
+} from "@xml/errors";
 export type { XmlParseLimit } from "@xml/errors";
+
+// The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
+export type { BaseErrorOptions } from "@utils/errors";

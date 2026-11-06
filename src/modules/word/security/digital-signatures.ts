@@ -28,7 +28,17 @@ import { xmlDecode } from "@xml/encode";
 
 /** Parsed digital signature metadata. */
 export interface DigitalSignatureInfo {
-  /** Signer's display name (from OfficeObject > SignatureInfoV1 > SignatureText). */
+  /**
+   * The signer's display name as the signature states it (OfficeObject >
+   * SignatureInfoV1 > SignatureText). Claimed, not verified — nothing here checks
+   * it against the certificate (see {@link cryptographicStatus}) — hence the name,
+   * as in PDF's `PdfSignatureReport.claimedSigner`.
+   */
+  readonly claimedSigner?: string;
+  /**
+   * @deprecated Use {@link claimedSigner}, which holds the same value: the name is
+   * what the signature claims, not a verified signer. Removed in 1.0.
+   */
   readonly signer?: string;
   /** Sign date (ISO 8601). */
   readonly signDate?: string;
@@ -97,7 +107,8 @@ export function parseSignatureXml(xmlStr: string, fileName: string): DigitalSign
   // job in a single linear scan and cannot exhibit super-linear runtime.
   const signer = extractTextElement(xmlStr, "SignatureText");
   if (signer !== undefined) {
-    info.signer = xmlDecode(signer);
+    info.claimedSigner = xmlDecode(signer);
+    info.signer = info.claimedSigner;
   }
 
   const sigComments = extractTextElement(xmlStr, "SignatureComments");

@@ -12,7 +12,7 @@ import * as path from "node:path";
 
 import { getWorksheets } from "@excel/core/workbook";
 import { getSheetName } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 const TEST_DATA_DIR = path.join(__dirname, "../../__tests__/data");
@@ -31,7 +31,7 @@ describe("HAN CELL xlsx files", () => {
 
     // Verify actual cell data was parsed (shared strings resolved)
     const worksheet = getWorksheets(workbook)[0];
-    const rowCount = Worksheet.rowCount(worksheet);
+    const rowCount = Row.getCount(worksheet);
     expect(rowCount).toBeGreaterThan(0);
   });
 });

@@ -1,13 +1,21 @@
 /**
- * `Security` namespace surface — encryption, document protection, security
- * policies.
+ * `Security` namespace surface — document protection and security policies.
+ * Encryption lives in `WordCrypto` (`documonster/word/crypto`).
  *
  * `import { Security } from "documonster/word"` →
- *   `Security.encrypt(...)`, `Security.protect(...)`, `Security.isProtected(doc)`,
- *   `Security.DEFAULT_SECURITY_POLICY`, … — tree-shaken via
+ *   `Security.protect(...)`, `Security.isProtected(doc)`,
+ *   `Security.verifyPassword(doc, pw)` (the protection password; the file-encryption
+ *   password is `WordCrypto.verifyPassword`),
+ *   `Security.DEFAULT_POLICY`, … — tree-shaken via
  *   `export * as Security`.
  */
-export { encryptDocx as encrypt } from "@word/security/encryption";
+import type { encryptDocx } from "@word/security/encryption";
+import {
+  DEFAULT_SECURITY_POLICY as DEFAULT_SECURITY_POLICY_IMPL,
+  STRICT_SECURITY_POLICY as STRICT_SECURITY_POLICY_IMPL,
+  resolveSecurityPolicy as resolveSecurityPolicyImpl
+} from "@word/security/policy";
+
 export {
   protectDocument as protect,
   unprotectDocument as unprotect,
@@ -16,7 +24,21 @@ export {
   verifyProtectionPassword as verifyPassword
 } from "@word/security/document-protection";
 export {
-  DEFAULT_SECURITY_POLICY,
-  STRICT_SECURITY_POLICY,
-  resolveSecurityPolicy
+  DEFAULT_SECURITY_POLICY as DEFAULT_POLICY,
+  STRICT_SECURITY_POLICY as STRICT_POLICY,
+  resolveSecurityPolicy as resolvePolicy
 } from "@word/security/policy";
+
+/**
+ * @deprecated Use `WordCrypto.encrypt` from `documonster/word/crypto`, beside
+ * `decrypt` and `verifyPassword`. Removed in 1.0.
+ */
+export const encrypt: typeof encryptDocx = async (zipBytes, password, options) =>
+  // Loaded on call, so `Security` does not bundle the encryption code for a deprecated forward.
+  (await import("@word/security/encryption")).encryptDocx(zipBytes, password, options);
+/** @deprecated Use {@link resolvePolicy}. Removed in 1.0. */
+export const resolveSecurityPolicy = resolveSecurityPolicyImpl;
+/** @deprecated Use {@link DEFAULT_POLICY}. Removed in 1.0. */
+export const DEFAULT_SECURITY_POLICY = DEFAULT_SECURITY_POLICY_IMPL;
+/** @deprecated Use {@link STRICT_POLICY}. Removed in 1.0. */
+export const STRICT_SECURITY_POLICY = STRICT_SECURITY_POLICY_IMPL;

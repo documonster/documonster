@@ -20,7 +20,7 @@ async function rewriteEntry(
     }
     archive.add(name, name === path ? patch(new TextDecoder().decode(file.data)) : file.data);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 async function roundTrip(buffer: Uint8Array) {
@@ -94,16 +94,20 @@ describe("reading hyperlinks and comments", () => {
     const cols = 60;
     for (let row = 1; row <= 20; row++) {
       for (let col = 1; col <= cols; col++) {
-        Cell.setValue(ws, row, col, {
-          text: `t${row}-${col}`,
-          hyperlink: `https://example.com/${row}/${col}`
-        });
+        Cell.setValue(
+          ws,
+          { row, col },
+          {
+            text: `t${row}-${col}`,
+            hyperlink: `https://example.com/${row}/${col}`
+          }
+        );
       }
     }
     const read = await roundTrip(await Workbook.toBuffer(wb));
     for (let row = 1; row <= 20; row++) {
       for (let col = 1; col <= cols; col++) {
-        expect(Cell.getValue(read, row, col)).toEqual({
+        expect(Cell.getValue(read, { row, col })).toEqual({
           text: `t${row}-${col}`,
           hyperlink: `https://example.com/${row}/${col}`
         });

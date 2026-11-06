@@ -5,7 +5,9 @@
  * modules (e.g. archive) can reuse it without pulling in the whole stream API.
  */
 
+import { checkStreamArgument } from "@stream/arguments";
 import type { EventEmitterLike } from "@stream/types";
+import { s } from "@utils/schema";
 
 function off(emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void): void {
   if (typeof emitter.off === "function") {
@@ -15,10 +17,24 @@ function off(emitter: EventEmitterLike, event: string, listener: (...args: any[]
   }
 }
 
+const eventEmitterSchema = s.custom(
+  e =>
+    typeof e === "object" &&
+    e !== null &&
+    (typeof (e as { once?: unknown }).once === "function" ||
+      typeof (e as { on?: unknown }).on === "function"),
+  "an event emitter"
+);
+
 /**
  * Resolve when an emitter fires `event`, reject on `error`.
  */
 export function onceEvent(emitter: EventEmitterLike, event: string): Promise<void> {
+  try {
+    checkStreamArgument(eventEmitterSchema, emitter, "Streams.LowLevel.onceEvent", "emitter");
+  } catch (error) {
+    return Promise.reject(error);
+  }
   return createEventWaiter(emitter, [event]).promise;
 }
 

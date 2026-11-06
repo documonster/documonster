@@ -82,7 +82,7 @@ async function repackToSubdirLayout(buffer: Uint8Array): Promise<Uint8Array> {
     archive.add(name, entry.data);
   }
 
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 // =============================================================================
@@ -176,7 +176,7 @@ describe("Comments subdirectory layout", () => {
       archive.add(name, entry.data);
     }
 
-    const repackedBuffer = await archive.bytes();
+    const repackedBuffer = await archive.toBuffer();
     const wb = Workbook.create();
     await Workbook.read(wb, repackedBuffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;
@@ -219,7 +219,7 @@ describe("Comments subdirectory layout", () => {
       archive.add(name, entry.data);
     }
 
-    const repackedBuffer = await archive.bytes();
+    const repackedBuffer = await archive.toBuffer();
     const wb = Workbook.create();
     await Workbook.read(wb, repackedBuffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;

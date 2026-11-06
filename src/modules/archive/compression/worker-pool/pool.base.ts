@@ -17,6 +17,7 @@ export interface ResolvedPoolOptions {
   idleTimeout: number;
   useTransferables: boolean;
   workerUrl: string | undefined;
+  streamStartTimeout: number;
 }
 
 /**
@@ -27,7 +28,8 @@ export const DEFAULT_POOL_OPTIONS: ResolvedPoolOptions = {
   minWorkers: 0,
   idleTimeout: 30_000,
   useTransferables: true,
-  workerUrl: undefined
+  workerUrl: undefined,
+  streamStartTimeout: 5000
 };
 
 /**
@@ -45,7 +47,11 @@ export function resolvePoolOptions(options?: WorkerPoolOptions): ResolvedPoolOpt
     minWorkers: Math.max(0, validatedMinWorkers),
     idleTimeout: Math.max(0, options?.idleTimeout ?? DEFAULT_POOL_OPTIONS.idleTimeout),
     useTransferables: options?.useTransferables ?? DEFAULT_POOL_OPTIONS.useTransferables,
-    workerUrl: options?.workerUrl
+    workerUrl: options?.workerUrl,
+    streamStartTimeout: Math.max(
+      0,
+      options?.streamStartTimeout ?? DEFAULT_POOL_OPTIONS.streamStartTimeout
+    )
   };
 }
 

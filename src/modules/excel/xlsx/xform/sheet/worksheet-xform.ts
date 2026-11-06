@@ -1,4 +1,8 @@
+import { Enums } from "@excel/core/enums";
+import type { LegacyControlModel } from "@excel/core/form-control";
+import { formCheckboxPlacement } from "@excel/core/form-control-placement";
 import type { ImageModel } from "@excel/core/image";
+import { rangeCreate, rangeExpand } from "@excel/core/range";
 import { StyledBlankRuns } from "@excel/core/styled-blanks";
 import type { ConditionalFormattingRule } from "@excel/types";
 import { decodeCol, encodeCol } from "@excel/utils/address";
@@ -8,6 +12,9 @@ import {
   buildWatermarkOverlayAnchors,
   buildFormControlAnchors,
   buildShapeAnchors,
+  defaultCheckboxName,
+  mediaFromDrawingAnchors,
+  preservedDrawingObjects,
   resolveMediaTarget
 } from "@excel/utils/drawing-utils";
 import {
@@ -22,10 +29,22 @@ import {
   vmlDrawingRelTargetFromWorksheet,
   vmlDrawingHFRelTargetFromWorksheet
 } from "@excel/utils/ooxml-paths";
+import { createMaxRelIds } from "@excel/utils/rel-ids";
 import { slideFormula } from "@excel/utils/shared-formula";
+import {
+  checkSheetSettings,
+  setAsideInvalidSheetSettings,
+  withKeptSheetSettings
+} from "@excel/utils/sheet-settings-checks";
+import { tableNameAt } from "@excel/utils/table-at";
+import { allocateVmlShapeIds, createVmlShapeIdSpace } from "@excel/utils/vml-shape-ids";
+import type { VmlShapeIdSpace } from "@excel/utils/vml-shape-ids";
 import { RelType } from "@excel/xlsx/rel-type";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
+import { joinFormControls, joinLegacyControls } from "@excel/xlsx/xform/drawing/form-control-join";
+import { GenericEchoXform } from "@excel/xlsx/xform/drawing/generic-echo-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import { AutoFilterXform, resolveAutoFilterRef } from "@excel/xlsx/xform/sheet/auto-filter-xform";
@@ -33,6 +52,7 @@ import { attachHyperlink, formulaResultAsValue } from "@excel/xlsx/xform/sheet/c
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
 import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
 import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
+import { SheetControlsXform } from "@excel/xlsx/xform/sheet/controls-xform";
 import { DataValidationsXform } from "@excel/xlsx/xform/sheet/data-validations-xform";
 import { DimensionXform } from "@excel/xlsx/xform/sheet/dimension-xform";
 import { DrawingXform } from "@excel/xlsx/xform/sheet/drawing-xform";
@@ -64,23 +84,121 @@ import { StdDocAttributes } from "@xml/writer";
  * `hlinkClick`, etc.), so this matches by value shape rather than trying to
  * enumerate every attribute name DrawingML might use.
  */
-function collectRelIds(
-  node: { attrs?: Record<string, unknown>; children?: unknown[] } | undefined,
-  into: Set<string>
-): void {
-  if (!node) {
+/**
+ * The write's workbook-wide VML shape-id space, kept on the prepare options every sheet shares. The
+ * package writer creates it and reserves the blocks preserved ids live in; a caller preparing one sheet
+ * on its own gets a fresh one.
+ */
+/** A preserved control as one write places it: the part number and relationship it was given. */
+interface PreparedLegacyControl extends LegacyControlModel {
+  ctrlPropId?: number;
+  ctrlPropRelId?: string;
+}
+
+/** Whether the sheet has any legacy form control — a checkbox, or one kept as read. */
+function hasVmlControls(model: {
+  formControls?: readonly unknown[];
+  legacyControls?: readonly unknown[];
+}): boolean {
+  return (model.formControls?.length ?? 0) > 0 || (model.legacyControls?.length ?? 0) > 0;
+}
+
+function vmlShapeIdSpace(options: { vmlShapeIds?: VmlShapeIdSpace }): VmlShapeIdSpace {
+  return (options.vmlShapeIds ??= createVmlShapeIdSpace());
+}
+
+/** A one-based column's style id from the prepared `<col>` models, for the row xform. */
+function columnStyleLookup(
+  cols: readonly { min: number; max: number; styleId?: number }[] | undefined
+): ((column: number) => number | undefined) | undefined {
+  const styled = (cols ?? []).filter(col => col.styleId);
+  if (styled.length === 0) {
+    return undefined;
+  }
+  return column => styled.find(col => col.min <= column && column <= col.max)?.styleId;
+}
+
+interface PreparedRow {
+  number: number;
+  min?: number;
+  max?: number;
+  cells: { type?: number; styleId?: number; address?: string }[];
+  height?: number;
+  styleId?: number;
+  hidden?: boolean;
+  outlineLevel?: number;
+}
+
+/**
+ * Take out of the prepared rows what the writer will not write, and state the dimension from what remains.
+ *
+ * A blank cell whose style is the default one, under an unstyled row and column, renders as nothing — but it is in the
+ * model, so its row's `spans` and the sheet's `<dimension>` counted it. The next read then had no such cell, and the
+ * second write reported a smaller dimension than the first: one write was not a fixed point. A row left with no cells
+ * and nothing else to say (`rowCarriesSettings`, by its written form) is dropped for the same reason.
+ */
+function dropUnwrittenBlanks(model: {
+  rows?: PreparedRow[];
+  dimensions?: { top: number; left: number; bottom: number; right: number };
+}): void {
+  const rows = model.rows;
+  if (rows === undefined) {
     return;
   }
-  if (node.attrs) {
-    for (const value of Object.values(node.attrs)) {
-      if (typeof value === "string" && /^rId\d+$/.test(value)) {
-        into.add(value);
+  let changed = false;
+  const kept: PreparedRow[] = [];
+  for (const row of rows) {
+    const cells = row.cells.filter(
+      cell => !(cell.type === Enums.ValueType.Null && cell.styleId === undefined)
+    );
+    if (cells.length !== row.cells.length) {
+      changed = true;
+      row.cells = cells;
+      const columns = cells.map(cell => colCache.decodeCol(cell.address ?? "A"));
+      row.min = columns.length > 0 ? Math.min(...columns) : 0;
+      row.max = columns.length > 0 ? Math.max(...columns) : 0;
+      if (
+        cells.length === 0 &&
+        row.height == null &&
+        !row.styleId &&
+        !row.hidden &&
+        !(row.outlineLevel ?? 0)
+      ) {
+        continue;
       }
     }
+    kept.push(row);
+  }
+  if (!changed) {
+    return;
+  }
+  model.rows = kept;
+  // The same arithmetic `getModel` uses, over the rows that are written.
+  const dimensions = rangeCreate();
+  for (const row of kept) {
+    rangeExpand(dimensions, row.number, row.min ?? 0, row.number, row.max ?? 0);
+  }
+  model.dimensions = dimensions as never;
+}
+
+/** The VML shape a preserved `<xdr:sp>` bridges to — its `a14:compatExt spid="_x0000_sN"` — or `undefined`. */
+function bridgedShapeId(
+  node: { tag?: string; attrs?: Record<string, unknown>; children?: unknown[] } | undefined
+): number | undefined {
+  if (!node) {
+    return undefined;
+  }
+  if (node.tag?.endsWith(":compatExt") === true) {
+    const match = /^_x0000_s(\d+)$/.exec(String(node.attrs?.spid ?? ""));
+    return match ? Number(match[1]) : undefined;
   }
   for (const child of node.children ?? []) {
-    collectRelIds(child as typeof node, into);
+    const found = bridgedShapeId(child as typeof node);
+    if (found !== undefined) {
+      return found;
+    }
   }
+  return undefined;
 }
 
 function mergeRule<T extends object>(rule: T, extRule: T): void {
@@ -411,6 +529,10 @@ function spanColumn(address: string | undefined): number | undefined {
 }
 
 class WorkSheetXform extends BaseXform {
+  get writerNamespaces(): WriterNamespaces {
+    return WORKSHEET_WRITER_NAMESPACES;
+  }
+
   /**
    * The child xforms, keyed by element name.
    *
@@ -487,7 +609,8 @@ class WorkSheetXform extends BaseXform {
                 }
               })
         }),
-        maxItems: maxRows
+        maxItems: maxRows,
+        limit: "maxRows"
       }),
       autoFilter: new AutoFilterXform(),
       sortState: new PreservedSubtreeXform(),
@@ -519,11 +642,16 @@ class WorkSheetXform extends BaseXform {
       }),
       conditionalFormatting: new ConditionalFormattingsXform(),
       extLst: new ExtLstXform(),
-      ignoredErrors: new IgnoredErrorsXform()
+      ignoredErrors: new IgnoredErrorsXform(),
+      controls: new SheetControlsXform()
     };
   }
 
   prepare(model, options) {
+    // Plain assignable fields reach the writer unchecked; refuse a value outside the format before writing anything.
+    checkSheetSettings(`Write XLSX (worksheet ${JSON.stringify(model.name)})`, model);
+    // A value a reader set aside goes back as it was read, wherever no one has set the field since.
+    Object.assign(model, withKeptSheetSettings(model));
     options.merges = new Merges();
     model.hyperlinks = options.hyperlinks = [];
     model.comments = options.comments = [];
@@ -531,7 +659,7 @@ class WorkSheetXform extends BaseXform {
     // Some Excel builds are surprisingly strict when legacy form controls exist.
     // Emitting a default sheetView (workbookViewId=0) matches typical Excel output
     // and avoids relying on optional element handling.
-    if (model.formControls && model.formControls.length > 0) {
+    if (hasVmlControls(model)) {
       if (!model.views || model.views.length === 0) {
         model.views = [{ workbookViewId: 0 }];
       }
@@ -549,8 +677,13 @@ class WorkSheetXform extends BaseXform {
 
     options.formulae = {};
     options.siFormulae = 0;
+    // The table each cell sits in, so an unnamed this-row reference is written with its table's name.
+    options.tableNameAt = tableNameAt(model.tables);
+    options.arrayRanges = [];
     this.map.cols.prepare(model.cols, options);
+    options.columnStyleId = columnStyleLookup(model.cols);
     this.map.sheetData.prepare(model.rows, options);
+    dropUnwrittenBlanks(model);
     this.map.conditionalFormatting.prepare(model.conditionalFormattings, options);
     // The workbook's date system, recorded on the *worksheet* model so that `render` — which runs on a
     // separately constructed `WorksheetXform`, with no options bag and no shared instance state — can convert a
@@ -571,24 +704,9 @@ class WorkSheetXform extends BaseXform {
     // prepare relationships
     const rels: RelationshipModel[] = (model.rels = []);
 
-    function nextRid(r: readonly unknown[]) {
-      // Derive the next id from the highest existing numeric suffix, not the
-      // array length. Length-based numbering only works while a rels list is a
-      // clean, gap-free rId1..rIdN sequence — true for lists this codebase
-      // builds from empty, but NOT once we preserve a subset of externally
-      // authored rels (e.g. keeping a `<xdr:grpSp>` group's original rel
-      // entries in place instead of renumbering them). There, length-based ids
-      // could collide with an id still in use.
-      let max = 0;
-      for (const rel of r) {
-        const id = (rel as { Id?: string } | undefined)?.Id;
-        const m = id ? /^rId(\d+)$/.exec(id) : null;
-        if (m) {
-          max = Math.max(max, Number(m[1]));
-        }
-      }
-      return `rId${max + 1}`;
-    }
+    // Highest-plus-one, not length-plus-one: a preserved drawing group keeps a subset of its original rel ids,
+    // so a list's length says nothing about which ids are free. Amortised O(1) per id — see `rel-ids.ts`.
+    const nextRid = createMaxRelIds();
 
     model.hyperlinks.forEach(hyperlink => {
       // Internal links (e.g. "#Sheet2!A1") use the location attribute only,
@@ -658,9 +776,10 @@ class WorkSheetXform extends BaseXform {
     // The original rId is reused when free, because the preserved part's own XML
     // may name it; on a collision `nextRid` allocates above every id in use.
     const opaqueIdRemap = new Map<string, string>();
+    const usedIds = new Set(rels.map(rel => rel.Id));
     for (const opaque of model.opaqueRels ?? []) {
-      const taken = rels.some(rel => rel.Id === opaque.id);
-      const id = taken ? nextRid(rels) : opaque.id;
+      const id = usedIds.has(opaque.id) ? nextRid(rels) : opaque.id;
+      usedIds.add(id);
       if (id !== opaque.id) {
         opaqueIdRemap.set(opaque.id, id);
       }
@@ -681,7 +800,7 @@ class WorkSheetXform extends BaseXform {
       const remapped = opaqueIdRemap.get(model.pageSetup.rId);
       if (remapped) {
         model.pageSetup = { ...model.pageSetup, rId: remapped };
-      } else if (!rels.some(rel => rel.Id === model.pageSetup.rId)) {
+      } else if (!usedIds.has(model.pageSetup.rId)) {
         // The printer-settings part is gone (dropped as unreachable, or never
         // preserved), so the attribute must go rather than dangle.
         model.pageSetup = { ...model.pageSetup, rId: undefined };
@@ -690,8 +809,8 @@ class WorkSheetXform extends BaseXform {
 
     // Handle pre-loaded drawing (from file read) that may contain charts or other non-image content.
     // Chart anchors (with chartNumber from reconcile) are preserved and get fresh rels.
-    // Group anchors (`<xdr:grpSp>`, captured verbatim by GenericEchoXform — no
-    // programmatic API mutates these) are preserved as-is. Image anchors are
+    // Preserved anchors (a group, a text box or a connector captured verbatim by
+    // GenericEchoXform — no programmatic API mutates these) are kept as-is. Image anchors are
     // discarded here and rebuilt from model.media below, since that is the path
     // Image.place()/etc. actually mutate.
     if (model.drawing && model.drawing.anchors) {
@@ -701,32 +820,18 @@ class WorkSheetXform extends BaseXform {
         drawing.name = `drawing${++options.drawingsCount}`;
       }
 
-      // Separate chart anchors (preserved + renumbered) and group anchors
-      // (preserved verbatim) from image anchors (rebuilt from model.media
+      // Separate chart anchors (preserved + renumbered) and preserved anchors
+      // (kept verbatim) from image anchors (rebuilt from model.media
       // below). `a` is a drawing-anchor model element (a prepare()-model
       // substructure shared with the drawing xform); kept `any` until that
       // model is typed.
       const chartAnchors = drawing.anchors.filter((a: any) => a.chartNumber || a.chartExNumber);
-      const groupAnchors = drawing.anchors.filter(
-        (a: any) => a.group && !a.chartNumber && !a.chartExNumber
-      );
+      const preserved = preservedDrawingObjects(drawing);
 
-      // A group anchor's captured XML references its original rIds directly
-      // (blip r:embed, hlinkClick r:id, …) with no remapping, so keep ONLY the
-      // rel entries a preserved group actually points at — not the whole
-      // original `drawing.rels`. Keeping everything would leave stale,
-      // never-referenced rels in the array, shifting `nextRid`'s numbering for
-      // freshly built chart/image rels.
-      const referencedRelIds = new Set<string>();
-      for (const anchor of groupAnchors) {
-        collectRelIds((anchor as any).group, referencedRelIds);
-      }
-      const preservedRels = (drawing.rels ?? []).filter((rel: any) => referencedRelIds.has(rel.Id));
-
-      // Reset anchors — chart anchors re-added (renumbered) below, group
-      // anchors preserved verbatim, image anchors rebuilt from model.media.
-      drawing.anchors = [...groupAnchors];
-      drawing.rels = preservedRels;
+      // Reset anchors — chart anchors re-added (renumbered) below, preserved
+      // anchors kept verbatim, image anchors rebuilt from model.media.
+      drawing.anchors = [...preserved.anchors];
+      drawing.rels = [...preserved.rels];
 
       // Re-add chart anchors and build their rels
       for (const anchor of chartAnchors) {
@@ -1044,7 +1149,8 @@ class WorkSheetXform extends BaseXform {
                 imageRelId: `rId${index + 1}`,
                 position: medium.position ?? "CH",
                 headerWidth: medium.headerWidth,
-                headerHeight: medium.headerHeight
+                headerHeight: medium.headerHeight,
+                vmlShape: medium.vmlShape
               }
             ]
           : [];
@@ -1058,6 +1164,10 @@ class WorkSheetXform extends BaseXform {
         });
         // Store header image info on the model for the VML writer and worksheet render
         model.headerImages = preparedImages;
+        // One shape per section — the VML writer keeps the last image declared for each.
+        model.headerImageShapeIds = allocateVmlShapeIds(vmlShapeIdSpace(options), {
+          count: new Set(preparedImages.map(image => image.position)).size
+        }).free;
         model.headerImage = {
           vmlRelId: rIdVml,
           ...preparedImages[0]
@@ -1106,9 +1216,43 @@ class WorkSheetXform extends BaseXform {
       });
     });
 
-    // prepare form controls (legacy checkboxes)
+    // The sheet's notes and form controls share one VML part, so they share its shape-id blocks. The
+    // controls keep the ids they were read or created with unless another part of the workbook already
+    // holds those blocks; a copy carries a renumbered id, so the live checkbox is not touched.
+    if (model.comments.length > 0 || hasVmlControls(model)) {
+      const controls = model.formControls ?? [];
+      const legacy: LegacyControlModel[] = model.legacyControls ?? [];
+      const ids = allocateVmlShapeIds(vmlShapeIdSpace(options), {
+        owner: model,
+        fixed: [
+          ...controls.map((control: { shapeId: number }) => control.shapeId),
+          ...legacy.map(control => control.shapeId)
+        ],
+        count: model.comments.length
+      });
+      // A control without a name of its own is named after its place in its block ("Check Box 3"), so
+      // the renumbered copy takes the name the id it was read or created with gives it.
+      model.formControls = controls.map(
+        (control: { shapeId: number; name?: string }, index: number) =>
+          control.shapeId === ids.fixed[index]
+            ? control
+            : {
+                ...control,
+                shapeId: ids.fixed[index],
+                name: control.name || defaultCheckboxName(control.shapeId)
+              }
+      );
+      // A preserved control is written from a copy for the same reason; its own model is never touched.
+      model.legacyControls = legacy.map((control, index): PreparedLegacyControl => ({
+        ...control,
+        shapeId: ids.fixed[controls.length + index]
+      }));
+      model.vmlShapeIds = ids.free;
+    }
+
+    // prepare form controls (legacy checkboxes and the controls kept as read)
     // Form controls share the VML file with comments, but need separate ctrlProp relationships
-    if (model.formControls && model.formControls.length > 0) {
+    if (hasVmlControls(model)) {
       // Ensure a DrawingML drawing part exists for form controls.
       // Excel often repairs sheets that have legacy controls but no <drawing> part.
       let { drawing } = model;
@@ -1140,7 +1284,7 @@ class WorkSheetXform extends BaseXform {
       // bridge to their VML shapes. The anchors come from `buildFormControlAnchors`, which the XLSB
       // writer also calls — the `spid` link between an anchor and its VML shape is exactly the kind of
       // detail two implementations get differently.
-      for (const control of model.formControls) {
+      const addCtrlProp = (control: { ctrlPropId?: number; ctrlPropRelId?: string }) => {
         const globalCtrlPropId = options.formControlRefs.length + 1;
         control.ctrlPropId = globalCtrlPropId;
         const relId = nextRid(rels);
@@ -1151,8 +1295,50 @@ class WorkSheetXform extends BaseXform {
           Target: ctrlPropRelTargetFromWorksheet(globalCtrlPropId)
         });
         options.formControlRefs.push(globalCtrlPropId);
+      };
+      const checkboxes = model.formControls ?? [];
+      checkboxes.forEach(addCtrlProp);
+      // A preserved control's `<control>` is written when what its `r:id` reached is written too: its
+      // ctrlProp part, re-numbered here, or a preserved part (an ActiveX control's) whose relationship
+      // the sheet keeps. Without either the entry would dangle, so only the shape is kept.
+      const legacy: PreparedLegacyControl[] = model.legacyControls ?? [];
+      for (const control of legacy) {
+        if (control.control === undefined) {
+          continue;
+        }
+        if (control.ctrlPropXml !== undefined) {
+          addCtrlProp(control);
+          continue;
+        }
+        const rId = String(control.control.attrs["r:id"] ?? "");
+        if ((model.opaqueRels ?? []).some((rel: { id: string }) => rel.id === rId)) {
+          control.ctrlPropRelId = opaqueIdRemap.get(rId) ?? rId;
+        }
       }
-      drawing.anchors.push(...buildFormControlAnchors(model.formControls, drawing.anchors.length));
+      drawing.anchors.push(
+        ...buildFormControlAnchors(
+          [...checkboxes, ...legacy.filter(control => control.ctrlPropRelId !== undefined)],
+          drawing.anchors.length
+        )
+      );
+    }
+
+    // **A drawing with nothing left in it is not written.** A drawing read from a file is carried
+    // through every write, and once its last picture is removed nothing above puts an anchor back —
+    // so an empty `<xdr:wsDr/>` was written with its relationship and the sheet's `<drawing>` naming it.
+    // Everything that lives in a drawing (pictures, charts, shapes, groups, control bridges) has been
+    // added by now, so an empty one is empty for good.
+    if (model.drawing && (model.drawing.anchors ?? []).length === 0) {
+      const empty = model.drawing;
+      const relIndex = rels.findIndex(rel => rel.Id === empty.rId);
+      if (relIndex !== -1) {
+        rels.splice(relIndex, 1);
+      }
+      const drawingIndex = options.drawings.indexOf(empty);
+      if (drawingIndex !== -1) {
+        options.drawings.splice(drawingIndex, 1);
+      }
+      model.drawing = undefined;
     }
 
     // prepare ext items
@@ -1172,7 +1358,7 @@ class WorkSheetXform extends BaseXform {
         )
       ].join(" ");
     }
-    if (model.formControls && model.formControls.length > 0) {
+    if (hasVmlControls(model)) {
       worksheetAttrs["xmlns:x14"] = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
       worksheetAttrs["xmlns:xdr"] =
         "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
@@ -1289,17 +1475,20 @@ class WorkSheetXform extends BaseXform {
 
     // Controls section for legacy form controls (checkboxes, etc.)
     // Excel expects <controls> entries that reference ctrlProp relationships.
-    if (model.formControls && model.formControls.length > 0) {
+    const legacyEntries = ((model.legacyControls ?? []) as PreparedLegacyControl[]).filter(
+      control => control.control !== undefined && control.ctrlPropRelId !== undefined
+    );
+    if ((model.formControls?.length ?? 0) > 0 || legacyEntries.length > 0) {
       xmlStream.openNode("mc:AlternateContent");
       xmlStream.openNode("mc:Choice", { Requires: "x14" });
       xmlStream.openNode("controls");
 
-      for (const control of model.formControls) {
+      for (const control of model.formControls ?? []) {
         if (!control.ctrlPropRelId) {
           continue;
         }
 
-        const defaultName = `Check Box ${Math.max(1, control.shapeId - 1024)}`;
+        const defaultName = defaultCheckboxName(control.shapeId);
         xmlStream.openNode("mc:AlternateContent");
         xmlStream.openNode("mc:Choice", { Requires: "x14" });
         xmlStream.openNode("control", {
@@ -1315,7 +1504,11 @@ class WorkSheetXform extends BaseXform {
           autoLine: 0,
           autoPict: 0
         });
-        xmlStream.openNode("anchor");
+        const placement = formCheckboxPlacement(control);
+        xmlStream.openNode("anchor", {
+          moveWithCells: placement === "absolute" ? undefined : 1,
+          sizeWithCells: placement === "twoCell" ? 1 : undefined
+        });
         xmlStream.openNode("from");
         xmlStream.leafNode("xdr:col", undefined, control.tl.col);
         xmlStream.leafNode("xdr:colOff", undefined, control.tl.colOff);
@@ -1331,6 +1524,23 @@ class WorkSheetXform extends BaseXform {
         xmlStream.closeNode(); // anchor
         xmlStream.closeNode(); // controlPr
         xmlStream.closeNode(); // control
+        xmlStream.closeNode(); // mc:Choice
+        xmlStream.leafNode("mc:Fallback");
+        xmlStream.closeNode(); // mc:AlternateContent
+      }
+
+      const echo = new GenericEchoXform("control");
+      for (const control of legacyEntries) {
+        xmlStream.openNode("mc:AlternateContent");
+        xmlStream.openNode("mc:Choice", { Requires: "x14" });
+        echo.render(xmlStream, {
+          ...control.control!,
+          attrs: {
+            ...control.control!.attrs,
+            shapeId: String(control.shapeId),
+            "r:id": control.ctrlPropRelId!
+          }
+        });
         xmlStream.closeNode(); // mc:Choice
         xmlStream.leafNode("mc:Fallback");
         xmlStream.closeNode(); // mc:AlternateContent
@@ -1453,6 +1663,9 @@ class WorkSheetXform extends BaseXform {
           colBreaks: this.map.colBreaks.model ?? [],
           ignoredErrors: this.map.ignoredErrors.model ?? []
         };
+        if (this.map.controls.model?.length) {
+          this.model.controlEntries = this.map.controls.model;
+        }
 
         if (this.map.autoFilter.model) {
           this.model.autoFilter = this.map.autoFilter.model;
@@ -1479,6 +1692,10 @@ class WorkSheetXform extends BaseXform {
         if (this.map.sheetProtection.model) {
           this.model.sheetProtection = this.map.sheetProtection.model;
         }
+        // A setting outside the format's vocabulary is read as absent and kept as read, so that writing the sheet back
+        // neither refuses a value the caller never set nor loses one the file had. `readWithDiagnostics` reports it.
+        // Every value this reader parses has text to keep, so nothing is dropped here.
+        setAsideInvalidSheetSettings("worksheet", this.model);
 
         return false;
       }
@@ -1553,6 +1770,39 @@ class WorkSheetXform extends BaseXform {
         }
       }
     }
+    // Legacy form controls: the VML shape draws a control and says most of what it is; the sheet's
+    // `<controls>` entry names it and anchors it exactly; its ctrlProp part holds the state Excel 2010+
+    // reads. All three are joined here, the VML first because a control without a shape is not drawn.
+    const sheetVml = relList
+      .filter(
+        rel =>
+          rel.Type === RelType.VmlDrawing &&
+          rel.TargetMode !== "External" &&
+          rel.Id !== model.legacyDrawingHF?.rId
+      )
+      .map(rel => options.vmlDrawings?.[resolveRelTarget("xl/worksheets/", rel.Target)]);
+    const vmlControls = sheetVml.flatMap(vml => vml?.formControls ?? []);
+    const ctrlPropFor = (rId: string) => {
+      const rel = rels[rId];
+      return rel?.Type === RelType.CtrlProp
+        ? options.ctrlProps?.[resolveRelTarget("xl/worksheets/", rel.Target)]
+        : undefined;
+    };
+    if (vmlControls.length > 0) {
+      model.formControls = joinFormControls(vmlControls, model.controlEntries ?? [], ctrlPropFor);
+    }
+    // Every other control — a button, a list box, a spinner — is kept whole, so the regenerated VML and
+    // `<controls>` carry it too.
+    const legacyControls = sheetVml.flatMap(vml => vml?.legacyControls ?? []);
+    if (legacyControls.length > 0) {
+      model.legacyControls = joinLegacyControls(
+        legacyControls,
+        model.controlEntries ?? [],
+        ctrlPropFor
+      );
+    }
+    delete model.controlEntries;
+
     // **Attached by address after the cell pass, not looked up by every cell.** The per-cell lookup ran once per cell
     // whether or not the sheet had a single hyperlink or comment; measured on a 3.4M-cell sheet with neither, it was
     // about a second of a 4.8 s read. See `attachAnnotations`.
@@ -1650,39 +1900,25 @@ class WorkSheetXform extends BaseXform {
               name: drawingName,
               rels: options.drawingRels?.[drawingName] ?? drawing.rels ?? []
             };
+            // A form control's hidden bridge shape is regenerated from the control on write, so keeping the one
+            // read here as well would put two shapes on the sheet for one control.
+            const controlShapeIds = new Set(
+              [...(model.formControls ?? []), ...(model.legacyControls ?? [])]
+                .map((control: { shapeId?: number }) => control.shapeId)
+                .filter((shapeId): shapeId is number => shapeId !== undefined)
+            );
+            if (controlShapeIds.size > 0) {
+              model.drawing.anchors = model.drawing.anchors.filter((anchor: any) => {
+                const shapeId =
+                  anchor.preserved?.tag === "xdr:sp" ? bridgedShapeId(anchor.preserved) : undefined;
+                return shapeId === undefined || !controlShapeIds.has(shapeId);
+              });
+            }
 
-            // Also extract images to model.media for backward compatibility.
-            drawing.anchors.forEach(anchor => {
-              if (anchor.medium) {
-                // Detect overlay watermarks: drawings that carry alphaModFix
-                const hasAlpha =
-                  anchor.medium.alphaModFix !== undefined && anchor.medium.alphaModFix < 100000;
-                if (hasAlpha) {
-                  model.media.push({
-                    type: "watermark",
-                    imageId: anchor.medium.index,
-                    opacity: anchor.medium.alphaModFix / 100000
-                  });
-                } else {
-                  model.media.push({
-                    type: "image",
-                    imageId: anchor.medium.index,
-                    range: anchor.range,
-                    hyperlinks: anchor.picture.hyperlinks,
-                    // Carry the picture's absolute geometry through so a plain
-                    // re-save (which discards the parsed anchor and rebuilds it
-                    // from this media entry — see the drawing-reset block in
-                    // prepare()) doesn't zero out an `editAs="oneCell"`
-                    // picture's position/size, rendering it invisible.
-                    xfrmOffX: anchor.picture.xfrmOffX,
-                    xfrmOffY: anchor.picture.xfrmOffY,
-                    xfrmExtCx: anchor.picture.xfrmExtCx,
-                    xfrmExtCy: anchor.picture.xfrmExtCy,
-                    rawSpPr: anchor.picture.rawSpPr
-                  });
-                }
-              }
-            });
+            // Also extract images to model.media for backward compatibility. Overlay watermarks are
+            // the pictures drawn translucent; see `mediaFromDrawingAnchors`, which the XLSB reader
+            // shares, and the drawing-reset block in prepare() for why the geometry is carried.
+            model.media.push(...mediaFromDrawingAnchors(drawing.anchors));
           } else {
             // Drawing data not found - clear the stale reference
             model.drawing = undefined;
@@ -1714,10 +1950,10 @@ class WorkSheetXform extends BaseXform {
 
     const headerVmlRel = model.legacyDrawingHF && rels[model.legacyDrawingHF.rId];
     if (headerVmlRel) {
-      const match = /\/(vmlDrawingHF\d+)[.]vml$/.exec(headerVmlRel.Target);
+      const match = /\/(vmlDrawing(?:HF)?\d+)[.]vml$/.exec(headerVmlRel.Target);
       const name = match?.[1];
       const images = name && options.vmlDrawingHF?.[name];
-      const imageRels = name && options.vmlDrawingHFRels?.[name];
+      const imageRels = name && options.vmlDrawingRels?.[name];
       if (images && imageRels) {
         const relMap = Object.fromEntries(imageRels.map(rel => [rel.Id, rel]));
         for (const image of images) {
@@ -1729,7 +1965,8 @@ class WorkSheetXform extends BaseXform {
               imageId,
               headerWidth: image.width,
               headerHeight: image.height,
-              position: image.position
+              position: image.position,
+              ...(image.shape === undefined ? {} : { vmlShape: image.shape })
             });
           }
         }
@@ -1766,5 +2003,11 @@ class WorkSheetXform extends BaseXform {
     delete model.comments;
   }
 }
+
+/** The worksheet writer declares its fixed set, and writes back the root's other declarations. */
+const WORKSHEET_WRITER_NAMESPACES: WriterNamespaces = {
+  fixed: WorkSheetXform.WORKSHEET_ATTRIBUTES,
+  preservesDocumentPrefixes: true
+};
 
 export { WorkSheetXform };

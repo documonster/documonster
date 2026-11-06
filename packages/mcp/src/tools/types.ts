@@ -58,6 +58,13 @@ type ShapeInput<Shape extends ZodRawShape> = {
 /**
  * A tool definition with its argument type erased, so tools with different
  * shapes can live in one array.
+ *
+ * `handler` takes arguments **already validated** against `inputSchema` — the
+ * server validates them before every call, and the handler relies on it rather
+ * than checking again. Code that calls a handler itself, outside a server,
+ * validates first: `tool.handler(z.object(tool.inputSchema).parse(args), context)`.
+ * The definitions are published for registering, filtering and inspecting
+ * tools; that is the contract they keep.
  */
 export interface AnyToolDefinition {
   readonly name: string;

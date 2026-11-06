@@ -1,7 +1,11 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
+import {
+  BaseCellAnchorXform,
+  preservedObjectXforms
+} from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
 import type { ExtModel } from "@excel/xlsx/xform/drawing/ext-xform";
+import type { EchoNode } from "@excel/xlsx/xform/drawing/generic-echo-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
@@ -22,6 +26,8 @@ interface AbsoluteModel {
   picture?: PicModel;
   graphicFrame?: GraphicFrameModel;
   shape?: ShapeRenderModel;
+  /** A group, shape or connector read from a file and written back verbatim. */
+  preserved?: EchoNode;
   medium?: unknown;
 }
 
@@ -99,6 +105,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
       // with no chart reference, so the anchor was ignored on open.
       "xdr:graphicFrame": new GraphicFrameXform(),
       "xdr:userShape": new ShapeXform(),
+      ...preservedObjectXforms(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -124,6 +131,8 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
       this.map["xdr:pic"].render(xmlStream, model.picture);
     } else if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
+    } else if (model.preserved) {
+      this.renderPreserved(xmlStream, model.preserved);
     } else if (model.shape?.kind === "userShape") {
       this.map["xdr:userShape"].render(xmlStream, model.shape);
     }
@@ -145,6 +154,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
         this.model.range.ext = this.map["xdr:ext"].model;
         this.model.picture = this.map["xdr:pic"].model;
         this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
+        this.model.preserved = this.takePreserved();
         return false;
       default:
         return true;

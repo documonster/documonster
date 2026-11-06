@@ -599,6 +599,13 @@ export interface TextContent {
   readonly type: "text";
   /** Text string. */
   readonly text: string;
+  /**
+   * Set when the text is instruction text (`w:instrText`) of a field read in
+   * pieces, at its place among the fields nested in that instruction —
+   * `" = \"EU\" \""` between `{ MERGEFIELD Region }` and `{ MERGEFIELD Big }`.
+   * Written back as instruction text.
+   */
+  readonly fieldCode?: boolean;
 }
 
 /** Line break. */
@@ -684,12 +691,46 @@ export interface EndnoteRefContent {
 /** Field code (PAGE, NUMPAGES, DATE, TOC, etc.). */
 export interface FieldContent {
   readonly type: "field";
-  /** Field instruction text (e.g. " PAGE ", " NUMPAGES "). */
+  /**
+   * Field instruction text (e.g. `"PAGE"`, `"NUMPAGES \\* roman"`). For a whole
+   * field the reader keeps it trimmed and the writer writes it trimmed, so
+   * surrounding spaces given here are not kept. For a piece
+   * ({@link fieldChar}) it is the text beside the character, as written.
+   */
   readonly instruction: string;
   /** Cached display value. */
   readonly cachedValue?: string;
   /** Legacy form field data (from w:ffData). */
   readonly formField?: FormField;
+  /**
+   * Range markers inside the field, in source order: between its begin and
+   * separate characters (`"instruction"`) or between separate and end
+   * (`"result"`), at a character offset into {@link instruction} or
+   * {@link cachedValue}.
+   */
+  readonly rangeMarkers?: readonly FieldRangeMarker[];
+  /**
+   * Set when this content is one field character of a field that is not
+   * held whole by one run — a field whose result spans paragraphs (a TOC,
+   * INDEX or BIBLIOGRAPHY without an SDT), one that nests another, or one
+   * whose field characters share a run with other content. It stands for
+   * that character alone: the field's result is the content between its
+   * `"separate"` and `"end"` pieces, wherever they are, and is not in
+   * {@link cachedValue}. {@link instruction} is the instruction text written
+   * beside the character — after a `"begin"`, before a `"separate"` or
+   * `"end"` — so the field's whole instruction is the pieces' instructions
+   * joined. Unset, the content is the whole field.
+   */
+  readonly fieldChar?: "begin" | "separate" | "end";
+}
+
+/** A range marker inside a complex field (see {@link FieldContent.rangeMarkers}). */
+export interface FieldRangeMarker {
+  readonly marker: RangeMarker;
+  /** The part of the field the marker sits in. */
+  readonly part: "instruction" | "result";
+  /** Offset, in UTF-16 code units, into the instruction or the cached result. */
+  readonly offset: number;
 }
 
 /** Inline image within a run. */
@@ -727,6 +768,12 @@ export interface InlineImageContent {
     readonly r?: number;
     readonly b?: number;
   };
+  /**
+   * The `wp:inline` / `wp:anchor` markup the drawing was read with, beyond
+   * its fields. Populated by the reader (see {@link DrawingFrame}).
+   * @internal
+   */
+  readonly _frame?: DrawingFrame;
 }
 
 /** Carriage return element. */
@@ -749,7 +796,11 @@ export interface LastRenderedPageBreakContent {
   readonly type: "lastRenderedPageBreak";
 }
 
-/** Annotation reference (for comments). */
+/**
+ * The annotation reference mark (`w:annotationRef`) at the start of a
+ * comment's own body, where Word draws the comment's number. It carries no id
+ * in the file; the comment's anchor in the story is {@link CommentReference}.
+ */
 export interface AnnotationReferenceContent {
   readonly type: "annotationReference";
   readonly id: number;
@@ -804,7 +855,7 @@ export interface OpaqueRunContent {
 // =============================================================================
 
 /** A run of text with uniform formatting. */
-export interface Run {
+export interface Run extends ParagraphChildRangeMarkers {
   /** Run properties (formatting). */
   readonly properties?: RunProperties;
   /** Content items within this run. */
@@ -826,7 +877,7 @@ export interface RevisionInfo {
 }
 
 /** An inserted text run (track changes). */
-export interface InsertedRun {
+export interface InsertedRun extends ParagraphChildRangeMarkers {
   readonly type: "insertedRun";
   /** Revision metadata. */
   readonly revision: RevisionInfo;
@@ -835,7 +886,7 @@ export interface InsertedRun {
 }
 
 /** A deleted text run (track changes). */
-export interface DeletedRun {
+export interface DeletedRun extends ParagraphChildRangeMarkers {
   readonly type: "deletedRun";
   /** Revision metadata. */
   readonly revision: RevisionInfo;
@@ -844,7 +895,7 @@ export interface DeletedRun {
 }
 
 /** A moved-from run (track changes — source of a move). */
-export interface MovedFromRun {
+export interface MovedFromRun extends ParagraphChildRangeMarkers {
   readonly type: "movedFromRun";
   /** Revision metadata. */
   readonly revision: RevisionInfo;
@@ -853,7 +904,7 @@ export interface MovedFromRun {
 }
 
 /** A moved-to run (track changes — destination of a move). */
-export interface MovedToRun {
+export interface MovedToRun extends ParagraphChildRangeMarkers {
   readonly type: "movedToRun";
   /** Revision metadata. */
   readonly revision: RevisionInfo;
@@ -862,7 +913,7 @@ export interface MovedToRun {
 }
 
 /** Move range marker (w:moveFromRangeStart/End, w:moveToRangeStart/End). */
-export interface MoveRangeMarker {
+export interface MoveRangeMarker extends ParagraphChildRangeMarkers {
   readonly type: "moveFromRangeStart" | "moveFromRangeEnd" | "moveToRangeStart" | "moveToRangeEnd";
   /** Revision ID. */
   readonly id: number;
@@ -875,7 +926,7 @@ export interface MoveRangeMarker {
 }
 
 /** Custom XML tracking range marker. */
-export interface CustomXmlTrackingMarker {
+export interface CustomXmlTrackingMarker extends ParagraphChildRangeMarkers {
   readonly type:
     | "customXmlInsRangeStart"
     | "customXmlInsRangeEnd"
@@ -968,21 +1019,32 @@ export interface CommentDef {
 }
 
 /** Comment range start marker. */
-export interface CommentRangeStart {
+export interface CommentRangeStart extends ParagraphChildRangeMarkers {
   readonly type: "commentRangeStart";
   readonly id: number;
 }
 
 /** Comment range end marker. */
-export interface CommentRangeEnd {
+export interface CommentRangeEnd extends ParagraphChildRangeMarkers {
   readonly type: "commentRangeEnd";
   readonly id: number;
 }
 
-/** Comment reference (in a run, links to a comment). */
-export interface CommentReference {
+/**
+ * A comment's reference mark (`w:commentReference`): the comment's anchor in
+ * the story, written as a run of its own. A run in the file that holds other
+ * content as well is read as that content split around this child, so the
+ * reference keeps its place. (The mark inside the comment's own body is
+ * `w:annotationRef`, {@link AnnotationReferenceContent}.)
+ */
+export interface CommentReference extends ParagraphChildRangeMarkers {
   readonly type: "commentReference";
   readonly id: number;
+  /**
+   * Formatting of the run holding the mark — usually the `CommentReference`
+   * character style.
+   */
+  readonly properties?: RunProperties;
 }
 
 // =============================================================================
@@ -1205,12 +1267,17 @@ export interface ParagraphProperties {
 // =============================================================================
 
 /** A paragraph. */
-export interface Paragraph {
+export interface Paragraph extends BlockRangeMarkers {
   readonly type: "paragraph";
   /** Paragraph properties. */
   readonly properties?: ParagraphProperties;
   /** Runs and hyperlinks within this paragraph. */
   readonly children: readonly ParagraphChild[];
+  /**
+   * Range markers after the paragraph's last child, before its end — markers of
+   * a kind that is not itself a {@link ParagraphChild} (a range permission).
+   */
+  readonly rangeMarkersAfter?: readonly RangeMarker[];
   /** Paragraph ID (w14:paraId) for commenting/collaboration features. */
   readonly paraId?: string;
   /** Text ID (w14:textId) for commenting/collaboration features. */
@@ -1218,7 +1285,7 @@ export interface Paragraph {
 }
 
 /** A hyperlink within a paragraph. */
-export interface Hyperlink {
+export interface Hyperlink extends ParagraphChildRangeMarkers {
   readonly type: "hyperlink";
   /** Relationship ID for external hyperlinks. */
   readonly rId?: string;
@@ -1234,12 +1301,31 @@ export interface Hyperlink {
   readonly tgtFrame?: string;
   /** Document location bookmark/fragment ID (w:docLocation). */
   readonly docLocation?: string;
-  /** Runs within the hyperlink. */
+  /**
+   * Runs within the hyperlink. Range markers between them ride on the run
+   * after them ({@link ParagraphChildRangeMarkers.rangeMarkersBefore}).
+   */
   readonly children: readonly Run[];
+  /** Range markers after the last run, inside the hyperlink. */
+  readonly rangeMarkersAfter?: readonly RangeMarker[];
+  /**
+   * Content of the link other than plain runs and range markers — tracked
+   * changes, content controls, nested links — each written
+   * before `children[before]` (after the last run when `before` is past the
+   * end), in order.
+   */
+  readonly nestedChildren?: readonly HyperlinkNestedChild[];
+}
+
+/** A paragraph child nested in a hyperlink among its runs (see {@link Hyperlink.nestedChildren}). */
+export interface HyperlinkNestedChild {
+  /** Index of the run in {@link Hyperlink.children} the child is written before. */
+  readonly before: number;
+  readonly child: Exclude<ParagraphChild, Run>;
 }
 
 /** Bookmark start marker. */
-export interface BookmarkStart {
+export interface BookmarkStart extends ParagraphChildRangeMarkers {
   readonly type: "bookmarkStart";
   readonly id: number;
   readonly name: string;
@@ -1252,9 +1338,164 @@ export interface BookmarkStart {
 }
 
 /** Bookmark end marker. */
-export interface BookmarkEnd {
+export interface BookmarkEnd extends ParagraphChildRangeMarkers {
   readonly type: "bookmarkEnd";
   readonly id: number;
+  /**
+   * Name of the bookmark this end closes. DOCX does not store it
+   * (`w:bookmarkEnd` has only an id); the writer uses it to pair the end with
+   * its start when several open bookmarks share an id, as overlapping ranges
+   * built by hand or merged from several documents can.
+   */
+  readonly name?: string;
+}
+
+/**
+ * Range markers written immediately before a block, between it and the block
+ * before it (see {@link RangeMarker}). Every block type that can appear in a
+ * body carries this, and so does a run, for the content of an SDT made of runs.
+ */
+export interface BlockRangeMarkers {
+  /** Range markers between the previous block and this one. */
+  readonly rangeMarkersBefore?: readonly RangeMarker[];
+}
+
+/**
+ * Range markers written immediately before a paragraph child. A marker kind
+ * that is a {@link ParagraphChild} itself (a bookmark, comment or revision
+ * range) is a child of its own; the others — range permissions and the span
+ * markers ({@link BidiStart}, {@link SmartTagStart} and their ends) — ride here
+ * on the child that follows them, and on {@link Paragraph.rangeMarkersAfter} at
+ * the end of the paragraph. Every paragraph child carries this; a run also
+ * uses it inside an SDT made of runs.
+ */
+export interface ParagraphChildRangeMarkers {
+  /** Range markers between the previous child (or the paragraph start) and this one. */
+  readonly rangeMarkersBefore?: readonly RangeMarker[];
+}
+
+/**
+ * A range marker: a zero-width point that opens or closes a range (bookmark,
+ * comment anchor, range permission, move or custom-XML revision range), or a
+ * span of paragraph content kept in a wrapper element (a bidirectional
+ * embedding or override, a smart tag).
+ *
+ * Span markers (`bidiStart`/`bidiEnd`, `smartTagStart`/`smartTagEnd`) only
+ * occur inside paragraph content and carry no id: they pair by nesting, like
+ * the elements they stand for.
+ *
+ * OOXML lets these sit between blocks as well as inside a paragraph — Word
+ * starts a bookmark that spans a table before the `w:tbl`, between rows, or
+ * between cells. The model keeps them where they were without adding entries
+ * to any list of blocks:
+ *
+ * - between body blocks: {@link BlockRangeMarkers.rangeMarkersBefore} on the
+ *   block that follows, and {@link DocxDocument.bodyRangeMarkersAfter} after
+ *   the last one;
+ * - inside a table: {@link TableRow.rangeMarkersBefore},
+ *   {@link TableCell.rangeMarkersBefore}, {@link TableRow.rangeMarkersAfter}
+ *   and {@link Table.rangeMarkersAfter}.
+ *
+ * Containers whose content is paragraphs only (table cells, headers, footers,
+ * notes, comments, SDT content) are read with the marker moved into the nearest
+ * paragraph, which delimits the same text: a start (and anything after it)
+ * into the start of the next paragraph, an end into the end of the previous one.
+ */
+export type RangeMarker =
+  | BookmarkStart
+  | BookmarkEnd
+  | CommentRangeStart
+  | CommentRangeEnd
+  | MoveRangeMarker
+  | CustomXmlTrackingMarker
+  | PermStart
+  | PermEnd
+  | BidiStart
+  | BidiEnd
+  | SmartTagStart
+  | SmartTagEnd;
+
+/**
+ * Start of a span of paragraph content laid out in an explicit direction: a
+ * bidirectional embedding (`w:dir`) or override (`w:bdo`), which runs to the
+ * matching {@link BidiEnd}; spans nest.
+ *
+ * Like a range permission it is a marker, not a paragraph child: it rides on
+ * the child after it ({@link ParagraphChildRangeMarkers.rangeMarkersBefore},
+ * or {@link Paragraph.rangeMarkersAfter} / {@link Hyperlink.rangeMarkersAfter}
+ * at the end), and the content it spans stays ordinary paragraph children.
+ */
+export interface BidiStart {
+  readonly type: "bidiStart";
+  /**
+   * `"embedding"` (`w:dir`): the span is a unit of `direction` within the
+   * line, its characters keeping their own directionality. `"override"`
+   * (`w:bdo`): every character is laid out in `direction`.
+   */
+  readonly kind: "embedding" | "override";
+  readonly direction: "ltr" | "rtl";
+}
+
+/** End of the innermost open {@link BidiStart}. */
+export interface BidiEnd {
+  readonly type: "bidiEnd";
+}
+
+/**
+ * Start of a smart tag (`w:smartTag`): the paragraph content up to the
+ * matching {@link SmartTagEnd} that an application recognised as a semantic
+ * entity (`uri` + `element`, e.g. a place or a date); smart tags nest. A
+ * marker riding on the child after it, as {@link BidiStart} is; the content
+ * stays ordinary paragraph children.
+ */
+export interface SmartTagStart {
+  readonly type: "smartTagStart";
+  /** Namespace of the smart tag type (`w:uri`). */
+  readonly uri?: string;
+  /** Name of the smart tag type (`w:element`). */
+  readonly element: string;
+  /** Smart tag properties (`w:smartTagPr/w:attr`), in order. */
+  readonly attributes?: readonly SmartTagAttribute[];
+}
+
+/** A smart tag property (`w:attr`). */
+export interface SmartTagAttribute {
+  readonly uri?: string;
+  readonly name: string;
+  readonly val: string;
+}
+
+/** End of the innermost open {@link SmartTagStart}. */
+export interface SmartTagEnd {
+  readonly type: "smartTagEnd";
+}
+
+/**
+ * Start of a range editing permission (`w:permStart`): the text up to the
+ * matching {@link PermEnd} (same `id`) stays editable for `edGrp` or `ed` when
+ * the document is protected.
+ */
+export interface PermStart {
+  readonly type: "permStart";
+  readonly id: number;
+  /** Group allowed to edit (`w:edGrp`), e.g. `"everyone"`, `"editors"`. */
+  readonly edGrp?: string;
+  /** User allowed to edit (`w:ed`), e.g. an e-mail address or `DOMAIN\user`. */
+  readonly ed?: string;
+  /** First table column of a column range. */
+  readonly colFirst?: number;
+  /** Last table column of a column range. */
+  readonly colLast?: number;
+  /** Displaced by custom XML. */
+  readonly displacedByCustomXml?: "next" | "prev";
+}
+
+/** End of a range editing permission (`w:permEnd`); see {@link PermStart}. */
+export interface PermEnd {
+  readonly type: "permEnd";
+  readonly id: number;
+  /** Displaced by custom XML. */
+  readonly displacedByCustomXml?: "next" | "prev";
 }
 
 /** Items that can appear as children of a paragraph. */
@@ -1278,7 +1519,7 @@ export type ParagraphChild =
  * Opaque paragraph child: preserves unknown XML elements found at paragraph level
  * for round-trip fidelity. The writer will emit the raw XML verbatim.
  */
-export interface OpaqueParagraphChild {
+export interface OpaqueParagraphChild extends ParagraphChildRangeMarkers {
   readonly type: "opaqueParagraphChild";
   /** Raw XML string of the unrecognized paragraph child element. */
   readonly rawXml: string;
@@ -1504,6 +1745,26 @@ export interface TableCell {
   readonly properties?: TableCellProperties;
   /** Cell content (must contain at least one paragraph). */
   readonly content: readonly (Paragraph | Table)[];
+  /** Range markers in the row immediately before this cell (`w:tr` level). */
+  readonly rangeMarkersBefore?: readonly RangeMarker[];
+  /**
+   * Block-level content controls (`w:sdt`) around runs of {@link content}:
+   * the content keeps the blocks they hold, and each control says which, so
+   * it is written back around them. Outer controls come before the controls
+   * nested in them. A control that does not fit the content — out of range,
+   * or overlapping another without nesting — is not written.
+   */
+  readonly contentControls?: readonly BlockContentControl[];
+}
+
+/** A content control around blocks of a list that holds no SDT itself (see {@link TableCell.contentControls}). */
+export interface BlockContentControl {
+  /** The control's properties, as a body-level {@link StructuredDocumentTag} has them. */
+  readonly properties?: SdtProperties;
+  /** Index of the first block it holds. */
+  readonly start: number;
+  /** Index after the last block it holds (`start` when it holds none). */
+  readonly end: number;
 }
 
 /** Table row. */
@@ -1512,10 +1773,14 @@ export interface TableRow {
   readonly properties?: TableRowProperties;
   /** Cells in this row. */
   readonly cells: readonly TableCell[];
+  /** Range markers in the table immediately before this row (`w:tbl` level). */
+  readonly rangeMarkersBefore?: readonly RangeMarker[];
+  /** Range markers in the row after its last cell (`w:tr` level). */
+  readonly rangeMarkersAfter?: readonly RangeMarker[];
 }
 
 /** A table. */
-export interface Table {
+export interface Table extends BlockRangeMarkers {
   readonly type: "table";
   /** Table properties. */
   readonly properties?: TableProperties;
@@ -1523,6 +1788,8 @@ export interface Table {
   readonly columnWidths?: readonly Twips[];
   /** Rows. */
   readonly rows: readonly TableRow[];
+  /** Range markers in the table after its last row (`w:tbl` level). */
+  readonly rangeMarkersAfter?: readonly RangeMarker[];
 }
 
 // =============================================================================
@@ -1566,7 +1833,7 @@ export interface WrapMargins {
 }
 
 /** Floating image (anchor). */
-export interface FloatingImage {
+export interface FloatingImage extends BlockRangeMarkers {
   readonly type: "floatingImage";
   /** Relationship ID for the image. */
   readonly rId: string;
@@ -1615,6 +1882,13 @@ export interface FloatingImage {
   readonly layoutInCell?: boolean;
   /** Allow overlap with other floating content (default: true). */
   readonly allowOverlap?: boolean;
+  /**
+   * The anchor sits among the text of the paragraph before this item, as the
+   * reader found it, rather than in an empty paragraph of its own (which is
+   * how a floating image without this flag is written). Layout positions the
+   * image against that paragraph and gives it no line of its own.
+   */
+  readonly inPrecedingParagraph?: boolean;
   /** Simple positioning with absolute x/y (alternative to relative anchor positioning). */
   readonly simplePos?: {
     readonly x: Emu;
@@ -1639,6 +1913,12 @@ export interface FloatingImage {
     readonly r?: number;
     readonly b?: number;
   };
+  /**
+   * The `wp:inline` / `wp:anchor` markup the drawing was read with, beyond
+   * its fields. Populated by the reader (see {@link DrawingFrame}).
+   * @internal
+   */
+  readonly _frame?: DrawingFrame;
 }
 
 // =============================================================================
@@ -1646,8 +1926,21 @@ export interface FloatingImage {
 // =============================================================================
 
 /** Table of Contents properties. */
-export interface TableOfContents {
+export interface TableOfContents extends BlockRangeMarkers {
   readonly type: "tableOfContents";
+  /**
+   * The field instruction exactly as written, e.g. `` TOC \o "1-3" \h \z \u `` —
+   * set by the reader, and accepted by `Document.addTableOfContents`.
+   * The options below are a reading of the switches it names; the rest
+   * (`\z`, `\u`, `\n`, `\w`, …) live only here.
+   *
+   * The writer emits it unchanged while the options it writes
+   * (`headingStyleRange`, `hyperlink`, `stylesWithLevels`, `captionLabel`,
+   * `sequenceFieldIdentifier`) still say what it says. Once they differ, it
+   * writes those options followed by the instruction's other switches in
+   * their original order, so changing one option keeps the rest of the field.
+   */
+  readonly instruction?: string;
   /** Heading style range (e.g. "1-3" for Heading 1 through 3). */
   readonly headingStyleRange?: string;
   /** Whether entries are hyperlinks. */
@@ -1665,6 +1958,21 @@ export interface TableOfContents {
   readonly leader?: TabStopLeader;
   /** Cached/fallback paragraphs to display when not updated by Word. */
   readonly cachedParagraphs?: readonly Paragraph[];
+  /**
+   * Where the block's `TOC` field is.
+   *
+   * - Unset: the writer builds it around {@link cachedParagraphs} — its begin
+   *   in a paragraph of its own before them, its end in one after — from
+   *   {@link instruction} and the options above. Builder-made blocks.
+   * - `"entries"`: {@link cachedParagraphs} hold it, in pieces
+   *   (`FieldContent.fieldChar`), where it was read — Word's own layout opens
+   *   it in the first entry's paragraph. The writer writes them as they are,
+   *   the field's instruction rebuilt from the options once they differ.
+   *   Should the pieces be gone, it builds the field as when unset.
+   * - `"none"`: the block has no field — a hand-written table of contents —
+   *   and none is written.
+   */
+  readonly field?: "entries" | "none";
 }
 
 // =============================================================================
@@ -1898,7 +2206,7 @@ export type MathContent =
   | MathEquationArray;
 
 /** A math block (inline or display). */
-export interface MathBlock {
+export interface MathBlock extends BlockRangeMarkers {
   readonly type: "math";
   /** Math content elements. */
   readonly content: readonly MathContent[];
@@ -1909,7 +2217,7 @@ export interface MathBlock {
 // =============================================================================
 
 /** Text box definition. */
-export interface TextBox {
+export interface TextBox extends BlockRangeMarkers {
   readonly type: "textBox";
   /** Content paragraphs. */
   readonly content: readonly Paragraph[];
@@ -1937,7 +2245,7 @@ export interface TextBox {
 export type PresetShapeType = string;
 
 /** DrawingML shape (wsp:). */
-export interface DrawingShape {
+export interface DrawingShape extends BlockRangeMarkers {
   readonly type: "drawingShape";
   /** Preset shape type (e.g. "rect", "roundRect", "ellipse"). */
   readonly shapeType: PresetShapeType;
@@ -2002,6 +2310,189 @@ export interface DrawingShape {
    * Internal: populated by createShape().
    */
   readonly _advancedEffectsXml?: string;
+  /**
+   * What the shape carried that its fields do not model, kept so a read →
+   * write round trip loses nothing. Populated by the reader.
+   * @internal
+   */
+  readonly _preserved?: DrawingShapePreserved;
+  /**
+   * The `wp:inline` / `wp:anchor` markup the drawing was read with, beyond
+   * its fields. Populated by the reader (see {@link DrawingFrame}).
+   * @internal
+   */
+  readonly _frame?: DrawingFrame;
+}
+
+/**
+ * A hyperlink that preserved markup refers to by relationship id — a
+ * `a:hlinkClick` on a drawing's `docPr`, say. Relationship ids are local to
+ * a part and rebuilt on every write, so the reader resolves the id to its
+ * target, and the writer registers that target in the part being written and
+ * rewrites the id in the markup to match.
+ */
+export interface PreservedLink {
+  /** The relationship id as it appears in the markup. */
+  readonly id: string;
+  /** The external target. */
+  readonly url: string;
+}
+
+/**
+ * The fields of a drawing its frame is built from — the ones that model a
+ * part of `wp:inline` / `wp:anchor`. Each drawing type has the subset it models.
+ */
+export interface DrawingFrameFields {
+  readonly width?: Emu;
+  readonly height?: Emu;
+  readonly name?: string;
+  readonly altText?: string;
+  readonly horizontalPosition?: {
+    readonly relativeTo?: HorizontalPositionRelative;
+    readonly offset?: Emu;
+    readonly align?: string;
+  };
+  readonly verticalPosition?: {
+    readonly relativeTo?: VerticalPositionRelative;
+    readonly offset?: Emu;
+    readonly align?: string;
+  };
+  readonly wrap?: {
+    readonly style: WrapStyle;
+    readonly side?: WrapTextSide;
+    readonly margins?: WrapMargins;
+  };
+  readonly relativeHeight?: number;
+  readonly behindDoc?: boolean;
+  readonly lockAnchor?: boolean;
+  readonly layoutInCell?: boolean;
+  readonly allowOverlap?: boolean;
+  readonly simplePos?: { readonly x: Emu; readonly y: Emu };
+  readonly distT?: Emu;
+  readonly distB?: Emu;
+  readonly distL?: Emu;
+  readonly distR?: Emu;
+}
+
+/** One child of a drawing frame other than `a:graphic` and `wp:docPr`, as read. */
+export interface DrawingFrameChild {
+  /** Local name (`positionH`, `wrapTight`, `sizeRelH`, …). */
+  readonly name: string;
+  /** The element, verbatim. */
+  readonly xml: string;
+  /** Whether it follows `a:graphic` (the `wp14` relative sizes do). */
+  readonly afterGraphic?: boolean;
+}
+
+/**
+ * The `wp:inline` / `wp:anchor` of a drawing as read, kept so its frame is
+ * written back exactly: every attribute, every child in its order — wrap
+ * polygons, effect extent, `wp14` sizes, frame locks, extension markup — and
+ * the `docPr` attributes and children (title, hidden flag, hyperlink).
+ *
+ * Fields of the drawing that model part of the frame stay authoritative. The
+ * writer builds that part from the fields as they are and as they were read
+ * (`read`); when the two agree it writes the markup as read, and when a field
+ * was edited it writes the field. `docPr`'s `name` and `descr` always follow
+ * the drawing's `name` and `altText`, and its `id` is the writer's.
+ *
+ * Internal: the reader produces it and the writer consumes it. Its shape may
+ * change between releases.
+ */
+export interface DrawingFrame {
+  readonly kind: "inline" | "anchor";
+  /** The frame element's attributes. */
+  readonly attrs: Readonly<Record<string, string>>;
+  /** Its children other than `a:graphic` and `wp:docPr`, in order. */
+  readonly children: readonly DrawingFrameChild[];
+  /** `wp:docPr` attributes other than `id`, `name` and `descr`. */
+  readonly docPrAttrs?: Readonly<Record<string, string>>;
+  /** `wp:docPr` children (`a:hlinkClick`, `a:hlinkHover`, `a:extLst`). */
+  readonly docPrChildrenXml?: string;
+  /** Hyperlinks the frame's markup refers to. */
+  readonly links?: readonly PreservedLink[];
+  /** The drawing's frame fields as read. */
+  readonly read: DrawingFrameFields;
+}
+
+/**
+ * The markup of a read `wps:wsp` that `DrawingShape`'s fields do not model,
+ * by schema position, so the writer can put each piece back where it was.
+ *
+ * Markup that stands in for a modelled field — custom geometry for
+ * `shapeType`, a theme-coloured fill for `fillColor`, a gradient line for
+ * `outlineColor` — is written only while that field still holds the value it
+ * was read with (`read`). Editing the field therefore replaces it; markup no
+ * field covers (a dash pattern, arrowheads, the style matrix, text-box
+ * insets) is kept regardless. Fragments are written through the same rewrite
+ * as every other markup kept verbatim, so image keys follow the part.
+ *
+ * Internal: the reader produces it and the writer consumes it. Its shape may
+ * change between releases.
+ */
+export interface DrawingShapePreserved {
+  /** The modelled values the shape was read with. */
+  readonly read: {
+    readonly shapeType: string;
+    readonly width: Emu;
+    readonly height: Emu;
+    readonly fillColor?: HexColor;
+    readonly noFill?: boolean;
+    readonly outlineColor?: HexColor;
+    readonly noOutline?: boolean;
+    readonly textContent?: readonly Paragraph[];
+  };
+  /** Attributes of `wps:wsp`. */
+  readonly wspAttrs?: Readonly<Record<string, string>>;
+  /** Attributes of `wps:cNvPr` other than `id` and `name`. */
+  readonly cNvPrAttrs?: Readonly<Record<string, string>>;
+  /** Children of `wps:cNvPr` (`a:hlinkClick`, `a:extLst`, …). */
+  readonly cNvPrChildrenXml?: string;
+  /** The `wps:cNvSpPr` or `wps:cNvCnPr` element, when it is not empty. */
+  readonly cNvSpPrXml?: string;
+  /** Attributes of `wps:spPr` (`bwMode`). */
+  readonly spPrAttrs?: Readonly<Record<string, string>>;
+  /**
+   * `a:xfrm`: `null` when the shape had none, otherwise its offset and — when
+   * it differed from the extent — its size.
+   */
+  readonly xfrm?: {
+    readonly off?: Readonly<Record<string, string>>;
+    readonly ext?: Readonly<Record<string, string>>;
+  } | null;
+  /** `a:custGeom`, or an `a:prstGeom` with adjust values. Stands for `shapeType`. */
+  readonly geometryXml?: string;
+  /** The fill, when it is not a plain sRGB colour or none. Stands for `fillColor` / `noFill`. */
+  readonly fillXml?: string;
+  /** `a:ln` attributes other than `w` (`cap`, `cmpd`, `algn`). */
+  readonly lnAttrs?: Readonly<Record<string, string>>;
+  /** The line's fill when not plain. Stands for `outlineColor` / `noOutline`. */
+  readonly lnFillXml?: string;
+  /** What follows the line's fill: dash, join, head and tail ends, extensions. */
+  readonly lnTailXml?: string;
+  /** What follows `a:ln` in `wps:spPr`: effects, 3-D, extensions. */
+  readonly spPrTailXml?: string;
+  /** `wps:style` — the line, fill, effect and font references to the theme. */
+  readonly styleXml?: string;
+  /** `wps:extLst` of the shape. */
+  readonly wspExtLstXml?: string;
+  /** Attributes of `wps:txbx` (`id`). */
+  readonly txbxAttrs?: Readonly<Record<string, string>>;
+  /**
+   * `w:txbxContent` verbatim, when it holds blocks `textContent` cannot (a
+   * table, a content control). Stands for `textContent`.
+   */
+  readonly txbxContentXml?: string;
+  /** `wps:extLst` of the text box. */
+  readonly txbxExtLstXml?: string;
+  /** `wps:linkedTxbx`, the continuation of a linked text box, in place of `wps:txbx`. */
+  readonly linkedTxbxXml?: string;
+  /** Attributes of `wps:bodyPr` other than `anchor`. */
+  readonly bodyPrAttrs?: Readonly<Record<string, string>>;
+  /** Children of `wps:bodyPr` (warp, autofit, 3-D, …). */
+  readonly bodyPrChildrenXml?: string;
+  /** Hyperlinks the kept markup refers to (an `a:hlinkClick` on `wps:cNvPr`). */
+  readonly links?: readonly PreservedLink[];
 }
 
 // =============================================================================
@@ -2009,7 +2500,7 @@ export interface DrawingShape {
 // =============================================================================
 
 /** Checkbox state. */
-export interface CheckBox {
+export interface CheckBox extends BlockRangeMarkers {
   readonly type: "checkBox";
   /** Whether checked. */
   readonly checked?: boolean;
@@ -2094,6 +2585,24 @@ export interface SdtProperties {
   readonly repeatingSection?: SdtRepeatingSectionProperties;
   /** Repeating section item properties. */
   readonly repeatingSectionItem?: boolean;
+  /**
+   * The building-block gallery the control holds an entry of
+   * (`w:docPartObj`, or `w:docPartList` with `list`) — a cover page, a page
+   * number, a bibliography…
+   */
+  readonly docPart?: SdtDocPart;
+}
+
+/** A content control's building-block reference (`w:docPartObj` / `w:docPartList`). */
+export interface SdtDocPart {
+  /** Gallery (`w:docPartGallery`), e.g. `"Cover Pages"`, `"Page Numbers (Bottom of Page)"`. */
+  readonly gallery?: string;
+  /** Category within the gallery (`w:docPartCategory`). */
+  readonly category?: string;
+  /** Whether the entry is unique in the document (`w:docPartUnique`). */
+  readonly unique?: boolean;
+  /** A list of entries (`w:docPartList`) rather than one (`w:docPartObj`). */
+  readonly list?: boolean;
 }
 
 /** SDT data binding to Custom XML part. */
@@ -2131,7 +2640,7 @@ export interface SdtRepeatingSectionProperties {
 }
 
 /** SDT content. */
-export interface StructuredDocumentTag {
+export interface StructuredDocumentTag extends BlockRangeMarkers {
   readonly type: "sdt";
   /** SDT properties. */
   readonly properties?: SdtProperties;
@@ -2144,6 +2653,11 @@ export interface StructuredDocumentTag {
    * children of type `"sdt"`.
    */
   readonly content: readonly (Paragraph | Run | Table | StructuredDocumentTag)[];
+  /**
+   * Range markers at the end of the content that no item could hold — in an
+   * SDT whose content is runs, say (see {@link RangeMarker}).
+   */
+  readonly contentRangeMarkersAfter?: readonly RangeMarker[];
 }
 
 // =============================================================================
@@ -2194,6 +2708,11 @@ export interface DropDownFormField {
   readonly entries?: readonly string[];
   /** Default selected index. */
   readonly default?: number;
+  /**
+   * Selected index (`w:result`): what the field shows and what
+   * `Query.listFormFields` reports. Absent, the field shows {@link default}.
+   */
+  readonly result?: number;
   /** Help text. */
   readonly helpText?: string;
   /** Status bar text. */
@@ -2212,18 +2731,36 @@ export type FormField = TextFormField | CheckBoxFormField | DropDownFormField;
 /** Text watermark properties. */
 export interface TextWatermark {
   readonly type: "text";
-  /** Watermark text. */
+  /** Watermark text, not empty. */
   readonly text: string;
   /** Font name. */
   readonly font?: string;
-  /** Font size (half-points). */
+  /**
+   * Font size (half-points, > 0): `fontSize: 72` is 36pt. Word draws a text
+   * watermark stretched over its shape (`fitshape`), so the size is carried
+   * by the shape: one line of text at this size, as wide as the text, and
+   * written as `font-size:<fontSize / 2>pt`. Absent, the watermark is
+   * auto-sized — the way Word writes its own — and the shape is
+   * {@link widthPt} × {@link heightPt}, or 468pt × 234pt.
+   *
+   * Word marks an auto-sized watermark with `font-size:1pt`, so a file says
+   * nothing else with that value: `fontSize: 2` (1pt) is written, but reads
+   * back as absent (auto-sized). Every other size reads back as written.
+   */
   readonly fontSize?: number;
   /** Color (hex, e.g. "C0C0C0"). */
   readonly color?: HexColor;
   /** Semi-transparent. */
   readonly semiTransparent?: boolean;
-  /** Rotation in degrees (default -45 for diagonal). */
+  /** Rotation in degrees (default -45 for diagonal; 0 is horizontal). */
   readonly rotation?: number;
+  /**
+   * Shape width in points (> 0). Read from the file; when set it is the box the
+   * text is stretched over, whatever {@link fontSize} says.
+   */
+  readonly widthPt?: number;
+  /** Shape height in points (> 0); see {@link widthPt}. */
+  readonly heightPt?: number;
 }
 
 /** Image watermark properties. */
@@ -2239,6 +2776,32 @@ export interface ImageWatermark {
   readonly widthPt?: number;
   /** Display height in points. Defaults to 415.2pt scaled to image ratio, or 233.5pt. */
   readonly heightPt?: number;
+}
+
+/**
+ * A value `Document.read` kept because it is outside its field's vocabulary (`<w:jc w:val="bogus"/>`): the field reads as
+ * absent and the text is written back until something sets the field. `Document.listUnrecognizedValues` lists them,
+ * `Document.discardUnrecognizedValues` drops them — the same shape as Excel's `UnrecognizedValue`, without the sheet.
+ */
+export interface DocxUnrecognizedValue {
+  /**
+   * The path to the field from the document root, as `Validation.validate` reports it:
+   * `body[0].properties.alignment`, `headers["rId7"].content.children[0]…`.
+   */
+  readonly path: string;
+  /** The text the file had. */
+  readonly value: string;
+}
+
+/** Options for `Document.discardUnrecognizedValues`. */
+export interface DocxDiscardUnrecognizedValuesOptions {
+  /**
+   * Which kept values to drop: called with each — its path, as `Validation.validate` reports it, and its text — and
+   * drops those it returns `true` for. Without it, every one is dropped. It also sees a value a field has since taken
+   * over from (which `Document.listUnrecognizedValues` no longer lists), so dropping that one keeps it from coming
+   * back when the field is cleared.
+   */
+  readonly filter?: (value: DocxUnrecognizedValue) => boolean;
 }
 
 /** Watermark (text or image). */
@@ -2265,7 +2828,7 @@ export type BodyContent =
   | StructuredDocumentTag;
 
 /** Alternate content chunk (w:altChunk) — embedded HTML/RTF/TXT/etc. in DOCX. */
-export interface AltChunk {
+export interface AltChunk extends BlockRangeMarkers {
   readonly type: "altChunk";
   /** Relationship ID for the alt chunk content. */
   readonly rId: string;
@@ -2344,7 +2907,22 @@ export interface ChartSeries {
   readonly name: string;
   readonly categories: readonly string[];
   readonly values: readonly number[];
+  /**
+   * The series' fill (and, for a line or scatter series, line) colour. A
+   * series read from a file keeps its `c:spPr` — scheme colours and their
+   * transforms, gradients, line styles, effects — and writes it back as read
+   * while this still equals the sRGB colour read from it; set it to anything
+   * else and the series is written with this colour.
+   */
   readonly color?: HexColor;
+  /**
+   * Per-point fill colours: entry `i` is the colour of point `i` (its
+   * `c:dPt` with `c:idx` `i`). A point with no colour of its own is a hole
+   * in the array (or `undefined`), so a file that colours only point 3 reads
+   * as `[, , , "FF8800"]`. A series read from a file keeps each `c:dPt` as
+   * read while its entry still equals the colour read from it; set the entry
+   * and that point is written from it.
+   */
   readonly pointColors?: readonly HexColor[];
   readonly showDataLabels?: boolean;
   readonly trendline?: ChartTrendline;
@@ -2353,6 +2931,106 @@ export interface ChartSeries {
   readonly chartType?: ChartType;
   /** Plot on secondary axis (for combo charts). */
   readonly plotOnSecondaryAxis?: boolean;
+  /**
+   * The `c:ser` as read, beyond its fields (see {@link ChartKeptNode}), and
+   * its `c:dLbls`.
+   * @internal
+   */
+  readonly _kept?: { readonly node: ChartKeptNode; readonly dataLabels?: ChartKeptNode };
+}
+
+/**
+ * One child of a chart part element, kept as read (see {@link ChartKeptNode}).
+ *
+ * Internal: the reader produces it and the writer consumes it. Its shape may
+ * change between releases.
+ */
+export interface ChartKeptElement {
+  /** Its local name (`spPr`, `dLbl`, `extLst`, …). */
+  readonly name: string;
+  /**
+   * The element, verbatim and declaring every namespace prefix it uses that
+   * the part's root does not. Empty for an element the writer builds from
+   * the model and its own kept children (a series, an axis, a title, …).
+   */
+  readonly xml: string;
+  /** The relationships of the chart part the element refers to. */
+  readonly rIds?: readonly string[];
+  /** A `c:dPt`'s `c:idx`. */
+  readonly index?: number;
+  /** A `c:dPt`'s colour (`pointColors[index]`) as read, as a field key. */
+  readonly read?: string;
+  /** A `c:dPt`'s `c:spPr`, verbatim, for the renderer. */
+  readonly spPr?: string;
+}
+
+/**
+ * An element of a chart part as read: its name, attributes and children, so
+ * the writer writes back what the chart model cannot hold — scheme colours
+ * and their transforms, gradients, line styles, effects, layouts, gridlines,
+ * text formatting, per-label data labels, data references, extension lists,
+ * `mc:AlternateContent`, …
+ *
+ * `read` holds, by child local name, the field the child is written from as
+ * the reader derived it (as a field key; see `core/chart-kept.ts`). The
+ * writer writes a child verbatim while its field still equals `read`, and
+ * from the field once it differs — setting the field takes over. A child no
+ * field governs is always written as read, and a child the part did not
+ * have is not written while its field is unchanged. Honours `rawXmlPolicy`.
+ *
+ * Internal: the reader produces it and the writer consumes it. Its shape may
+ * change between releases.
+ */
+export interface ChartKeptNode {
+  /** Its qualified name as read (`c:bar3DChart`, `c:dateAx`). */
+  readonly name: string;
+  /** Its attributes other than namespace declarations. */
+  readonly attrs?: Readonly<Record<string, string>>;
+  readonly children: readonly ChartKeptElement[];
+  /** Field keys as read, by child local name (`""`: the element itself). */
+  readonly read: Readonly<Record<string, string | undefined>>;
+}
+
+/** An axis of a chart part as read (see {@link ChartKeptNode}). Internal. */
+export interface ChartKeptAxis {
+  /** Its `c:axId`. */
+  readonly id: string;
+  /** The model field it is read into, if any. */
+  readonly role?: "category" | "value" | "secondaryCategory" | "secondaryValue";
+  readonly node: ChartKeptNode;
+  readonly scaling?: ChartKeptNode;
+  readonly title?: ChartKeptNode;
+  /** The axis verbatim, for one the model does not represent (a series axis). */
+  readonly xml?: string;
+  readonly rIds?: readonly string[];
+}
+
+/**
+ * A chart part as read, beyond its fields: every element down to the series,
+ * axes, titles, legend and data labels (see {@link ChartKeptNode}), the
+ * root's namespaces and `mc:Ignorable`, and the part's relationships.
+ *
+ * Internal: the reader produces it and the writer consumes it. Its shape may
+ * change between releases.
+ */
+export interface ChartKept {
+  readonly root?: PreservedXml;
+  readonly space: ChartKeptNode;
+  readonly chart?: ChartKeptNode;
+  readonly title?: ChartKeptNode;
+  readonly plotArea?: ChartKeptNode;
+  readonly legend?: ChartKeptNode;
+  /** The chart groups, in order, each by the type and axis its series are written with. */
+  readonly groups: readonly {
+    /** `<type>|<secondary>` — see `chartGroupKey`. */
+    readonly key: string;
+    readonly node: ChartKeptNode;
+    readonly dataLabels?: ChartKeptNode;
+  }[];
+  /** The axes, in order. */
+  readonly axes: readonly ChartKeptAxis[];
+  /** The chart part's relationships; their targets are kept as opaque parts. */
+  readonly relationships?: readonly OpaqueRelationship[];
 }
 
 /** Chart legend position. */
@@ -2390,7 +3068,15 @@ export interface Chart {
   readonly categoryAxis?: ChartAxis;
   readonly valueAxis?: ChartAxis;
   readonly secondaryValueAxis?: ChartAxis;
+  /**
+   * The plot area's fill. A chart read from a file keeps the plot area's
+   * `c:spPr` as read while this still equals the colour read from it.
+   */
   readonly plotAreaColor?: HexColor;
+  /**
+   * The chart area's fill. A chart read from a file keeps the chart space's
+   * `c:spPr` as read while this still equals the colour read from it.
+   */
   readonly chartAreaColor?: HexColor;
   readonly view3d?: boolean;
   readonly style?: number;
@@ -2402,21 +3088,32 @@ export interface Chart {
   readonly secondarySeries?: readonly ChartSeries[];
   /** Whether to embed chart data as an xlsx workbook (for full editing in Word). */
   readonly embedWorkbook?: boolean;
+  /**
+   * The chart part as read, beyond its fields (see {@link ChartKept}).
+   * @internal
+   */
+  readonly _kept?: ChartKept;
 }
 
 /** Chart content placed in a document. */
-export interface ChartContent {
+export interface ChartContent extends BlockRangeMarkers {
   readonly type: "chart";
   readonly chart: Chart;
   readonly altText?: string;
   readonly name?: string;
+  /**
+   * The `wp:inline` / `wp:anchor` markup the drawing was read with, beyond
+   * its fields. Populated by the reader (see {@link DrawingFrame}).
+   * @internal
+   */
+  readonly _frame?: DrawingFrame;
 }
 
 /**
  * ChartEx content block (cx: namespace, Office 2016+ chart types).
  * Supports: sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap.
  */
-export interface ChartExContent {
+export interface ChartExContent extends BlockRangeMarkers {
   readonly type: "chartEx";
   /** Pre-rendered ChartEx XML (cx:chartSpace). Generated via excel-bridge. */
   readonly chartExXml: string;
@@ -2430,6 +3127,12 @@ export interface ChartExContent {
   readonly width?: Emu;
   /** Height in EMU. Default: 3657600 (4 inches). */
   readonly height?: Emu;
+  /**
+   * The `wp:inline` / `wp:anchor` markup the drawing was read with, beyond
+   * its fields. Populated by the reader (see {@link DrawingFrame}).
+   * @internal
+   */
+  readonly _frame?: DrawingFrame;
 }
 
 /** Structured data extracted from a ChartEx (cx: namespace) XML. */
@@ -2516,7 +3219,12 @@ export interface StyleDef {
   readonly runProperties?: RunProperties;
   /** Table properties (for table styles). */
   readonly tableProperties?: TableProperties;
-  /** Outline level (0-8 for Heading styles). */
+  /**
+   * Outline level (0-8 for Heading styles). Shorthand for
+   * `paragraphProperties.outlineLevel`, which wins when both are set: it is
+   * written in the style's `w:pPr` and read back as
+   * `paragraphProperties.outlineLevel`.
+   */
   readonly outlineLevel?: number;
   /** Semi-hidden (not shown in style gallery). */
   readonly semiHidden?: boolean;
@@ -2532,6 +3240,12 @@ export interface StyleDef {
   readonly autoRedefine?: boolean;
   /** Table style conditional formats. */
   readonly tableStyleConditions?: readonly TableStyleConditionalFormat[];
+  /**
+   * Children of `w:style` the model does not represent (`w:aliases`, `w:rsid`,
+   * `w:trPr`, …), verbatim and self-contained, for round-trip. Honours
+   * `rawXmlPolicy`.
+   */
+  readonly preservedXml?: readonly string[];
 }
 
 /** Document defaults for styles.xml. */
@@ -2770,6 +3484,9 @@ export interface EndnoteProperties {
 /** Footnote/endnote note type. */
 export type NoteType = "normal" | "separator" | "continuationSeparator" | "continuationNotice";
 
+/** A special note settings can name as the document's separator (`w:footnotePr/w:footnote`). */
+export type NoteSeparatorType = Exclude<NoteType, "normal">;
+
 export interface FootnoteDef {
   /** Unique footnote ID (starts from 1; -1 and 0 are reserved for separators). */
   readonly id: number;
@@ -2813,18 +3530,36 @@ export interface ImageDef {
   readonly mediaType: ImageMediaType;
   /** File name within word/media/ (e.g. "image1.png"). */
   readonly fileName: string;
-  /** Relationship ID (assigned during packaging). */
+  /**
+   * The image's key. Content in every part — body, headers, footers, notes,
+   * comments, picture bullets — names a picture by key (`InlineImageContent.rId`,
+   * `FloatingImage.rId`, …), so a key names one picture document-wide; two
+   * different pictures never share one, and writing a document where they do
+   * fails with `DocxDuplicateIdError`.
+   *
+   * It is not the relationship id the package uses: those are local to each
+   * part, and the writer gives every part that shows the picture a relationship
+   * of its own, keeping the key as its id where it has the `rId<n>` form and is
+   * free there. The reader keeps the body's ids as keys, and a header's or
+   * note's where they do not collide; a picture whose local id another picture
+   * already holds gets a fresh key, and that part's content is rewritten to it.
+   */
   rId?: string;
   /**
-   * Additional relationship IDs under which this same media file is referenced
-   * by other parts (typically header/footer .rels using their own local id
-   * space). Populated by the reader so that the packager can rebuild each
-   * part's local .rels even when callers and parts use different rIds for the
-   * same physical media file.
+   * More keys for the same picture, under the same rules as {@link rId}: a
+   * part that shows this media file under an id of its own (a header reusing
+   * the body's logo as its `rId1`) names it by an alias.
    */
   readonly aliasRIds?: readonly string[];
   /** SVG fallback image data (PNG). Required for SVG images in Word. */
   readonly fallbackData?: Uint8Array;
+  /**
+   * The content type a read package declared for this picture, kept when its
+   * extension is not an {@link ImageMediaType} (`.emz`, `.jfif`, …) so the part
+   * is written back as it was: under its own name, with this type. Pictures
+   * added through the API do not set it.
+   */
+  readonly contentType?: string;
 }
 
 // =============================================================================
@@ -2840,6 +3575,8 @@ export type FontPitch = "fixed" | "variable" | "default";
 /** Font definition for fontTable.xml. */
 export interface FontDef {
   readonly name: string;
+  /** Alternate name (`w:altName`), e.g. the localized name of an East Asian face. */
+  readonly altName?: string;
   readonly panose1?: string;
   readonly charset?: string;
   readonly family?: FontFamily;
@@ -2869,6 +3606,11 @@ export interface FontDef {
   readonly embedBoldItalic?: string;
   /** Embedded bold-italic font key. */
   readonly embedBoldItalicKey?: string;
+  /**
+   * Children of `w:font` the model does not represent (`w:notTrueType`, …),
+   * verbatim and self-contained, for round-trip. Honours `rawXmlPolicy`.
+   */
+  readonly preservedXml?: readonly string[];
 }
 
 /** Embedded font binary data. */
@@ -2902,10 +3644,34 @@ export interface HyphenationSettings {
   readonly doNotHyphenateCaps?: boolean;
 }
 
+/**
+ * Markup of a part the model does not represent, kept so a read→write round
+ * trip does not lose it: the root's namespace declarations and `mc:Ignorable`,
+ * and every root child the model has no field for (`w:latentStyles` in
+ * `styles.xml`, `m:mathPr` or `w14:docId` in `settings.xml`, …).
+ *
+ * The writer emits the elements verbatim, each at its schema position among
+ * the elements the model does write. Honours the security policy's
+ * `rawXmlPolicy` like the other raw-XML fields.
+ */
+export interface PreservedXml {
+  /** The root's namespace declarations, prefix → URI (`""` is the default namespace). */
+  readonly namespaces?: Readonly<Record<string, string>>;
+  /** The root's `mc:Ignorable` prefixes. */
+  readonly ignorable?: string;
+  /**
+   * Root children the model does not represent, in source order. Each is
+   * self-contained: it declares every namespace prefix it uses.
+   */
+  readonly elements?: readonly string[];
+}
+
 /** Document settings. */
 export interface DocumentSettings {
   /** Zoom percentage. */
   readonly zoom?: number;
+  /** Zoom preset (`w:zoom/@w:val`), applied by Word in place of the percentage. */
+  readonly zoomType?: "none" | "fullPage" | "bestFit" | "textFit";
   /** Default tab stop distance in twips. */
   readonly defaultTabStop?: Twips;
   /** Character spacing compression control. */
@@ -2944,7 +3710,11 @@ export interface DocumentSettings {
   readonly gutterAtTop?: boolean;
   /** Display background colors/images in print layout. */
   readonly displayBackgroundShape?: boolean;
-  /** Update fields on open. */
+  /**
+   * Ask Word to update the document's fields when it opens (`w:updateFields`);
+   * Word asks the user first. Nothing in the library sets it; `false` is read
+   * from `w:updateFields w:val="false"` and written as no element.
+   */
   readonly updateFieldsOnOpen?: boolean;
   /** Document variables (key-value pairs). */
   readonly docVars?: ReadonlyMap<string, string>;
@@ -2958,6 +3728,16 @@ export interface DocumentSettings {
   readonly compatFlags?: ReadonlyArray<CompatFlag>;
   /** Mail merge settings (opaque). */
   readonly mailMergeRawXml?: string;
+  /**
+   * The special footnotes `w:footnotePr` names (`w:footnote w:id`), by type.
+   * Written as the ids those notes get in `footnotes.xml`; a type no written
+   * note has is left out.
+   */
+  readonly footnoteSeparators?: readonly NoteSeparatorType[];
+  /** The special endnotes `w:endnotePr` names, by type — see {@link footnoteSeparators}. */
+  readonly endnoteSeparators?: readonly NoteSeparatorType[];
+  /** `settings.xml` markup the model does not represent (round-trip). */
+  readonly preservedXml?: PreservedXml;
   /** Write protection (separate from documentProtection). */
   readonly writeProtection?: {
     readonly recommended?: boolean;
@@ -3086,6 +3866,12 @@ export interface AppProperties {
   readonly paragraphs?: number;
   readonly company?: string;
   readonly manager?: string;
+  /**
+   * Elements of `docProps/app.xml` the model does not represent (`Template`,
+   * `TotalTime`, `TitlesOfParts`, …), verbatim and self-contained, for
+   * round-trip. Honours `rawXmlPolicy`.
+   */
+  readonly preservedXml?: readonly string[];
 }
 
 // =============================================================================
@@ -3111,6 +3897,20 @@ export type ThemeColorName =
 export interface ThemeColorScheme {
   readonly name: string;
   readonly colors: Readonly<Record<ThemeColorName, HexColor>>;
+  /**
+   * Colours defined as a system colour (`a:sysClr`), e.g. `dk1` as
+   * `windowText`. Written back as `a:sysClr` while `colors` still holds its
+   * `lastClr`; a colour edited in `colors` is written as that colour.
+   */
+  readonly systemColors?: Readonly<Partial<Record<ThemeColorName, ThemeSystemColor>>>;
+}
+
+/** A theme colour defined by the system (`a:sysClr`). */
+export interface ThemeSystemColor {
+  /** The system colour (`windowText`, `window`, …). */
+  readonly val: string;
+  /** The colour it last resolved to. */
+  readonly lastClr?: HexColor;
 }
 
 /** Theme font definition (major or minor). */
@@ -3123,6 +3923,13 @@ export interface ThemeFont {
   readonly complexScript?: string;
   /** Supplemental fonts: script name → typeface. */
   readonly supplementalFonts?: Readonly<Record<string, string>>;
+  /**
+   * Attributes of `a:latin`, `a:ea` and `a:cs` beside `typeface` (`panose`,
+   * `pitchFamily`, `charset`), for round-trip.
+   */
+  readonly faceAttributes?: Readonly<
+    Partial<Record<"latin" | "ea" | "cs", Readonly<Record<string, string>>>>
+  >;
 }
 
 /** Theme font scheme. */
@@ -3154,6 +3961,12 @@ export interface DocumentTheme {
   readonly formatScheme?: ThemeFormatScheme;
   /** Raw XML of extra <a:extLst> element inside <a:theme>, for round-trip. */
   readonly extLstXml?: string;
+  /**
+   * Children of `a:theme` between `a:themeElements` and `a:extLst`
+   * (`a:objectDefaults`, `a:extraClrSchemeLst`, `a:custClrLst`), verbatim and
+   * self-contained, for round-trip. Honours `rawXmlPolicy`.
+   */
+  readonly preservedXml?: readonly string[];
 }
 
 // =============================================================================
@@ -3255,14 +4068,56 @@ export interface GlossaryDocument {
   /** Raw parts preserved for round-trip (style, settings, fontTable). */
   readonly rawParts?: ReadonlyMap<string, Uint8Array>;
   /**
-   * Verbatim `word/glossary/document.xml` markup. Populated by the reader so a
-   * read→write round-trip preserves the glossary byte-faithfully even though
-   * the structured `blocks` are not reverse-parsed. When present the writer
-   * emits this verbatim and ignores `blocks`.
+   * Verbatim `word/glossary/document.xml` markup, populated by the reader so a
+   * read→write round-trip preserves the glossary byte-faithfully. The writer
+   * emits it as long as `blocks` are the ones read from it; once they are
+   * edited it writes the blocks instead — with the entries `blocks` does not
+   * list (galleries outside {@link BuildingBlockGallery}, such as Word's
+   * content-control placeholder text) as they were read, and the glossary's
+   * other parts unchanged.
    */
   readonly rawXml?: string;
+  /**
+   * The read blocks, serialised, to tell an edit from the blocks as read.
+   * @internal
+   */
+  readonly _blocksAsRead?: string;
+  /**
+   * `w:docPart` markup of the read entries `blocks` does not list.
+   * @internal
+   */
+  readonly _unlistedDocParts?: readonly string[];
 }
 
+/**
+ * The Word document: a transparent content tree. `Document.create()` returns
+ * one, `Document.read` returns one, every namespace operates on one and `Document.toBuffer`
+ * writes one. Its fields are public on purpose — a Word document is a tree
+ * callers assemble.
+ *
+ * **Editing it beside the helpers.** The `Document.*` helpers that add a
+ * footnote, endnote, comment, list or image give it an id no entry of its
+ * collection uses at that moment, and they see every edit made between two
+ * calls that does one of these:
+ *
+ * - gives a collection a new array, on this document or on a copy
+ *   (`{ ...doc, footnotes: [...] }`) — the way the `readonly` model types
+ *   express an edit;
+ * - appends entries to the end of the array a helper last saw (`push`).
+ *
+ * Both are tracked exactly, at O(1) amortised per helper call. Changing an
+ * existing entry inside that same array — assigning `doc.footnotes[0]`,
+ * `splice`, `sort`, removing and then appending, or editing an entry object —
+ * is outside this contract: to replace, remove or reorder entries, assign a
+ * new array. Such an edit is never written silently, though. If it leaves two
+ * entries of a collection content refers to by id (footnotes, endnotes,
+ * comments, abstract numberings, numbering instances, or two different
+ * images under one `rId` / `aliasRIds` key) with the same id, `Document.toBuffer`
+ * rejects with a `DocxDuplicateIdError` naming the collection and the id.
+ *
+ * Bookmark and drawing ids are referenced by nothing but their own start and
+ * end, so the writer renumbers any clash as it writes; any edit is safe there.
+ */
 export interface DocxDocument {
   /**
    * Document type. Determines the content type used in the package.
@@ -3275,11 +4130,18 @@ export interface DocxDocument {
 
   /** Final section properties (for the last section). */
   readonly sectionProperties?: SectionProperties;
+  /**
+   * Range markers after the last body block, before the final section
+   * properties — where Word closes a bookmark that ends with the document.
+   */
+  readonly bodyRangeMarkersAfter?: readonly RangeMarker[];
 
   /** Style definitions. */
   readonly styles?: readonly StyleDef[];
   /** Document defaults. */
   readonly docDefaults?: DocDefaults;
+  /** `styles.xml` markup the model does not represent (`w:latentStyles`, …), for round-trip. */
+  readonly stylesPreservedXml?: PreservedXml;
 
   /** Abstract numbering definitions. */
   readonly abstractNumberings?: readonly AbstractNumbering[];
@@ -3339,7 +4201,19 @@ export interface DocxDocument {
   /** Custom properties. */
   readonly customProperties?: readonly CustomProperty[];
 
-  /** Watermark (rendered in default header). */
+  /**
+   * The document's watermark, drawn on every page as Word's Design ›
+   * Watermark does: in every header a section shows — its default header, its
+   * first-page header when it has a distinct first page (`titlePage`), its
+   * even-page header when the document has distinct even and odd headers
+   * (`settings.evenAndOddHeaders`) — in every section. A section showing no
+   * header of a type, named or inherited from the section before, is given a
+   * header holding only the watermark.
+   *
+   * Reading sets it only when every header shown anywhere draws the same
+   * watermark, and takes it out of those headers. A watermark only some pages
+   * show is left in its headers as their content, and this is `undefined`.
+   */
   readonly watermark?: Watermark;
 
   /** Document theme (from theme1.xml). */
@@ -3370,6 +4244,22 @@ export interface DocxDocument {
    * Quick Parts from.
    */
   readonly glossary?: GlossaryDocument;
+
+  /**
+   * Derive the East Asian proofing language and typeface from the document's
+   * own text when it is written, laid out or converted, unless
+   * `docDefaults.runProperties.language.eastAsia` is already stated.
+   *
+   * `Document.create()` sets it, because a document assembled from scratch
+   * has no other way to get them right: `useDefaultStyles` runs before any
+   * content exists. `Document.read` never sets it, so a read → edit → write round
+   * trip does not acquire a language its author never chose. It is an
+   * ordinary field: a spread, `structuredClone` or JSON copy keeps it, and a
+   * caller may set or clear it on any document.
+   *
+   * Never written to the package.
+   */
+  readonly deriveEastAsianDefaults?: boolean;
 }
 
 // =============================================================================
@@ -3454,7 +4344,7 @@ export interface OleObjectPart {
 }
 
 /** An opaque drawing element (e.g. chart) preserved in a paragraph. */
-export interface OpaqueDrawing {
+export interface OpaqueDrawing extends BlockRangeMarkers {
   readonly type: "opaqueDrawing";
   /** Raw XML of the w:drawing element. */
   readonly rawXml: string;
@@ -3466,7 +4356,12 @@ export interface OpaqueDrawing {
 // Builder Options
 // =============================================================================
 
-/** Options for creating a DOCX file. */
+/**
+ * Options for creating a DOCX file.
+ *
+ * @deprecated No function takes this type; use {@link DocxWriteOptions} (the
+ * options of `Document.toBuffer`), which has `compressionLevel` too. Removed in 1.0.
+ */
 export interface DocxOptions {
   /** Compression level (0-9). Default: 6. */
   readonly compressionLevel?: number;
@@ -3476,7 +4371,12 @@ export interface DocxOptions {
 // Asset References (currently unused; reserved for future package-model API)
 // =============================================================================
 
-/** A reference to a media asset (image, chart, etc.) by logical ID. */
+/**
+ * A reference to a media asset (image, chart, etc.) by logical ID.
+ *
+ * @deprecated Reserved for a package-model API that was never added: no
+ * function takes or returns it. Removed in 1.0.
+ */
 export interface AssetRef {
   /** Logical asset ID (assigned by builder, resolved to rId at package time). */
   readonly assetId: string;
@@ -3484,7 +4384,13 @@ export interface AssetRef {
   readonly type: "image" | "chart" | "oleObject" | "font" | "xlsx";
 }
 
-/** A media asset registered in the document. */
+/**
+ * A media asset registered in the document.
+ *
+ * @deprecated Reserved for a package-model API that was never added: no
+ * function takes or returns it; a document's images are `ImageDef`s. Removed
+ * in 1.0.
+ */
 export interface MediaAsset {
   /** Logical ID for referencing. */
   readonly id: string;

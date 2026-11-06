@@ -143,7 +143,7 @@ describe("page setup reaches the sheets that asked for it", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
 
     expect(read.pageSetup).toMatchObject({
       paperSize: 9,
@@ -171,7 +171,7 @@ describe("page setup reaches the sheets that asked for it", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const [readPlain, readFitted] = Workbook.getWorksheets(reopened);
+    const [readPlain, readFitted] = Workbook.listWorksheets(reopened);
     expect(readPlain!.pageSetup.fitToPage).not.toBe(true);
     expect(readFitted!.pageSetup).toMatchObject({
       fitToPage: true,
@@ -195,6 +195,6 @@ describe("page setup reaches the sheets that asked for it", () => {
     // whatever a zeroed record would have meant.
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    expect(Workbook.getWorksheets(reopened)[0]!.pageSetup.margins).toEqual(DEFAULT_MARGINS);
+    expect(Workbook.listWorksheets(reopened)[0]!.pageSetup.margins).toEqual(DEFAULT_MARGINS);
   });
 });

@@ -42,32 +42,75 @@ export class StreamStateError extends StreamError {
   }
 }
 
+/** Options for {@link StreamArgumentError} and {@link StreamUnsupportedTypeError}. */
+export interface StreamErrorOptions extends BaseErrorOptions {
+  /**
+   * The argument or option at fault, when the error is about one: the path from the parameter
+   * name in the public signature (`stream`, `options.highWaterMark`).
+   */
+  field?: string;
+  /**
+   * The public call that refused the argument (`Streams.fromString`), which a
+   * {@link StreamArgumentError} message then starts with.
+   */
+  where?: string;
+}
+
 /**
- * Error thrown when data type conversion fails.
+ * The stream module's argument error: an argument, an option or a written chunk is not what
+ * the call accepts. `field` names the argument or option, and `where` (when given) the public
+ * call, which the message then starts with.
  */
-export class StreamTypeError extends StreamError {
-  override name = "StreamTypeError";
+export class StreamArgumentError extends StreamError {
+  override name = "StreamArgumentError";
+  /** The argument or option at fault; absent when the error is about a stream's contents. */
+  readonly field?: string;
 
   constructor(
     public readonly expectedType: string,
     public readonly actualType: string,
-    options?: BaseErrorOptions
+    options?: StreamErrorOptions
   ) {
-    super(`Expected ${expectedType}, got ${actualType}`, options);
+    super(
+      options?.where === undefined
+        ? `Expected ${expectedType}, got ${actualType}`
+        : `${options.where}: expected ${expectedType}, got ${actualType}`,
+      options
+    );
+    if (options?.field !== undefined) {
+      this.field = options.field;
+    }
   }
 }
 
+/** @deprecated Use {@link StreamArgumentError}. Removed in 1.0. */
+export const StreamTypeError = StreamArgumentError;
+/** @deprecated Use {@link StreamArgumentError}. Removed in 1.0. */
+export type StreamTypeError = StreamArgumentError;
+
 /**
- * Error thrown when a stream type is not supported.
+ * Error thrown when a stream type is not supported. `operation` is the public call that was
+ * given it (`Streams.bytes`), which the message starts with.
  */
-export class UnsupportedStreamTypeError extends StreamError {
-  override name = "UnsupportedStreamTypeError";
+export class StreamUnsupportedTypeError extends StreamError {
+  override name = "StreamUnsupportedTypeError";
+
+  /** The argument at fault, when the error is about one; absent for a stream's contents. */
+  readonly field?: string;
 
   constructor(
     public readonly operation: string,
     public readonly streamType: string,
-    options?: BaseErrorOptions
+    options?: StreamErrorOptions
   ) {
     super(`${operation}: unsupported stream type "${streamType}"`, options);
+    if (options?.field !== undefined) {
+      this.field = options.field;
+    }
   }
 }
+
+/** @deprecated Use {@link StreamUnsupportedTypeError}. Removed in 1.0. */
+export const UnsupportedStreamTypeError = StreamUnsupportedTypeError;
+/** @deprecated Use {@link StreamUnsupportedTypeError}. Removed in 1.0. */
+export type UnsupportedStreamTypeError = StreamUnsupportedTypeError;

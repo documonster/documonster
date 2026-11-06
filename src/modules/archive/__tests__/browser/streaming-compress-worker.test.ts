@@ -13,10 +13,11 @@ import {
 } from "@archive/compression/streaming-compress.browser";
 import {
   WorkerPool,
+  getDefaultWorkerPool,
   terminateDefaultWorkerPool
 } from "@archive/compression/worker-pool/index.browser";
 import { concatUint8Arrays } from "@utils/binary";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 
 // Helper to create compressible data
 function createCompressibleData(size: number): Uint8Array {
@@ -47,7 +48,19 @@ function collectStreamOutput(stream: ReturnType<typeof createDeflateStream>): Pr
   });
 }
 
+/**
+ * These tests are about the worker path, so they must not depend on how quickly a loaded
+ * machine boots a worker: a stream whose worker misses its start deadline continues on
+ * the main thread (covered in worker-stream-start-fallback.test.ts), which would quietly
+ * test the wrong path here.
+ */
+const PATIENT_START = { streamStartTimeout: 120_000 };
+
 describe("streaming-compress.browser with worker support", () => {
+  beforeEach(() => {
+    getDefaultWorkerPool(PATIENT_START);
+  });
+
   afterEach(() => {
     terminateDefaultWorkerPool();
   });
@@ -164,7 +177,7 @@ describe("streaming-compress.browser with worker support", () => {
         return;
       }
 
-      const customPool = new WorkerPool({ maxWorkers: 2 });
+      const customPool = new WorkerPool({ maxWorkers: 2, ...PATIENT_START });
 
       try {
         const deflate = createDeflateStream({ useWorker: true, workerPool: customPool });

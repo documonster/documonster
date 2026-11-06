@@ -1,8 +1,7 @@
 /**
  * Example: Excel — DataValidation namespace (standalone registry API)
  *
- * Demonstrates the `DataValidation` namespace's standalone handle API:
- * - DataValidation.create()        — make / reuse a validation registry
+ * Demonstrates the `DataValidation` namespace on a sheet's registry:
  * - DataValidation.add(dv, a, r)   — register a rule at an address
  * - DataValidation.find(dv, a)     — resolve the rule applying to an address
  * - DataValidation.remove(dv, a)   — clear a rule
@@ -117,11 +116,11 @@ DataValidation.remove(dv, "B6");
 console.log("After remove(B6), find(B6):", DataValidation.find(dv, "B6"));
 console.log("Remaining rules:", Object.keys(dv.model).filter(k => dv.model[k]).length);
 
-// create() can build a standalone registry (e.g. seeded from a parsed model)
-// that is independent of any worksheet.
-const standalone = DataValidation.create();
-DataValidation.add(standalone, "A1", { type: "any", allowBlank: true });
-console.log("Standalone registry rule at A1:", DataValidation.find(standalone, "A1")?.type);
+// list() reports every rule with its range; each entry is a copy.
+console.log(
+  "Rules:",
+  DataValidation.list(ws).map(entry => `${entry.ref}=${entry.rule.type}`)
+);
 
 try {
   await writeBothFormats(wb, filename);

@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Column, Workbook, Worksheet } from "@excel/index";
+import { Column, Row, Workbook, Worksheet } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -39,11 +39,10 @@ async function convertFile(
   pdfName: string,
   options?: Parameters<typeof Pdf.fromExcel>[1]
 ): Promise<void> {
-  const wb = Workbook.create();
-  await Workbook.readFile(wb, xlsxPath);
+  const wb = await Workbook.readFile(xlsxPath);
   const pdf = await Pdf.fromExcel(wb, options);
   fs.writeFileSync(path.join(outDir, pdfName), pdf);
-  const sheets = Workbook.getWorksheets(wb).length;
+  const sheets = Workbook.listWorksheets(wb).length;
   console.log(`  ${pdfName} — ${sheets} sheet(s), ${pdf.length} bytes`);
 }
 
@@ -151,8 +150,7 @@ await convertFile(
 
 console.log("10. Same file, multiple export variants:");
 
-const wb10 = Workbook.create();
-await Workbook.readFile(wb10, path.join(excelDataDir, "test.xlsx"));
+const wb10 = await Workbook.readFile(path.join(excelDataDir, "test.xlsx"));
 
 // Variant A: Landscape, no grid
 const pdfA = await Pdf.fromExcel(wb10, { orientation: "landscape" });
@@ -162,12 +160,12 @@ console.log("  excel-to-pdf-landscape.pdf — landscape, no grid");
 // Variant B: A5, fit to page — build a small workbook suited for A5
 const wb10b = Workbook.create();
 const wsA5 = Workbook.addWorksheet(wb10b, "A5 Demo");
-Worksheet.setColumns(wsA5, [
+Column.setDefinitions(wsA5, [
   { header: "Item", key: "item", width: 15 },
   { header: "Qty", key: "qty", width: 8 },
   { header: "Price", key: "price", width: 10 }
 ]);
-Worksheet.addRows(wsA5, [
+Row.addMany(wsA5, [
   { item: "Apples", qty: 12, price: 3.5 },
   { item: "Bananas", qty: 6, price: 1.2 },
   { item: "Oranges", qty: 8, price: 2.8 }
@@ -185,9 +183,9 @@ const pdfC = await Pdf.fromExcel(wb10, {
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-encrypted.pdf"), pdfC);
 console.log("  excel-to-pdf-encrypted.pdf — encrypted");
 
-// Variant D: Select first sheet only
+// Variant D: Select first sheet only — by its name
 const pdfD = await Pdf.fromExcel(wb10, {
-  sheets: [1],
+  sheets: [Worksheet.getName(Workbook.listWorksheets(wb10)[0])],
   showGridLines: true,
   showPageNumbers: true
 });

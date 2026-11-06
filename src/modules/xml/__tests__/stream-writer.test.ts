@@ -1,10 +1,10 @@
 import { parseXml, textContent } from "@xml/dom";
 import { XmlStreamWriter } from "@xml/stream-writer";
-import type { WritableTarget } from "@xml/types";
+import type { XmlWritableTarget } from "@xml/types";
 import { describe, it, expect } from "vitest";
 
 /** Helper to capture stream output. */
-function createCapture(): { target: WritableTarget; output: () => string } {
+function createCapture(): { target: XmlWritableTarget; output: () => string } {
   const chunks: string[] = [];
   return {
     target: { write: (chunk: string | Uint8Array) => chunks.push(String(chunk)) },

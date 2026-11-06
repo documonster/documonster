@@ -49,7 +49,7 @@ describe("Worksheet Watermark API", () => {
     addWatermark(ws, { imageId: imgId, mode: "overlay", opacity: 0.2 });
 
     const wm = getWatermark(ws);
-    expect(wm).not.toBeNull();
+    expect(wm).toBeDefined();
     expect(wm!.imageId).toBe(String(imgId));
     expect(wm!.mode).toBe("overlay");
     expect(wm!.opacity).toBe(0.2);
@@ -294,7 +294,7 @@ describe("Excel Overlay Watermark (XLSX)", () => {
 
     // The watermark should be detected from the alphaModFix on the drawing
     const wm = getWatermark(ws2);
-    expect(wm).not.toBeNull();
+    expect(wm).toBeDefined();
     expect(wm!.mode).toBe("overlay");
     // Opacity round-trips through OOXML percentage (0.3 → 30000 → 0.3)
     expect(wm!.opacity).toBeCloseTo(0.3, 2);
@@ -320,7 +320,7 @@ describe("Excel Overlay Watermark (XLSX)", () => {
     expect(images.length).toBeGreaterThanOrEqual(1);
     // Watermark should be detected
     const wm = getWatermark(ws2);
-    expect(wm).not.toBeNull();
+    expect(wm).toBeDefined();
     expect(wm!.mode).toBe("overlay");
   });
 });
@@ -475,7 +475,7 @@ describe("Watermark round-trip", () => {
     const modelCopy = { ...model, name: "Sheet2", id: ws2.id };
     setSheetModel(ws2, modelCopy);
     const wm = getWatermark(ws2);
-    expect(wm).not.toBeNull();
+    expect(wm).toBeDefined();
     expect(wm!.mode).toBe("overlay");
     expect(wm!.opacity).toBe(0.2);
   });
@@ -715,7 +715,7 @@ describe("Excel watermark opacity edge cases", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buffer);
     const wm = getWatermark(getWorksheets(wb2)[0]);
-    expect(wm).not.toBeNull();
+    expect(wm).toBeDefined();
     expect(wm!.opacity).toBeGreaterThanOrEqual(0);
   });
 });

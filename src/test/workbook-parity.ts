@@ -73,9 +73,9 @@ export function accountedFor(
   const accounted = new Set(
     reported.map(reportedAddress).filter((entry): entry is string => entry !== undefined)
   );
-  for (const worksheet of Workbook.getWorksheets(workbook)) {
+  for (const worksheet of Workbook.listWorksheets(workbook)) {
     const sheet = Worksheet.getName(worksheet);
-    for (const region of Worksheet.mergedRegions(worksheet)) {
+    for (const region of Worksheet.getMergedRegions(worksheet)) {
       // `mergedRegions` is one-based; `encodeCol` is zero-based.
       const master = `${sheet}!${encodeCol(region.left - 1)}${region.top}`;
       if (!accounted.has(master)) {

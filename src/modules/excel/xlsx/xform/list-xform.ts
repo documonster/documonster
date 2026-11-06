@@ -1,4 +1,5 @@
-import { MaxItemsExceededError } from "@excel/errors";
+import { ExcelLimitExceededError } from "@excel/errors";
+import type { ExcelLimit } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
@@ -30,6 +31,8 @@ interface ListXformOptions {
   // child xform be supplied without forcing every caller to thread the generic.
   childXform: ListChildXform<any>;
   maxItems?: number;
+  /** The read option `maxItems` came from, which a refusal names. */
+  limit?: ExcelLimit;
 }
 
 class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
@@ -41,7 +44,10 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
   declare public $?: XmlAttributes;
   declare protected childXform: ListChildXform<TChild>;
   declare protected maxItems?: number;
+  declare protected limit?: ExcelLimit;
   declare public parser?: ListChildXform<TChild>;
+  /** Depth inside an element the child parser declined, whose subtree is skipped. */
+  private skipping = 0;
 
   constructor(options: ListXformOptions) {
     super();
@@ -54,6 +60,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
     this.$ = options.$;
     this.childXform = options.childXform as ListChildXform<TChild>;
     this.maxItems = options.maxItems;
+    this.limit = options.limit;
   }
 
   prepare(model: TChild[], options: unknown): void {
@@ -89,12 +96,23 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
       this.parser.parseOpen(node);
       return true;
     }
+    if (this.skipping > 0) {
+      this.skipping++;
+      return true;
+    }
     if (node.name === this.tag) {
       this.model = [];
       return true;
     }
     if (this.childXform.parseOpen(node)) {
       this.parser = this.childXform;
+      return true;
+    }
+    // **An element the child does not take is skipped with its subtree**, once the list is open. Declining it
+    // (`false`) left its closing tag to arrive here with no child parser, where it read as the list's own close —
+    // ending `<sheetData>` at the first stray `</c>` and handing the rest of the rows to whatever parsed next.
+    if (this.model !== undefined) {
+      this.skipping = 1;
       return true;
     }
     return false;
@@ -116,9 +134,13 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
           // The concrete child may declare `tag` as a private member; probe it
           // structurally for the diagnostic message.
           const childTag = (this.childXform as unknown as { tag?: string }).tag ?? "";
-          throw new MaxItemsExceededError(childTag, this.maxItems);
+          throw new ExcelLimitExceededError(childTag, this.maxItems, { limit: this.limit });
         }
       }
+      return true;
+    }
+    if (this.skipping > 0) {
+      this.skipping--;
       return true;
     }
 
@@ -136,6 +158,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
 
   reset(): void {
     super.reset();
+    this.skipping = 0;
     if (this.childXform) {
       this.childXform.reset();
     }

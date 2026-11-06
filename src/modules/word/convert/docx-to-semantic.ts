@@ -17,6 +17,7 @@
  * - Math content (text fallback)
  */
 
+import type { SchemaMatches } from "@utils/schema";
 import { ommlToMathML } from "@word/advanced/math-convert";
 import type {
   ConversionContext,
@@ -31,7 +32,10 @@ import type {
   SemanticTableRow
 } from "@word/convert/conversion-ir";
 import { createConversionContext } from "@word/convert/conversion-ir";
-import { extractMathText, symbolText } from "@word/core/text-utils";
+import { checkHandle } from "@word/core/argument-checks";
+import { withDisplayFields } from "@word/core/field-view";
+import { checkSchema, w } from "@word/core/option-schema";
+import { extractMathText, hyperlinkContent, symbolText } from "@word/core/text-utils";
 import { finalViewRun, isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
 import type { NumberingCounter } from "@word/query/numbering-counter";
@@ -82,6 +86,17 @@ export interface DocxToSemanticOptions {
   readonly extractImages?: boolean;
 }
 
+const toSemanticOptionsSchema = w.record({
+  includeFootnotes: w.boolean().optional(),
+  includeEndnotes: w.boolean().optional(),
+  extractImages: w.boolean().optional()
+});
+const _toSemanticOptionsMatch: SchemaMatches<
+  typeof toSemanticOptionsSchema,
+  DocxToSemanticOptions
+> = true;
+void _toSemanticOptionsMatch;
+
 /**
  * Convert a DocxDocument to a SemanticDocument (format-agnostic IR).
  *
@@ -93,6 +108,10 @@ export function docxToSemantic(
   doc: DocxDocument,
   options?: DocxToSemanticOptions
 ): { document: SemanticDocument; context: ConversionContext } {
+  checkHandle(doc, "document", "doc", "Convert.toSemantic");
+  checkSchema(toSemanticOptionsSchema.optional(), options, "Convert.toSemantic");
+  // What a field's instruction holds is not shown.
+  doc = withDisplayFields(doc);
   // The public context is returned as-is; the resolver and numbering counter
   // are conversion internals and must not ride along on the returned object.
   const context = createConversionContext();
@@ -626,7 +645,7 @@ function convertParagraphChildren(
     if ("type" in child && child.type === "hyperlink") {
       const hl: Hyperlink = child;
       const linkChildren: SemanticInline[] = [];
-      for (const linkChild of hl.children) {
+      for (const linkChild of hyperlinkContent(hl)) {
         const inner = finalViewRun(linkChild);
         if (inner) {
           linkChildren.push(...convert(inner));

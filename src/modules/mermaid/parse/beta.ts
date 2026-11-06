@@ -6,7 +6,7 @@
  * axis is a named value, an architecture service is a declaration with an icon.
  */
 
-import { decodeLabel, splitStatements, unquote, linesOf } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, linesOf, splitStatementsAt, unquote } from "@mermaid/parse/lex";
 import type {
   ArchitectureDiagram,
   ArchitectureEdge,
@@ -26,7 +26,9 @@ export function parsePacket(source: string): PacketDiagram {
   let title: string | undefined;
   let bitsPerRow = 32;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^packet(?:-beta)?\s*$/i.test(text)) {
       continue;
     }
@@ -51,14 +53,20 @@ export function parsePacket(source: string): PacketDiagram {
         end: Math.max(start, end),
         label: decodeLabel(field[3])
       });
+      continue;
     }
+    if (/^(accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
     kind: "packet",
     ...(title === undefined ? {} : { title }),
     bitsPerRow,
-    fields
+    fields,
+    ...skipped.report()
   };
 }
 
@@ -73,9 +81,11 @@ export function parseKanban(source: string): KanbanDiagram {
   let title: string | undefined;
   let columnIndent: number | undefined;
 
-  for (const raw of linesOf(source)) {
+  const skipped = new SkipLog();
+  const lines = linesOf(source);
+  for (let index = 0; index < lines.length; index++) {
     // Already comment-free: `linesOf` applies the shared, quote-aware rule.
-    const line = raw;
+    const line = lines[index];
     if (line.trim() === "") {
       continue;
     }
@@ -105,13 +115,16 @@ export function parseKanban(source: string): KanbanDiagram {
         ...(parsed.priority === undefined ? {} : { priority: parsed.priority }),
         ...(parsed.ticket === undefined ? {} : { ticket: parsed.ticket })
       });
+    } else {
+      skipped.addLine(line, index + 1);
     }
   }
 
   return {
     kind: "kanban",
     ...(title === undefined ? {} : { title }),
-    columns: columns as readonly KanbanColumn[]
+    columns: columns as readonly KanbanColumn[],
+    ...skipped.report()
   };
 }
 
@@ -151,7 +164,9 @@ export function parseRadar(source: string): RadarDiagram {
   let title: string | undefined;
   let max: number | undefined;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^radar(?:-beta)?\s*$/i.test(text)) {
       continue;
     }
@@ -165,6 +180,8 @@ export function parseRadar(source: string): RadarDiagram {
       const value = Number.parseFloat(maxMatch[1]);
       if (Number.isFinite(value)) {
         max = value;
+      } else {
+        skipped.add(statement);
       }
       continue;
     }
@@ -182,16 +199,25 @@ export function parseRadar(source: string): RadarDiagram {
       const body = curve[1];
       const bracket = /\{(.*)\}/.exec(body) ?? /\[(.*)\]/.exec(body);
       if (!bracket) {
+        skipped.add(statement);
         continue;
       }
       const named = /^\s*\S+\s*\[(.*?)\]/.exec(body);
       const label = decodeLabel(named ? named[1] : body.replace(/[{[].*/, ""));
-      const values = bracket[1]
+      const read = bracket[1]
         .split(",")
-        .map(part => Number.parseFloat(part.replace(/^[^:]*:/, "")))
-        .filter(value => Number.isFinite(value));
+        .map(part => Number.parseFloat(part.replace(/^[^:]*:/, "")));
+      const values = read.filter(value => Number.isFinite(value));
+      if (values.length !== read.length) {
+        skipped.add(statement);
+      }
       series.push({ label: label === "" ? `series ${series.length + 1}` : label, values });
+      continue;
     }
+    if (/^(showLegend|graticule|ticks|min|accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
@@ -199,7 +225,8 @@ export function parseRadar(source: string): RadarDiagram {
     ...(title === undefined ? {} : { title }),
     axes,
     series,
-    ...(max === undefined ? {} : { max })
+    ...(max === undefined ? {} : { max }),
+    ...skipped.report()
   };
 }
 
@@ -209,7 +236,9 @@ export function parseArchitecture(source: string): ArchitectureDiagram {
   const edges: ArchitectureEdge[] = [];
   let title: string | undefined;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^architecture(?:-beta)?\s*$/i.test(text)) {
       continue;
     }
@@ -246,13 +275,19 @@ export function parseArchitecture(source: string): ArchitectureDiagram {
         ...(edge[4] === undefined ? {} : { toSide: edge[4] }),
         arrow: edge[3].includes(">")
       });
+      continue;
     }
+    if (/^(accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   return {
     kind: "architecture",
     ...(title === undefined ? {} : { title }),
     nodes,
-    edges
+    edges,
+    ...skipped.report()
   };
 }

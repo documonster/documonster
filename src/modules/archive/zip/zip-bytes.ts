@@ -5,7 +5,7 @@
  * https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
  *
  * This module focuses on producing a complete ZIP as a single Uint8Array.
- * For true streaming (push chunks while reading sources), use `zip()` / `ZipArchive.stream()`.
+ * For true streaming (push chunks while reading sources), use `Archive.createZip()` and its `stream()`.
  */
 
 import type { CompressOptions } from "@archive/compression/compress";
@@ -17,13 +17,12 @@ import {
   DEFAULT_ZIP_TIMESTAMPS,
   REPRODUCIBLE_ZIP_MOD_TIME
 } from "@archive/core/defaults";
-import { ArchiveError } from "@archive/core/errors";
+import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import { encodeZipString } from "@archive/core/text";
 import type { ZipEncryptionMethod } from "@archive/crypto";
 import {
   zipCryptoEncrypt,
-  aesEncrypt,
   buildAesExtraField,
   randomBytes,
   isAesEncryption,
@@ -33,8 +32,11 @@ import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import { normalizeZipPath } from "@archive/zip-spec/zip-path";
 import {
+  FLAG_DATA_DESCRIPTOR,
   FLAG_ENCRYPTED,
   COMPRESSION_AES,
+  buildDataDescriptor,
+  buildDataDescriptorZip64,
   UINT32_MAX,
   ZIP_LOCAL_FILE_HEADER_FIXED_SIZE,
   buildZip64ExtraField,
@@ -70,6 +72,10 @@ interface ProcessedEntry {
   flags: number;
   externalAttributes: number;
   versionMadeBy?: number;
+  /** Per-entry ZIP64 override; `undefined` follows the archive-level mode. */
+  zip64Mode?: Zip64Mode;
+  /** Set when this entry is written with ZIP64 records, central directory included. */
+  zip64?: boolean;
 }
 
 /**
@@ -119,6 +125,8 @@ export interface ZipEntry {
    * where mode is typically 0o120777 for symlinks.
    */
   externalAttributes?: number;
+  /** Per-entry ZIP64 override. Defaults to the archive-level `zip64` mode. */
+  zip64?: Zip64Mode;
 }
 
 // Re-export ZipRawEntry from shared module
@@ -168,18 +176,21 @@ function sortProcessedEntriesByName(entries: ProcessedEntry[]): void {
 /**
  * Validate encryption options and throw if invalid.
  */
+/** Names public calls only: the synchronous builders all have an asynchronous twin. */
+const AES_SYNC_WRITE_MESSAGE =
+  "AES encryption requires the asynchronous API (it runs on Web Crypto): build with " +
+  'toBuffer() rather than toBufferSync(), or the method of the same name without the "Sync" suffix';
+
 function validateEncryptionOptions(
   encryptionMethod: ZipEncryptionMethod,
   password: string | Uint8Array | undefined,
   isSync: boolean
 ): void {
   if (encryptionMethod !== "none" && !password) {
-    throw new ArchiveError("Password is required when encryption is enabled");
+    throw new ArchiveArgumentError("password", "Password is required when encryption is enabled");
   }
   if (isSync && isAesEncryption(encryptionMethod)) {
-    throw new ArchiveError(
-      "AES encryption requires async API. Use createZip() instead of createZipSync()."
-    );
+    throw new ArchiveError(AES_SYNC_WRITE_MESSAGE);
   }
 }
 /**
@@ -351,7 +362,8 @@ function buildProcessedEntry(
     offset: 0,
     flags,
     externalAttributes: attrs.externalAttributes,
-    versionMadeBy: attrs.versionMadeBy
+    versionMadeBy: attrs.versionMadeBy,
+    zip64Mode: entry.zip64
   };
 }
 
@@ -387,8 +399,8 @@ function buildProcessedRawEntry(
     compressedData: entry.compressedData,
     crc: entry.crc32 >>> 0,
     compressionMethod: entry.compressionMethod,
-    modTime: metadata.dosTime,
-    modDate: metadata.dosDate,
+    modTime: entry.dosTime ?? metadata.dosTime,
+    modDate: entry.dosDate ?? metadata.dosDate,
     extraField: entry.extraField ?? metadata.extraField,
     comment: metadata.commentBytes,
     offset: 0,
@@ -508,6 +520,8 @@ async function encryptData(
     // CRC violates the spec and causes strict readers (WinZip, 7-Zip,
     // pyzipper, …) to reject the entry with a CRC error.
     const keyStrength = getAesKeyStrength(encryptionMethod)!;
+    // Loaded only for an AES entry, so a package that encrypts nothing does not carry the cipher.
+    const { aesEncrypt } = await import("@archive/crypto/aes");
     const encrypted = await aesEncrypt(compressedData, password, keyStrength);
     const aesExtraField = buildAesExtraField(2, keyStrength, originalCompressionMethod);
     return {
@@ -544,9 +558,7 @@ function encryptDataSync(
   }
 
   if (isAesEncryption(encryptionMethod)) {
-    throw new ArchiveError(
-      "AES encryption requires async API. Use createZip() instead of createZipSync()."
-    );
+    throw new ArchiveError(AES_SYNC_WRITE_MESSAGE);
   }
 
   return {
@@ -555,13 +567,16 @@ function encryptDataSync(
   };
 }
 
+/** Bytes of the data descriptor written after an entry with flag bit 3 (none otherwise). */
+function dataDescriptorSize(entry: ProcessedEntry, zip64: boolean): number {
+  return (entry.flags & FLAG_DATA_DESCRIPTOR) === 0 ? 0 : zip64 ? 24 : 16;
+}
+
 function finalizeZip(
   processedEntries: ProcessedEntry[],
   zipComment: Uint8Array,
   zip64Mode: Zip64Mode = "auto"
 ): Uint8Array {
-  const forceZip64 = zip64Mode === true;
-
   // Precompute offsets and effective extra fields (local vs central can differ for ZIP64).
   const localExtraFields: Uint8Array[] = new Array(processedEntries.length);
   const zip64EntryNeeded: boolean[] = new Array(processedEntries.length);
@@ -572,12 +587,21 @@ function finalizeZip(
     entry.offset = localSectionSize;
 
     const compressedSize = entry.compressedData.length;
-    const needsZip64Entry =
-      forceZip64 ||
+    const exceedsZip32 =
       entry.offset > UINT32_MAX ||
       compressedSize > UINT32_MAX ||
       entry.uncompressedSize > UINT32_MAX;
+    // A per-entry mode wins over the archive's, as it does in the streaming writer.
+    const entryMode = entry.zip64Mode ?? zip64Mode;
+    if (entryMode === false && exceedsZip32) {
+      throw new ArchiveError("ZIP64 is required but zip64=false");
+    }
+    const needsZip64Entry = entryMode === true || exceedsZip32;
     zip64EntryNeeded[i] = needsZip64Entry;
+    if (entry.zip64Mode === true) {
+      // The central directory record then carries the ZIP64 extra field too.
+      entry.zip64 = true;
+    }
 
     const zip64LocalExtra = needsZip64Entry
       ? buildZip64ExtraField({
@@ -592,7 +616,8 @@ function finalizeZip(
 
     const localHeaderSize =
       ZIP_LOCAL_FILE_HEADER_FIXED_SIZE + entry.name.length + localExtraFields[i]!.length;
-    localSectionSize += localHeaderSize + compressedSize;
+    localSectionSize +=
+      localHeaderSize + compressedSize + dataDescriptorSize(entry, needsZip64Entry);
   }
 
   const centralDirOffset = localSectionSize;
@@ -613,6 +638,10 @@ function finalizeZip(
     const entry = processedEntries[i]!;
     const compressedSize = entry.compressedData.length;
     const needsZip64Entry = zip64EntryNeeded[i]!;
+    // Flag bit 3: the CRC and sizes follow the data in a descriptor and are zero in the local
+    // header (APPNOTE 4.4.4). Only a copied entry asks for it — a ZipCrypto payload whose
+    // check byte was taken from the DOS time, which readers expect exactly when bit 3 is set.
+    const hasDescriptor = (entry.flags & FLAG_DATA_DESCRIPTOR) !== 0;
 
     offset += writeLocalFileHeaderInto(out, view, offset, {
       fileName: entry.name,
@@ -621,14 +650,21 @@ function finalizeZip(
       compressionMethod: entry.compressionMethod,
       dosTime: entry.modTime,
       dosDate: entry.modDate,
-      crc32: entry.crc,
-      compressedSize: needsZip64Entry ? UINT32_MAX : compressedSize,
-      uncompressedSize: needsZip64Entry ? UINT32_MAX : entry.uncompressedSize,
+      crc32: hasDescriptor ? 0 : entry.crc,
+      compressedSize: needsZip64Entry ? UINT32_MAX : hasDescriptor ? 0 : compressedSize,
+      uncompressedSize: needsZip64Entry ? UINT32_MAX : hasDescriptor ? 0 : entry.uncompressedSize,
       versionNeeded: needsZip64Entry ? VERSION_ZIP64 : undefined
     });
 
     out.set(entry.compressedData, offset);
     offset += compressedSize;
+    if (hasDescriptor) {
+      const descriptor = needsZip64Entry
+        ? buildDataDescriptorZip64(entry.crc, compressedSize, entry.uncompressedSize)
+        : buildDataDescriptor(entry.crc, compressedSize, entry.uncompressedSize);
+      out.set(descriptor, offset);
+      offset += descriptor.length;
+    }
   }
 
   writeCentralDirectoryAndEocdInto(processedEntries, {

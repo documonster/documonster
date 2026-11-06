@@ -4,16 +4,26 @@
  * Renders word/footnotes.xml and word/endnotes.xml parts.
  */
 
-import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { DOCUMENT_NAMESPACES, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { within } from "@word/core/node-path";
 import type { FootnoteDef, EndnoteDef } from "@word/types";
+import {
+  DEFAULT_CONTINUATION_SEPARATOR_ID,
+  DEFAULT_SEPARATOR_ID,
+  hasOwnSeparators
+} from "@word/writer/note-separators";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /** Render the default separator/continuation separator entries (required by Word). */
 function renderDefaultSeparators(xml: XmlSink, elementName: string): void {
   // Separator (id=-1)
-  xml.openNode(elementName, { "w:type": "separator", "w:id": "-1" });
+  xml.openNode(elementName, {
+    "w:type": "separator",
+    "w:id": xmlValue(DEFAULT_SEPARATOR_ID, "w:id")
+  });
   xml.openNode("w:p");
   xml.openNode("w:r");
   xml.leafNode("w:separator");
@@ -22,7 +32,10 @@ function renderDefaultSeparators(xml: XmlSink, elementName: string): void {
   xml.closeNode();
 
   // Continuation separator (id=0)
-  xml.openNode(elementName, { "w:type": "continuationSeparator", "w:id": "0" });
+  xml.openNode(elementName, {
+    "w:type": "continuationSeparator",
+    "w:id": xmlValue(DEFAULT_CONTINUATION_SEPARATOR_ID, "w:id")
+  });
   xml.openNode("w:p");
   xml.openNode("w:r");
   xml.leafNode("w:continuationSeparator");
@@ -38,14 +51,14 @@ function renderNote(
   note: FootnoteDef | EndnoteDef,
   helpers?: RenderHelpers
 ): void {
-  const attrs: Record<string, string> = { "w:id": String(note.id) };
+  const attrs: Record<string, string> = { "w:id": xmlValue(note.id, "w:id") };
   if (note.type && note.type !== "normal") {
     attrs["w:type"] = note.type;
   }
   xml.openNode(elementName, attrs);
-  for (const para of note.content) {
-    renderParagraph(xml, para, helpers);
-  }
+  note.content.forEach((para, i) =>
+    within(`content[${i}]`, () => renderParagraph(xml, para, helpers))
+  );
   xml.closeNode();
 }
 
@@ -56,26 +69,23 @@ export function renderFootnotes(
   helpers?: RenderHelpers
 ): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
-  xml.openNode("w:footnotes", {
-    "xmlns:w": NS_W,
-    "xmlns:r": NS_R
-  });
+  // Every prefix the document part declares: drawings and markup kept
+  // verbatim inside a note use the same ones.
+  xml.openNode("w:footnotes", DOCUMENT_NAMESPACES);
 
   // If the caller already provided separator entries (identified by their
   // `type` rather than a magic id range), use those. Otherwise synthesize
-  // the default separators. Earlier we keyed off `id <= 0`, but a caller is
-  // free to use id=0 for a normal note — that would silently skip the
-  // mandatory separators and produce an invalid document.
-  const hasSeparators = footnotes.some(
-    fn => fn.type === "separator" || fn.type === "continuationSeparator"
-  );
-  if (!hasSeparators) {
+  // the default separators, which take ids -1 and 0 — `assertUniqueReferencedIds`
+  // has already refused a normal note holding either. Keying off `id <= 0`
+  // instead would let a normal note with id 0 suppress the mandatory
+  // separators and produce an invalid document.
+  if (!hasOwnSeparators(footnotes)) {
     renderDefaultSeparators(xml, "w:footnote");
   }
 
-  for (const fn of footnotes) {
-    renderNote(xml, "w:footnote", fn, helpers);
-  }
+  footnotes.forEach((fn, i) =>
+    within(`footnotes[${i}]`, () => renderNote(xml, "w:footnote", fn, helpers))
+  );
 
   xml.closeNode();
 }
@@ -87,21 +97,17 @@ export function renderEndnotes(
   helpers?: RenderHelpers
 ): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
-  xml.openNode("w:endnotes", {
-    "xmlns:w": NS_W,
-    "xmlns:r": NS_R
-  });
+  // Every prefix the document part declares: drawings and markup kept
+  // verbatim inside a note use the same ones.
+  xml.openNode("w:endnotes", DOCUMENT_NAMESPACES);
 
-  const hasSeparators = endnotes.some(
-    en => en.type === "separator" || en.type === "continuationSeparator"
-  );
-  if (!hasSeparators) {
+  if (!hasOwnSeparators(endnotes)) {
     renderDefaultSeparators(xml, "w:endnote");
   }
 
-  for (const en of endnotes) {
-    renderNote(xml, "w:endnote", en, helpers);
-  }
+  endnotes.forEach((en, i) =>
+    within(`endnotes[${i}]`, () => renderNote(xml, "w:endnote", en, helpers))
+  );
 
   xml.closeNode();
 }

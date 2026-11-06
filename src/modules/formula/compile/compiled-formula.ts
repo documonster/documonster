@@ -21,8 +21,15 @@
  * AST is not retained on the CompiledFormula).
  */
 
-import type { BoundExpr } from "@formula/compile/bound-ast";
-import { BoundExprKind } from "@formula/compile/bound-ast";
+import type { BoundCall, BoundExpr } from "@formula/compile/bound-ast";
+import { BoundExprKind, nameExprKey } from "@formula/compile/bound-ast";
+import {
+  LAST_COL,
+  LAST_ROW,
+  lookupResultShape,
+  STRETCHED_ARGUMENT,
+  stretchArea
+} from "@formula/compile/stretched-range";
 import {
   resolveStructuredRefRows,
   buildTableGeometry,
@@ -30,9 +37,15 @@ import {
 } from "@formula/compile/structured-ref-utils";
 import type { FormulaInstance } from "@formula/integration/formula-instance";
 import type { ResolvedTable, WorkbookSnapshot } from "@formula/integration/workbook-snapshot";
+import {
+  producesArray,
+  type RegisteredFunctions,
+  returnsArray
+} from "@formula/syntax/array-result";
 import type { AstNode } from "@formula/syntax/ast";
 import { NodeType } from "@formula/syntax/ast";
-import { stripFunctionPrefix } from "@formula/syntax/token-types";
+import { SPILL_OPERATOR, stripFunctionPrefix } from "@formula/syntax/token-types";
+import { excelNameKey } from "@utils/name-key";
 
 // ============================================================================
 // CompiledFormula
@@ -55,10 +68,9 @@ export interface CompiledFormula {
   /** Whether this formula contains any lambda expressions. */
   readonly containsLambda: boolean;
   /**
-   * Whether the top-level function is a known dynamic array function
-   * (FILTER, SORT, UNIQUE, SEQUENCE, etc.). Determined once at compile
-   * time — consumers should use this flag instead of re-checking the AST
-   * or bound expression.
+   * Whether the formula is inferred to be a dynamic array — it produces an array (`producesArray`) and its host did
+   * not say otherwise. Determined once at compile time — consumers should use this flag instead of re-checking the
+   * AST or bound expression.
    */
   readonly isDynamicArrayFunction: boolean;
   /**
@@ -259,8 +271,19 @@ function walkDeps(
       break;
 
     case BoundExprKind.Call:
+      if (expr.callee !== undefined) {
+        walkDeps(expr.callee, cells, areas, tablesByName, nameResolver, visitedNames);
+      }
       for (const arg of expr.args) {
         walkDeps(arg, cells, areas, tablesByName, nameResolver, visitedNames);
+      }
+      // SUMIF / AVERAGEIF / LOOKUP read the cells an argument stretches to, not only the ones it
+      // names.
+      if (isStretchingCall(expr)) {
+        const stretched = staticStretchedArea(expr);
+        if (stretched) {
+          areas.push(stretched);
+        }
       }
       break;
 
@@ -286,7 +309,7 @@ function walkDeps(
       // Try to resolve structured reference to static deps using the table index.
       // Only possible when we have the table name and the table exists in the snapshot.
       if (tablesByName && expr.tableName) {
-        const resolved = tablesByName.get(expr.tableName.toLowerCase());
+        const resolved = tablesByName.get(excelNameKey(expr.tableName));
         if (resolved) {
           const t = resolved.table;
           const geo = buildTableGeometry(t);
@@ -330,9 +353,9 @@ function walkDeps(
     case BoundExprKind.NameExpr:
       // Try to resolve the defined name and extract its dependencies.
       // Guard against infinite recursion with visitedNames.
-      if (nameResolver && visitedNames && !visitedNames.has(expr.upperName)) {
-        visitedNames.add(expr.upperName);
-        const resolved = nameResolver(expr.upperName);
+      if (nameResolver && visitedNames && !visitedNames.has(nameExprKey(expr))) {
+        visitedNames.add(nameExprKey(expr));
+        const resolved = nameResolver(nameExprKey(expr));
         if (resolved) {
           for (const c of resolved.deps.cells) {
             cells.push(c);
@@ -381,58 +404,91 @@ const VOLATILE_FUNCTIONS = new Set([
 
 const DYNAMIC_REF_FUNCTIONS = new Set(["INDIRECT", "OFFSET"]);
 
-/**
- * Function names that naturally produce arrays and should trigger spill
- * behavior even when `isDynamicArray` is not explicitly set in the XLSX model.
- */
-const DYNAMIC_ARRAY_FUNCTION_NAMES = new Set([
-  "FILTER",
-  "SORT",
-  "UNIQUE",
-  "SORTBY",
-  "SEQUENCE",
-  "RANDARRAY",
-  "TOCOL",
-  "TOROW",
-  "CHOOSEROWS",
-  "CHOOSECOLS",
-  "VSTACK",
-  "HSTACK",
-  "WRAPROWS",
-  "WRAPCOLS",
-  "EXPAND",
-  "TAKE",
-  "DROP"
-]);
+/** A call with an argument the evaluator stretches (`@formula/compile/stretched-range`). */
+function isStretchingCall(call: BoundCall): boolean {
+  const index = STRETCHED_ARGUMENT.get(stripFunctionPrefix(call.name));
+  return call.callee === undefined && index !== undefined && call.args.length > index;
+}
 
 /**
- * Check if the formula's top-level expression is a known dynamic array
- * function. Checks both the raw AST (for prefixed names like `_XLFN.FILTER`)
- * and the bound expression (for the canonical uppercase name).
+ * The cells a stretched argument is read from, when the bind fixes both it and the argument
+ * whose size it takes. `null` when there are no such cells to depend on — the argument is a value
+ * rather than a reference, or (LOOKUP) a two-dimensional one, which is #N/A. `undefined` when
+ * either is known only at run time.
  */
-export function detectDynamicArrayFunction(ast: AstNode, bound: BoundExpr): boolean {
-  // Check AST level (handles _XLFN. prefixed names)
-  if (ast.type === NodeType.FunctionCall) {
-    const upper = ast.name.toUpperCase();
-    if (DYNAMIC_ARRAY_FUNCTION_NAMES.has(upper)) {
-      return true;
-    }
-    const canonical = stripFunctionPrefix(upper);
-    if (DYNAMIC_ARRAY_FUNCTION_NAMES.has(canonical)) {
-      return true;
-    }
+function staticStretchedArea(call: BoundCall): AreaDep | null | undefined {
+  const name = stripFunctionPrefix(call.name);
+  const stretched = call.args[STRETCHED_ARGUMENT.get(name)!];
+  if (stretched.kind === BoundExprKind.Literal || stretched.kind === BoundExprKind.Array) {
+    return null;
   }
-  // Check bound expression level. Strip `_XLFN.` prefix here too —
-  // `boundCall` preserves the prefix on the bound name, so without the
-  // strip a synthesised bound call (e.g. from INDIRECT re-parse) would
-  // miss detection.
-  if (bound.kind === BoundExprKind.Call) {
-    const canonical = stripFunctionPrefix(bound.name);
-    if (DYNAMIC_ARRAY_FUNCTION_NAMES.has(canonical)) {
-      return true;
-    }
+  const target = staticRefArea(stretched);
+  const source = staticShape(call.args[name === "LOOKUP" ? 1 : 0]);
+  if (!target || !source) {
+    return undefined;
   }
-  return false;
+  let shape: { height: number; width: number } | undefined = source;
+  if (name === "LOOKUP") {
+    const length = source.height === 1 ? source.width : source.height;
+    shape = lookupResultShape(
+      target.bottom - target.top + 1,
+      target.right - target.left + 1,
+      length
+    );
+  }
+  return shape
+    ? stretchArea(target.sheet, target.top, target.left, shape.height, shape.width)
+    : null;
+}
+
+/** The size of a bound reference or array constant; `undefined` for anything else. */
+function staticShape(e: BoundExpr): { height: number; width: number } | undefined {
+  if (e.kind === BoundExprKind.Array) {
+    return { height: e.rows.length, width: Math.max(0, ...e.rows.map(row => row.length)) };
+  }
+  const area = staticRefArea(e);
+  return area && { height: area.bottom - area.top + 1, width: area.right - area.left + 1 };
+}
+
+/** The one area a bound reference names, at its full extent; `undefined` for anything else. */
+function staticRefArea(e: BoundExpr): AreaDep | undefined {
+  switch (e.kind) {
+    case BoundExprKind.CellRef:
+      return { sheet: e.sheet, top: e.row, left: e.col, bottom: e.row, right: e.col };
+    case BoundExprKind.AreaRef:
+      return { sheet: e.sheet, top: e.top, left: e.left, bottom: e.bottom, right: e.right };
+    case BoundExprKind.ColRangeRef:
+      return { sheet: e.sheet, top: 1, left: e.leftCol, bottom: LAST_ROW, right: e.rightCol };
+    case BoundExprKind.RowRangeRef:
+      return { sheet: e.sheet, top: e.topRow, left: 1, bottom: e.bottomRow, right: LAST_COL };
+    case BoundExprKind.Ref3D:
+      return e.sheets.length === 1 ? staticRefArea({ ...e.inner, sheet: e.sheets[0] }) : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Whether the formula produces an array, so it spills even when `isDynamicArray` is not set — the static decision of
+ * `@formula/syntax/array-result`, which a host storing the formula asks too. The bound expression is checked as well
+ * for a call the binder synthesised (an `INDIRECT` re-parse) and for `ANCHORARRAY(A1)`, which it binds as `A1#`.
+ */
+export function detectDynamicArrayFunction(
+  ast: AstNode,
+  bound: BoundExpr,
+  functions?: RegisteredFunctions
+): boolean {
+  if (producesArray(ast, functions)) {
+    return true;
+  }
+  if (bound.kind === BoundExprKind.UnaryOp && bound.op === SPILL_OPERATOR) {
+    return true;
+  }
+  return (
+    bound.kind === BoundExprKind.Call &&
+    bound.callee === undefined &&
+    returnsArray(bound.name, functions)
+  );
 }
 
 /**
@@ -445,7 +501,8 @@ export function detectDynamicArrayFunction(ast: AstNode, bound: BoundExpr): bool
  * formula to decide whether to set `subtotalMask[r][c]`.
  */
 export function detectSubtotalOutput(ast: AstNode, bound: BoundExpr): boolean {
-  if (ast.type === NodeType.FunctionCall) {
+  // An applied argument list makes the whole expression the *invocation's* result, not the named call's.
+  if (ast.type === NodeType.FunctionCall && ast.invocations === undefined) {
     const upper = ast.name.toUpperCase();
     const canonical = stripFunctionPrefix(upper);
     if (canonical === "SUBTOTAL" || canonical === "AGGREGATE") {
@@ -501,6 +558,13 @@ export function analyzeExpr(
         if (VOLATILE_FUNCTIONS.has(canonical) || additionalVolatileFunctions?.has(canonical)) {
           isVolatile = true;
         }
+        // An argument whose stretched cells the bind cannot fix is recorded as it is read.
+        if (isStretchingCall(e) && staticStretchedArea(e) === undefined) {
+          hasDynamicRefs = true;
+        }
+        if (e.callee !== undefined) {
+          walkAnalyze(e.callee);
+        }
         for (const arg of e.args) {
           walkAnalyze(arg);
         }
@@ -533,7 +597,7 @@ export function analyzeExpr(
         // pointing at `NOW()` stayed cached between calculations — the
         // bug drove R5-P0-5.
         if (nameResolver) {
-          const resolved = nameResolver(e.upperName);
+          const resolved = nameResolver(nameExprKey(e));
           if (resolved?.hasDynamicRefs) {
             hasDynamicRefs = true;
           }

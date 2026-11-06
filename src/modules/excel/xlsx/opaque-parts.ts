@@ -67,12 +67,14 @@ const DROP_RULES: readonly DropRule[] = [
   {
     reason: "stale-cache",
     description: "formula dependency-order cache; Excel rebuilds it on open",
-    test: path => path === "xl/calcchain.xml"
+    // `.bin` is the XLSB form. Kept through an edit it names cells that no longer hold the formula it
+    // lists, and Excel refuses the workbook rather than rebuilding the chain.
+    test: path => path === "xl/calcchain.xml" || path === "xl/calcchain.bin"
   },
   {
     reason: "stale-cache",
     description: "volatile-function dependency cache; Excel rebuilds it on open",
-    test: path => path === "xl/volatiledependencies.xml"
+    test: path => path === "xl/volatiledependencies.xml" || path === "xl/volatiledependencies.bin"
   },
   {
     reason: "stale-cache",

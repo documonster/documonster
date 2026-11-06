@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { UnderlineStyle, HighlightColor, RunProperties, Run } from "../index";
 
 const outDir = path.resolve(
@@ -41,7 +41,7 @@ Document.addHeading(doc, "Word Module — Text Formatting", 1);
 // Basic toggles (helper builders)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Basic toggles", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Plain, "),
@@ -53,7 +53,7 @@ Document.addParagraphElement(
 );
 
 // Combined: bold + italic + underline at once via text()
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Combined: "),
@@ -85,7 +85,7 @@ const allUnderlineStyles: UnderlineStyle[] = [
   "wavyDouble",
   "none"
 ];
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     allUnderlineStyles.flatMap(
@@ -95,7 +95,7 @@ Document.addParagraphElement(
 );
 
 // Underline with explicit color (independent of text color)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Red wavy underline on black text: "),
@@ -107,7 +107,7 @@ Document.addParagraphElement(
 // Color
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Color", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("RGB ", { color: "1F4E79" }),
@@ -133,7 +133,7 @@ const highlights: HighlightColor[] = [
   "white",
   "none"
 ];
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     highlights.flatMap(h => [
@@ -142,7 +142,7 @@ Document.addParagraphElement(
   )
 );
 // Custom shading (background fill, more flexible than highlight)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Custom shading via shading.fill: "),
@@ -159,12 +159,12 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Size & font family", 2);
 for (const pt of [8, 10, 12, 14, 18, 24, 36]) {
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([Build.text(`${pt}pt sample`, { size: Units.ptToHalfPoint(pt) })])
   );
 }
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Calibri ", { font: { ascii: "Calibri", hAnsi: "Calibri" } }),
@@ -179,7 +179,7 @@ Document.addParagraphElement(
 // Sub / super script
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Super/Subscript", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("E = mc"),
@@ -194,7 +194,7 @@ Document.addParagraphElement(
 // Caps / small caps / hidden
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Caps & visibility", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("All caps: ", { caps: true }),
@@ -203,7 +203,7 @@ Document.addParagraphElement(
     Build.text("hello world", { smallCaps: true })
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Visible "),
@@ -216,7 +216,7 @@ Document.addParagraphElement(
 // Spacing / kerning / scale / position / fitText
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Spacing & glyph metrics", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("S P A C E D ", { spacing: Units.ptToTwips(2) }),
@@ -227,7 +227,7 @@ Document.addParagraphElement(
     Build.text(" lowered", { position: -Units.ptToHalfPoint(4) })
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("FitText: "),
@@ -241,7 +241,7 @@ Document.addParagraphElement(
 // Decorative effects (outline, shadow, emboss, imprint)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Decorative effects", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Outline ", { outline: true, size: Units.ptToHalfPoint(20), bold: true }),
@@ -255,7 +255,7 @@ Document.addParagraphElement(
 // Run-level border
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Character border", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Plain "),
@@ -269,7 +269,7 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 // Emphasis mark (East Asian typographic dots)
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("着重号:"),
@@ -283,7 +283,7 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 // Symbol (Wingdings glyph by codepoint)
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Symbols (Wingdings): "),
@@ -300,13 +300,10 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Edge cases", 2);
 const emptyProps: RunProperties = {};
-Document.addParagraphElement(
-  doc,
-  Build.paragraph([Build.text("Run with empty properties.", emptyProps)])
-);
+Document.addParagraph(doc, Build.paragraph([Build.text("Run with empty properties.", emptyProps)]));
 
 // Edge case 2: zero-length text run (writer should still emit valid XML)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Before["),
@@ -316,7 +313,7 @@ Document.addParagraphElement(
 );
 
 // Edge case 3: many consecutive identical-formatted runs
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     Array.from({ length: 20 }, (_, i) =>
@@ -326,7 +323,7 @@ Document.addParagraphElement(
 );
 
 // Edge case 4: deeply mixed inline formatting
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Mixed: "),
@@ -345,6 +342,6 @@ Document.addParagraphElement(
   ])
 );
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Document.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "02-formatting.docx"), buf);
 console.log(`  → 02-formatting.docx (${buf.length} bytes)`);

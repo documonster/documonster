@@ -1,4 +1,4 @@
-import { Cell, Column, Row, Stream, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import type { ColumnDefn } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
@@ -83,11 +83,11 @@ describe("Cell addressing", () => {
     expect(Cell.getValidation(ws, 1, 1)?.type).toBe("whole");
     expect(Cell.getValidation(ws, "B1")?.type).toBe("whole");
 
-    Cell.setName(ws, "A1", "Left");
-    Cell.setName(ws, 1, 2, "Right");
+    Cell.setNames(ws, "A1", ["Left"]);
+    Cell.setNames(ws, 1, 2, ["Right"]);
     expect(Cell.getNames(ws, 1, 1)).toEqual(["Left"]);
     expect(Cell.getNames(ws, "B1")).toEqual(["Right"]);
-    Cell.removeAllNames(ws, 1, 1);
+    Cell.clearNames(ws, 1, 1);
     expect(Cell.getNames(ws, "A1")).toEqual([]);
   });
 
@@ -99,14 +99,13 @@ describe("Cell addressing", () => {
   });
 });
 
-describe("Cell.view", () => {
-  it("reads a handle and stays live", () => {
+describe("Cell.getView", () => {
+  it("reads a cell by position and stays live", () => {
     const { ws } = sheet();
     Cell.setValue(ws, "A1", 42);
     Cell.setNumFmt(ws, "A1", "0.00");
 
-    const handle = Row.getCell(ws, 1, 1);
-    const view = Cell.view(handle);
+    const view = Cell.getView(ws, 1, 1)!;
 
     expect(view.value).toBe(42);
     // `text` is the raw text, like `Cell.getText`; the numFmt-applied string is
@@ -115,19 +114,19 @@ describe("Cell.view", () => {
     expect(Cell.getDisplayText(ws, "A1")).toBe("42.00");
     expect(view.numFmt).toBe("0.00");
 
-    // live projection: no re-reading required after a write through the handle
-    Stream.setCellValue(handle, 7);
+    // live projection: no re-reading required after a write
+    Cell.setValue(ws, "A1", 7);
     expect(view.value).toBe(7);
   });
 
-  it("makes the Row.eachCell handle usable", () => {
+  it("reads each cell Row.eachAddress visits", () => {
     const { ws } = sheet();
-    Worksheet.addRow(ws, ["Invoice", "Total"]);
+    Row.add(ws, ["Invoice", "Total"]);
 
     const headers: string[] = [];
-    Row.eachCell(ws, 1, cell => {
-      headers.push(Cell.view(cell).text);
-      Stream.setCellFont(cell, { bold: true });
+    Row.eachAddress(ws, 1, address => {
+      headers.push(Cell.getView(ws, address)!.text);
+      Cell.setFont(ws, address, { bold: true });
     });
 
     expect(headers).toEqual(["Invoice", "Total"]);
@@ -138,7 +137,7 @@ describe("Cell.view", () => {
 describe("Column identity and definitions", () => {
   it("maps a key, letter or number to a column number and letter", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Invoice", key: "invoiceId", width: 20 },
       { header: "Total", key: "total", width: 12 }
     ]);
@@ -156,7 +155,7 @@ describe("Column identity and definitions", () => {
 
   it("normalises a definition the same way the library does", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [{ header: "Total", key: "total", width: 12 }]);
+    Column.setDefinitions(ws, [{ header: "Total", key: "total", width: 12 }]);
 
     expect(Column.getDefinition(ws, "total")).toEqual({
       header: "Total",
@@ -171,7 +170,7 @@ describe("Column identity and definitions", () => {
 
   it("returns detached copies that cannot write back", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [{ header: "Total", key: "total", width: 12 }]);
+    Column.setDefinitions(ws, [{ header: "Total", key: "total", width: 12 }]);
 
     const defn = Column.getDefinition(ws, "total");
     defn.header = "Mutated";
@@ -183,22 +182,18 @@ describe("Column identity and definitions", () => {
 
   it("round-trips the whole layout through columnDefinitions + setColumns", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Invoice", key: "invoiceId", width: 20 },
       { header: "Total", key: "total", width: 12, style: { numFmt: "#,##0.00" } }
     ]);
 
     const appended: ColumnDefn[] = [
-      ...Worksheet.columnDefinitions(ws),
+      ...Column.getDefinitions(ws),
       { header: "Error", key: "error", width: 40 }
     ];
-    Worksheet.setColumns(ws, appended);
+    Column.setDefinitions(ws, appended);
 
-    expect(Worksheet.columnDefinitions(ws).map(c => c.key)).toEqual([
-      "invoiceId",
-      "total",
-      "error"
-    ]);
+    expect(Column.getDefinitions(ws).map(c => c.key)).toEqual(["invoiceId", "total", "error"]);
     expect(Column.getWidth(ws, "invoiceId")).toBe(20);
     expect(Column.getStyle(ws, "total").numFmt).toBe("#,##0.00");
     expect(Column.getWidth(ws, "error")).toBe(40);
@@ -207,18 +202,20 @@ describe("Column identity and definitions", () => {
 
   it("keeps `columns` and `columnCount` distinct", () => {
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [{ header: "Only", key: "only", width: 10 }]);
-    Worksheet.addRow(ws, ["a", "b", "c"]);
+    Column.setDefinitions(ws, [{ header: "Only", key: "only", width: 10 }]);
+    Row.add(ws, ["a", "b", "c"]);
 
     // Three columns hold cells, and the records were padded to match.
-    expect(Worksheet.columnCount(ws)).toBe(3);
-    expect(Worksheet.columns(ws)).toHaveLength(3);
+    expect(Column.getCount(ws)).toBe(3);
+    expect(Column.getDefinitions(ws)).toHaveLength(3);
 
-    // Declaring a column creates its record without creating any cell — this is
-    // where the two diverge, and why `columns(ws).length` is not a cell count.
+    // Declaring a column creates its record without creating any cell. The column exists then — `Column.has`
+    // says so — and the count follows it, as `Row.getCount` follows a row with only a height.
     Column.setWidth(ws, "F", 20);
-    expect(Worksheet.columns(ws)).toHaveLength(6);
-    expect(Worksheet.columnCount(ws)).toBe(3);
+    expect(Column.getDefinitions(ws)).toHaveLength(6);
+    expect(Column.has(ws, "F")).toBe(true);
+    expect(Column.getCount(ws)).toBe(6);
+    expect(Column.getActualCount(ws)).toBe(3);
   });
 });
 
@@ -230,7 +227,7 @@ describe("Row data from arbitrary objects", () => {
       customer: { name: string };
     }
     const { ws } = sheet();
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Invoice", key: "invoiceId", width: 20 },
       { header: "Total", key: "total", width: 12 },
       { header: "Customer", key: "customer.name", width: 24 }
@@ -240,7 +237,7 @@ describe("Row data from arbitrary objects", () => {
       { invoiceId: "INV-1", total: 10, customer: { name: "Acme" } },
       { invoiceId: "INV-2", total: 20, customer: { name: "Globex" } }
     ];
-    Worksheet.addRows(ws, invoices);
+    Row.addMany(ws, invoices);
 
     // row 1 is the header row written by `setColumns`
     expect(Cell.getValue(ws, "A1")).toBe("Invoice");
@@ -253,7 +250,7 @@ describe("Row data from arbitrary objects", () => {
 
   it("still accepts positional arrays", () => {
     const { ws } = sheet();
-    Worksheet.addRow(ws, ["a", 1, true]);
+    Row.add(ws, ["a", 1, true]);
     expect(Row.getValues(ws, 1)).toEqual(["a", 1, true]);
   });
 });

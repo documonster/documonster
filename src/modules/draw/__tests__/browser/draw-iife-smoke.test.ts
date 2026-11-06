@@ -16,19 +16,19 @@ import { beforeAll, describe, expect, it } from "vitest";
 describe("Documonster.Draw IIFE bundle", () => {
   let Draw: {
     toSvg: (list: unknown) => string;
-    rasterizeToRgba: (
+    toRgba: (
       list: unknown,
       options?: unknown
     ) => { width: number; height: number; data: Uint8Array };
     measureText: (text: string, style: unknown) => number;
     wrapText: (text: string, style: unknown, width: number) => unknown;
-    renderDrawList: (list: unknown, surface: unknown) => void;
-    cssColour: (token: string) => { r: number; g: number; b: number; a: number };
+    render: (list: unknown, surface: unknown) => void;
+    parseColor: (token: string) => { r: number; g: number; b: number; a: number };
   };
 
   /**
    * A blue rectangle with white text on it, built the way a consumer would: paints come
-   * from `cssColour`, not from a hand-written tuple. Writing `[0.15, 0.39, 0.92, 1]`
+   * from `parseColor`, not from a hand-written tuple. Writing `[0.15, 0.39, 0.92, 1]`
    * instead — as the first version of this test did — makes the SVG surface emit a `<rect>`
    * with a nonsense fill while the rasteriser paints nothing at all, which is the shape of
    * bug this test exists to catch.
@@ -36,7 +36,7 @@ describe("Documonster.Draw IIFE bundle", () => {
   let LIST: unknown;
 
   beforeAll(async () => {
-    Draw = await loadIife("draw", "Draw");
+    Draw = (await loadIife<{ Draw: typeof Draw }>("draw", "Draw")).Draw;
     LIST = {
       width: 40,
       height: 20,
@@ -47,23 +47,23 @@ describe("Documonster.Draw IIFE bundle", () => {
           y: 0,
           width: 40,
           height: 20,
-          paint: { fill: Draw.cssColour("#2563eb") }
+          paint: { fill: Draw.parseColor("#2563eb") }
         },
         {
           kind: "text",
           x: 4,
           y: 14,
           lines: [{ text: "hi", dy: 0 }],
-          style: { size: 10, family: "sans-serif", fill: Draw.cssColour("#ffffff") }
+          style: { size: 10, family: "sans-serif", fill: Draw.parseColor("#ffffff") }
         }
       ]
     };
   }, 60000);
 
   it("exposes the walker, both surfaces and text measurement", () => {
-    expect(typeof Draw.renderDrawList).toBe("function");
+    expect(typeof Draw.render).toBe("function");
     expect(typeof Draw.toSvg).toBe("function");
-    expect(typeof Draw.rasterizeToRgba).toBe("function");
+    expect(typeof Draw.toRgba).toBe("function");
     expect(typeof Draw.measureText).toBe("function");
     expect(typeof Draw.wrapText).toBe("function");
   });
@@ -77,7 +77,7 @@ describe("Documonster.Draw IIFE bundle", () => {
   });
 
   it("rasterises the same list to the same picture", () => {
-    const raster = Draw.rasterizeToRgba(LIST);
+    const raster = Draw.toRgba(LIST);
     expect(raster.width).toBe(40);
     expect(raster.height).toBe(20);
     expect(raster.data.length).toBe(raster.width * raster.height * 4);

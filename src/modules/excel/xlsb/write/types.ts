@@ -59,6 +59,11 @@ export interface SheetCell extends StyleFacets {
   readonly shareType?: string;
   /** The range a shared or array formula covers, on the master cell. */
   readonly ref?: string;
+  /**
+   * Whether the master of an array formula is a dynamic array. Its record is then preceded by a `BrtCellMeta`
+   * naming the `XLDAPR` cell metadata, and the package carries `xl/metadata.bin`.
+   */
+  readonly isDynamicArray?: boolean;
   /** Name of the feature this cell needs and the writer lacks, reported rather than approximated. */
   readonly unsupported?: string;
 }

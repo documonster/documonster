@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**documonster** — zero-dependency TypeScript toolkit. Nine modules: Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream.
+**documonster** — zero-dependency TypeScript toolkit. Modules: Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream, Draw, Mermaid.
 
 - Zero runtime dependencies — never add packages to `dependencies`
 - Cross-platform: Node.js LTS lines (22, 24) and Current (26), plus modern browsers
@@ -27,6 +27,7 @@
 - **Do not be afraid of large changes.** If the best solution means rewriting a function, restructuring a module, or breaking an existing API — do it. Correctness and quality come first. Tests exist to catch regressions; use them.
 - **Do not touch unrelated files.** Only modify files directly relevant to the task. Never make drive-by changes to code you were not asked to work on.
 - **Verify your fix.** After making changes, run the relevant tests or `pnpm check` to confirm the fix works. Never claim a problem is resolved without evidence.
+- **Moving a member between namespaces? Run `pnpm build`.** It runs `verify:treeshake`, which `pnpm check` does not — a member re-homed into another namespace object can pull that namespace's whole module into every bundle that imports the old one.
 - **No over-engineering.** Solve the actual problem, not a hypothetical general case. If unsure whether a design is over-engineered, summarize the tradeoffs and ask before proceeding.
 
 ## Commands
@@ -46,7 +47,17 @@ pnpm build:packages
 
 pnpm verify:doc-examples  # documented imports & members must exist — see "Documentation" below
 pnpm verify:doc-links     # local Markdown targets & headings must exist
+pnpm verify:guide-tables  # the calls in the migration guides' tables must compile
+pnpm verify:guide-examples  # every ts code block of the migration guides compiles whole (`ts browser`, `ts before`)
 pnpm verify:examples      # every example must actually run — see "Examples" below
+pnpm verify:compat        # the last release's examples still type-check and run
+pnpm api:changes --migration  # before a release: regenerate docs/api-changes-since-v<last>.md and
+                              # the generated parts of MIGRATION.md (needs build:esm + build:packages)
+pnpm verify:excelts-guide     # the excelts guide accounts for every name excelts 10.2.0 published; --write
+                              # regenerates its name index and docs/api-changes-from-excelts-10.2.0.md
+pnpm verify:exceljs-guide     # the exceljs guide accounts for every name exceljs 4.4.0 published
+pnpm verify:exceljs-parity    # the guides' ports write the same workbooks as exceljs 4.4.0 (and
+pnpm verify:excelts-parity    # excelts 10.2.0) did — both installed from npm
 
 # Single test file
 pnpm exec vitest run src/modules/excel/core/__tests__/cell.test.ts
@@ -64,7 +75,7 @@ src/
 ├── modules/
 │   ├── excel/          # core/ (Workbook, Worksheet, Cell, …) surface/ stream/ xlsx/
 │   ├── word/           # DocxDocument, DocumentBuilder, readDocx, packageDocx
-│   ├── formula/        # Tokenizer, parser, evaluator, 448 functions, spill engine
+│   ├── formula/        # Tokenizer, parser, evaluator, 467 functions, spill engine
 │   ├── pdf/            # core/ builder/ font/ render/ reader/ + excel-bridge.ts + word-bridge.ts + word-chart-bridge.ts + word-layout-to-pdf.ts
 │   ├── csv/            # Parsing/formatting + streaming
 │   ├── markdown/       # GFM table parsing/formatting
@@ -103,6 +114,16 @@ in one PR instead of drifting across two repositories.
    IIFE build matrix.
 3. Satellites are excluded from the root `tsconfig.json` and the root
    `vitest.config.ts`; each carries its own.
+
+**A satellite's own surface follows its host protocol, not the core's vocabulary.**
+`@documonster/mcp` publishes a server (`createServer`, `resolveConfig`), wire-named tools
+(`sheet_read`, snake_case and stable) and the error codes a model retries on
+(`McpToolError.code`), because those are what an MCP client and the SDK expect. The
+"Public API Conventions" below are the core's; they apply to a satellite only where it
+re-exposes a core capability, which it does by calling the public entry, never by
+re-publishing it under a name of its own. One core rule does apply to it unchanged: a type
+its public signatures name is importable from its entry — `pnpm verify:public-types` checks
+`@documonster/mcp` as it checks the core entries.
 
 **Consequence for the dev loop:** because satellites resolve the core through
 `exports`, `dist/esm` + `dist/types` must exist before they will type-check.
@@ -162,11 +183,11 @@ keeps the `v0.9.0` tag format instead of `documonster-v0.9.0`).
 ## Module Dependency Layers
 
 ```
-Layer 5:  pdf      → excel (only excel-bridge.ts + word-chart-bridge.ts), word (only word-bridge.ts + word-chart-bridge.ts + word-layout-to-pdf.ts), draw, archive, utils
-Layer 4:  excel, word → formula, draw, archive, xml, csv, markdown, stream, utils
-Layer 3:  formula  → utils    (independent calc engine; no excel imports)
-Layer 2:  csv, archive → stream, utils; mermaid → draw, utils
-Layer 1:  xml, markdown, stream, draw → utils
+Layer 5:  pdf      → excel (only excel-bridge.ts + word-chart-bridge.ts), word (only word-bridge.ts + word-chart-bridge.ts + word-layout-to-pdf.ts), draw, archive, xml, utils
+Layer 4:  excel, word → formula, draw, archive, xml, csv, markdown, stream, utils; mermaid → draw, utils
+Layer 3:  formula  → utils    (independent calc engine; no excel imports); draw → utils, archive (only api/png.ts)
+Layer 2:  csv, archive → stream, utils
+Layer 1:  xml, markdown, stream → utils
 Layer 0:  utils    (no module dependencies; owns the shared TTF parser and font discovery)
 ```
 
@@ -347,15 +368,21 @@ diagram alternates between two keys and built `Songti SC` twice — two 43,000-e
 identity. Deduplicating on the answer rather than on the question fixes that class of
 problem instead of guessing which keys ought to have been equal.
 
-**It yields pixels, not a PNG.** Encoding one needs DEFLATE, which lives at Layer 2 in
-`archive/`, and dragging that down into Layer 1 to return a file format would make
-every consumer of the drawing engine pay for a compression library. The seam is
-therefore at the image: `rasterizeToRgba` is the backend, and the encoder lives with
+**The rasteriser yields pixels; `Draw.toPng` adds the file.** The encoder lives with
 DEFLATE and CRC-32 in `archive/png.ts`, published as `encodePng` from
 `documonster/archive` — a PNG is a DEFLATE stream plus CRC-32-checked chunks, so that is
-where it belongs rather than in whichever module first wanted a picture. Pairing the two
-is two lines, and a caller with a different encoder (a browser canvas, say) pairs the
-pixels with that instead.
+where it belongs rather than in whichever module first wanted a picture. `draw/api/png.ts`
+is the one file in `draw/` allowed to import `archive/` (registered in
+`scripts/verify-layers.ts`), which is why `draw` now sits above `archive` in the diagram;
+`archive` imports only `stream` and `utils`, so the edge cannot form a cycle. It used to be
+two calls across two entries, and a Mermaid diagram took three — the encoder was placed by
+where its code lived, and a user looking for a PNG looked in `Draw` and `Mermaid`.
+`scripts/treeshake-verify.ts` pins that, under rolldown and rspack, only `Draw.toPng` /
+`Mermaid.toPng` bring DEFLATE into a bundle: `Draw.toSvg` and `Draw.toRgba` stay archive-free.
+esbuild keeps every member of an imported namespace, so there the edge costs every `Draw`
+consumer the encoder; that scenario excludes esbuild, as the other member-level ones do. Moving DEFLATE down to
+`utils` instead was rejected — it would put a compression engine, with its Node and browser
+variants, at Layer 0.
 
 That placement was arrived at the second time. The encoder sat in `excel/utils/png.ts`
 while both its callers were in `excel/`, with a note to move it down rather than copy it
@@ -514,11 +541,14 @@ Cross-backend agreement is enforced by
 rendered to markup, pixels and PDF operators, and the geometry is asserted to
 match modulo each backend's coordinate convention.
 
+- `pdf` imports `xml` because XMP metadata is XML: editing it with regular expressions wrote unbound prefixes, duplicated properties and edits inside nested descriptions, so the editor parses and rewrites the packet with the real parser.
+- Office file encryption (MS-OFFCRYPTO Agile Encryption) is shared by `excel` and `word`, so it lives below both, in `archive` — CFB is a container format, as ZIP is: `archive/cfb/` (the compound file; `signature.ts` is the tiny test readers use before loading anything) and `archive/office-crypto/` (key derivation, verifier, package encryption, data-integrity HMAC). Both are internal; each module checks its own arguments, imports them with `import()` only when a password is involved, and reports `CfbError` / `OfficeCryptoError` as its own errors (`Docx*`, `Excel*`).
 - Modules may only import from **lower** layers — never sideways or upward.
 - **Sole exceptions**:
   - `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may import `@excel/` except `pdf/word-chart-bridge.ts` (Word charts rendered by the Excel chart engine).
   - `pdf/word-bridge.ts`, `pdf/word-chart-bridge.ts`, and `pdf/word-layout-to-pdf.ts` may import from `@word/` (the Word→PDF bridge family). No other file in `pdf/` may.
   - `word/bridge/excel-bridge.ts` may import from `@excel/`. No other file in `word/` may.
+  - `draw/api/png.ts` may import from `@archive/` (the PNG encoder, for `Draw.toPng`). No other file in `draw/` may.
   - `formula/` consumes immutable snapshots and emits writeback plans; `excel/` owns the host adapter. `formula/` never imports concrete types from `@excel/*`.
 - `utils/` must never import from any module.
 
@@ -566,7 +596,7 @@ The files that genuinely differed were mostly not platform code but _importers_ 
 specifier had been rewritten — and an importer of `#platform/utils/fs` is byte-identical in
 both worlds, which is why the difference collapses to the 27 variant files.
 
-Two invariants keep it honest, and both fail loudly rather than degrade:
+Three invariants keep it honest, and each fails loudly rather than degrade:
 
 - `pnpm verify:browser-stubs` scans `dist/esm` and `dist/types` for a _relative_ import of
   a module that has a variant. Any hit means the browser condition cannot fire for it, so a
@@ -577,6 +607,9 @@ Two invariants keep it honest, and both fail loudly rather than degrade:
   `--customConditions browser --lib ESNext,DOM` and no Node types available. Drop the
   condition and it fails on `Buffer` and `node:stream`, which is how you know the check is
   doing work rather than passing vacuously.
+- `pnpm verify:public-types` reads the browser entries the way `#platform/*` resolves them
+  — a module's `.browser.ts` sibling wins — so a shared surface file needs no hand-copied
+  `.browser` twin to type-check the browser build.
 
 **One capability was deliberately given up:** `dist/esm` is no longer loadable in a browser
 straight from a URL, because `#platform/*` is a bare specifier and a browser needs an import
@@ -757,7 +790,8 @@ of that name, while the namespace is published as `Styles`.
 
 Rules when writing documentation:
 
-- **Name the public form**, not the internal function it forwards to. `Pdf.read`, not `readPdf`;
+- **Name the public form**, not the internal function it forwards to — and not a deprecated
+  forward either. `Pdf.extract`, not `readPdf` (nor `Pdf.read`, which now forwards to it);
   `Worksheet.Handle`, not `WorksheetData`.
 - **Put runnable code in a fence.** Markdown is checked inside fenced blocks only; inline code
   in a sentence is treated as a reference to a symbol, which is what lets a document _discuss_
@@ -777,6 +811,418 @@ Rules when writing documentation:
   browser config excludes `*.node.test.ts` by glob, which is a rule rather than a hand-kept list.
 - A member a comment names _in order to say it is absent_ goes in that script's
   `DELIBERATELY_ABSENT` map, keyed by file, and is documented there.
+
+## Public API Conventions
+
+Every public entry follows one vocabulary, so a name learnt in one module predicts the
+name in the next. A new export that breaks a rule here needs a reason written beside it.
+
+- **One way to do a thing.** A new name must add a capability or replace a deprecated one;
+  it is not added for symmetry. Legacy return conventions (e.g. `null` for absence) are
+  kept rather than duplicated. So a class gets no namespace factory that only forwards to
+  its constructor or a static opener, a type gets no second name (`Handle`, or a flat
+  re-export of a namespace member), and a lookup gets no twin that differs only in
+  returning `undefined` where the existing one returns `null`. The rules below describe
+  the vocabulary for _new_ capability; they are not a reason to rename what already works.
+
+- **Namespaces of plain functions.** Each subpath publishes its operations as namespaces
+  (`Workbook.*`, `Csv.*`, `Mermaid.*`). Flat exports are for types, error classes and
+  constants only. The exception is `documonster/stream`'s Node-compatible surface
+  (`Readable`, `pipeline`, `isDestroyed`, …), whose names must match `node:stream`;
+  everything else in that entry lives in `Streams`. A subpath that bridges two modules
+  prefixes its namespace with the module it extends (`ExcelCsv`, `WordHtml`), so it can
+  be imported beside the standalone one (`Csv`, `Markdown`) without renaming.
+- **A namespace is a subject, not a promise about effects.** It may hold more than one
+  collection (`Image`: the workbook's media and a sheet's placements of it), and a plain
+  function in it is not necessarily pure — `ChartClassic.createOptionsFromRows` writes its
+  rows to the sheet it is given, `fillCaches` edits the model. Say so in the member's TSDoc
+  and in the namespace header when the subject holds more than one collection. Likewise a
+  number keeps the unit of the format it belongs to (Word `size` in half-points, Draw
+  `size` in user units, PDF `fontSize` in points); a shared field name across modules does
+  not imply a shared unit, so each field documents its unit and conversions go through
+  `Units`.
+- **Low-level members go in a labelled sub-namespace**, not beside the everyday ones:
+  `Draw.Backend`, `Draw.Geometry`, `Streams.LowLevel`, `WordCrypto.Agile`,
+  `WordCrypto.Cfb`, `Pdf.Signature`. They are supported API; the label says who they are
+  for.
+- **Handles.** A namespace whose functions take a handle that has no other public name
+  exports it as `type Handle` (`Table.Handle`). Where the handle already has a public name
+  — a data-model interface such as `DocxDocument`, `DocxStyleMap` or `ChartHandle` — that name
+  is the only one; no `Handle` alias is added beside it.
+- **One primary object per document type, and one namespace for it.** `create`, `read`
+  and `toBuffer` live together (`Workbook.*`, `Document.*`) and return or take the same thing,
+  every namespace operates on it, `toBuffer` writes it — `Workbook.Handle` for Excel,
+  `DocxDocument` for Word. Word's is a transparent content tree rather than an opaque
+  record because a Word document _is_ a tree callers assemble; the shape of the API is
+  the same. A plain serialisable snapshot is `<Noun>Model` (`WorkbookModel`).
+- **Prefixes.** A format prefix (`Xlsx`, `Docx`) is for format-level things — read/write
+  options, parse errors (`XlsxReadOptions`, `DocxParseError`) — not for the document
+  object. An entry whose vocabulary is generic (`Row`, `Table`, `Transform…`) prefixes
+  _every_ flat type with its module (`Pdf…`, `Csv…`), not only the ones that collide
+  today: PDF's `Table`, `Row`, `Image`, `Sheet` would otherwise meet Excel's
+  namespaces, and CSV's `Row` already did. A bridge entry prefixes its flat types with
+  its namespace, as it prefixes the namespace itself (`ExcelCsvReadOptions`,
+  `ExcelMarkdownWriteOptions`), so they cannot be mistaken for the standalone module's
+  (`CsvParseOptions`). A format-level type that serves every format of the document is
+  named for the document (`WorkbookEncryptOptions` covers XLSX and XLSB); `Xlsx…` is for
+  what only XLSX has.
+  The one exception is Word's document model — the content tree declared in
+  `word/types.ts` (`Paragraph`, `Run`, `Table`, `RunProperties`, …), which callers build
+  documents from and which mirrors OOXML element for element; everything else Word
+  publishes (option, result, layout and conversion types) carries `Docx`. That includes
+  Word's bridge entries, whose types take `Docx` plus the bridge's subject
+  (`DocxHtmlRenderOptions`, `DocxMarkdownImportOptions`, `DocxChartSvgOptions`) rather than
+  the namespace (`WordHtml…`): `Word…` is the prefix Word's flat types moved away from
+  (`WordChartExOptions`, published in 0.21.1, is now a deprecated name for
+  `DocxChartExOptions`), and the subject already tells them from the standalone module's
+  (`MarkdownParseOptions`).
+- **Every public error class carries a prefix**: its module's (`ExcelTableError`,
+  `DocxTemplateError`, `ArchiveFileTooLargeError`, `PdfFontError`) or, for a failure
+  only one format can produce, that format's (`ZipEocdNotFoundError`, `XlsxParseError`).
+  The one exception is `AbortError`, whose name is the DOM's and is what
+  `isAbortError` and every `AbortSignal` consumer test for. Each module's argument
+  error is `<Module>ArgumentError` (`StreamArgumentError`, not `StreamTypeError`). A failure
+  every module can have has the same name in each: `<Module>FileError` for a refused file
+  operation, `<Module>UnsupportedFeatureError` for something the module recognises but does
+  not do, `<Module>LimitExceededError` for a configured read limit (`ExcelLimitExceededError`,
+  `DocxLimitExceededError`, `PdfLimitExceededError`). An operation's own computational cap
+  that is not such a limit (the size of `Diff.compare`'s LCS table) is the module's base
+  error with the call in its message. An index or other argument the caller got wrong is
+  the `ArgumentError`, never a `*StructureError` (which describes a malformed file) or a
+  bare `RangeError`; "it always threw that class" is not a reason to keep one.
+- **A namespace member does not repeat its namespace's noun**, and a getter/setter pair
+  shares one: `Chart.isEx` (the namespace is the chart) but `Chartsheet.isChartEx` (the
+  sheet is not the chart); `Security.DEFAULT_POLICY`, not `DEFAULT_SECURITY_POLICY`;
+  `Table.hasRowStripes` / `Table.setRowStripes`, not `setShowRowStripes`.
+- **Constants**: an enum-like name → code table is PascalCase (`ValueType`, `PaperSize`,
+  `Pdf.PageSizes`, `Archive.TarType`); any other constant is SCREAMING_CASE
+  (`TAR_BLOCK_SIZE`, `Xml.DEFAULT_DECLARATION`, `Styles.DEFAULT`).
+- **A namespace holds its module's own things.** Generic helpers the platform already
+  provides (byte/base64/UTF-8 conversion, `signal.throwIfAborted()`) are not
+  re-published from whichever module first used them; that is how `Archive` came to carry
+  `base64ToUint8Array` and `concatUint8Arrays`, now deprecated in favour of the native
+  APIs. An error guard sits flat beside its class (`isAbortError` beside `AbortError`).
+  A helper that only _looks_ like a platform one stays when it does something the platform
+  does not, and says so beside it: `Archive.throwIfAborted` always throws this package's
+  `AbortError` class (the signal's reason becomes its `cause`), where
+  `signal.throwIfAborted()` rethrows whatever reason was given, so `isAbortError` and
+  `instanceof AbortError` cannot rely on the native one.
+- **Classes only for stateful incremental objects** — the PDF `Builder`/`Editor`, the
+  streaming readers and writers, archive builders and readers, XML writers. They are
+  public values, built with their constructor or static opener (`new Pdf.Builder()`,
+  `Pdf.Editor.read(bytes)`, `new Xml.Writer()`, `Archive.RemoteZipReader.open(url)`); a
+  namespace factory exists only where it adds something the class cannot — the `Archive`
+  format matrix (`Archive.createZip`, `Archive.openTarGz`, …) picks the class from the
+  format, and replaced the deprecated `zip` / `unzip`; `Streams.createReadable` and its
+  siblings return one cross-platform typed interface over two platform classes. A factory
+  that only forwards to `new X(options)` is deprecated in favour of the constructor
+  (`Workbook.createStreamWriter`, `Csv.createParserStream`, `Streams.createPullStream`).
+  Their methods follow the same verbs (`toBuffer`, not `save`/`build`/`bytes`).
+  Two refinements apply to class methods only. A builder whose `add*` / `remove*` methods
+  return `this` for chaining (`Pdf.Builder`, `Stream.DocumentWriter`) is exempt from the
+  collection return rules below, because what it returns is the builder, not an item. And a
+  transactional object marks, keeps and undoes with `snapshot()` / `commit()` /
+  `rollback()` (`Streams.ChunkedBuilder`, `Xml.Writer`) — a transaction's `commit` keeps
+  the edits since the snapshot, which is a different object from a streaming writer's
+  `commit` below and never appears on the same class.
+  Two vocabularies are borrowed from the platform on purpose. An object edited by entry
+  path (`Archive.ZipEditor`, `ArchiveFile`, and `ZipEditPlan`, which records the same edits)
+  speaks `Map`'s `set` / `delete` (and `has` where it can answer) — `set` adds or replaces,
+  which no collection verb above says, and `remove` beside `set` would mix two vocabularies.
+  And something that holds a body names its readers as `Blob` and `Response` do — `bytes()`,
+  `text()`, `stream()` — as `Streams.bytes` / `Streams.text` do. `stream()` here yields an
+  async iterable of chunks, not the web `ReadableStream` `Blob#stream()` returns nor the Node
+  `Readable` that `toStream` names; the name is for the role, and its TSDoc says the type.
+- **A document module's streaming API is its `Stream` namespace**, and the classes in it
+  are named for the primary object they write or read: `Stream.WorkbookWriter` in Excel,
+  `Stream.DocumentWriter` in Word. `documonster/stream` calls its helper namespace
+  `Streams` because `Stream` is a `node:stream` name that entry must keep free.
+- **A streaming writer finishes the same way in every module.** `commit()` completes the
+  file and ends the output the writer was given (a sink, a stream, a file); `toBuffer()`
+  is for a writer that owns its output, commits if it has not, and returns the whole file —
+  given an output of its own it refuses, rather than answering with something that is not
+  the file. Word's `finalize()`, which returned the bytes in one mode and an empty array in
+  the other, is the reason this is written down.
+- **Who owns a returned object is part of the name's contract, and the same name means the
+  same ownership everywhere.** The two document models answer this differently, because
+  they are different kinds of object.
+
+  Excel's model is opaque and addressed by position, so a reader returns a copy: editing it
+  changes nothing, and the setter is how to change the document (`Cell.getFont` answers as
+  `Row.getFont` and `Column.getFont` do, whether or not the cell exists). The live
+  exceptions are named and few: `getStyle` (for in-place editing), `Chart.getModel` (edited
+  through `Chart.mutate`), and **handles** — an item a collection's `remove` takes by identity
+  (`Image.list`, `Pivot.list`, `ConditionalFormatting.list`, `Sparkline.list`) is the item
+  itself, because a copy could not be handed back. A collection keyed by something else
+  (`DataValidation` by reference) hands out copies. A value given to a setter is copied in as
+  well, so the caller's object never becomes the cell's. Values are copied at the public
+  boundary (`cellReadValue`), not in the stored value classes: the library's own reads — the
+  writers, the formula engine — take the stored value (`cellGetValue`) and pay nothing.
+
+  Word's model is a transparent tree whose nodes are typed `readonly` all the way down, so
+  a reader (`Document.getContent`, `Query.listParagraphs`, `Query.getComment`, …) returns
+  the tree's own nodes: the type system already refuses an edit through them, copying a
+  subtree per lookup would cost what the tree is meant to save, and identity is what lets a
+  node found by `Query` be handed back to `Document` or a `Transform`. The document changes
+  only through `Document.*` (in place) or a `Transform` (a new document that may share
+  unchanged nodes). Bytes held in a node — `ImageDef.data`, what `Vba.getData` returns —
+  are the node's own too: a `Uint8Array` has no `readonly` form, and writing into one is
+  outside the contract exactly as editing any other node is.
+
+- **`clone` returns an independent copy and attaches it to nothing** (`Document.clone`,
+  `Anchor.clone`). Copying something into a container is `copyTo(item, container, …)`,
+  which is why `Chart.clone` — which placed a second chart on the sheet and returned its
+  part number — is deprecated.
+- **A file operation the platform refuses is still the module's error.** A file-path read or
+  write wraps the file system's failure in the module's file error, with the system error
+  as `cause` (`ExcelFileError`, `DocxFileError`), so `isExcelError` / `isDocxError` see
+  every failure of the call. `Fs.*` in `documonster/archive` are file-system helpers
+  themselves and pass the platform's error on.
+- **An entry does not publish what cannot work on its platform.** A Node-only member is
+  absent from the browser surface (a `*.browser.ts` variant of the namespace), as
+  `Workbook.readFile` and `Document.readFile` are — a type error at the call beats a runtime one.
+  The one sanctioned exception is a member isomorphic code must be able to name on both
+  platforms, and then the entry carries a probe for it: `Compression.Workers` stays on the
+  Node entry because `Compression.hasWorkerSupport()` answers `false` there, and every
+  member it guards throws a typed, prefixed error (`ArchiveWorkerUnsupportedError`), never
+  the bare base class. A Node-only _option_ that is harmless elsewhere
+  (`preferSystemFonts`) stays and says in its documentation that it has no effect in a
+  browser.
+- **Positional arguments are what the operation acts on; settings go in options.** A row
+  index or a count that names the target (`Table.addRow(t, values, rowNumber)`,
+  `Table.removeColumns(t, colIndex, count)`) is positional; a flag or a preference is never.
+  Two kinds of parameter list stay positional, and say so beside them: one copied from a
+  format the caller translates from, in its order (`Draw.Geometry.arcToCubics` is SVG's `A`
+  command, `Matrix.rotate(deg, cx, cy)` its `rotate()`, `createRectNode`'s `rx` a `<rect>`'s),
+  and a value that is one entry of an options map handed through as it is
+  (`Csv.applyDynamicTyping(value, columnConfig)` takes one column's `dynamicTyping`).
+- **Accessors.** Readers are `getX`, writers `setX`, booleans `isX`/`hasX`. A bare noun
+  (`Table.name(t)`) is not an accessor name. A reader never creates, materialises or
+  mutates anything — reading a row's height must not add the row. The one sanctioned
+  exception is `getStyle` on `Cell`/`Row`/`Column`: it returns the **live, mutable** style
+  record so callers can edit it in place, and therefore materialises the cell, row or
+  column it names. That is its purpose, not a leak. Side-effect-free reads are the facet
+  getters (`Cell.getFont`, `Row.getHeight`, …), `findStyle` on `Cell`/`Row`/`Column` (a
+  copy of the whole record, or `undefined`) and `Cell.getView`; do not add a second
+  live-record reader. The deprecated get-or-create forwards (`Worksheet.getRow`,
+  `Worksheet.getRows`, `Row.getCell`) keep creating what they name, as they always did. So
+  do the streaming handle getters (`Stream.getRowCell`, `WorksheetWriter#getRow` /
+  `getCell`): handing out the handle every `Stream.setCell*` writes through is what they
+  are for. A streamed row is being written, not read, so there is little to look up in it;
+  the writer still offers `findRow` / `findCell` for a lookup that creates nothing.
+- **Collections.** `add(…)` attaches and returns what it attached, `get(…, key)` returns
+  one item or `undefined`, `list(…)` returns all, `remove(…)` removes one and returns
+  `boolean`, `clear(…)` removes all, `each(…, cb)` iterates. `find(…)` is `get`'s form
+  for a lookup by something other than the collection's own key (`DataValidation.find` by
+  address); it too creates nothing and returns `undefined`. Excel's deprecated chart `add*`
+  return the part number and keep doing so until they are removed in 1.0; `Chart.place` and
+  `Chart.copyTo` return the chart's handle, which carries the part number. Likewise an
+  existing `remove` that returned the removed item keeps doing so (`Chart.removeSeries`).
+
+  Those rules are for a collection edited in place. Three other kinds of operation share
+  the verbs, and each has its own return because each has a different thing to hand back:
+  a **transform** returns the new document, since the input is left as it was and nothing
+  else changed (`Vba.add`, `Vba.remove`, `Font.addEmbedded`, `Security.protect`); a
+  **registration** returns the identifier the registered thing is later referred to by
+  (`Image.add` → the id `Image.place` takes, `Document.addFootnote` → the note id,
+  `Document.addListDefinition` → the `numId`); and a **builder command** returns `this`
+  (see the class rules above). An append into Word's tree (`Document.addContent`,
+  `Document.addParagraph`) returns nothing: the node is the caller's, or is reachable with
+  `Document.getContent`. Choose the kind before the verb, and name an operation that fits
+  none of them for what it does.
+
+- **Absence is `undefined`**, in every public return. The archive readers, `Fs.safeStats`
+  and `Watermark.get` returned `null` until they were changed together; a deprecated name
+  keeps the `null` it returned until it is removed. Two kinds of `null` are not absences and
+  stay: Node's own semantics in `documonster/stream` (`Readable#read()`, `errored`), and a
+  three-way result whose `null` means "not applicable" (`RemoteZipReader#checkPassword` and `#checkEntryPassword`: the entry is not encrypted).
+  `null` as data — an empty cell, a JSON value, a callback's "drop this row" — is not a
+  return convention at all.
+- **Conversions and I/O.** `toX` / `fromX` for format conversions (`toSvg`, `fromDocx`);
+  `read` / `readFile` / `readStream` in, `toBuffer` / `toStream` / `writeFile` /
+  `writeStream` out. `format` serialises to a `string`; `toBuffer` to bytes and is async,
+  with `toBufferSync` beside it when the work is synchronous. `extract` pulls content out
+  of a document without producing the primary object (`Pdf.extract`,
+  `WordExcel.extractTables`). The unsuffixed name is the primary form and a sibling is
+  suffixed by how it differs: work that is I/O or compression is async with a `Sync`
+  sibling (`packZip` / `packZipSync`, `gzip` / `gzipSync`), while parsing or formatting
+  text already in memory is synchronous, with an `Async` sibling for input that arrives
+  asynchronously (`Csv.parse` / `Csv.parseAsync`). `Async` marks the asynchronous sibling
+  of a synchronous form whether that form returns or yields (`Csv.generateRows` /
+  `Csv.generateRowsAsync`); `Stream` marks a form that consumes its source incrementally,
+  holding one piece at a time (`Workbook.readStream`, `Archive.parseTarStream`,
+  `Csv.parseStream`, `Xml.parseSaxStream`). `toBuffer` resolves to a `Uint8Array` on every
+  platform, and to a plain one at runtime — not a `Buffer` typed as one, whose `slice` is a view
+  where the declared type's copies. One verb means one
+  thing: in `Archive`, `create*` returns a builder, `open*` a reader, `pack*` bytes,
+  `unpack*` a path map and `parse*` an entry list — the last for TAR and tar.gz only, since a
+  ZIP's entry list is what its reader already gives (`openZip(…).list()` / `entries()`) and a
+  name is not added for symmetry. `toSvg` returns a complete `<svg>` document; a surface that
+  holds only a fragment serialises it with `format()` (`Draw.Backend.SvgSurface#format`). A
+  function that returns a changed copy and leaves its input alone is `with*`
+  (`Draw.withAlpha`, `DrawingMl.withSpPrFill`), never `set*`, which promises an edit in place.
+- **Bridges pick their verbs by what they are.** A bridge that is a file format of the
+  module's primary object uses the I/O verbs (`ExcelCsv.read` / `format` / `toBuffer` /
+  `writeFile`, `ExcelMarkdown.read`), because a CSV or Markdown table _is_ a way to store a
+  workbook. A bridge that converts between two document models uses `toX` / `fromX`
+  (`WordHtml.toDocx`, `WordMarkdown.fromDocx`, `WordExcel.toDocx`, `Pdf.fromDocx`), because
+  the conversion is lossy and the result is a different kind of document.
+- **Arguments.** The handle comes first; optional settings go in one trailing options
+  object — no positional booleans or chains of optional positionals. An overload that
+  accepts both a new options object and a deprecated positional form dispatches with
+  `isRecordArgument` (`@utils/object`), never `typeof x === "object"`, `instanceof` or
+  `Array.isArray`, so `null`, typed arrays and `Date` keep their old positional meaning;
+  pin it with a parity test whose expected values come from the previous release.
+- **Arguments are declared with `@utils/schema` and checked at the boundary.** A public
+  function checks its arguments before it changes anything, with
+  `check(schema, value, { where, field, error })` — or `checkAt(...)` with the same four
+  values where a check runs per node or per call. `where` is the public call as the caller
+  writes it (`Csv.parse`, `new Xml.SaxParser`), `field` the parameter name in the public
+  signature, and `error` the module's own `<Module>ArgumentError`; a module whose error
+  records more than field and message builds it from the factory's third argument,
+  `{ where, label, expected, got }`. The schema derives the path (`options.columns[2].width`,
+  `options.headers["a"]`) and the
+  message `${where}: ${path} must be ${expected}, got ${describeValue(value)}`; neither is
+  written by hand. A rule that relates two values uses `fail()`, so it reads the same way.
+  Each public options interface keeps its TSDoc and is pinned with
+  `SchemaMatches<typeof schema, Interface>`, so the two cannot drift without `pnpm type`
+  failing. Declare readonly keys with `{ readonly: true }` and flatten an intersection with
+  `Flatten<A & B>` — never cast through a `Writable<>` helper. An options argument an
+  overload must tell from a positional value uses `record: "argument"`; a string vocabulary
+  uses `s.member`; a tagged union uses `s.variant`. A guard that lives in a module is passed
+  to `s.custom` and never imported into `@utils/schema`, which is Layer 0.
+
+  A check that runs per node, per cell or per surface call may stay a hand-written predicate
+  when the schema form measures slower (draw and pdf do, at about 1.6–2.3 times; Excel's
+  per-row setters likewise); it still words its refusal through the schema's `fail`, so the
+  message is the same, and says so beside it with the measurement. A check shared by hundreds
+  of entry points (a worksheet-handle check, the Word writer's model validation) cannot know
+  its caller; it states the problem without a prefix (`ws must be a worksheet, got 42`) and
+  `field` plus the stack locate it.
+
+  Nothing unchecked reaches a part: a value written into a package still goes through the
+  checked serialisers (`xmlValue` and the drawing-geometry checks). And it is a gate rather
+  than a habit: `src/test/__tests__/public-argument-errors.node.test.ts` calls every
+  namespace member of every entry, and constructs every class, with wrong arguments, and
+  fails on an error that is not the library's own, that belongs to another module than the
+  entry's, or that is an argument error naming no `field`. A member it exempts is named
+  there with the reason (a deprecated forward, a refusal the platform owns, a private
+  constructor), and an exemption that stops being needed fails too. It does not reach
+  instance methods or a wrong argument behind a valid handle, so a module's own tests still
+  cover those. An instance method is as much the boundary as a namespace function — so is a
+  method of an object a public call hands out (`Pdf.PageBuilder#getContentStream` returns a
+  `PdfContentStream`) — and a refusal there is the module's error too, a destroyed or
+  finished object's included (`StreamStateError`, never a bare `Error`).
+
+- **A read keeps what it cannot type.** A file's value outside a field's vocabulary is
+  neither put in the typed field nor dropped: the field reads as absent, the text is kept
+  beside it (`@utils/unrecognized-values`) and written back until something sets the
+  field, and the module's read report lists it. A vocabulary is the schema's, held to the
+  ECMA-376 schemas by a test (`src/test/fixtures/ooxml-enumerations.ts`) — a narrow
+  hand-written list otherwise surfaces only when a file from elsewhere carries the value.
+- **Names compare the way Office compares them.** Case-insensitive name matching uses
+  `excelNameKey` (tables, columns, defined names) or `sheetNameKey` (sheet names, sheet
+  references, `LET`/`LAMBDA` parameters) from `@utils/name-key`; never `toUpperCase()` or
+  `toLowerCase()`.
+- **Acronyms are words**: `toSvg`, `toPng`, `addJson`, `MathMl`, `XmlParseOptions`.
+  US spelling (`color`, `centered`).
+- **Excel's document model is addressed by position** — `(ws, "A1")`, `(ws, row)`,
+  `(ws, "B")` — and hands out no row, column or cell handles; handles belong to the
+  streaming API (`Stream.*`), where a row is written once and committed. Row-level work
+  lives on `Row`, column-level on `Column`; `Worksheet` keeps what concerns the sheet.
+  A cell is **one** argument, `addr: string | CellPosition` (`"A1"` or `{ row, col }`,
+  1-based); a position is never split across positional arguments, and an overload is never
+  chosen by `arguments.length` — a missing argument must be a type error, not a column read
+  as a value. A batch of cells is a range (`Range.setValues`, `Range.setStyle`), not a loop
+  of `Cell.*` calls.
+
+  A streaming writer takes the document model's vocabulary. A namespace function whose
+  operation makes sense for a writer accepts `Stream.WorkbookWriter` /
+  `Stream.WorksheetWriter` beside the document handle — `Workbook.*` (sheets, protection,
+  cell styles, defined names), `Worksheet.merge` / `protect`, `Column.*` settings,
+  `Cell.*`, `Row.*`, `Range.*`, `Image.*`, `Watermark.*`, `ConditionalFormatting.*`,
+  `DataValidation.*` — and dispatches to the writer's own implementation, so the writer's
+  state rules apply: a committed workbook or sheet refuses an edit with
+  `ExcelStreamStateError`; a row the writer has written refuses an edit **and** a read
+  (`surface/stream-targets.ts`: `checkStreamRowsOpen` / `checkStreamRowsHeld`), because a
+  silently incomplete answer is worse than none; a multi-row write checks the span before
+  touching a cell; column settings are refused once written with the first committed row.
+  Detection is structural, never `instanceof`, and is not moved into `checkWorkbook` /
+  `checkWorksheet`: the writers pass themselves to core functions on purpose. What needs
+  rows already written or the whole document — `Row.insert` / `splice` / `each`,
+  `Column.getValues`, `Worksheet.unmerge`, `Workbook.removeWorksheet`, `Workbook.toBuffer`
+  (a writer finishes with its own `commit()` / `toBuffer()`) — refuses a writer with
+  `ExcelUnsupportedFeatureError` naming the reason, through `refuseStreamWorksheet` or
+  `workbookOnly`. That refusal is for JavaScript and `any`; a typed caller gets a compile error
+  first, because those signatures name the document model only and a writer is not
+  structurally one. `excel/__tests__/type/stream-writer-refusals.typecheck.ts` holds every
+  refused member to that, so a new refusal belongs there too. A writer overload that changes the return type keeps the document model's
+  signature both first (what `any` picks) and last (what `ReturnType` reads).
+
+  Two ways to address a streamed cell are kept, because they take different things: `Cell` /
+  `Row` / `Range` address **by position**; `Stream.setCell*` / `Stream.setRow*` /
+  `Stream.getRowCell` take **the handle `addRow` returns**, the row just appended, with no
+  address to build. Committing is a handle operation only (`Stream.commitRow`). The
+  exceljs-named class methods are deprecated forwards; what stays on the classes has no
+  positional counterpart — `addRow`, `getRow` / `getCell` (get-or-create handles),
+  `findRow` / `findCell`, `getColumn`, `eachRow`, `commit`, `toBuffer`, and the
+  column-key registry. A capability the writer gains is added by teaching the namespace
+  function to accept it, not as a new class method.
+
+- **Names are honest about what they do.** A verifier that checks integrity but not trust
+  reports `intact` and `claimedSigner`, not `valid` and `signer`; a capability check
+  that answers "vector or raster" is `canDrawVectorPdf`, not `canDrawPdf`.
+- **A display-list node factory is `create*`** (`Draw.Geometry.createRectNode`), not a
+  bare noun (`rectNode`).
+- **Who changes what is visible in the namespace.** In Word, `Document.*` edits the
+  document it is given, in place; every other function that returns a `DocxDocument`
+  leaves its input unchanged and may share unchanged nodes with it. The two never reach each
+  other: a function that returns a document derived from another calls
+  `markDerived(result, ...inputs)` (`@word/core/ownership`), and a `Document.*` edit takes
+  its containers through `ownContainer` and calls `ownTree` before changing nodes inside the
+  tree, so what two documents share is copied once, by whichever is edited first. Never mutate
+  a container or node reached from a caller's document without one of them. `Document.clone`
+  is for a snapshot, not for isolation. A new in-place edit goes in `Document`, never in
+  `Query`.
+- **A read returns what it read.** `Workbook.read(bytes)` returns a new workbook, as
+  `Document.read(bytes)` returns a new document; nothing reads _into_ a handle the caller
+  made. An edit applies when it is made; there is no separate commit step. An edit
+  that validates checks before it changes anything (as every `Table.*` edit does), so
+  one that throws leaves the object as it was.
+  A `getModel` says in its documentation whether it hands out a copy or the live
+  model; where it is a copy (`Table.getModel`), the matching `setModel` applies it in
+  full, and where it is live (`Cell.getModel`, `Chart.getModel`) edits go through the
+  namespace (`Chart.mutate`).
+- **A handle's published type is what a caller may touch.** A new internal field
+  carries `@internal` and is stripped from the declarations (`stripInternal`). One
+  that was already published is not removed: it is marked `@deprecated` and stripped
+  at 1.0, like any other name. A field left in the type is a promise.
+
+**Renaming a public name** keeps the old one as a forward, with the old behaviour, until
+1.0 — every deprecated name is removed together there, not one minor at a time, so a
+consumer migrates once. After 1.0 the package follows semver strictly. "The old behaviour"
+is what the old name did with arguments it accepted; where a forward shares its replacement's
+implementation, an argument the old name never accepted may now be the module's argument
+error instead of a `TypeError` from inside. What an accepted argument returned must not
+change — `Archive.getEncryptionMethodName` still answers an unknown method with `undefined`
+while `Archive.Crypto.getEncryptionMethodName` refuses it.
+
+```ts
+/** @deprecated Use {@link getName}. Removed in 1.0. */
+export const name = getName;
+```
+
+Use a `const`, not `export { getName as name }`: tooling does not reliably carry
+`@deprecated` through an export specifier. A deprecated name appears in no README,
+example or TSDoc `@example`. A capability is never removed by a rename: the old name
+forwards to a non-deprecated member that can do everything it did.
+
+Two shapes cannot be a `const`, and say so beside them. An `enum` keeps its old name with
+`export { FormulaTokenType as TokenType }`, because a `const` plus `type` pair loses the
+member types (`NodeType.Number` stops compiling as a type). And a class method whose
+positional form becomes an options object keeps the old form as a `@deprecated` overload
+of the same method, dispatched with `isRecordArgument`
+(`BasicRasterCanvas#drawText(x, y, text, options)`).
 
 ## Code Style
 
@@ -840,7 +1286,7 @@ Rules when writing an example:
 - **Use the public API.** An example that has to import from `@excel/core/...`, `@pdf/reader/...`
   or `__tests__/` is either the wrong file or evidence of a missing public member — treat it as
   the latter until proven otherwise. That is how `Row.addPageBreak`, `Column.setNumFmt` and
-  `Cell.find` came to exist.
+  `Cell.getView` came to exist.
 - **Be re-runnable.** The gate runs an example against the `tmp/` output of its own previous
   run. Anything that defaults to `overwrite: "error"` needs the opt-in.
 - **Write only to `tmp/`.** Accept an optional output path as `process.argv[2]` and default it

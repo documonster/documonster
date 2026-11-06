@@ -58,6 +58,12 @@ export interface BooleanToken {
 export interface ErrorToken {
   type: TokenType.Error;
   value: string;
+  /**
+   * The text of an external-workbook reference (`[1]Sheet1!A1`, `[Book.xlsx]Data!A1:B2`). Other
+   * workbooks are not loaded, so the reference evaluates as `#REF!` (`value`); the text is
+   * kept so a formula reformatted from its tokens or tree still names what it named.
+   */
+  externalReference?: string;
 }
 
 export interface CellRefToken {
@@ -191,6 +197,14 @@ export interface IntersectToken {
  * checking the first code unit before the `startsWith` machinery lets
  * those lookups skip the allocation.
  */
+/** The operator token `A1#` (Excel's spill-range operator) is read as. */
+export const SPILL_OPERATOR = "#";
+
+/** Whether a token is the spill-range operator of `A1#`, a postfix on the reference before it. */
+export function isSpillOperator(token: Token): boolean {
+  return token.type === TokenType.Operator && token.value === SPILL_OPERATOR;
+}
+
 export function stripFunctionPrefix(name: string): string {
   // `_` is code unit 95 — ASCII letters are 65..90 / 97..122. The XLFN
   // prefix is the only legitimate name shape that begins with `_`.
@@ -206,6 +220,10 @@ export function stripFunctionPrefix(name: string): string {
   return name;
 }
 
+/**
+ * One token of a formula, as `Formula.tokenize` returns it: a union discriminated by `type`
+ * ({@link TokenType}). `Formula.parse` accepts these to build an {@link AstNode}.
+ */
 export type Token =
   | NumberToken
   | StringToken

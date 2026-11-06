@@ -35,8 +35,9 @@ import { Enums } from "@excel/core/enums";
 import type { RowData } from "@excel/core/row";
 import { rowSetFont } from "@excel/core/row";
 import { findRow, getCell, getRow, rowGetCell } from "@excel/core/worksheet";
-import { findCell, getColumn } from "@excel/core/worksheet-core";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { findCell, getColumn, getRow as coreGetRow } from "@excel/core/worksheet-core";
+import type { Worksheet } from "@excel/index";
+import { Cell, Workbook } from "@excel/index";
 import type { CellHyperlinkValue } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -132,7 +133,7 @@ describe("Cell", () => {
 
     const dateValue = new Date();
     cellSetValue(a1, dateValue);
-    expect(cellGetValue(a1)).toBe(dateValue);
+    expect(cellGetValue(a1)).toEqual(dateValue);
     expect(cellType(a1)).toBe(Enums.ValueType.Date);
 
     const formulaValue = { formula: "A2", result: 5 };
@@ -777,11 +778,11 @@ describe("Cell", () => {
     const ws = Workbook.addWorksheet(wb, "test");
 
     // Set row style before creating cells
-    rowSetFont(Worksheet.getRow(ws, 1), { bold: true, size: 14 });
-    cellSetValue(rowGetCell(Worksheet.getRow(ws, 1), 1), "A1");
+    rowSetFont(coreGetRow(ws, 1), { bold: true, size: 14 });
+    cellSetValue(rowGetCell(coreGetRow(ws, 1), 1), "A1");
 
     // New cell in the same row should inherit font
-    cellSetValue(rowGetCell(Worksheet.getRow(ws, 1), 2), "B1");
+    cellSetValue(rowGetCell(coreGetRow(ws, 1), 2), "B1");
     expect(Cell.getStyle(ws, "B1").font).toEqual({ bold: true, size: 14 });
 
     // Mutating B1's font should not affect A1

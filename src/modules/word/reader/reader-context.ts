@@ -6,10 +6,12 @@
  */
 
 import { STRICT_TO_TRANSITIONAL_REL } from "@word/constants";
+import type { OpenFieldPiece } from "@word/reader/field-pieces";
 import { parsePartXml } from "@word/reader/part-xml";
-import type { WordSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
-import type { FormField, RunProperties } from "@word/types";
+import type { FormField, RangeMarker, RunProperties } from "@word/types";
+import type { XmlElement } from "@xml/types";
 
 /**
  * A parsed OPC relationship entry (from a .rels part).
@@ -39,6 +41,35 @@ export interface FieldParseState {
   cached: string;
   runProps: RunProperties | undefined;
   formField: FormField | undefined;
+  /** Range markers met inside the open field, in source order. */
+  markers: PendingFieldMarker[];
+  /**
+   * The fields read in pieces that a paragraph opened and has not yet ended
+   * (see `splitFieldPieces`), innermost last.
+   */
+  open: OpenFieldPiece[];
+  /** `w:fldChar` begin characters whose fields are read in pieces whatever their shape. */
+  forced?: ReadonlySet<XmlElement>;
+  /**
+   * Whether the paragraph being read may hold marker runs for field pieces
+   * (`splitFieldPieces` changed it); when not, no run is looked up.
+   */
+  marked: boolean;
+  /**
+   * Set when the part being read holds no `fldChar` and no `fldSimple` at
+   * all, so no field can be read in pieces and paragraphs skip
+   * `splitFieldPieces`.
+   */
+  noFieldChars?: boolean;
+}
+
+/** A range marker inside an open complex field, at an offset into its raw instruction or its result. */
+export interface PendingFieldMarker {
+  readonly marker: RangeMarker;
+  readonly part: "instruction" | "result";
+  readonly offset: number;
+  /** Set once the field ends and holds it. */
+  embedded: boolean;
 }
 
 /**
@@ -57,7 +88,7 @@ export interface ReaderContext {
    * pieces of information that may be dangerous in untrusted documents.
    * Defaults to `DEFAULT_SECURITY_POLICY` when not set.
    */
-  securityPolicy: Required<WordSecurityPolicy>;
+  securityPolicy: Required<DocxSecurityPolicy>;
 }
 
 /**
@@ -69,14 +100,17 @@ export function createFieldState(): FieldParseState {
     instr: "",
     cached: "",
     runProps: undefined,
-    formField: undefined
+    formField: undefined,
+    markers: [],
+    open: [],
+    marked: true
   };
 }
 
 /**
  * Create a fresh reader context for a new parse session.
  */
-export function createReaderContext(securityPolicy?: Required<WordSecurityPolicy>): ReaderContext {
+export function createReaderContext(securityPolicy?: Required<DocxSecurityPolicy>): ReaderContext {
   return {
     relMap: new Map(),
     field: createFieldState(),

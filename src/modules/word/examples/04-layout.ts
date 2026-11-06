@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 import type { SectionProperties } from "../index";
 
 const outDir = path.resolve(
@@ -67,7 +67,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     }
   };
   Document.setSectionProperties(doc, sect);
-  const buf = await Io.toBuffer(Document.build(doc));
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-a4.docx"), buf);
   console.log(`  → 04-layout-a4.docx (${buf.length} bytes)`);
 }
@@ -108,7 +108,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     );
   }
   // Force a break to the second column
-  Document.addParagraphElement(doc, Build.paragraph([Build.columnBreak()]));
+  Document.addParagraph(doc, Build.paragraph([Build.columnBreak()]));
   for (let i = 0; i < 3; i++) {
     Document.addParagraph(
       doc,
@@ -162,7 +162,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     }
   });
 
-  const buf = await Io.toBuffer(Document.build(doc));
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-multi-section.docx"), buf);
   console.log(`  → 04-layout-multi-section.docx (${buf.length} bytes)`);
 }
@@ -179,7 +179,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     doc,
     "This page has artistic borders, vertical-centered text, and Roman page numbers."
   );
-  Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+  Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
   Document.addParagraph(doc, "Second page — line numbers should appear on the left margin.");
   for (let i = 0; i < 30; i++) {
     Document.addParagraph(doc, `Numbered line ${i + 1}.`);
@@ -213,7 +213,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     lineNumbers: { countBy: 1, start: 1, restart: "newPage", distance: Units.cmToTwips(0.5) }
   });
 
-  const buf = await Io.toBuffer(Document.build(doc));
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-decorative.docx"), buf);
   console.log(`  → 04-layout-decorative.docx (${buf.length} bytes)`);
 }
@@ -248,17 +248,17 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
   // the section default is not auto-inherited by paragraphs that lack the
   // property. Apply bidi on every paragraph in this RTL section, including
   // the heading.
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([Build.text("Right-to-left section")], { style: "Heading1", bidi: true })
   );
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([Build.text("هذه فقرة في قسم RTL.  Latin words وكلمات عربية mixed.")], {
       bidi: true
     })
   );
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([Build.text("النص الثاني في هذا القسم.")], { bidi: true })
   );
@@ -274,7 +274,7 @@ const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
     bidi: true
   });
 
-  const buf = await Io.toBuffer(Document.build(doc));
+  const buf = await Document.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "04-layout-landscape-grid-rtl.docx"), buf);
   console.log(`  → 04-layout-landscape-grid-rtl.docx (${buf.length} bytes)`);
 }

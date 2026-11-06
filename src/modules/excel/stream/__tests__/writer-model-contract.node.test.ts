@@ -105,7 +105,7 @@ describe("the model a streaming writer produces", () => {
       const value = Cell.getValue(Workbook.getWorksheet(reopened, "S")!, "A1");
       expect(value, via).toBeInstanceOf(Date);
       expect((value as Date).toISOString(), via).toBe(when.toISOString());
-      expect(Workbook.getWorksheets(reopened).map(s => Worksheet.getName(s))).toEqual(["S"]);
+      expect(Workbook.listWorksheets(reopened).map(s => Worksheet.getName(s))).toEqual(["S"]);
     }
   });
 });

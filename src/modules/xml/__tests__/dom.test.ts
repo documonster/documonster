@@ -255,10 +255,13 @@ describe("parseXml fragment mode", () => {
 describe("parseXml prologue", () => {
   it("should collect top-level comments when enabled", () => {
     const doc = parseXml("<!-- before --><root/><!-- after -->", { comments: true });
-    expect(doc.prologue.length).toBe(2);
+    // The comment after the root is the epilogue; it used to be reported in `prologue`, whose
+    // documentation says "before the root element".
+    expect(doc.prologue.length).toBe(1);
     expect(doc.prologue[0].type).toBe("comment");
     expect((doc.prologue[0] as any).value).toBe(" before ");
-    expect((doc.prologue[1] as any).value).toBe(" after ");
+    expect(doc.epilogue?.length).toBe(1);
+    expect((doc.epilogue![0] as any).value).toBe(" after ");
   });
 
   it("should collect top-level PIs when enabled", () => {

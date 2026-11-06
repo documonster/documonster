@@ -14,7 +14,21 @@
  * glyphs that are actually used in the document.
  */
 
+import { asPlainBytes } from "@utils/binary";
 import { glyphComponents, parseTtf } from "@utils/font-ttf";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
+import {
+  checkBytes,
+  checkHandle,
+  checkNodeArray,
+  checkOneOf,
+  checkRecord,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
 import { obfuscateFont, generateFontKey } from "@word/font/font-obfuscation";
 import type { DocxDocument, FontDef, EmbeddedFont } from "@word/types";
 
@@ -78,14 +92,42 @@ export interface EmbedFontResult {
  * @param fontData - Raw TTF/OTF font bytes
  * @param characters - String of characters to keep
  * @returns Subsetted font bytes, or original if subsetting fails/not applicable
+ * @throws {DocxArgumentError} If `fontData` is not a font — it does not
+ * begin with an `sfnt` version (TrueType, OpenType or a collection).
  */
-export function subsetFont(fontData: Uint8Array, characters: string): Uint8Array {
+export function subsetFont(fontData: Uint8Array, characters: string): Uint8Array<ArrayBuffer> {
+  const where = "Font.subset";
+  fontData = checkFontData(fontData, "fontData", where);
+  checkString(characters, "characters", where);
   try {
-    return _subsetTtf(fontData, characters);
+    return asPlainBytes(_subsetTtf(fontData, characters));
   } catch {
     // If subsetting fails for any reason, return original data
-    return fontData;
+    return asPlainBytes(fontData);
   }
+}
+
+/**
+ * The `sfnt` versions a font file begins with: TrueType (`0x00010000`, and
+ * Apple's `true`), OpenType with CFF outlines (`OTTO`) and a collection
+ * (`ttcf`).
+ */
+const SFNT_VERSIONS: ReadonlySet<number> = new Set([
+  0x00010000, 0x74727565, 0x4f54544f, 0x74746366
+]);
+
+/** Bytes that are a font file — checked by its `sfnt` version, as every reader does first. */
+function checkFontData(value: unknown, field: string, where: string): Uint8Array {
+  const data = checkBytes(value, field, where);
+  if (data.byteLength < 4 || !SFNT_VERSIONS.has(readU32(data, 0))) {
+    invalidArgument(
+      where,
+      field,
+      "a TrueType or OpenType font (bytes beginning with an sfnt version)",
+      value
+    );
+  }
+  return data;
 }
 
 /** Read a uint32 big-endian from buffer. */
@@ -403,6 +445,57 @@ function writeCheckSumAdjustment(
 // Font Embedding
 // =============================================================================
 
+const FONT_STYLES: ReadonlySet<string> = new Set<FontEmbedStyle>([
+  "regular",
+  "bold",
+  "italic",
+  "boldItalic"
+]);
+
+const FONT_FAMILIES: ReadonlySet<string> = new Set<NonNullable<EmbedFontOptions["family"]>>([
+  "roman",
+  "swiss",
+  "modern",
+  "script",
+  "decorative",
+  "auto"
+]);
+const FONT_PITCHES: ReadonlySet<string> = new Set<NonNullable<EmbedFontOptions["pitch"]>>([
+  "default",
+  "fixed",
+  "variable"
+]);
+
+/** The options every variant of an embedded font shares. */
+const sharedEmbedShape = {
+  obfuscate: w.boolean().optional(),
+  family: s.member<NonNullable<EmbedFontOptions["family"]>>(FONT_FAMILIES).optional(),
+  pitch: s.member<NonNullable<EmbedFontOptions["pitch"]>>(FONT_PITCHES).optional(),
+  // `w:panose1` is ten bytes in hex.
+  panose1: s
+    .custom<string>(v => typeof v === "string" && /^[0-9A-Fa-f]{20}$/.test(v), "20 hex digits")
+    .optional(),
+  charset: w.integer({ min: 0, max: 255 }).optional(),
+  usedCharacters: w.string().optional()
+};
+
+const sharedEmbedOptionsSchema = w.record(sharedEmbedShape).optional();
+
+/** `data` is a font, which {@link checkFontData} checks once the rest is known to be right. */
+const embedFontOptionsSchema = w.record({
+  name: w.string().refine(v => v !== "", "a non-empty string"),
+  data: s.unknown<Uint8Array>(),
+  style: s.member<FontEmbedStyle>(FONT_STYLES).optional(),
+  ...sharedEmbedShape
+});
+const _embedFontOptionsMatch: SchemaMatches<typeof embedFontOptionsSchema, EmbedFontOptions> = true;
+void _embedFontOptionsMatch;
+
+/** `w:charset` is one byte in hex (`ST_UcharHexNumber`): 0 is `"00"`, 128 is `"80"`. */
+function charsetHex(charset: number): string {
+  return charset.toString(16).toUpperCase().padStart(2, "0");
+}
+
 /**
  * Prepare a font for embedding into a DOCX document.
  *
@@ -430,6 +523,9 @@ function writeCheckSumAdjustment(
  * ```
  */
 export function embedFont(options: EmbedFontOptions): EmbedFontResult {
+  const where = "Font.embed";
+  checkSchema(embedFontOptionsSchema, options, where);
+  options = { ...options, data: checkFontData(options.data, "options.data", where) };
   const style = options.style ?? "regular";
   const shouldObfuscate = options.obfuscate !== false;
 
@@ -470,7 +566,7 @@ export function embedFont(options: EmbedFontOptions): EmbedFontResult {
     name: options.name,
     family: options.family ?? "auto",
     pitch: options.pitch ?? "variable",
-    charset: options.charset !== undefined ? String(options.charset) : undefined,
+    charset: options.charset !== undefined ? charsetHex(options.charset) : undefined,
     panose1: options.panose1,
     embedRegular: style === "regular" ? rId : undefined,
     embedRegularKey: style === "regular" ? fontKey : undefined,
@@ -506,6 +602,23 @@ export function embedFontFamily(
   variants: Partial<Record<FontEmbedStyle, Uint8Array>>,
   options?: Omit<EmbedFontOptions, "name" | "data" | "style">
 ): EmbedFontResult[] {
+  const where = "Font.embedFamily";
+  checkString(name, "name", where);
+  if (name === "") {
+    invalidArgument(where, "name", "a non-empty string", name);
+  }
+  checkRecord(variants, "variants", where);
+  const checked: Record<string, Uint8Array | undefined> = {};
+  for (const [style, data] of Object.entries(variants)) {
+    checkOneOf(style, FONT_STYLES, `variants.${style}`, where);
+    // An empty buffer is skipped below, as it always was.
+    checked[style] =
+      data !== undefined && !(ArrayBuffer.isView(data) && data.byteLength === 0)
+        ? checkFontData(data, `variants.${style}`, where)
+        : data;
+  }
+  variants = checked;
+  checkSchema(sharedEmbedOptionsSchema, options, where);
   const results: EmbedFontResult[] = [];
 
   for (const [style, data] of Object.entries(variants) as [FontEmbedStyle, Uint8Array][]) {
@@ -537,6 +650,9 @@ export function embedFontFamily(
  * Add embedded fonts to an existing document model.
  * Merges new fonts with existing font definitions.
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
+ *
  * @param doc - The existing document.
  * @param results - Embed results from `embedFont` or `embedFontFamily`.
  * @returns A new document with embedded fonts added.
@@ -545,6 +661,8 @@ export function addEmbeddedFonts(
   doc: DocxDocument,
   results: readonly EmbedFontResult[]
 ): DocxDocument {
+  checkHandle(doc, "document", "doc", "Font.addEmbedded");
+  checkNodeArray(results, "results", "Font.addEmbedded");
   const existingFonts = doc.fonts ? [...doc.fonts] : [];
   const existingEmbedded = doc.embeddedFonts ? [...doc.embeddedFonts] : [];
 
@@ -571,11 +689,14 @@ export function addEmbeddedFonts(
     existingEmbedded.push(result.embeddedFont);
   }
 
-  return {
-    ...doc,
-    fonts: existingFonts,
-    embeddedFonts: existingEmbedded
-  };
+  return markDerived(
+    {
+      ...doc,
+      fonts: existingFonts,
+      embeddedFonts: existingEmbedded
+    },
+    doc
+  );
 }
 
 // =============================================================================

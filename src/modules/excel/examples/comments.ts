@@ -10,14 +10,12 @@ const outDir = path.resolve(path.dirname(inputFile), "../../../../../tmp/excel-e
 fs.mkdirSync(outDir, { recursive: true });
 const outputFile = path.join(outDir, "comments-out.xlsx");
 
-const wb = Workbook.create();
-
-Workbook.readFile(wb, inputFile)
-  .then(() => {
-    Workbook.getWorksheets(wb).forEach(sheet => {
+Workbook.readFile(inputFile)
+  .then(wb => {
+    Workbook.listWorksheets(wb).forEach(sheet => {
       console.info(Cell.getModel(sheet, "A1"));
       Cell.setValue(sheet, "B2", "Zeb");
-      Cell.setComment(sheet, "B2", {
+      Cell.setNote(sheet, "B2", {
         texts: [
           {
             font: {

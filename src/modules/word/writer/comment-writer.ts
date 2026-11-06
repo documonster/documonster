@@ -4,10 +4,12 @@
  * Renders word/comments.xml and word/commentsExtended.xml parts.
  */
 
-import { NS_W, NS_W15, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { DOCUMENT_NAMESPACES, NS_W, NS_W15, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { within } from "@word/core/node-path";
 import type { CommentDef } from "@word/types";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /** Render word/comments.xml. */
@@ -17,14 +19,13 @@ export function renderComments(
   helpers?: RenderHelpers
 ): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
-  xml.openNode("w:comments", {
-    "xmlns:w": NS_W,
-    "xmlns:r": NS_R
-  });
+  // Every prefix the document part declares: drawings and markup kept
+  // verbatim inside a comment use the same ones.
+  xml.openNode("w:comments", DOCUMENT_NAMESPACES);
 
-  for (const comment of comments) {
+  comments.forEach((comment, c) => {
     const attrs: Record<string, string> = {
-      "w:id": String(comment.id),
+      "w:id": xmlValue(comment.id, "w:id"),
       "w:author": comment.author
     };
     if (comment.date) {
@@ -34,11 +35,11 @@ export function renderComments(
       attrs["w:initials"] = comment.initials;
     }
     xml.openNode("w:comment", attrs);
-    for (const para of comment.content) {
-      renderParagraph(xml, para, helpers);
-    }
+    comment.content.forEach((para, i) =>
+      within(`comments[${c}].content[${i}]`, () => renderParagraph(xml, para, helpers))
+    );
     xml.closeNode();
-  }
+  });
 
   xml.closeNode();
 }

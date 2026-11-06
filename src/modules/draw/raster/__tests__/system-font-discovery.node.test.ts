@@ -194,8 +194,8 @@ describe("raster font discovery", () => {
     }
 
     const canvas = new BasicRasterCanvas(200, 60);
-    canvas.drawText(10, 40, text, 24, "#000000", "start");
-    expect([...canvas.uncoveredCodePoints]).toEqual([]);
+    canvas.drawText(10, 40, text, { fontSize: 24, color: "#000000", anchor: "start" });
+    expect(canvas.getUncoveredCodePoints()).toEqual([]);
 
     resetFontDiscoveryCache();
     _setCandidatesForTest([]);
@@ -221,9 +221,9 @@ describe("raster font discovery", () => {
     expect(lengths.size).toBe(1);
 
     const canvas = new BasicRasterCanvas(200, 60);
-    canvas.drawText(10, 40, text, 24, "#000000", "start");
+    canvas.drawText(10, 40, text, { fontSize: 24, color: "#000000", anchor: "start" });
     // The one it cannot draw is reported; the one it can is not.
-    expect([...canvas.uncoveredCodePoints]).toEqual([impossible]);
+    expect(canvas.getUncoveredCodePoints()).toEqual([impossible]);
 
     resetFontDiscoveryCache();
     _setCandidatesForTest([]);

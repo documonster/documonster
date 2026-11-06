@@ -11,7 +11,9 @@
 import { captureFormulaSnapshot } from "@excel/core/formula-capture";
 import { applyFormulaWriteback } from "@excel/core/formula-writeback";
 import type { WorkbookFunctionDescriptor } from "@excel/core/workbook-core";
+import { isReadTarget } from "@excel/core/workbook-io-types";
 import type { WorkbookData } from "@excel/core/workbook.browser";
+import { ExcelArgumentError } from "@excel/errors";
 import type { FormulaFunction } from "@formula/integration/calculate-formulas";
 import { calculateFormulas as calculateFormulasEngine } from "@formula/integration/calculate-formulas";
 import { createFormulaCalculationState } from "@formula/integration/calculation-state";
@@ -44,6 +46,7 @@ function toEngineFunctions(
       minArity: fn.minArity,
       maxArity: fn.maxArity,
       ...(fn.volatile === undefined ? {} : { volatile: fn.volatile }),
+      ...(fn.returnsArray === undefined ? {} : { returnsArray: fn.returnsArray }),
       invoke: args => normalizeFunctionResult(fn.invoke(args as never[]))
     });
   }
@@ -81,6 +84,13 @@ function stateFor(wb: WorkbookData): FormulaCalculationState {
  * Excel-side wrapper around the formula engine's snapshot/writeback boundary.
  */
 export function calculateFormulas(wb: WorkbookData): void {
+  // A workbook, or a typed error naming the argument — `null` reached a `WeakMap` and `{}` a missing field.
+  if (!isReadTarget(wb)) {
+    throw new ExcelArgumentError(
+      "wb",
+      `ExcelFormula.calculate: wb must be a workbook, got ${wb === null ? "null" : typeof wb}.`
+    );
+  }
   const state = stateFor(wb);
   const snapshot = captureFormulaSnapshot(wb);
   // Capture this before evaluation. A custom function may unregister itself

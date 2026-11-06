@@ -7,11 +7,12 @@
 // That loose signature was not merely imprecise, it was dangerous:
 // `Cell.getValue(ws, "A1", 99)` type-checked and silently read `"CUA1"`
 // (`colCache.getAddress` composes `n2l(99) + "A1"`), and `Cell.getValue(ws, 5)`
-// type-checked and threw `InvalidAddressError` at runtime. The `@ts-expect-error`
+// type-checked and threw `ExcelInvalidAddressError` at runtime. The `@ts-expect-error`
 // blocks below are the regression guard: if any of them stops erroring, the
 // loose signature is back.
 
-import { Cell, Column, Row, Stream, Worksheet } from "@excel/index";
+import { getColumns, getLastColumn } from "@excel/core/worksheet";
+import { Cell, Column, Row, Stream } from "@excel/index";
 import type {
   CellData,
   CellValue,
@@ -19,7 +20,8 @@ import type {
   CellView,
   ColumnDefn,
   ColumnView,
-  RowValues
+  RowValues,
+  Worksheet
 } from "@excel/index";
 
 declare const ws: Worksheet.Handle;
@@ -29,6 +31,11 @@ declare const ws: Worksheet.Handle;
 // ---------------------------------------------------------------------------
 
 const byAddress: CellValue = Cell.getValue(ws, "A1");
+const byPosition: CellValue = Cell.getValue(ws, { row: 1, col: 1 });
+Cell.setFont(ws, { row: 1, col: 1 }, { bold: true });
+// @ts-expect-error a position takes no column argument
+Cell.getValue(ws, { row: 1, col: 1 }, 2);
+// The `(row, col)` form below is deprecated but still compiles.
 const byRowCol: CellValue = Cell.getValue(ws, 1, 1);
 
 Cell.setValue(ws, "A1", 42);
@@ -69,29 +76,30 @@ Cell.setFont(ws, "A1", 3, { bold: true });
 Cell.setValue(ws, 5, 42);
 
 // ---------------------------------------------------------------------------
-// Cell handles: readable through `Cell.view`, writable through `Stream.*`
+// Cell handles: readable through `Stream.getCellView`, writable through `Stream.*`
 // ---------------------------------------------------------------------------
 
-Row.eachCell(ws, 1, (cell: CellData, colNumber: number) => {
-  const view: CellView = Cell.view(cell);
+declare const handle: CellData;
+{
+  const view: CellView = Stream.getCellView(handle);
   const text: string = view.text;
   const value: CellValue = view.value;
-  Stream.setCellValue(cell, `${text}${value}${colNumber}`);
-});
+  Stream.setCellValue(handle, `${text}${value}`);
+}
 
 // ---------------------------------------------------------------------------
 // Column: key → number bridge, and definition round-trip
 // ---------------------------------------------------------------------------
 
-Worksheet.setColumns(ws, [{ header: "Total", key: "total", width: 12 }]);
+Column.setDefinitions(ws, [{ header: "Total", key: "total", width: 12 }]);
 
 const totalCol: number = Column.getNumber(ws, "total");
 const totalLetter: string = Column.getLetter(ws, "total");
 Cell.setValue(ws, 2, totalCol, 1);
 
 const oneDefn: ColumnDefn = Column.getDefinition(ws, "total");
-const allDefns: ColumnDefn[] = Worksheet.columnDefinitions(ws);
-Worksheet.setColumns(ws, [...allDefns, { header: "Error", key: "error", width: 40 }]);
+const allDefns: ColumnDefn[] = Column.getDefinitions(ws);
+Column.setDefinitions(ws, [...allDefns, { header: "Error", key: "error", width: 40 }]);
 
 // ---------------------------------------------------------------------------
 // Column values: a read returns `CellValue`, a write takes `CellValueInput`
@@ -103,7 +111,7 @@ Worksheet.setColumns(ws, [...allDefns, { header: "Error", key: "error", width: 4
 // types — were rejected at the boundary and nowhere else.
 // ---------------------------------------------------------------------------
 
-const colValues: CellValue[] = Column.values(ws, "total");
+const colValues: CellValue[] = Column.getValues(ws, "total", { base: 1 });
 const colValues0: CellValue[] = Column.getValues(ws, 1);
 Column.setValues(ws, "B", colValues0);
 
@@ -119,7 +127,7 @@ const frozen: readonly CellValueInput[] = [1, 2, 3];
 Column.setValues(ws, "A", frozen);
 
 // @ts-expect-error a column reference is a key, a letter or a number
-Column.values(ws, true);
+Column.getValues(ws, true, { base: 1 });
 // @ts-expect-error the values are an array, not a single value
 Column.setValues(ws, "A", 1);
 
@@ -133,27 +141,27 @@ interface Invoice {
 }
 declare const invoices: Invoice[];
 
-Worksheet.addRow(ws, invoices[0]);
-Worksheet.addRows(ws, invoices);
+Row.add(ws, invoices[0]);
+Row.addMany(ws, invoices);
 Row.setValues(ws, 2, invoices[0]);
 const positional: RowValues = ["a", 1, true];
-Worksheet.addRow(ws, positional);
+Row.add(ws, positional);
 
 // ---------------------------------------------------------------------------
 // Declared columns are read-only: mutate through `Column.*` / `setColumns`
 // ---------------------------------------------------------------------------
 
-const declared: readonly ColumnView[] = Worksheet.columns(ws);
-const lastDeclared: ColumnView = Worksheet.lastColumn(ws);
+const declared: readonly ColumnView[] = getColumns(ws);
+const lastDeclared: ColumnView = getLastColumn(ws);
 
 // @ts-expect-error the declared-column view is read-only
-Worksheet.columns(ws)[0].header = "X";
+getColumns(ws)[0].header = "X";
 // @ts-expect-error the declared-column array is read-only
-Worksheet.columns(ws).push(Worksheet.columns(ws)[0]);
+getColumns(ws).push(getColumns(ws)[0]);
 // @ts-expect-error the view is deeply readonly — nested style included
-Worksheet.columns(ws)[0].style.numFmt = "0.00";
+getColumns(ws)[0].style.numFmt = "0.00";
 // @ts-expect-error the sheet back-reference is not part of the view
-void Worksheet.columns(ws)[0].worksheet;
+void getColumns(ws)[0].worksheet;
 
 // Style facets stay live references, exactly like `Cell.getStyle` — copy before
 // editing. This is a supported read-modify-write, not a leak to be sealed.
@@ -161,6 +169,7 @@ Cell.setStyle(ws, "B1", { ...Cell.getStyle(ws, "A1") });
 
 void byAddress;
 void byRowCol;
+void byPosition;
 void fontByAddress;
 void fontByRowCol;
 void totalLetter;

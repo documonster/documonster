@@ -18,6 +18,7 @@
 import type { PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfDictValue, PdfStream } from "@pdf/reader/pdf-parser";
 import { isPdfRef, isPdfArray, dictGetName, dictGetNumber } from "@pdf/reader/pdf-parser";
+import { asPlainBytes } from "@utils/binary";
 
 // =============================================================================
 // Types
@@ -45,12 +46,13 @@ export interface ExtractedImage {
    * - "jpx" — JPEG 2000 data
    * - "raw" — raw pixel data (RGB/CMYK/Gray, decompressed)
    * - "ccitt" — CCITT fax compressed data
+   * - "jbig2" — JBIG2 compressed data
    */
   format: "jpeg" | "jpx" | "raw" | "ccitt" | "jbig2";
   /** The image data */
-  data: Uint8Array;
-  /** Alpha mask data (if present) — same dimensions, 1 component, 8 bits */
-  alphaMask: Uint8Array | null;
+  data: Uint8Array<ArrayBuffer>;
+  /** Alpha mask data — same dimensions, 1 component, 8 bits; absent when the image has none */
+  alphaMask?: Uint8Array<ArrayBuffer>;
   /** Filter name from the original stream */
   filter: string;
   /** XObject name (if it was a named XObject) */
@@ -162,7 +164,7 @@ function extractImage(
   }
 
   // Extract soft mask (alpha channel)
-  let alphaMask: Uint8Array | null = null;
+  let alphaMask: Uint8Array | undefined;
   const smaskRef = dict.get("SMask");
   if (smaskRef) {
     const smaskResult = doc.derefStreamWithObjNum(smaskRef);
@@ -179,8 +181,8 @@ function extractImage(
     colorSpace,
     components,
     format,
-    data,
-    alphaMask,
+    data: asPlainBytes(data),
+    ...(alphaMask === undefined ? {} : { alphaMask: asPlainBytes(alphaMask) }),
     filter,
     name
   };

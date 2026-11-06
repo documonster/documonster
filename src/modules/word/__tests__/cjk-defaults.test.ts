@@ -11,6 +11,7 @@
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
+import { finalizeDocument } from "../builder/document-finalize";
 import * as Document from "../builder/document-handle";
 import { renderFontTable, renderTheme } from "../writer/parts-writer";
 import { renderStyles } from "../writer/styles-writer";
@@ -19,7 +20,7 @@ describe("CJK defaults", () => {
   it("should not declare a language it cannot know", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
-    const doc = Document.build(h);
+    const doc = h;
 
     // `useDefaultStyles` runs before any content exists, so it has nothing to base an
     // East Asian language on — and this document never gains any text. Declaring
@@ -30,15 +31,15 @@ describe("CJK defaults", () => {
   });
 
   it("should derive the East Asian language from the document's own text", () => {
-    // The other half of the same question: `useDefaultStyles` cannot know, but by
-    // `build()` the text is all in one place. Without this, a hand-built Chinese
+    // The other half of the same question: `useDefaultStyles` cannot know, but by the
+    // time the document is written the text is all in one place. Without this, a hand-built Chinese
     // document opens in Word with a red underline under every single word, because an
     // English dictionary is being asked about Chinese.
     const h = Document.create();
     Document.useDefaultStyles(h);
     Document.addHeading(h, "第一章 销售业绩概述", 1);
     Document.addParagraph(h, "其中华东地区同比增长百分之十二。");
-    const rPr = Document.build(h).docDefaults?.runProperties;
+    const rPr = finalizeDocument(h).docDefaults?.runProperties;
 
     expect(rPr?.language).toEqual({ val: "en-US", eastAsia: "zh-CN" });
     expect(rPr?.font).toMatchObject({ ascii: "Calibri", eastAsia: "SimSun" });
@@ -52,7 +53,7 @@ describe("CJK defaults", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
     Document.addParagraph(h, "日本語のテスト資料です。");
-    const rPr = Document.build(h).docDefaults?.runProperties;
+    const rPr = finalizeDocument(h).docDefaults?.runProperties;
 
     expect(rPr?.language).toEqual({ val: "en-US", eastAsia: "ja-JP" });
     expect(rPr?.font).toMatchObject({ eastAsia: "Yu Gothic" });
@@ -62,7 +63,7 @@ describe("CJK defaults", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
     Document.addParagraph(h, "Plain English paragraph.");
-    const rPr = Document.build(h).docDefaults?.runProperties;
+    const rPr = finalizeDocument(h).docDefaults?.runProperties;
 
     expect(rPr?.language?.eastAsia).toBeUndefined();
     expect(rPr?.font).not.toMatchObject({ eastAsia: expect.any(String) });
@@ -79,16 +80,19 @@ describe("CJK defaults", () => {
       }
     });
     Document.addParagraph(h, "简体中文内容");
-    const rPr = Document.build(h).docDefaults?.runProperties;
+    const rPr = finalizeDocument(h).docDefaults?.runProperties;
 
     expect(rPr?.language).toEqual({ val: "en-GB", eastAsia: "ja-JP" });
-    expect(rPr?.font).toEqual({ ascii: "Arial", eastAsia: "Meiryo" });
+    // New documents now state their Latin faces in full (Word's new-document
+    // defaults are filled in where left out): the one Latin face named stands
+    // for both slots.
+    expect(rPr?.font).toEqual({ ascii: "Arial", hAnsi: "Arial", eastAsia: "Meiryo" });
   });
 
   it("should carry an explicitly set East Asian language through to styles.xml", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
-    const doc = Document.build(h);
+    const doc = h;
     const writer = new XmlWriter();
     renderStyles(
       writer,
@@ -178,7 +182,7 @@ describe("useDefaultStyles supplies defaults without discarding settings", () =>
     Document.setDocDefaults(h, { runProperties: { size: 40 } });
     Document.useDefaultStyles(h);
 
-    expect(Document.build(h).docDefaults?.runProperties?.size).toBe(40);
+    expect(h.docDefaults?.runProperties?.size).toBe(40);
   });
 
   it("does not define the same style twice when called again", () => {
@@ -188,7 +192,7 @@ describe("useDefaultStyles supplies defaults without discarding settings", () =>
     Document.useDefaultStyles(h);
     Document.useDefaultStyles(h);
 
-    const ids = (Document.build(h).styles ?? []).map(style => style.styleId);
+    const ids = (h.styles ?? []).map(style => style.styleId);
     expect(ids.length).toBe(new Set(ids).size);
   });
 });
@@ -206,7 +210,7 @@ describe("the font table declares every face the defaults can name", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
     Document.addParagraph(h, text);
-    const doc = Document.build(h);
+    const doc = finalizeDocument(h);
 
     expect(doc.docDefaults?.runProperties?.font).toMatchObject({ eastAsia: expected });
 

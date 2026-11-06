@@ -9,7 +9,7 @@
 
 import { toStreamBytes } from "@stream/core/binary-chunk";
 import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
-import { UnsupportedStreamTypeError } from "@stream/errors";
+import { StreamUnsupportedTypeError } from "@stream/errors";
 import type { ReadableLike, WritableLike } from "@stream/types";
 import { concatUint8Arrays, createTextDecoder } from "@utils/binary";
 
@@ -46,6 +46,13 @@ export const isReadableStreamLike = isReadableStream as (
 export async function* readableStreamToAsyncIterable<T>(
   stream: ReadableStreamLike<T>
 ): AsyncGenerator<T, void, unknown> {
+  if (!isReadableStream(stream)) {
+    throw new StreamUnsupportedTypeError(
+      "Streams.readableStreamToAsyncIterable",
+      stream === null ? "null" : typeof stream,
+      { field: "stream" }
+    );
+  }
   const reader = stream.getReader();
   let done = false;
   try {
@@ -69,6 +76,15 @@ export async function* readableStreamToAsyncIterable<T>(
 export async function collect<T>(stream: {
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }): Promise<T[]> {
+  if (!isAsyncIterable(stream)) {
+    throw new StreamUnsupportedTypeError(
+      "Streams.collect",
+      stream === null ? "null" : typeof stream,
+      {
+        field: "stream"
+      }
+    );
+  }
   const result: T[] = [];
   for await (const chunk of stream) {
     result.push(chunk);
@@ -87,12 +103,69 @@ export async function json<T = unknown>(stream: AsyncIterableStream): Promise<T>
 }
 
 /** A whole stream's bytes. */
-export function bytes(stream: AsyncIterableStream): Promise<Uint8Array> {
+export function bytes(stream: AsyncIterableStream): Promise<Uint8Array<ArrayBuffer>> {
   return streamToUint8Array(stream as AsyncIterable<Uint8Array>);
 }
 
+/** Options for `Streams.text` and `Streams.json`. */
+export interface StreamTextOptions {
+  /** Text encoding, as `TextDecoder` names it. Default `"utf-8"`. */
+  encoding?: string;
+}
+
+/**
+ * A whole stream decoded as text, as `node:stream/consumers.text` decodes it: a leading BOM
+ * is stripped (as `TextDecoder`, `Response.text()` and `Blob.text()` strip it), string chunks
+ * are taken as they are, and the stream may be an async iterable (a Node-style readable is
+ * one), a Web `ReadableStream` or a plain iterable. Published as `Streams.text`, and behind
+ * `consumers.text`.
+ */
+export function readText(
+  stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | Iterable<Uint8Array | string>,
+  options?: StreamTextOptions
+): Promise<string> {
+  return readTextAt("Streams.text", stream, options);
+}
+
+/** {@link readText}, naming `where` — the public call — when it refuses the stream. */
+export async function readTextAt(
+  where: string,
+  stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | Iterable<Uint8Array | string>,
+  options?: StreamTextOptions
+): Promise<string> {
+  const decoder = createTextDecoder(options?.encoding, { ignoreBOM: false });
+  let text = "";
+  for await (const chunk of toAsyncIterable(stream, where)) {
+    if (typeof chunk === "string") {
+      text += chunk;
+      continue;
+    }
+    const bytes = toStreamBytes(chunk);
+    if (!bytes) {
+      throw new StreamUnsupportedTypeError(where, typeof chunk);
+    }
+    text += decoder.decode(bytes, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+/**
+ * A whole stream decoded as {@link readText} does and parsed as JSON. Published as
+ * `Streams.json`, and as `consumers.json`.
+ */
+export async function readJson<T = unknown>(
+  stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | Iterable<Uint8Array | string>,
+  options?: StreamTextOptions
+): Promise<T> {
+  return JSON.parse(await readTextAt("Streams.json", stream, options)) as T;
+}
+
+/**
+ * A stream as an async iterable: a Web `ReadableStream`, an async iterable, or — as
+ * `node:stream/consumers` accepts — a plain iterable such as an array or a string.
+ */
 function toAsyncIterable<T>(
-  stream: AsyncIterable<T> | ReadableStream<T>,
+  stream: AsyncIterable<T> | ReadableStream<T> | Iterable<T>,
   name: string
 ): AsyncIterable<T> {
   if (isReadableStream(stream)) {
@@ -101,19 +174,34 @@ function toAsyncIterable<T>(
   if (isAsyncIterable(stream)) {
     return stream as AsyncIterable<T>;
   }
-  throw new UnsupportedStreamTypeError(name, typeof stream);
+  if (
+    typeof stream === "string" ||
+    (stream !== null &&
+      typeof stream === "object" &&
+      typeof (stream as Iterable<T>)[Symbol.iterator] === "function")
+  ) {
+    return (async function* () {
+      yield* stream as Iterable<T>;
+    })();
+  }
+  throw new StreamUnsupportedTypeError(name, stream === null ? "null" : typeof stream, {
+    field: "stream"
+  });
 }
 
-/** Collect every byte of a stream. */
+/**
+ * Collect every byte of a stream (string chunks as UTF-8). Published as `Streams.bytes`, and
+ * as `consumers.bytes`.
+ */
 export async function streamToUint8Array(
-  stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>
-): Promise<Uint8Array> {
+  stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | Iterable<Uint8Array | string>
+): Promise<Uint8Array<ArrayBuffer>> {
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
-  for await (const chunk of toAsyncIterable(stream, "streamToUint8Array")) {
+  for await (const chunk of toAsyncIterable(stream, "Streams.bytes")) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
-      throw new UnsupportedStreamTypeError("streamToUint8Array", typeof chunk);
+      throw new StreamUnsupportedTypeError("Streams.bytes", typeof chunk);
     }
     chunks.push(bytes);
     totalLength += bytes.byteLength;
@@ -121,10 +209,13 @@ export async function streamToUint8Array(
   return concatUint8Arrays(chunks, totalLength);
 }
 
-/** Alias of {@link streamToUint8Array}, named after Node's `Buffer`. */
+/**
+ * Alias of {@link streamToUint8Array}, kept for the deprecated `streamToBuffer` export. Despite the name it resolves to a
+ * `Uint8Array`, not a Node `Buffer` — exactly what `Streams.bytes` returns.
+ */
 export function streamToBuffer(
   stream: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   return streamToUint8Array(stream);
 }
 
@@ -138,18 +229,21 @@ export async function streamToString(
   for await (const chunk of toAsyncIterable(stream, "streamToString")) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
-      throw new UnsupportedStreamTypeError("streamToString", typeof chunk);
+      throw new StreamUnsupportedTypeError("streamToString", typeof chunk);
     }
     text += decoder.decode(bytes, { stream: true });
   }
   return text + decoder.decode();
 }
 
-/** Consume a stream to its end, discarding the data. */
+/**
+ * Consume a stream to its end, discarding the data. Published as `Streams.discard` —
+ * not `drain`, which names the writable-side backpressure event.
+ */
 export async function drainStream(
   stream: AsyncIterable<unknown> | ReadableStream<unknown>
 ): Promise<void> {
-  for await (const _chunk of toAsyncIterable(stream, "drainStream")) {
+  for await (const _chunk of toAsyncIterable(stream, "Streams.discard")) {
     // discard
   }
 }

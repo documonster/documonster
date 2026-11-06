@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -35,10 +35,10 @@ const data: [string, string, number, number][] = [
   ["East", "Gadget", 75, 6]
 ];
 data.forEach((row, i) => {
-  Cell.setValue(ws, i + 2, 1, row[0]);
-  Cell.setValue(ws, i + 2, 2, row[1]);
-  Cell.setValue(ws, i + 2, 3, row[2]);
-  Cell.setValue(ws, i + 2, 4, row[3]);
+  Cell.setValue(ws, { row: i + 2, col: 1 }, row[0]);
+  Cell.setValue(ws, { row: i + 2, col: 2 }, row[1]);
+  Cell.setValue(ws, { row: i + 2, col: 3 }, row[2]);
+  Cell.setValue(ws, { row: i + 2, col: 4 }, row[3]);
 });
 
 // Criteria — East + Gadget
@@ -64,7 +64,7 @@ Cell.setValue(ws, "F7", "West");
 Cell.setValue(ws, "I7", { formula: 'DSUM(A1:D7, "Sales", F5:F7)' });
 Cell.setValue(ws, "I8", { formula: 'DCOUNTA(A1:D7, "Product", F5:F7)' });
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of ["I1", "I2", "I3", "I4", "I5", "I7", "I8"]) {
   console.log(

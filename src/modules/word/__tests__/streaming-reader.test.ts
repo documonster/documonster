@@ -8,7 +8,17 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Build, Document, Io, Streaming } from "../index";
+import { WordCrypto } from "../crypto";
+import {
+  Build,
+  Document,
+  DocxDecryptionError,
+  DocxEncryptedError,
+  DocxError,
+  DocxParseError,
+  Io,
+  Stream
+} from "../index";
 import type { BodyContent, Table } from "../types";
 
 /** Build a representative document and return its packaged bytes. */
@@ -18,7 +28,7 @@ async function buildSampleDocx(paragraphCount = 5): Promise<Uint8Array> {
   for (let i = 0; i < paragraphCount; i++) {
     Document.addParagraph(h, `Paragraph ${i}`);
   }
-  Document.addTableElement(
+  Document.addTable(
     h,
     Build.simpleTable([
       ["A1", "B1"],
@@ -26,13 +36,13 @@ async function buildSampleDocx(paragraphCount = 5): Promise<Uint8Array> {
     ])
   );
   Document.addParagraph(h, "Trailing paragraph");
-  const doc = Document.build(h);
-  return Io.package(doc);
+  const doc = h;
+  return Io.toBuffer(doc);
 }
 
 /** Collect all body content yielded by the streaming reader. */
 async function collectStream(bytes: Uint8Array): Promise<BodyContent[]> {
-  const reader = Streaming.createDocxStreamReader(bytes);
+  const reader = new Stream.DocumentReader(bytes);
   const out: BodyContent[] = [];
   for await (const item of reader) {
     out.push(item);
@@ -40,7 +50,7 @@ async function collectStream(bytes: Uint8Array): Promise<BodyContent[]> {
   return out;
 }
 
-describe("StreamingDocxReader", () => {
+describe("Stream.DocumentReader", () => {
   it("yields the same body content as readDocx", async () => {
     const bytes = await buildSampleDocx();
 
@@ -96,7 +106,7 @@ describe("StreamingDocxReader", () => {
     const bytes = await buildSampleDocx(1);
 
     const batch = await Io.read(bytes);
-    const reader = Streaming.createDocxStreamReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
 
     // Drain the iterator so the metadata pass has run.
     for await (const _ of reader) {
@@ -114,7 +124,7 @@ describe("StreamingDocxReader", () => {
 
   it("can only be iterated once", async () => {
     const bytes = await buildSampleDocx(1);
-    const reader = Streaming.createDocxStreamReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
 
     for await (const _ of reader) {
       // drain
@@ -130,10 +140,10 @@ describe("StreamingDocxReader", () => {
   it("rejects an oversized single body element via maxElementBytes", async () => {
     const h = Document.create();
     Document.addParagraph(h, "x".repeat(2000));
-    const doc = Document.build(h);
-    const bytes = await Io.package(doc);
+    const doc = h;
+    const bytes = await Io.toBuffer(doc);
 
-    const reader = Streaming.createDocxStreamReader(bytes, { maxElementBytes: 100 });
+    const reader = new Stream.DocumentReader(bytes, { maxElementBytes: 100 });
     await expect(async () => {
       for await (const _ of reader) {
         // should throw before yielding the oversized paragraph
@@ -141,16 +151,81 @@ describe("StreamingDocxReader", () => {
     }).rejects.toThrow(/maxElementBytes/);
   });
 
-  it("rejects encrypted (CFB) input with a clear error", async () => {
-    const cfb = new Uint8Array(16);
-    cfb.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  it("rejects encrypted (CFB) input without a password as Io.read does", async () => {
+    const enc = await WordCrypto.encrypt(await buildSampleDocx(1), "pw", { spinCount: 1 });
 
-    const reader = Streaming.createDocxStreamReader(cfb);
+    const reader = new Stream.DocumentReader(enc);
     await expect(async () => {
       for await (const _ of reader) {
         // should throw
       }
-    }).rejects.toThrow(/Encrypted DOCX/);
+    }).rejects.toBeInstanceOf(DocxEncryptedError);
+  });
+
+  it("reports a compound file that is not an encrypted package as a legacy document, not as encrypted", async () => {
+    // A bare CFB signature — a legacy .doc for all the reader can tell — used to be reported as encrypted, telling
+    // the caller to supply a password that could never help.
+    const cfb = new Uint8Array(16);
+    cfb.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    for (const read of [
+      () => Io.read(cfb),
+      async () => {
+        for await (const _ of new Stream.DocumentReader(cfb)) {
+          // should throw
+        }
+      }
+    ]) {
+      const error = await read().then(
+        () => undefined,
+        (e: unknown) => e
+      );
+      expect(error).toBeInstanceOf(DocxParseError);
+      expect(error).not.toBeInstanceOf(DocxEncryptedError);
+      expect((error as Error).message).toMatch(/legacy \.doc/);
+    }
+  });
+
+  it("reads an encrypted package with { password }, as Io.read does", async () => {
+    const bytes = await buildSampleDocx(3);
+    const enc = await WordCrypto.encrypt(bytes, "pw", { spinCount: 1 });
+    const streamed: BodyContent[] = [];
+    for await (const item of new Stream.DocumentReader(enc, { password: "pw" })) {
+      streamed.push(item);
+    }
+    expect(streamed).toEqual((await Io.read(enc, { password: "pw" })).body);
+
+    const wrong = new Stream.DocumentReader(enc, { password: "nope" });
+    await expect(async () => {
+      for await (const _ of wrong) {
+        // should throw
+      }
+    }).rejects.toBeInstanceOf(DocxDecryptionError);
+  });
+
+  it("fails with a DocxParseError on damaged bytes, as Io.read does", async () => {
+    const bytes = await buildSampleDocx(40);
+    const damaged: Uint8Array[] = [];
+    for (let i = 1; i < 32; i++) {
+      const at = Math.floor((bytes.length * i) / 32);
+      damaged.push(bytes.slice(0, at));
+      // The central directory intact at its offset, the data before it zeroed.
+      const zeroed = bytes.slice();
+      zeroed.fill(0, at, Math.min(bytes.length - 22, at + 64));
+      damaged.push(zeroed);
+    }
+    const failures: string[] = [];
+    for (const input of damaged) {
+      try {
+        await collectStream(input);
+      } catch (e) {
+        if (!(e instanceof DocxError)) {
+          failures.push(`${(e as Error).name}: ${(e as Error).message}`);
+        } else if (e.name === "DocxParseError") {
+          expect(e.cause).toBeDefined();
+        }
+      }
+    }
+    expect(failures).toEqual([]);
   });
 });
 
@@ -173,10 +248,10 @@ async function buildLargeDocx(paraCount: number, paraSize: number): Promise<Uint
   for (let i = 0; i < paraCount; i++) {
     Document.addParagraph(h, `${i}:${randomText(paraSize)}`);
   }
-  return Io.package(Document.build(h));
+  return Io.toBuffer(h);
 }
 
-describe("StreamingDocxReader — true streaming", () => {
+describe("Stream.DocumentReader — true streaming", () => {
   it("emits the first element long before document.xml is fully consumed", async () => {
     // ~3 MB of incompressible body across 800 paragraphs.
     const bytes = await buildLargeDocx(800, 4000);
@@ -185,7 +260,7 @@ describe("StreamingDocxReader — true streaming", () => {
     let totalConsumed = 0;
     let count = 0;
 
-    const reader = Streaming.createDocxStreamReader(bytes, {
+    const reader = new Stream.DocumentReader(bytes, {
       onProgress: consumed => {
         totalConsumed = consumed;
       }
@@ -214,7 +289,7 @@ describe("StreamingDocxReader — true streaming", () => {
     const bytes = await buildLargeDocx(400, 4000);
 
     const samples: number[] = [];
-    const reader = Streaming.createDocxStreamReader(bytes);
+    const reader = new Stream.DocumentReader(bytes);
     for await (const _ of reader) {
       samples.push(reader.consumedBytes);
     }
@@ -226,4 +301,46 @@ describe("StreamingDocxReader — true streaming", () => {
     }
     expect(samples[0]).toBeLessThan(samples[samples.length - 1]);
   }, 60000);
+});
+
+describe("Stream.DocumentReader — leaving the loop early", () => {
+  for (const [where, at] of [
+    ["first", 0],
+    ["middle", 200],
+    ["last", -1]
+  ] as const) {
+    for (const how of ["break", "throw"] as const) {
+      it(`settles on a ${how} at the ${where} element, over a body larger than an inflate chunk`, async () => {
+        const bytes = await buildLargeDocx(400, 4000);
+        const total = (await collectStream(bytes)).length;
+        const stopAt = at < 0 ? total - 1 : at;
+        const thrown = new Error("left");
+        let seen = 0;
+        const run = (async () => {
+          try {
+            for await (const _ of new Stream.DocumentReader(bytes)) {
+              if (seen++ === stopAt) {
+                if (how === "throw") {
+                  throw thrown;
+                }
+                break;
+              }
+            }
+          } catch (error) {
+            if (error !== thrown) {
+              throw error;
+            }
+          }
+        })();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          run,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("did not settle")), 10_000);
+          })
+        ]).finally(() => clearTimeout(timer));
+        expect(seen).toBe(stopAt + 1);
+      }, 60000);
+    }
+  }
 });

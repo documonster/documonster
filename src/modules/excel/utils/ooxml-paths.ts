@@ -34,7 +34,10 @@ const chartUserShapesXmlRegex =
   /^xl\/drawings\/((?:chartUserShape|chartUserShapes|userDrawing)\d+)[.]xml$/;
 const vmlDrawingRegex = /^xl\/drawings\/(vmlDrawing\d+)[.]vml$/;
 const vmlDrawingHFRegex = /^xl\/drawings\/(vmlDrawingHF\d+)[.]vml$/;
-const vmlDrawingHFRelsRegex = /^xl\/drawings\/_rels\/(vmlDrawingHF\d+)[.]vml[.]rels$/;
+// Any VML part's relationships, by part name. Excel names a header/footer VML `vmlDrawingN.vml`, like a
+// comment's, so the name cannot say which part a set of rels belongs to: the sheet's `legacyDrawing` /
+// `legacyDrawingHF` relationship does, and every consumer resolves the part through it.
+const vmlDrawingRelsRegex = /^xl\/drawings\/_rels\/(vmlDrawing(?:HF)?\d+)[.]vml[.]rels$/;
 // Matches both flat layout (xl/comments1.xml) and subdirectory layout (xl/comments/comment1.xml).
 // Both are valid OOXML — the actual path is determined by .rels, not by convention.
 const commentsXmlRegex = /^xl\/(?:comments(\d+)|comments\/comment(\d+))[.]xml$/;
@@ -127,8 +130,9 @@ export function getVmlDrawingHFNameFromPath(path: string): string | undefined {
   return match ? match[1] : undefined;
 }
 
-export function getVmlDrawingHFNameFromRelsPath(path: string): string | undefined {
-  const match = vmlDrawingHFRelsRegex.exec(path);
+/** The VML part name (`vmlDrawing1`, `vmlDrawingHF1`) whose relationships part `path` is. */
+export function getVmlDrawingNameFromRelsPath(path: string): string | undefined {
+  const match = vmlDrawingRelsRegex.exec(path);
   return match ? match[1] : undefined;
 }
 

@@ -8,26 +8,12 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import type { LineChartGroup, LineSeries, BarSeries, ValueAxis } from "@excel/chart";
-import {
-  buildChartModel,
-  buildComboChartModel,
-  fillChartCaches,
-  parseSpPr,
-  buildSpPr,
-  getSpPrFillColor,
-  getSpPrGradient,
-  getSpPrPattern,
-  setSpPrFill,
-  parseChartColors,
-  buildChartColors,
-  parseChartStyle,
-  buildChartScene
-} from "@excel/chart";
+import { DrawingMl, ChartClassic } from "@excel/chart";
 import { definedNamesAdd, definedNamesAddFormula } from "@excel/core/defined-names";
 import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { addChart, addChartEx, addComboChart, getCharts, removeChart } from "@excel/core/worksheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 import { CATEGORIES, VALUES_B, baseSeries, ctg, pa } from "./chart-builder.helpers";
@@ -36,7 +22,7 @@ const textDecoder = new TextDecoder();
 
 describe("trendline array", () => {
   it("single trendline option produces one trendline", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [{ ...baseSeries("S1"), trendline: { type: "linear" } }]
     });
@@ -46,7 +32,7 @@ describe("trendline array", () => {
   });
 
   it("array of trendlines produces multiple trendlines", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [
         {
@@ -71,7 +57,7 @@ describe("trendline array", () => {
   it("renderer fits exp/log/power/poly trendlines as curves, not straight lines", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       [1, 2],
       [2, 4],
       [3, 8],
@@ -94,8 +80,8 @@ describe("trendline array", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    const scene = buildChartScene(model, { width: 420, height: 260 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    const scene = ChartClassic.Backend.toScene(model, { width: 420, height: 260 });
     const scatterSeries = scene.series[0] as {
       trendlines?: Array<{ points: Array<{ x: number; y: number }> }>;
     };
@@ -108,7 +94,7 @@ describe("trendline array", () => {
   it("linear trendline produces a positive-slope line for positive-slope data", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       [1, 3],
       [2, 5],
       [3, 7],
@@ -129,8 +115,8 @@ describe("trendline array", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    const scene = buildChartScene(model, { width: 400, height: 300 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    const scene = ChartClassic.Backend.toScene(model, { width: 400, height: 300 });
     const scatterSeries = scene.series[0] as {
       trendlines?: Array<{ points: Array<{ x: number; y: number }> }>;
     };
@@ -153,7 +139,7 @@ describe("trendline array", () => {
 
 describe("dataPoint extended options", () => {
   it("dataPoint with marker", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [
         {
@@ -169,7 +155,7 @@ describe("dataPoint extended options", () => {
   });
 
   it("dataPoint with invertIfNegative", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ ...baseSeries("S1"), dataPoints: [{ index: 0, invertIfNegative: true }] }]
     });
@@ -184,7 +170,7 @@ describe("dataPoint extended options", () => {
 
 describe("extended axis options", () => {
   it("lblAlgn and lblOffset on category axis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       categoryAxis: { lblAlgn: "l", lblOffset: 200 }
@@ -195,7 +181,7 @@ describe("extended axis options", () => {
   });
 
   it("tickLblSkip and tickMarkSkip on category axis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       categoryAxis: { tickLblSkip: 2, tickMarkSkip: 3 }
@@ -206,7 +192,7 @@ describe("extended axis options", () => {
   });
 
   it("crosses and crossesAt on axis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { crosses: "min", crossesAt: 100 }
@@ -217,7 +203,7 @@ describe("extended axis options", () => {
   });
 
   it("displayUnits on value axis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { displayUnits: "thousands" }
@@ -228,7 +214,7 @@ describe("extended axis options", () => {
   });
 
   it("lineColor and lineWidth on axis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { lineColor: "#FF0000", lineWidth: 2 }
@@ -252,9 +238,9 @@ describe("Chart class convenience methods", () => {
     Cell.setValue(ws, "A1", "data");
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(Chart.plotArea(chart)).toBeDefined();
-    expect(Chart.plotArea(chart)!.chartTypes).toHaveLength(1);
-    expect(Chart.plotArea(chart)!.axes.length).toBeGreaterThan(0);
+    expect(Chart.getPlotArea(chart)).toBeDefined();
+    expect(Chart.getPlotArea(chart)!.chartTypes).toHaveLength(1);
+    expect(Chart.getPlotArea(chart)!.axes.length).toBeGreaterThan(0);
   });
 
   it("addSeries adds to first chart type group", () => {
@@ -296,7 +282,7 @@ describe("Chart class convenience methods", () => {
   });
 
   it("combo chart dataTable in builder", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Bar")] },
         { type: "line", series: [baseSeries("Line")] }
@@ -314,7 +300,7 @@ describe("Chart class convenience methods", () => {
 
 describe("gradient and pattern fill", () => {
   it("buildSpPr with gradient fill produces valid structure", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       fill: {
         gradient: {
           stops: [
@@ -347,7 +333,7 @@ describe("gradient and pattern fill", () => {
       "  </a:gradFill>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.fill?.gradient).toBeDefined();
     expect(parsed.fill!.gradient!.stops).toHaveLength(3);
     // OOXML `<a:gs pos>` is encoded in hundredths of a percent
@@ -376,13 +362,13 @@ describe("gradient and pattern fill", () => {
       "  </a:gradFill>",
       "</c:spPr>"
     ].join("");
-    const grad = getSpPrGradient({ _rawXml: rawXml } as any);
+    const grad = DrawingMl.getSpPrGradient({ _rawXml: rawXml } as any);
     expect(grad).toBeDefined();
     expect(grad!.stops).toHaveLength(2);
   });
 
   it("buildSpPr with pattern fill produces valid structure", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       fill: {
         pattern: {
           preset: "dkDnDiag",
@@ -408,7 +394,7 @@ describe("gradient and pattern fill", () => {
       "  </a:pattFill>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.fill?.pattern).toBeDefined();
     expect(parsed.fill!.pattern!.preset).toBe("ltHorz");
     expect(parsed.fill!.pattern!.foreground?.srgb).toBe("112233");
@@ -418,14 +404,14 @@ describe("gradient and pattern fill", () => {
   it("getSpPrPattern returns pattern from raw XML", () => {
     const rawXml =
       '<c:spPr><a:pattFill prst="smCheck"><a:fgClr><a:srgbClr val="000000"/></a:fgClr></a:pattFill></c:spPr>';
-    const pat = getSpPrPattern({ _rawXml: rawXml } as any);
+    const pat = DrawingMl.getSpPrPattern({ _rawXml: rawXml } as any);
     expect(pat).toBeDefined();
     expect(pat!.preset).toBe("smCheck");
   });
 
-  it("setSpPrFill with gradient replaces existing fill", () => {
-    const original = buildSpPr({ fill: { solid: { srgb: "FF0000" } } });
-    const updated = setSpPrFill(original, {
+  it("withSpPrFill with gradient replaces existing fill", () => {
+    const original = DrawingMl.createSpPr({ fill: { solid: { srgb: "FF0000" } } });
+    const updated = DrawingMl.withSpPrFill(original, {
       gradient: {
         stops: [
           { position: 0, color: { srgb: "000000" } },
@@ -433,8 +419,8 @@ describe("gradient and pattern fill", () => {
         ]
       }
     });
-    expect(getSpPrFillColor(updated)).toBeUndefined();
-    expect(getSpPrGradient(updated)).toBeDefined();
+    expect(DrawingMl.getSpPrFillColor(updated)).toBeUndefined();
+    expect(DrawingMl.getSpPrGradient(updated)).toBeDefined();
   });
 
   it("path gradient type is parsed", () => {
@@ -449,7 +435,7 @@ describe("gradient and pattern fill", () => {
       "  </a:gradFill>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.fill!.gradient!.type).toBe("circle");
   });
 });
@@ -474,7 +460,7 @@ describe("automatic chart cache population", () => {
     addChart(ws, { type: "bar", series: [baseSeries("Sales")] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
 
     expect(series.val.numRef.cache.points).toHaveLength(4);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 100 });
@@ -497,7 +483,7 @@ describe("automatic chart cache population", () => {
     addChart(ws, { type: "line", series: [baseSeries("S")] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.cat.strRef.cache.points).toHaveLength(4);
     expect(series.cat.strRef.cache.points[0]).toEqual({ index: 0, value: "Jan" });
     expect(series.cat.strRef.cache.points[3]).toEqual({ index: 3, value: "Apr" });
@@ -517,7 +503,7 @@ describe("automatic chart cache population", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     const numPoints = series.val.numRef.cache.points;
     // pointCount should include total slots
     expect(series.val.numRef.cache.pointCount).toBe(4);
@@ -549,7 +535,7 @@ describe("automatic chart cache population", () => {
       "A1:H10"
     );
     const chart = getCharts(chartWs)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(3);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 1 });
   });
@@ -575,7 +561,7 @@ describe("automatic chart cache population", () => {
       "A1:H10"
     );
     const chart = getCharts(chartWs)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(2);
   });
 
@@ -608,7 +594,7 @@ describe("automatic chart cache population", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.xVal.numRef.cache.points).toHaveLength(3);
     expect(series.yVal.numRef.cache.points).toHaveLength(3);
     expect(series.bubbleSize.numRef.cache.points).toHaveLength(3);
@@ -646,7 +632,7 @@ describe("automatic chart cache population", () => {
     Cell.setValue(ws, "B2", false);
     addChart(ws, { type: "bar", series: [baseSeries("S", "Sheet1!$B$1:$B$2")] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points[0].value).toBe(1);
     expect(series.val.numRef.cache.points[1].value).toBe(0);
   });
@@ -658,14 +644,14 @@ describe("automatic chart cache population", () => {
     Cell.setValue(ws, "B1", 100);
 
     // Build manually so we can pre-populate
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
     });
     const series = m.chart.plotArea.chartTypes[0].series[0] as any;
     series.val.numRef.cache.points = [{ index: 0, value: 999 }];
     // Now import
-    fillChartCaches(m, wb);
+    ChartClassic.fillCaches(m, wb);
     // Should keep our pre-set 999, not override with 100
     expect(series.val.numRef.cache.points[0].value).toBe(999);
   });
@@ -699,7 +685,7 @@ describe("chart cache population — defined names", () => {
     );
 
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(3);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 10 });
     expect(series.val.numRef.cache.points[2]).toEqual({ index: 2, value: 30 });
@@ -724,7 +710,7 @@ describe("chart cache population — defined names", () => {
     );
 
     const chart = getCharts(ws2)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toEqual([
       { index: 0, value: 111 },
       { index: 1, value: 222 }
@@ -757,7 +743,7 @@ describe("chart cache population — defined names", () => {
       "C1:J10"
     );
     const chart2 = getCharts(ws2)[0];
-    const series2 = Chart.chartModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series2 = Chart.getModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series2.val.numRef.cache.points).toEqual([
       { index: 0, value: 100 },
       { index: 1, value: 200 }
@@ -773,7 +759,7 @@ describe("chart cache population — defined names", () => {
       "C1:J10"
     );
     const chart1 = getCharts(ws1)[0];
-    const series1 = Chart.chartModel(chart1)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series1 = Chart.getModel(chart1)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series1.val.numRef.cache.points).toEqual([
       { index: 0, value: 1 },
       { index: 1, value: 2 }
@@ -803,7 +789,7 @@ describe("chart cache population — defined names", () => {
       "E1:L10"
     );
     const chart = getCharts(ws)[0];
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     // All four values should be present (order: both ranges concatenated)
     const values = (series.val.numRef.cache.points as Array<{ value: number }>).map(p => p.value);
     expect(values.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
@@ -816,11 +802,11 @@ describe("chart cache population — defined names", () => {
 
     // Use the builder directly so the assertion targets the resolver, not
     // the Worksheet.addChart convenience path.
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ name: "S", categories: "Sheet1!$A$1", values: "DoesNotExist" }]
     });
-    fillChartCaches(m, wb);
+    ChartClassic.fillCaches(m, wb);
 
     const series = m.chart.plotArea.chartTypes[0].series[0] as any;
     // No cache points populated because the name is unresolvable.
@@ -838,11 +824,11 @@ describe("chart cache population — defined names", () => {
     definedNamesAddFormula(getDefinedNames(wb), "A", "B");
     definedNamesAddFormula(getDefinedNames(wb), "B", "A");
 
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ name: "S", categories: "Sheet1!$A$1", values: "A" }]
     });
-    expect(() => fillChartCaches(m, wb)).not.toThrow();
+    expect(() => ChartClassic.fillCaches(m, wb)).not.toThrow();
     const series = m.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache?.points ?? []).toHaveLength(0);
   });
@@ -863,7 +849,7 @@ describe("rich text writing API", () => {
   it("chart.title setter accepts plain string", () => {
     const { chart } = makeChart();
     Chart.setTitle(chart, "New Title");
-    expect(Chart.title(chart)).toBe("New Title");
+    expect(Chart.getTitle(chart)).toBe("New Title");
   });
 
   it("chart.title setter accepts structured rich text", () => {
@@ -878,8 +864,8 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    expect(Chart.titleRichText(chart)).toBeDefined();
-    const runs = Chart.titleRichText(chart)!.paragraphs[0].runs!;
+    expect(Chart.getTitleRichText(chart)).toBeDefined();
+    const runs = Chart.getTitleRichText(chart)!.paragraphs[0].runs!;
     expect(runs).toHaveLength(2);
     expect(runs[0].properties?.bold).toBe(true);
     expect(runs[1].properties?.italic).toBe(true);
@@ -888,15 +874,15 @@ describe("rich text writing API", () => {
   it("chart.title setter accepts formula reference", () => {
     const { chart } = makeChart();
     Chart.setTitle(chart, { formula: "Sheet1!$A$1" });
-    expect(Chart.chartModel(chart)!.chart.title!.strRef).toBeDefined();
-    expect(Chart.chartModel(chart)!.chart.title!.strRef!.formula).toBe("Sheet1!$A$1");
+    expect(Chart.getModel(chart)!.chart.title!.strRef).toBeDefined();
+    expect(Chart.getModel(chart)!.chart.title!.strRef!.formula).toBe("Sheet1!$A$1");
   });
 
   it("chart.title = undefined clears the title", () => {
     const { chart } = makeChart();
     Chart.setTitle(chart, undefined);
-    expect(Chart.chartModel(chart)!.chart.title).toBeUndefined();
-    expect(Chart.chartModel(chart)!.chart.autoTitleDeleted).toBe(true);
+    expect(Chart.getModel(chart)!.chart.title).toBeUndefined();
+    expect(Chart.getModel(chart)!.chart.autoTitleDeleted).toBe(true);
   });
 
   it("chart.title setter preserves first-run formatting when setting a plain string", () => {
@@ -915,8 +901,8 @@ describe("rich text writing API", () => {
     });
     // Now set as plain string
     Chart.setTitle(chart, "Replaced");
-    expect(Chart.title(chart)).toBe("Replaced");
-    const props = Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties;
+    expect(Chart.getTitle(chart)).toBe("Replaced");
+    const props = Chart.getTitleRichText(chart)!.paragraphs[0].runs![0].properties;
     expect(props?.bold).toBe(true);
     expect(props?.italic).toBe(true);
     expect(props?.size).toBe(1600);
@@ -928,7 +914,7 @@ describe("rich text writing API", () => {
     Chart.setTitleRichText(chart, {
       paragraphs: [{ runs: [{ text: "Hi", properties: { size: 2000 } }] }]
     });
-    expect(Chart.titleRichText(chart)!.paragraphs[0].runs![0].text).toBe("Hi");
+    expect(Chart.getTitleRichText(chart)!.paragraphs[0].runs![0].text).toBe("Hi");
   });
 
   it("rich text supports bodyProperties", () => {
@@ -937,8 +923,8 @@ describe("rich text writing API", () => {
       bodyProperties: { rotation: 900000, anchor: "ctr" },
       paragraphs: [{ runs: [{ text: "Rotated" }] }]
     });
-    expect(Chart.titleRichText(chart)!.bodyProperties?.rotation).toBe(900000);
-    expect(Chart.titleRichText(chart)!.bodyProperties?.anchor).toBe("ctr");
+    expect(Chart.getTitleRichText(chart)!.bodyProperties?.rotation).toBe(900000);
+    expect(Chart.getTitleRichText(chart)!.bodyProperties?.anchor).toBe("ctr");
   });
 
   it("paragraph properties support alignment and indent", () => {
@@ -951,7 +937,7 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    const pPr = Chart.titleRichText(chart)!.paragraphs[0].properties;
+    const pPr = Chart.getTitleRichText(chart)!.paragraphs[0].properties;
     expect(pPr?.alignment).toBe("ctr");
     expect(pPr?.indent).toBe(914400);
     expect(pPr?.level).toBe(1);
@@ -967,7 +953,7 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    const pPr = Chart.titleRichText(chart)!.paragraphs[0].properties;
+    const pPr = Chart.getTitleRichText(chart)!.paragraphs[0].properties;
     expect(pPr?.bullet).toEqual({ type: "char", character: "•" });
   });
 
@@ -981,7 +967,7 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    const pPr = Chart.titleRichText(chart)!.paragraphs[0].properties;
+    const pPr = Chart.getTitleRichText(chart)!.paragraphs[0].properties;
     expect(pPr?.lineSpacing).toEqual({ type: "percentage", value: 150000 });
   });
 
@@ -1005,7 +991,7 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    const props = Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties!;
+    const props = Chart.getTitleRichText(chart)!.paragraphs[0].runs![0].properties!;
     expect(props.strike).toBe("sngStrike");
     expect(props.baseline).toBe(30000);
     expect(props.cap).toBe("all");
@@ -1022,7 +1008,7 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    expect(Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties?.underline).toBe(
+    expect(Chart.getTitleRichText(chart)!.paragraphs[0].runs![0].properties?.underline).toBe(
       "wavyDbl"
     );
   });
@@ -1036,7 +1022,7 @@ describe("rich text writing API", () => {
         }
       ]
     });
-    expect(Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties?.underline).toBe(true);
+    expect(Chart.getTitleRichText(chart)!.paragraphs[0].runs![0].properties?.underline).toBe(true);
   });
 
   it("round-trips rich text through workbook write/read", async () => {
@@ -1058,8 +1044,8 @@ describe("rich text writing API", () => {
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     // On read, rich text may come back as rawTx — the plain-string title getter
     // should still extract the concatenated text.
-    expect(Chart.title(chart2)).toContain("Bold");
-    expect(Chart.title(chart2)).toContain("plain");
+    expect(Chart.getTitle(chart2)).toContain("Bold");
+    expect(Chart.getTitle(chart2)).toContain("plain");
   });
 });
 
@@ -1069,7 +1055,7 @@ describe("rich text writing API", () => {
 
 describe("P1 builder completions", () => {
   it("floor / sideWall / backWall as simplified fill options", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar3D",
       series: [baseSeries("S")],
       floor: { fill: "#EEEEEE" },
@@ -1084,7 +1070,7 @@ describe("P1 builder completions", () => {
   });
 
   it("title options: layout and overlay", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S")],
       title: "Hello",
@@ -1100,7 +1086,7 @@ describe("P1 builder completions", () => {
   });
 
   it("legend options: layout, overlay, entries, spPr, txPr", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S"), baseSeries("S2", VALUES_B)],
       showLegend: true,
@@ -1121,7 +1107,7 @@ describe("P1 builder completions", () => {
   });
 
   it("plotArea options: layout and background", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S")],
       plotAreaOptions: {
@@ -1134,7 +1120,7 @@ describe("P1 builder completions", () => {
   });
 
   it("data label per-entry overrides", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -1158,7 +1144,7 @@ describe("P1 builder completions", () => {
   });
 
   it("trendline label styling", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [
         {
@@ -1183,7 +1169,7 @@ describe("P1 builder completions", () => {
   });
 
   it("error bars with spPr styling", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -1205,7 +1191,7 @@ describe("P1 builder completions", () => {
   });
 
   it("up-down bars with upBars and downBars styling", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S"), baseSeries("S2", VALUES_B)],
       upDownBars: {
@@ -1221,7 +1207,7 @@ describe("P1 builder completions", () => {
   });
 
   it("surface bandFormats", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "surface",
       series: [baseSeries("S")],
       bandFormats: [
@@ -1237,7 +1223,7 @@ describe("P1 builder completions", () => {
   });
 
   it("axis extended options: spPr, txPr, customUnit", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S")],
       valueAxis: {
@@ -1257,7 +1243,7 @@ describe("P1 builder completions", () => {
   });
 
   it("axis date-specific time units", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S")],
       categoryAxis: {
@@ -1273,7 +1259,7 @@ describe("P1 builder completions", () => {
   });
 
   it("axis majorGridlines with custom styling", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S")],
       valueAxis: {
@@ -1286,7 +1272,7 @@ describe("P1 builder completions", () => {
   });
 
   it("series spPr override via structured options", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -1304,7 +1290,7 @@ describe("P1 builder completions", () => {
   });
 
   it("series pictureFill for bar charts", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -1324,7 +1310,7 @@ describe("P1 builder completions", () => {
   });
 
   it("combo chart preserves explicit globally-unique indices", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         {
           type: "bar",
@@ -1360,7 +1346,7 @@ describe("effect list and 3D structured", () => {
       "  </a:effectLst>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.effectList?.outerShadow).toBeDefined();
     expect(parsed.effectList!.outerShadow!.blurRadius).toBe(40000);
     expect(parsed.effectList!.outerShadow!.distance).toBe(25000);
@@ -1378,7 +1364,7 @@ describe("effect list and 3D structured", () => {
       "  </a:effectLst>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.effectList?.glow).toBeDefined();
     expect(parsed.effectList!.glow!.radius).toBe(63500);
     expect(parsed.effectList!.glow!.color.srgb).toBe("FF6600");
@@ -1386,7 +1372,7 @@ describe("effect list and 3D structured", () => {
 
   it("parseSpPr extracts soft edge", () => {
     const rawXml = '<c:spPr><a:effectLst><a:softEdge rad="25400"/></a:effectLst></c:spPr>';
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.effectList?.softEdge?.radius).toBe(25400);
   });
 
@@ -1397,7 +1383,7 @@ describe("effect list and 3D structured", () => {
       'dist="5000" dir="5400000" sy="-100000" algn="bl" rotWithShape="0"/>',
       "</a:effectLst></c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     const r = parsed.effectList?.reflection;
     expect(r).toBeDefined();
     expect(r!.blurRadius).toBe(6350);
@@ -1407,7 +1393,7 @@ describe("effect list and 3D structured", () => {
   });
 
   it("structured effect list round-trips through render", () => {
-    const spPr = buildSpPr({
+    const spPr = DrawingMl.createSpPr({
       fill: { solid: { srgb: "FF0000" } },
       effectList: {
         outerShadow: {
@@ -1435,7 +1421,7 @@ describe("effect list and 3D structured", () => {
       "  </a:scene3d>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.scene3d?.camera?.preset).toBe("legacyObliqueTopRight");
     expect(parsed.scene3d?.lightRig?.rig).toBe("threePt");
     expect(parsed.scene3d?.lightRig?.direction).toBe("t");
@@ -1450,7 +1436,7 @@ describe("effect list and 3D structured", () => {
       "  </a:sp3d>",
       "</c:spPr>"
     ].join("");
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.sp3d).toBeDefined();
     expect(parsed.sp3d!.extrusionHeight).toBe(50800);
     expect(parsed.sp3d!.material).toBe("metal");
@@ -1474,7 +1460,7 @@ describe("effect list and 3D structured", () => {
     );
     const chart = getCharts(ws)[0];
     // Assign effect list to the first series
-    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.getModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     series.spPr = {
       fill: { solid: { srgb: "4472C4" } },
       effectList: {
@@ -1491,9 +1477,9 @@ describe("effect list and 3D structured", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    const s = Chart.chartModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
+    const s = Chart.getModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
     // After round-trip spPr comes back as _rawXml — parseSpPr extracts it
-    const parsed = parseSpPr(s.spPr);
+    const parsed = DrawingMl.parseSpPr(s.spPr);
     expect(parsed.fill?.solid?.srgb).toBe("4472C4");
     expect(parsed.effectList?.outerShadow).toBeDefined();
   });
@@ -1543,22 +1529,22 @@ describe("anchor types and chart management", () => {
     expect(chart.range.editAs).toBe("twoCell");
   });
 
-  it("Chart.clone creates a deep copy in the same worksheet", () => {
+  it("Chart.copyTo onto the chart's own worksheet creates a deep copy beside it", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "x");
     Cell.setValue(ws, "B1", 1);
     addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
     const original = getCharts(ws)[0];
-    const clonedNumber = Chart.clone(original);
+    const cloned = Chart.copyTo(original, original.worksheet);
     expect(getCharts(ws)).toHaveLength(2);
-    expect(clonedNumber).not.toBe(original.chartNumber);
-    const cloned = getCharts(ws)[1];
-    expect(Chart.title(cloned)).toBe("Original");
+    expect(cloned).toBe(getCharts(ws)[1]);
+    expect(cloned.chartNumber).not.toBe(original.chartNumber);
+    expect(Chart.getTitle(cloned)).toBe("Original");
     // Mutate the clone — original should be unchanged
     Chart.setTitle(cloned, "Modified");
-    expect(Chart.title(original)).toBe("Original");
-    expect(Chart.title(cloned)).toBe("Modified");
+    expect(Chart.getTitle(original)).toBe("Original");
+    expect(Chart.getTitle(cloned)).toBe("Modified");
   });
 
   it("Chart.copyTo copies to another worksheet", () => {
@@ -1571,7 +1557,7 @@ describe("anchor types and chart management", () => {
     const chart = getCharts(src)[0];
     Chart.copyTo(chart, dst, "A1:H10");
     expect(getCharts(dst)).toHaveLength(1);
-    expect(Chart.title(getCharts(dst)[0])).toBe("Moved");
+    expect(Chart.getTitle(getCharts(dst)[0])).toBe("Moved");
     // Original still exists in source
     expect(getCharts(src)).toHaveLength(1);
   });
@@ -1586,7 +1572,7 @@ describe("anchor types and chart management", () => {
     const removed = removeChart(ws, charts[0]);
     expect(removed).toBe(true);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(Chart.chartTypes(getCharts(ws)[0])[0].type).toBe("line");
+    expect(Chart.getTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart by index", () => {
@@ -1596,7 +1582,7 @@ describe("anchor types and chart management", () => {
     addChart(ws, { type: "line", series: [baseSeries("S")] }, "K1:R10");
     removeChart(ws, 0);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(Chart.chartTypes(getCharts(ws)[0])[0].type).toBe("line");
+    expect(Chart.getTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart returns false for out-of-range", () => {
@@ -1626,7 +1612,7 @@ describe("anchor types and chart management", () => {
     const chart = getCharts(ws)[0];
     expect(Chart.getSeriesCount(chart, 0)).toBe(1);
     expect(Chart.getSeriesCount(chart, 1)).toBe(1);
-    expect(Chart.totalSeriesCount(chart)).toBe(2);
+    expect(Chart.getTotalSeriesCount(chart)).toBe(2);
     expect(Chart.getSeries(chart, 0, 0)).toBeDefined();
     expect(Chart.getSeries(chart, 0, 1)).toBeDefined();
     // Remove from group 1
@@ -1651,7 +1637,7 @@ describe("chart sidecar files", () => {
       '  <a:srgbClr val="FF6600"/>',
       "</cs:colorStyle>"
     ].join("\n");
-    const parsed = parseChartColors(xml);
+    const parsed = ChartClassic.fromColorsXml(xml);
     expect(parsed.method).toBe("cycle");
     expect(parsed.id).toBe(10);
     expect(parsed.colors).toHaveLength(3);
@@ -1660,7 +1646,7 @@ describe("chart sidecar files", () => {
   });
 
   it("buildChartColors rebuilds XML from structured colors", () => {
-    const xml = buildChartColors({
+    const xml = ChartClassic.toColorsXml({
       method: "cycle",
       id: 10,
       colors: [{ theme: "accent1" }, { theme: "accent2", lumMod: 80000 }, { srgb: "FF0000" }]
@@ -1673,7 +1659,7 @@ describe("chart sidecar files", () => {
 
   it("parseChartStyle extracts style id", () => {
     const xml = '<cs:chartStyle xmlns:cs="..." id="227">...</cs:chartStyle>';
-    const parsed = parseChartStyle(xml);
+    const parsed = ChartClassic.fromStyleXml(xml);
     expect(parsed.id).toBe(227);
   });
 

@@ -12,7 +12,7 @@ import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { Build, Document, Io, Layout, Query } from "documonster/word";
+import { Build, Document, Layout, Query } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
@@ -59,25 +59,25 @@ async function makeDocument(fx: Fixture, name = "contract.docx"): Promise<string
   const doc = Document.create();
   Document.addHeading(doc, "Service Agreement", 1);
   Document.addParagraph(doc, "Acme Corp agrees to the terms. Acme Corp is the client.");
-  Document.addParagraphElement(doc, {
+  Document.addParagraph(doc, {
     type: "paragraph",
     children: [
       Build.text("CRITICAL RISK", { bold: true, color: "C00000" }),
       Build.text(" — review before signing.")
     ]
   });
-  Document.addParagraphElement(doc, {
+  Document.addParagraph(doc, {
     type: "paragraph",
     children: [Build.text("Confidential", { highlight: "yellow" })]
   });
   // "Acme Corp" split across two runs, as Word routinely produces.
-  Document.addParagraphElement(doc, {
+  Document.addParagraph(doc, {
     type: "paragraph",
     children: [Build.text("Signed by Acme "), Build.text("Corp representative.")]
   });
   Document.addHeading(doc, "Schedule", 2);
   Document.addParagraph(doc, "Delivery within 30 days.");
-  await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+  await Document.writeFile(doc, path.join(fx.root, name));
   return name;
 }
 
@@ -212,8 +212,8 @@ describe("doc_edit", () => {
     });
 
     expect(report).toContain("Replaced **3**");
-    const doc = await Io.readFile(path.join(fx.root, file));
-    const text = Query.extractText(doc);
+    const doc = await Document.readFile(path.join(fx.root, file));
+    const text = Query.getText(doc);
     expect(text).toContain("Acme Pty Ltd agrees");
     expect(text).not.toContain("Acme Corp");
     // The unrelated bold red run must still be bold and red.
@@ -231,7 +231,7 @@ describe("doc_edit", () => {
       replace: "authorised signatory"
     });
 
-    const text = Query.extractText(await Io.readFile(path.join(fx.root, file)));
+    const text = Query.getText(await Document.readFile(path.join(fx.root, file)));
     expect(text).toContain("Signed by authorised signatory.");
   });
 
@@ -245,7 +245,9 @@ describe("doc_edit", () => {
       regex: true
     });
 
-    expect(Query.extractText(await Io.readFile(path.join(fx.root, file)))).toContain("Globex Corp");
+    expect(Query.getText(await Document.readFile(path.join(fx.root, file)))).toContain(
+      "Globex Corp"
+    );
   });
 
   it("dryRun reports the count and writes nothing", async () => {
@@ -285,10 +287,10 @@ describe("doc_edit", () => {
       out: "out/renamed.docx"
     });
 
-    expect(Query.extractText(await Io.readFile(path.join(fx.root, file)))).toContain("Acme Corp");
-    expect(Query.extractText(await Io.readFile(path.join(fx.root, "out/renamed.docx")))).toContain(
-      "Acme Pty Ltd"
-    );
+    expect(Query.getText(await Document.readFile(path.join(fx.root, file)))).toContain("Acme Corp");
+    expect(
+      Query.getText(await Document.readFile(path.join(fx.root, "out/renamed.docx")))
+    ).toContain("Acme Pty Ltd");
     // No backup when writing elsewhere — the original was never at risk.
     await expect(stat(path.join(fx.root, `${file}.bak`))).rejects.toThrow();
   });
@@ -298,8 +300,8 @@ describe("doc_edit", () => {
     const file = await makeDocument(fx);
     await run(docEditTool, fx, { path: file, find: "Acme Corp", replace: "Z" });
 
-    const backup = await Io.readFile(path.join(fx.root, `${file}.bak`));
-    expect(Query.extractText(backup)).toContain("Acme Corp");
+    const backup = await Document.readFile(path.join(fx.root, `${file}.bak`));
+    expect(Query.getText(backup)).toContain("Acme Corp");
   });
 
   it("is withheld under --readonly", async () => {
@@ -345,14 +347,14 @@ describe("doc_paginate", () => {
         `Beta body paragraph ${index + 1} with a reasonable amount of text to occupy a full line.`
       );
     }
-    await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+    await Document.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
   it("reports a page count that matches the layout engine", async () => {
     const fx = await fixture();
     const file = await makeLongDocument(fx);
-    const expected = Layout.document(await Io.readFile(path.join(fx.root, file))).pageCount;
+    const expected = Layout.getPageMap(await Document.readFile(path.join(fx.root, file))).pageCount;
 
     const text = await run(docPaginateTool, fx, { path: file });
     expect(expected).toBeGreaterThan(1);
@@ -389,8 +391,8 @@ describe("doc_paginate", () => {
 
     expect(report).toContain("recomputed");
     // Still a readable document afterwards.
-    const doc = await Io.readFile(path.join(fx.root, file));
-    expect(Query.extractText(doc)).toContain("Alpha");
+    const doc = await Document.readFile(path.join(fx.root, file));
+    expect(Query.getText(doc)).toContain("Alpha");
     // And a backup was taken.
     await expect(stat(path.join(fx.root, `${file}.bak`))).resolves.toBeDefined();
   });
@@ -408,7 +410,7 @@ describe("doc_paginate", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Just one paragraph.");
-    await Io.writeFile(Document.build(doc), path.join(fx.root, "flat.docx"));
+    await Document.writeFile(doc, path.join(fx.root, "flat.docx"));
 
     expect(await run(docPaginateTool, fx, { path: "flat.docx" })).toContain("no headings");
   });

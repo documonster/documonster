@@ -19,8 +19,9 @@ import {
   unprotectWorkbook
 } from "@excel/core/workbook";
 import { addWorkbookImage } from "@excel/core/workbook-core";
-import { getSheetName, setSheetName } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getSheetName, setSheetName, duplicateRow } from "@excel/core/worksheet";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
@@ -49,7 +50,7 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const sheet = Workbook.addWorksheet(wb, "first");
 
-      Workbook.eachSheet(wb, () => {});
+      Workbook.eachWorksheet(wb, () => {});
       const numSheets = getWorksheets(wb).length;
 
       expect(numSheets).toBe(1);
@@ -163,7 +164,7 @@ describe("Workbook", () => {
       Workbook.addWorksheet(wb, "three");
 
       const names: string[] = [];
-      Workbook.eachSheet(wb, ws => names.push(getSheetName(ws)));
+      Workbook.eachWorksheet(wb, ws => names.push(getSheetName(ws)));
       expect(names).toEqual(["one", "two", "three"]);
     });
 
@@ -404,7 +405,7 @@ describe("Workbook", () => {
       Cell.setStyle(ws, "B1", { font: testUtils.styles.fonts.comicSansUdB16 });
       Cell.setValue(ws, "C1", "1.3");
       Cell.setStyle(ws, "C1", { fill: testUtils.styles.fills.redDarkVertical });
-      rowSetNumFmt(Worksheet.getRow(ws, 1), testUtils.styles.numFmts.numFmt1);
+      rowSetNumFmt(getRow(ws, 1), testUtils.styles.numFmts.numFmt1);
 
       Cell.setValue(ws, "A2", "2.1");
       Cell.setStyle(ws, "A2", { alignment: testUtils.styles.namedAlignments.topLeft });
@@ -412,13 +413,13 @@ describe("Workbook", () => {
       Cell.setStyle(ws, "B2", { alignment: testUtils.styles.namedAlignments.middleCentre });
       Cell.setValue(ws, "C2", "2.3");
       Cell.setStyle(ws, "C2", { alignment: testUtils.styles.namedAlignments.bottomRight });
-      rowSetNumFmt(Worksheet.getRow(ws, 2), testUtils.styles.numFmts.numFmt2);
+      rowSetNumFmt(getRow(ws, 2), testUtils.styles.numFmts.numFmt2);
 
-      Worksheet.duplicateRow(ws, 1, 2, true);
-      expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(rowValues(Worksheet.getRow(ws, 4))).toEqual([, "2.1", "2.2", "2.3"]);
+      duplicateRow(ws, 1, 2, true);
+      expect(rowValues(getRow(ws, 1))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(getRow(ws, 2))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(getRow(ws, 3))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(getRow(ws, 4))).toEqual([, "2.1", "2.2", "2.3"]);
 
       for (let i = 1; i <= 3; i++) {
         expect(Cell.getStyle(ws, `A${i}`).font).toEqual(testUtils.styles.fonts.arialBlackUI14);
@@ -433,10 +434,10 @@ describe("Workbook", () => {
         testUtils.styles.namedAlignments.bottomRight
       );
 
-      expect(rowNumFmt(Worksheet.getRow(ws, 1))).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(rowNumFmt(Worksheet.getRow(ws, 2))).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(rowNumFmt(Worksheet.getRow(ws, 3))).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(rowNumFmt(Worksheet.getRow(ws, 4))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(rowNumFmt(getRow(ws, 1))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(getRow(ws, 2))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(getRow(ws, 3))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(getRow(ws, 4))).toBe(testUtils.styles.numFmts.numFmt2);
     });
 
     it("overwrites with duplicates", () => {
@@ -448,7 +449,7 @@ describe("Workbook", () => {
       Cell.setStyle(ws, "B1", { font: testUtils.styles.fonts.comicSansUdB16 });
       Cell.setValue(ws, "C1", "1.3");
       Cell.setStyle(ws, "C1", { fill: testUtils.styles.fills.redDarkVertical });
-      rowSetNumFmt(Worksheet.getRow(ws, 1), testUtils.styles.numFmts.numFmt1);
+      rowSetNumFmt(getRow(ws, 1), testUtils.styles.numFmts.numFmt1);
 
       Cell.setValue(ws, "A2", "2.1");
       Cell.setStyle(ws, "A2", { alignment: testUtils.styles.namedAlignments.topLeft });
@@ -456,7 +457,7 @@ describe("Workbook", () => {
       Cell.setStyle(ws, "B2", { alignment: testUtils.styles.namedAlignments.middleCentre });
       Cell.setValue(ws, "C2", "2.3");
       Cell.setStyle(ws, "C2", { alignment: testUtils.styles.namedAlignments.bottomRight });
-      rowSetNumFmt(Worksheet.getRow(ws, 2), testUtils.styles.numFmts.numFmt2);
+      rowSetNumFmt(getRow(ws, 2), testUtils.styles.numFmts.numFmt2);
 
       Cell.setValue(ws, "A3", "3.1");
       Cell.setStyle(ws, "A3", { fill: testUtils.styles.fills.redGreenDarkTrellis });
@@ -464,12 +465,12 @@ describe("Workbook", () => {
       Cell.setStyle(ws, "B3", { fill: testUtils.styles.fills.blueWhiteHGrad });
       Cell.setValue(ws, "C3", "3.3");
       Cell.setStyle(ws, "C3", { fill: testUtils.styles.fills.rgbPathGrad });
-      rowSetFont(Worksheet.getRow(ws, 3), testUtils.styles.fonts.broadwayRedOutline20);
+      rowSetFont(getRow(ws, 3), testUtils.styles.fonts.broadwayRedOutline20);
 
-      Worksheet.duplicateRow(ws, 1, 1, false);
-      expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "3.1", "3.2", "3.3"]);
+      duplicateRow(ws, 1, 1, false);
+      expect(rowValues(getRow(ws, 1))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(getRow(ws, 2))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(getRow(ws, 3))).toEqual([, "3.1", "3.2", "3.3"]);
 
       for (let i = 1; i <= 2; i++) {
         expect(Cell.getStyle(ws, `A${i}`).font).toEqual(testUtils.styles.fonts.arialBlackUI14);
@@ -480,10 +481,10 @@ describe("Workbook", () => {
         expect(Cell.getStyle(ws, `C${i}`).alignment).toBeUndefined();
       }
 
-      expect(rowNumFmt(Worksheet.getRow(ws, 1))).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(rowNumFmt(Worksheet.getRow(ws, 2))).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(rowNumFmt(Worksheet.getRow(ws, 3))).toBeUndefined();
-      expect(rowFont(Worksheet.getRow(ws, 3))).toEqual(testUtils.styles.fonts.broadwayRedOutline20);
+      expect(rowNumFmt(getRow(ws, 1))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(getRow(ws, 2))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(getRow(ws, 3))).toBeUndefined();
+      expect(rowFont(getRow(ws, 3))).toEqual(testUtils.styles.fonts.broadwayRedOutline20);
     });
   });
 
@@ -521,7 +522,7 @@ describe("Workbook", () => {
     it("protect() with password generates hash fields", async () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
-      await protectWorkbook(wb, "secret");
+      await protectWorkbook(wb, { password: "secret" });
 
       expect(wb.protection).toBeDefined();
       expect(wb.protection!.lockStructure).toBe(true);
@@ -534,7 +535,8 @@ describe("Workbook", () => {
     it("protect() with options overrides defaults", async () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
-      await protectWorkbook(wb, "pass", {
+      await protectWorkbook(wb, {
+        password: "pass",
         lockStructure: false,
         lockWindows: true,
         spinCount: 50000
@@ -550,22 +552,22 @@ describe("Workbook", () => {
       Workbook.addWorksheet(wb, "Sheet1");
 
       // undefined → default 100000
-      await protectWorkbook(wb, "a", { lockStructure: true });
+      await protectWorkbook(wb, { password: "a", lockStructure: true });
       expect(wb.protection!.spinCount).toBe(100000);
 
       // negative → 0
-      await protectWorkbook(wb, "a", { spinCount: -1 });
+      await protectWorkbook(wb, { password: "a", spinCount: -1 });
       expect(wb.protection!.spinCount).toBe(0);
 
       // fractional → rounded
-      await protectWorkbook(wb, "a", { spinCount: 1.8 });
+      await protectWorkbook(wb, { password: "a", spinCount: 1.8 });
       expect(wb.protection!.spinCount).toBe(2);
     });
 
     it("unprotect() removes protection", async () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
-      await protectWorkbook(wb, "secret");
+      await protectWorkbook(wb, { password: "secret" });
       expect(wb.protection).toBeDefined();
 
       unprotectWorkbook(wb);
@@ -575,7 +577,7 @@ describe("Workbook", () => {
     it("protection survives model round-trip", async () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
-      await protectWorkbook(wb, "secret", { lockWindows: true });
+      await protectWorkbook(wb, { password: "secret", lockWindows: true });
 
       const model = getWorkbookModel(wb);
       expect(model.protection).toBeDefined();
@@ -594,7 +596,7 @@ describe("Workbook", () => {
     it("protection round-trips through XLSX write/load", async () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
-      await protectWorkbook(wb, "test123", { lockStructure: true });
+      await protectWorkbook(wb, { password: "test123", lockStructure: true });
 
       const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();

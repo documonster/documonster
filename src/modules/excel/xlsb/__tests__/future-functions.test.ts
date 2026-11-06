@@ -17,6 +17,7 @@
  * unless `fHidden`, `fFunc` and `fProc` are all 1 and `fOB`, `fCalcExp`, `fgrp`, `fPublished`, `fBuiltin` and
  * `fWorkbookParam` are all 0, with a NULL comment and a global `itab`. `0x0002000b` is exactly that.
  */
+import { Archive } from "@archive";
 import { extractAll } from "@archive/unzip/extract";
 import { Cell, Workbook } from "@excel";
 import { validateXlsbBuffer } from "@excel/utils/xlsb-validator";
@@ -35,6 +36,23 @@ function withFormula(formula: string): Workbook.Handle {
   const handle = Workbook.create();
   Cell.setValue(Workbook.addWorksheet(handle, "S"), "A1", { formula, result: 1 } as never);
   return handle;
+}
+
+/** A workbook read from an XLSX whose A1 holds `formula` as an ordinary formula — no dynamic-array metadata. */
+async function storedOrdinary(formula: string): Promise<Workbook.Handle> {
+  const handle = Workbook.create();
+  Cell.setValue(Workbook.addWorksheet(handle, "S"), "A1", 1);
+  const entries = new Map(
+    [...(await extractAll(await Workbook.toBuffer(handle)))].map(([path, entry]) => [
+      path,
+      entry.data
+    ])
+  );
+  const sheet = new TextDecoder()
+    .decode(entries.get("xl/worksheets/sheet1.xml"))
+    .replace(/<c r="A1"[^>]*>.*?<\/c>/, `<c r="A1"><f>${formula}</f><v>1</v></c>`);
+  entries.set("xl/worksheets/sheet1.xml", new TextEncoder().encode(sheet));
+  return Workbook.read(await Archive.packZip(entries));
 }
 
 /** The `BrtName` records and the A1 token stream of a workbook's XLSB form. */
@@ -121,7 +139,8 @@ describe("a call to a future function", () => {
   });
 
   it("calls it through PtgName with iftab 0x00FF", async () => {
-    const found = await parts(withFormula("XLOOKUP(1,B1:B3,C1:C3)"));
+    // A call returning one value: one returning an array (`XLOOKUP`) is a dynamic array, whose cell holds a `PtgExp`.
+    const found = await parts(withFormula("XMATCH(1,B1:B3,0)"));
     // First token: `PtgName` in the reference class, then the one-based name index.
     expect(found.rgce[0]).toBe(0x23);
     expect(found.rgce[1]).toBe(1);
@@ -151,18 +170,36 @@ describe("a call to a future function", () => {
     "CONFIDENCE.T(0.05,2,3)",
     'TEXTJOIN(",",TRUE,B1:B3)',
     "SEQUENCE(3)"
-  ])("round-trips %s without the prefix leaking out", async formula => {
-    // The `_xlfn.` prefix belongs to the file format, not to the formula: a caller must read back what they
-    // wrote, which is also what the XLSX container stores.
+  ])("reads %s back with the _xlfn. prefix the XLSX container needs", async formula => {
+    // **The prefix is how the call is spelled outside the token stream.** Excel's own XLSX of a cell calling
+    // `CONCAT` holds `_xlfn.CONCAT(…)`, and an unprefixed `CONCAT(…)` in XLSX is a user-defined function Excel
+    // shows as `#NAME?`. Reading the stub's name without it made a workbook converted XLSB → XLSX lose every such
+    // call; the name the stub carries is the name the formula has.
     const back = Workbook.create();
     await Workbook.read(
       back,
       await Workbook.toBuffer(withFormula(formula), { format: "xlsb", unsupported: "ignore" })
     );
     expect(
-      (Cell.getValue(Workbook.getWorksheets(back)[0]!, "A1") as { formula?: string }).formula
-    ).toBe(formula);
+      (Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1") as { formula?: string }).formula
+    ).toBe(`_xlfn.${formula}`);
   });
+
+  it.each(["_xlfn.CONCAT(B1,B2)", "_xlfn._xlws.SORT(B1:B3)", "_xlfn.STDEV.S(B1:B3)"])(
+    "round-trips %s, already prefixed, unchanged",
+    async formula => {
+      // The form an XLSX read produces. It used to find no stub — the collector skipped prefixed names and the
+      // encoder looked for `_xlfn._XLFN.CONCAT` — so the formula was refused and written as a blank.
+      const handle = withFormula(formula);
+      const { names } = await parts(handle);
+      expect(names.map(entry => entry.name)).toContain(formula.slice(0, formula.indexOf("(")));
+      const back = Workbook.create();
+      await Workbook.read(back, await Workbook.toBuffer(handle, { format: "xlsb" }));
+      expect(
+        (Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1") as { formula?: string }).formula
+      ).toBe(formula);
+    }
+  );
 
   it("interns one stub for repeated calls", async () => {
     const handle = Workbook.create();
@@ -179,5 +216,85 @@ describe("a call to a future function", () => {
     // And the call is by id: `PtgFuncVar` with `SUM`'s `iftab`, not `0x00FF`.
     const tail = found.rgce.slice(-4);
     expect(tail[2]! | (tail[3]! << 8)).not.toBe(0x00ff);
+  });
+});
+
+describe("the class of a future function's result", () => {
+  /** The `PtgFuncVar` byte of the stub call — the one whose `tab` is `0x00FF`. */
+  function stubCallClass(rgce: Uint8Array): number[] {
+    const found: number[] = [];
+    for (let at = 0; at + 3 < rgce.length; at++) {
+      if ((rgce[at]! & 0x1f) === 0x02 && rgce[at + 2] === 0xff && rgce[at + 3] === 0x00) {
+        found.push(rgce[at]! & 0x60);
+      }
+    }
+    return found;
+  }
+
+  it.each([
+    "SUM(FILTER(B1:B4,B1:B4>1))",
+    "SUM(SEQUENCE(3))",
+    "ROWS(SEQUENCE(5))",
+    "SUM(VSTACK(1,2))",
+    "SUM(UNIQUE(B1:B4))",
+    "SUM(SORT(B1:B4))",
+    "SUM(SORTBY(B1:B4,B1:B4))",
+    "SUM(HSTACK(1,2))",
+    "SUM(CHOOSECOLS(A1:B4,2))",
+    "SUM(TOCOL(B1:B4))"
+  ])("keeps an array-returning call whole as an argument: %s", async formula => {
+    // In the value class Excel intersects the result to one cell — `SUM(FILTER(…))` computes 2 rather than 9.
+    expect(stubCallClass((await parts(withFormula(formula))).rgce)).toEqual([0x60]);
+  });
+
+  // `TAKE` and `DROP` were asserted in the array class above, after LibreOffice's table; Excel's own XLSB of
+  // `SUM(_xlfn.TAKE(…))` and `SUM(_xlfn.DROP(…))` has them in the reference class, as `TRIMRANGE` and `ANCHORARRAY`.
+  it.each([
+    "SUM(TAKE(B1:B4,2))",
+    "SUM(DROP(B1:B4,1))",
+    "SUM(TRIMRANGE(B1:B20))",
+    "SUM(ANCHORARRAY(B1))"
+  ])("keeps a reference-returning call a reference as an argument: %s", async formula => {
+    // In the value class Excel shows `SUM(@TRIMRANGE(…))` and sums one cell.
+    expect(stubCallClass((await parts(withFormula(formula))).rgce)).toEqual([0x20]);
+  });
+
+  it("keeps the value class for the whole formula", async () => {
+    // An ordinary formula, as a file stores it: set through the API, `SEQUENCE(3)` is a dynamic array.
+    expect(stubCallClass((await parts(await storedOrdinary("_xlfn.SEQUENCE(3)"))).rgce)).toEqual([
+      0x40
+    ]);
+  });
+
+  it("stubs a worksheet function with both prefixes, written bare or prefixed", async () => {
+    for (const formula of ["SUM(FILTER(B1:B4,B1:B4>1))", "SUM(_xlfn.FILTER(B1:B4,B1:B4>1))"]) {
+      const { names } = await parts(withFormula(formula));
+      expect(names.map(entry => entry.name)).toEqual(["_xlfn._xlws.FILTER"]);
+    }
+  });
+});
+
+/**
+ * `PY` and `PQSOURCE`: Excel refuses the package this writer produced for them (`lib-py.xlsb` in the fx21 checks), and
+ * no Excel-written file shows a form it opens. They are reported, and with `unsupported: "ignore"` the cell keeps its
+ * cached value and the package carries no stub for them.
+ */
+describe("functions with no XLSB form", () => {
+  it.each(["PY(0,0)", "PQSOURCE(1)", "_xlfn._xlws.PY(0,0)"])("reports %s", async formula => {
+    const workbook = Workbook.create();
+    const sheet = Workbook.addWorksheet(workbook, "S");
+    Cell.setValue(sheet, "A1", { formula, result: 7 } as never);
+    Cell.setValue(sheet, "A2", { formula: "1+1" } as never);
+    await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(
+      /S!A1: formula \(a call to (PY|PQSOURCE) is not supported yet\)/
+    );
+    const bytes = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
+    const workbookPart = (await extractAll(bytes)).get("xl/workbook.bin")!.data;
+    expect(new TextDecoder("utf-16le").decode(workbookPart)).not.toMatch(/PY|PQSOURCE/);
+    const back = Workbook.create();
+    await Workbook.read(back, bytes);
+    const reread = Workbook.getWorksheet(back, "S")!;
+    expect(Cell.getValue(reread, "A1")).toBe(7);
+    expect(Cell.getFormula(reread, "A2")).toBe("1+1");
   });
 });

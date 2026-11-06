@@ -1,3 +1,4 @@
+import { escapeXmlAttr } from "@excel/chart/shared/chart-utils";
 /**
  * Parser and builder for chart sidecar files:
  * - `styles{N}.xml` (cs:chartStyle) — chart-wide style id
@@ -6,7 +7,11 @@
  * These files are normally written and read as opaque XML; this module offers
  * structured access for users who want to inspect or rewrite the palette.
  */
-import { escapeXmlAttr } from "@excel/chart/shared/chart-utils";
+import {
+  colorTransformsXml,
+  paletteTransformList,
+  readColorTransforms
+} from "@excel/chart/shared/color-transforms";
 
 /** indexOf-based attribute extraction — no backtracking risk. */
 function extractAttr(xml: string, tagName: string, attrName: string): string | undefined {
@@ -62,7 +67,9 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
   // classified based on the last variation in the file, not the enclosing
   // element).
   const variationRanges: Array<{ start: number; end: number }> = [];
-  const varRangeRe = /<cs:variation\b[^>]*(?:\/>|>[\s\S]*?<\/cs:variation>)/g;
+  // A self-closing `<cs:variation/>` is one variation: `[^>]*` must not take its `/`, or the match ran on to the next
+  // variation's close tag.
+  const varRangeRe = /<cs:variation\b(?:[^>]*[^/>])?(?:\/>|>[\s\S]*?<\/cs:variation>)/g;
   let vrm: RegExpExecArray | null;
   while ((vrm = varRangeRe.exec(rawXml)) !== null) {
     variationRanges.push({ start: vrm.index, end: vrm.index + vrm[0].length });
@@ -120,6 +127,11 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
     if (alphaV !== undefined) {
       entry.alpha = alphaV;
     }
+    // Every transform, in order — the six above are views of it (`ChartColor.transforms`).
+    const transforms = readColorTransforms(inner);
+    if (transforms.length > 0) {
+      entry.transforms = transforms;
+    }
     if (entry.theme || entry.srgb) {
       colors.push(entry);
     }
@@ -134,7 +146,12 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
   // `ChartColorVariation` entries so editors can mutate the gradient
   // palette without string surgery.
   const variations: ChartColorVariation[] = [];
-  const variationRe = /<cs:variation\b[^>]*>([\s\S]*?)<\/cs:variation>|<cs:variation\b[^>]*\/>/g;
+  // **A self-closing `<cs:variation/>` is a variation of its own.** The open-tag pattern `[^>]*>` also matched
+  // `<cs:variation/>` — `[^>]*` took the `/` — and ran on to the *next* variation's close tag, so Excel's own
+  // `colors1.xml` (an empty first variation, then eight) read as eight, each one index early: the palette's variation
+  // `n` got variation `n + 1`'s modifiers on any write from the model.
+  const variationRe =
+    /<cs:variation\b(?:[^>]*[^/>])?>([\s\S]*?)<\/cs:variation>|<cs:variation\b[^>]*\/>/g;
   let vm: RegExpExecArray | null;
   // Reuse the sibling `parseModAttr` semantics from the colour parser
   // above: accept signed / fractional values. Third-party exports
@@ -171,6 +188,10 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
     const alphaV = parseModAttr(body, "alpha");
     if (alphaV !== undefined) {
       entry.alpha = alphaV;
+    }
+    const transforms = readColorTransforms(body);
+    if (transforms.length > 0) {
+      entry.transforms = transforms;
     }
     // Push even empty variations so the count survives round-trip —
     // Excel uses the presence of a `<cs:variation/>` self-closing tag
@@ -247,13 +268,18 @@ function variationEntryToXml(v: ChartColorVariation): string {
     }
     children.push(`<a:${tag} val="${Math.round(value)}"/>`);
   };
-  emitInt("lumMod", v.lumMod);
-  emitInt("lumOff", v.lumOff);
-  emitInt("tint", v.tint);
-  emitInt("shade", v.shade);
-  emitInt("satMod", v.satMod);
-  emitInt("alpha", v.alpha);
-  if (children.length === 0) {
+  const list = paletteTransformList(v);
+  if (list !== undefined) {
+    children.push(colorTransformsXml(list));
+  } else {
+    emitInt("lumMod", v.lumMod);
+    emitInt("lumOff", v.lumOff);
+    emitInt("tint", v.tint);
+    emitInt("shade", v.shade);
+    emitInt("satMod", v.satMod);
+    emitInt("alpha", v.alpha);
+  }
+  if (children.join("") === "") {
     return "  <cs:variation/>";
   }
   return `  <cs:variation>${children.join("")}</cs:variation>`;
@@ -302,7 +328,7 @@ export function buildChartStyle(model: ChartStyleModel): string {
   // Authors who need genuine style customisation should:
   //   1. Pre-build the sidecar XML themselves and pass it via
   //      `rawXml` (honoured by the early return above), OR
-  //   2. Call `setBuiltInStyle(N)` on the chart instead — the
+  //   2. Call `Chart.setStyle(chart, N)` instead — the
   //      classic `<c:style val="N"/>` element is schema-legal
   //      standalone and doesn't require a sidecar.
   //
@@ -338,12 +364,20 @@ function colorEntryToXml(c: ChartColorsEntry): string {
     }
     mods.push(`<a:${tag} val="${Math.round(value)}"/>`);
   };
-  emitInt("lumMod", c.lumMod);
-  emitInt("lumOff", c.lumOff);
-  emitInt("tint", c.tint);
-  emitInt("shade", c.shade);
-  emitInt("satMod", c.satMod);
-  emitInt("alpha", c.alpha);
+  const list = paletteTransformList(c);
+  if (list !== undefined) {
+    const xml = colorTransformsXml(list);
+    if (xml !== "") {
+      mods.push(xml);
+    }
+  } else {
+    emitInt("lumMod", c.lumMod);
+    emitInt("lumOff", c.lumOff);
+    emitInt("tint", c.tint);
+    emitInt("shade", c.shade);
+    emitInt("satMod", c.satMod);
+    emitInt("alpha", c.alpha);
+  }
 
   let tag: string;
   let val: string;

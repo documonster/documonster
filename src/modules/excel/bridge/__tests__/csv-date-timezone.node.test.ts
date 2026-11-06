@@ -19,8 +19,8 @@
  * them, and one that the bridge round-trips its own output. And they run under {@link ZONES}, because at offset
  * zero the wrong answer and the right answer are identical — which is why a UTC-only CI never saw this.
  */
-import { Cell, Workbook, Worksheet } from "@excel";
-import { readCsv, writeCsvBuffer } from "@excel/bridge/csv.node";
+import { Cell, Row, Workbook } from "@excel";
+import { ExcelCsv } from "@excel/bridge/csv.node";
 import { createDateParser, createIsoDateParser } from "@utils/datetime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -78,10 +78,10 @@ describe.each(ZONES)("in %s", zone => {
 
   it("round-trips a date cell through the Excel CSV bridge", async () => {
     const workbook = Workbook.create();
-    Worksheet.addRow(Workbook.addWorksheet(workbook, "S"), [new Date(Date.UTC(2020, 0, 15))]);
-    const csv = await writeCsvBuffer(workbook);
+    Row.add(Workbook.addWorksheet(workbook, "S"), [new Date(Date.UTC(2020, 0, 15))]);
+    const csv = await ExcelCsv.toBuffer(workbook);
     const reopened = Workbook.create();
-    await readCsv(reopened, csv);
+    await ExcelCsv.read(reopened, csv);
     // Invariance is the assertion: the defect was a *difference* between timezones.
     expect(Cell.getDateParts(Workbook.getWorksheet(reopened, 1)!, "A1")).toMatchObject({
       year: 2020,
@@ -92,14 +92,13 @@ describe.each(ZONES)("in %s", zone => {
   });
 
   it("round-trips a date cell written as the calendar value", async () => {
-    // `dateUTC: true` makes the file identical on every machine. It is not the default because a named
-    // `dateFormat` carries no timezone marker and is read back as local — see `createDefaultWriteMapper`.
+    // `dateUTC: true` — the default — makes the file identical on every machine; see `createDefaultWriteMapper`.
     const workbook = Workbook.create();
-    Worksheet.addRow(Workbook.addWorksheet(workbook, "S"), [new Date(Date.UTC(2020, 0, 15))]);
-    const csv = await writeCsvBuffer(workbook, { dateUTC: true });
+    Row.add(Workbook.addWorksheet(workbook, "S"), [new Date(Date.UTC(2020, 0, 15))]);
+    const csv = await ExcelCsv.toBuffer(workbook, { dateUTC: true });
     expect(new TextDecoder().decode(csv).trim()).toBe("2020-01-15T00:00:00.000Z");
     const reopened = Workbook.create();
-    await readCsv(reopened, csv);
+    await ExcelCsv.read(reopened, csv);
     expect(Cell.getDateParts(Workbook.getWorksheet(reopened, 1)!, "A1")).toMatchObject({
       year: 2020,
       month: 1,

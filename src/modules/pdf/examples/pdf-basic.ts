@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -31,14 +31,14 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const wb1 = Workbook.create();
 const ws1 = Workbook.addWorksheet(wb1, "Sales");
-Worksheet.setColumns(ws1, [
+Column.setDefinitions(ws1, [
   { header: "Product", key: "product", width: 20 },
   { header: "Q1", key: "q1", width: 12 },
   { header: "Q2", key: "q2", width: 12 },
   { header: "Q3", key: "q3", width: 12 },
   { header: "Q4", key: "q4", width: 12 }
 ]);
-Worksheet.addRows(ws1, [
+Row.addMany(ws1, [
   { product: "Widget A", q1: 1200, q2: 1350, q3: 1100, q4: 1500 },
   { product: "Widget B", q1: 800, q2: 950, q3: 1020, q4: 870 },
   { product: "Gadget C", q1: 3200, q2: 2900, q3: 3100, q4: 3400 },
@@ -112,10 +112,11 @@ Cell.setValue(wsSum, "A1", "Q1 Summary");
 const pdf5a = await Pdf.fromExcel(wb5, { sheets: ["January", "Summary"] });
 fs.writeFileSync(path.join(outDir, "basic-select-by-name.pdf"), pdf5a);
 
-// Export by 1-based position (sheets 2 and 4)
-const pdf5b = await Pdf.fromExcel(wb5, { sheets: [2, 4] });
-fs.writeFileSync(path.join(outDir, "basic-select-by-index.pdf"), pdf5b);
-console.log("5. basic-select-by-name.pdf + basic-select-by-index.pdf — sheet selection");
+// Names choose the order too: Summary first, then February. (Numeric positions are
+// deprecated — they mean something different in each bridge.)
+const pdf5b = await Pdf.fromExcel(wb5, { sheets: ["Summary", "February"] });
+fs.writeFileSync(path.join(outDir, "basic-select-in-order.pdf"), pdf5b);
+console.log("5. basic-select-by-name.pdf + basic-select-in-order.pdf — sheet selection");
 
 // =============================================================================
 // 6. excelToPdf with options

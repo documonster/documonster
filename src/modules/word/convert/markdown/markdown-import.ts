@@ -7,11 +7,11 @@
  *
  * @example
  * ```ts
- * import { markdownToDocx } from "documonster/word/markdown";
- * import { Io } from "documonster/word";
+ * import { WordMarkdown } from "documonster/word/markdown";
+ * import { Document } from "documonster/word";
  *
- * const doc = markdownToDocx("# Hello\n\nWorld **bold**");
- * const buffer = await Io.toBuffer(doc);
+ * const doc = await WordMarkdown.toDocx("# Hello\n\nWorld **bold**");
+ * const buffer = await Document.toBuffer(doc);
  * ```
  *
  * @stability experimental
@@ -19,9 +19,13 @@
 
 import { isSpacelessScript } from "@utils/cjk";
 import { mapToStandardFont, measureTextWidth, styledFontVariant } from "@utils/font-metrics";
+import type { SchemaMatches } from "@utils/schema";
 import { emuToPt, ptToTwips, twipsToPt } from "@utils/units";
+import { checkString } from "@word/core/argument-checks";
 import { eastAsianDefaultsFor, withEastAsianDefaults } from "@word/core/east-asian-defaults";
+import { assertImageMediaType } from "@word/core/image-media";
 import { sanitizeUrl } from "@word/core/internal-utils";
+import { checkSchema, w } from "@word/core/option-schema";
 import { isRun } from "@word/core/text-utils";
 import {
   DEFAULT_FONT_SIZE_HALF_PT,
@@ -65,12 +69,15 @@ import type {
 export interface MarkdownImportOptions {
   /** Default font family for body text. */
   readonly defaultFont?: string;
-  /** Default font size in half-points (default: 24 = 12pt). */
+  /**
+   * Default font size in **half-points**, as every Word run size is: 24 = 12pt
+   * (the default). Note the unit: `Pdf.fromDocx`'s `defaultFontSize` is in points.
+   */
   readonly defaultFontSize?: number;
   /** Code font family (default: "Courier New"). */
   readonly codeFont?: string;
   /**
-   * Code font size in half-points. Defaults to the body size, matching
+   * Code font size in **half-points** (20 = 10pt). Defaults to the body size, matching
    * `code { font-size: 1em }` in VS Code's Markdown preview stylesheet.
    */
   readonly codeFontSize?: number;
@@ -110,12 +117,30 @@ export interface MarkdownImportOptions {
   ) => MarkdownImageData | undefined | Promise<MarkdownImageData | undefined>;
 }
 
+const markdownImportOptionsSchema = w.record({
+  // Run sizes, half-points; the measure, twips.
+  defaultFont: w.string().optional(),
+  defaultFontSize: w.integer({ min: 0 }).optional(),
+  codeFont: w.string().optional(),
+  codeFontSize: w.integer({ min: 0 }).optional(),
+  contentWidth: w.integer({ min: 1 }).optional(),
+  codeBlockFit: w.oneOf(["shrink", "wrap"]).optional(),
+  resolveImage: w.function<NonNullable<MarkdownImportOptions["resolveImage"]>>().optional()
+});
+const _markdownImportOptionsMatch: SchemaMatches<
+  typeof markdownImportOptionsSchema,
+  MarkdownImportOptions
+> = true;
+void _markdownImportOptionsMatch;
+
 /** Resolved image data for embedding. */
 export interface MarkdownImageData {
   readonly data: Uint8Array;
   readonly mediaType: ImageMediaType;
-  readonly width?: number; // EMU
-  readonly height?: number; // EMU
+  /** Width in EMU (914400 per inch, 12700 per point), as every Word drawing size is. */
+  readonly width?: number;
+  /** Height in EMU; see {@link width}. */
+  readonly height?: number;
   /**
    * Raster (PNG) fallback for vector images. Required by Word for `svg`
    * images so non-SVG-aware viewers have something to display. When the
@@ -133,8 +158,16 @@ export interface MarkdownImageData {
  * references a numbering id, a footnote reference run references a
  * `FootnoteDef`, and an inline image references an `ImageDef`. Splicing the
  * `body` alone into a host document that lacks these definitions yields
- * invalid OOXML. Merge the relevant arrays into the host document (or its
- * builder state) alongside the body.
+ * invalid OOXML.
+ *
+ * Its ids are fixed — numbering instances, abstract numberings, footnote ids
+ * and image rIds start at the same values every time, whatever the host
+ * already uses — so copying these arrays into a document that has lists,
+ * notes or pictures of its own gives duplicate ids (`DocxDuplicateIdError` at
+ * write). To splice Markdown into an existing document, convert it whole and
+ * merge the two, which renumbers:
+ * `Transform.merge([host, await WordMarkdown.toDocx(markdown)])`. Use this fragment
+ * where the host has none of its own, or to inspect the conversion.
  */
 export interface MarkdownBodyResult {
   readonly body: BodyContent[];
@@ -161,13 +194,19 @@ export interface MarkdownBodyResult {
   readonly docDefaults: DocDefaults;
 }
 
+function checkMarkdownImport(markdown: unknown, options: unknown, where: string): void {
+  checkString(markdown, "markdown", where);
+  checkSchema(markdownImportOptionsSchema.optional(), options, where);
+}
+
 /**
  * Convert a Markdown string into a complete DocxDocument.
  *
  * Supports the full GFM feature set including inline images (embedded via the
  * `resolveImage` callback) and footnotes (`[^id]` references with `[^id]: …`
- * definitions). Because image resolution and document packaging are inherently
- * asynchronous, this function is async.
+ * definitions). It is async because `resolveImage` may return a Promise (an image
+ * fetched or read from disk) and is awaited per image; `WordHtml.toDocx` is synchronous
+ * because it embeds only pictures already in the HTML, as `data:` URLs.
  *
  * @param markdown - The GFM Markdown string.
  * @param options - Optional conversion settings.
@@ -177,7 +216,12 @@ export async function markdownToDocx(
   markdown: string,
   options?: MarkdownImportOptions
 ): Promise<DocxDocument> {
-  const { body, state } = await markdownToDocxBodyInternal(markdown, options);
+  checkMarkdownImport(markdown, options, "WordMarkdown.toDocx");
+  const { body, state } = await markdownToDocxBodyInternal(
+    markdown,
+    options,
+    "WordMarkdown.toDocx"
+  );
   const doc: DocxDocument = {
     body,
     styles: defaultMarkdownStyles(),
@@ -222,7 +266,12 @@ export async function markdownToDocxBody(
   markdown: string,
   options?: MarkdownImportOptions
 ): Promise<MarkdownBodyResult> {
-  const { body, state } = await markdownToDocxBodyInternal(markdown, options);
+  checkMarkdownImport(markdown, options, "WordMarkdown.toDocxBody");
+  const { body, state } = await markdownToDocxBodyInternal(
+    markdown,
+    options,
+    "WordMarkdown.toDocxBody"
+  );
   return {
     body,
     abstractNumberings: state.abstractNumberings,
@@ -245,9 +294,10 @@ export async function markdownToDocxBody(
  */
 async function markdownToDocxBodyInternal(
   markdown: string,
-  options?: MarkdownImportOptions
+  options: MarkdownImportOptions | undefined,
+  where: string
 ): Promise<{ body: BodyContent[]; state: ConversionState }> {
-  const state = createState();
+  const state = createState(where);
   const opts: Required<Pick<MarkdownImportOptions, "codeFont" | "codeFontSize">> &
     MarkdownImportOptions = {
     codeFont: "Courier New",
@@ -410,10 +460,13 @@ interface ConversionState {
   nextFootnoteId: number;
   nextImageId: number;
   nextDrawingId: number;
+  /** The public call converting, which an error names (`WordMarkdown.toDocx`). */
+  where: string;
 }
 
-function createState(): ConversionState {
+function createState(where: string): ConversionState {
   return {
+    where,
     abstractNumberings: [],
     numberingInstances: [],
     nextNumId: 1,
@@ -2433,6 +2486,11 @@ async function inlineToRuns(
   }
 }
 
+let _markdownImageSeq = 0;
+function nextMarkdownImageSeq(): number {
+  return ++_markdownImageSeq;
+}
+
 /**
  * Resolve an inline image. If `resolveImage` returns image data, embed it as a
  * real `InlineImageContent` run and register the media in `state.images`;
@@ -2454,9 +2512,14 @@ async function resolveImageRun(
     });
   }
 
+  // The value came back from the caller's callback, so the error names it.
+  assertImageMediaType(data.mediaType, state.where, "options.resolveImage");
   const n = state.nextImageId++;
   const fileName = `image${n}.${imageExtension(data.mediaType)}`;
-  const rId = `mdimg${n}`;
+  // Unique across conversions, not only within this one: a body is meant to
+  // be spliced into a document, possibly beside another conversion's, and an
+  // image key names one picture document-wide.
+  const rId = `mdimg${nextMarkdownImageSeq()}`;
   // For SVG, the packager auto-splits the PNG fallback into its own media
   // part, assigns a second relationship, and back-fills `svgRId` on the inline
   // image — so we only ever push a single ImageDef and a single rId here.

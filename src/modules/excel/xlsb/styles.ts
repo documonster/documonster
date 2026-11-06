@@ -42,7 +42,8 @@ import {
   encodeBiffRecords,
   encodeWideString,
   iterateInterpretableRecords,
-  readWideString
+  readWideString,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import { encodeBorder, readBorder } from "@excel/xlsb/border";
 import { encodeDxf, readDxf } from "@excel/xlsb/dxf";
@@ -51,7 +52,7 @@ import { defaultFont, encodeFont, readFont, unmodelledFlagsOf } from "@excel/xls
 import { requireRecordSpec, recordSpec } from "@excel/xlsb/spec/records";
 import type { StyleFacets } from "@excel/xlsb/write/types";
 import { defaultNumFormats } from "@excel/xlsx/defaultnumformats";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /**
  * First format id available for a custom format.
@@ -201,7 +202,7 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
     const name = recordSpec(record.id)?.name;
     switch (name) {
       case "BrtFmt": {
-        const reader = new BinaryReader(record.payload, 0, part);
+        const reader = new XlsbReader(record.payload, 0, part);
         try {
           const id = reader.readUint16();
           customFormats.set(id, readWideString(reader, part));
@@ -263,13 +264,13 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
             // came back with no format at all. Latent while this library's writer emitted a `BrtFmt` for every
             // format including the built-ins — a bug the writer was hiding rather than one it lacked.
             numberFormat: formatById(
-              new BinaryReader(record.payload, XF_FORMAT_OFFSET, part).readUint16()
+              new XlsbReader(record.payload, XF_FORMAT_OFFSET, part).readUint16()
             ),
-            font: fontTable[new BinaryReader(record.payload, XF_FONT_OFFSET, part).readUint16()],
-            fill: fillTable[new BinaryReader(record.payload, XF_FILL_OFFSET, part).readUint16()],
+            font: fontTable[new XlsbReader(record.payload, XF_FONT_OFFSET, part).readUint16()],
+            fill: fillTable[new XlsbReader(record.payload, XF_FILL_OFFSET, part).readUint16()],
             border:
               record.payload.length >= XF_BORDER_OFFSET + 2
-                ? borderTable[new BinaryReader(record.payload, XF_BORDER_OFFSET, part).readUint16()]
+                ? borderTable[new XlsbReader(record.payload, XF_BORDER_OFFSET, part).readUint16()]
                 : undefined,
             alignment: readAlignment(record.payload),
             protection: readProtection(record.payload)
@@ -288,7 +289,7 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
           protections.push(undefined);
           break;
         }
-        const id = new BinaryReader(record.payload, XF_FORMAT_OFFSET, part).readUint16();
+        const id = new XlsbReader(record.payload, XF_FORMAT_OFFSET, part).readUint16();
         const format = formatById(id);
         // `General` is normalised to "no format". Reporting the string instead would be more
         // literal and worse: every caller would have to compare against a magic value to answer
@@ -296,11 +297,11 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
         // `CellFormatTable`, whose index 0 *is* "no format", would stop being symmetric.
         numberFormats.push(format === "General" ? undefined : format);
         // Index 0 of each table is the default, which a cell does not need to be told about.
-        const iFont = new BinaryReader(record.payload, XF_FONT_OFFSET, part).readUint16();
-        const iFill = new BinaryReader(record.payload, XF_FILL_OFFSET, part).readUint16();
+        const iFont = new XlsbReader(record.payload, XF_FONT_OFFSET, part).readUint16();
+        const iFill = new XlsbReader(record.payload, XF_FILL_OFFSET, part).readUint16();
         const iBorder =
           record.payload.length >= XF_BORDER_OFFSET + 2
-            ? new BinaryReader(record.payload, XF_BORDER_OFFSET, part).readUint16()
+            ? new XlsbReader(record.payload, XF_BORDER_OFFSET, part).readUint16()
             : 0;
         fonts.push(iFont === 0 ? undefined : fontTable[iFont]);
         fills.push(iFill === 0 ? undefined : fillTable[iFill]);
@@ -853,7 +854,7 @@ function readNamedStyle(
   part: string
 ): { name: string; ixf: number; builtinId?: number; hidden?: boolean } | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const ixf = reader.readUint32();
     const flags = reader.readUint16();
     const builtinId = reader.readUint8();

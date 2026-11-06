@@ -20,7 +20,7 @@ import { Markdown } from "documonster/markdown";
 - **CJK/Emoji 宽度** — 内置显示宽度计算,实现正确的列对齐
 - **多行单元格** — 支持 `<br>` 标签以在单元格内换行
 - **多表格** — 使用 `Markdown.parseAll` 从一篇 Markdown 文档中提取所有表格
-- **Workbook 集成** — 使用 `documonster/excel/markdown` 的 `readMarkdown(workbook, input)` / `writeMarkdown(workbook)` 实现 Excel↔Markdown
+- **Workbook 集成** — 使用 `documonster/excel/markdown` 的 `ExcelMarkdown.read(input)` / `ExcelMarkdown.format(workbook)` 实现 Excel↔Markdown
 
 ---
 
@@ -77,32 +77,31 @@ Markdown.format(["Name", "Age", "Active"], [["Alice", 30, true]]);
 
 ### Workbook 集成
 
+`ExcelMarkdown.read` 返回一个新工作簿（第一个表格；`{ tables: "all" }` 时为所有表格），输入可以是 Markdown 文本或其 UTF-8 字节（即 `toBuffer` 的输出）；`ExcelMarkdown.addWorksheet` /
+`ExcelMarkdown.addWorksheets` 添加到已有的工作簿，并返回所添加的工作表。
+
 ```typescript
-import { Workbook, Cell } from "documonster/excel";
-import {
-  readMarkdown,
-  writeMarkdown,
-  readMarkdownAll,
-  readMarkdownFile,
-  writeMarkdownFile
-} from "documonster/excel/markdown";
+import { Cell, Workbook } from "documonster/excel";
+import { ExcelMarkdown } from "documonster/excel/markdown";
 
-const workbook = Workbook.create();
-
-// 读取 Markdown → 工作表
-const ws = readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+// 读取 Markdown → 新工作簿
+const workbook = ExcelMarkdown.read("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const ws = Workbook.listWorksheets(workbook)[0];
 console.log(Cell.getValue(ws, "A2")); // "Alice"
 
 // 工作表 → Markdown
-const markdownText = writeMarkdown(workbook);
+const markdownText = ExcelMarkdown.format(workbook);
 
-// 从文档中读取所有表格
-const sheets = readMarkdownAll(workbook, markdownDoc, { sheetName: "Table" });
+// 将文档中的所有表格读入新工作簿
+const tables = ExcelMarkdown.read(markdownDoc, { sheetName: "Table", tables: "all" });
 // 创建 "Table"、"Table_2"、"Table_3"、……
 
+// 将所有表格添加到已有工作簿
+const sheets = ExcelMarkdown.addWorksheets(workbook, markdownDoc, { sheetName: "Table" });
+
 // 文件 I/O(仅限 Node.js)
-await readMarkdownFile(workbook, "data.md");
-await writeMarkdownFile(workbook, "output.md");
+const fromFile = await ExcelMarkdown.readFile("data.md");
+await ExcelMarkdown.writeFile(workbook, "output.md");
 ```
 
 ---
@@ -186,7 +185,7 @@ interface MarkdownColumnConfig {
 
 ## 多行单元格
 
-单元格内容中的换行符在格式化时会转换为 `<br>` 标签,并可在解析时通过 `convertBr: true` 转换回换行符。
+单元格内容中的换行符在格式化时会转换为 `<br>` 标签,并可在解析时通过 `convertBr: true` 转换回换行符。内容本身为 `<br>` 文本的单元格会写成 `\<br>`,解析时读回 `<br>` 而不是换行,因此 `Markdown.parse(Markdown.format(h, rows), { convertBr: true })` 能原样读回单元格(GFM 本身的首尾空白裁剪除外)。位于围栏代码块或缩进代码块中的表格不会被解析——GFM 会把它们渲染为代码。
 
 ```typescript
 // 格式化:换行符变为 <br>
@@ -235,23 +234,25 @@ try {
 
 ## Workbook 方法
 
-| 方法                                  | 平台    | 描述                        |
-| ------------------------------------- | ------- | --------------------------- |
-| `readMarkdown(input, options?)`       | 全部    | 解析 Markdown 表格 → 工作表 |
-| `readMarkdownAll(input, options?)`    | 全部    | 解析所有表格 → Worksheet[]  |
-| `writeMarkdown(options?)`             | 全部    | 工作表 → Markdown 字符串    |
-| `writeMarkdownBuffer(options?)`       | 全部    | 工作表 → Uint8Array(UTF-8)  |
-| `readMarkdownFile(path, options?)`    | Node.js | 从文件读取                  |
-| `readMarkdownAllFile(path, options?)` | Node.js | 从文件读取所有表格          |
-| `writeMarkdownFile(path, options?)`   | Node.js | 写入文件                    |
+| 方法                                               | 平台    | 描述                                                                                 |
+| -------------------------------------------------- | ------- | ------------------------------------------------------------------------------------ |
+| `ExcelMarkdown.read(input, options?)`              | 全部    | 第一个表格（`tables: "all"`：所有表格，每个一个工作表）→ 新工作簿；文本或 UTF-8 字节 |
+| `ExcelMarkdown.addWorksheet(wb, input, options?)`  | 全部    | 第一个表格 → `wb` 上的新工作表                                                       |
+| `ExcelMarkdown.addWorksheets(wb, input, options?)` | 全部    | 所有表格 → `wb` 上的 Worksheet[]                                                     |
+| `ExcelMarkdown.format(wb, options?)`               | 全部    | 工作表 → Markdown 字符串                                                             |
+| `ExcelMarkdown.toBuffer(wb, options?)`             | 全部    | 工作表 → Promise<Uint8Array>(UTF-8)                                                  |
+| `ExcelMarkdown.toBufferSync(wb, options?)`         | 全部    | 工作表 → Uint8Array(UTF-8)，同步                                                     |
+| `ExcelMarkdown.readFile(path, options?)`           | Node.js | 从文件读取第一个（或所有）表格 → 新工作簿                                            |
+| `ExcelMarkdown.writeFile(wb, path, options?)`      | Node.js | 写入文件                                                                             |
 
-**Workbook 选项(`MarkdownOptions`)** 同时继承 `MarkdownParseOptions` 与 `MarkdownFormatOptions`,并额外包含:
+**Workbook 选项**来自 `documonster/excel/markdown`:`ExcelMarkdownReadOptions`(`read`、`readFile`、`addWorksheet`、`addWorksheets`)继承 `MarkdownParseOptions`,`ExcelMarkdownWriteOptions`(`format`、`toBuffer`、`toBufferSync`、`writeFile`)继承 `MarkdownFormatOptions`。此外还包含:
 
-| 选项               | 类型                         | 描述                                      |
-| ------------------ | ---------------------------- | ----------------------------------------- |
-| `sheetName`        | `string`                     | 工作表名称(对 `readMarkdownAll`:用作前缀) |
-| `sheetId`          | `number`                     | 要写入的工作表 ID                         |
-| `map`              | `(value, column) => unknown` | 解析时的自定义值映射器                    |
-| `dateFormat`       | `string`                     | 写入时的日期格式                          |
-| `dateUTC`          | `boolean`                    | 日期使用 UTC                              |
-| `includeEmptyRows` | `boolean`                    | 在输出中包含空行                          |
+| 选项               | 类型                      | 描述                                                                    |
+| ------------------ | ------------------------- | ----------------------------------------------------------------------- |
+| `sheetName`        | `string`                  | 工作表名称(对 `tables: "all"` / `addWorksheets`:用作前缀)               |
+| `tables`           | `"first" \| "all"`        | `read` / `readFile` 导入哪些表格（默认 `"first"`）                      |
+| `sheetId`          | `number`                  | 要写入的工作表 ID                                                       |
+| `map`              | `(text, column) => value` | 解析时的自定义值映射器：传入单元格文本和从 0 开始的列，返回单元格值     |
+| `dateFormat`       | `string`                  | 写入时的日期格式（默认：UTC 的 ISO 8601，`…Z`）                         |
+| `dateUTC`          | `boolean`                 | 按 UTC 字段写日期，即 Excel 显示的值（默认 `true`；`false` 为本地时间） |
+| `includeEmptyRows` | `boolean`                 | 在输出中包含空行                                                        |

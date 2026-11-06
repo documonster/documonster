@@ -7,7 +7,11 @@
  * to be recognisable without claiming to be pixel-identical to it.
  */
 
-import { cssColour, relativeLuminance } from "@draw/colour";
+import { cssColor, relativeLuminance } from "@draw/colour";
+import { at, colour } from "@mermaid/arguments";
+import { MermaidArgumentError } from "@mermaid/errors";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 import type { Rgba01 } from "@utils/svg-lex";
 
 /**
@@ -121,26 +125,77 @@ const DEFAULTS = {
   ]
 } as const;
 
-/** Resolve a theme, filling anything the caller left out. */
+const themeShape = {
+  background: colour().optional(),
+  nodeFill: colour().optional(),
+  nodeStroke: colour().optional(),
+  nodeText: colour().optional(),
+  edge: colour().optional(),
+  edgeText: colour().optional(),
+  edgeLabelBackground: colour().optional(),
+  groupFill: colour().optional(),
+  groupStroke: colour().optional(),
+  title: colour().optional(),
+  paletteText: colour().optional(),
+  palette: s
+    .readonlyArray(colour(), { minLength: 1, expected: "a non-empty array of CSS colours" })
+    .optional()
+};
+const themeOptionsSchema = s.object(themeShape, {
+  expected: "an object of CSS colours",
+  readonly: true
+});
+const _themeOptionsMatch: SchemaMatches<typeof themeOptionsSchema, ThemeOptions> = true;
+void _themeOptionsMatch;
+
+const THEME_TOKENS = Object.keys(themeShape);
+
+/**
+ * Check a `ThemeOptions`: an object of CSS colour strings, with `palette` a non-empty list
+ * of them. An unknown key is refused rather than ignored — Mermaid calls the node fill
+ * `primaryColor`, and a theme written with Mermaid's names used to change nothing at all.
+ * So is a string the colour reader cannot read: it used to be drawn black, silently.
+ */
+export function checkThemeOptions(where: string, value: unknown, field = "options"): void {
+  check(themeOptionsSchema.optional(), value, at(where, field));
+  for (const key of Object.keys(value ?? {})) {
+    if (!THEME_TOKENS.includes(key)) {
+      throw new MermaidArgumentError(
+        `${field}.${key}`,
+        `${where}: ${field}.${key} is not a theme token; the tokens are ${THEME_TOKENS.join(", ")}.`
+      );
+    }
+  }
+}
+
+/**
+ * Resolve theme overrides into the colours the renderer draws with — the same resolution
+ * `Mermaid.toSvg` applies, so a diagram drawn from `Mermaid.layoutGraph` matches it.
+ *
+ * @throws {MermaidArgumentError} `options` is not an object of CSS colour strings, a colour
+ *   cannot be read, or `options` names a token
+ *   that does not exist.
+ */
 export function resolveTheme(options: ThemeOptions = {}): Theme {
+  checkThemeOptions("Mermaid.resolveTheme", options);
   return {
     ...(options.background === undefined || options.background === "transparent"
       ? {}
-      : { background: cssColour(options.background) }),
-    nodeFill: cssColour(options.nodeFill ?? DEFAULTS.nodeFill),
-    nodeStroke: cssColour(options.nodeStroke ?? DEFAULTS.nodeStroke),
-    nodeText: cssColour(options.nodeText ?? DEFAULTS.nodeText),
-    edge: cssColour(options.edge ?? DEFAULTS.edge),
-    edgeText: cssColour(options.edgeText ?? DEFAULTS.edgeText),
-    edgeLabelBackground: cssColour(options.edgeLabelBackground ?? DEFAULTS.edgeLabelBackground),
-    groupFill: cssColour(options.groupFill ?? DEFAULTS.groupFill),
-    groupStroke: cssColour(options.groupStroke ?? DEFAULTS.groupStroke),
-    title: cssColour(options.title ?? DEFAULTS.title),
+      : { background: cssColor(options.background) }),
+    nodeFill: cssColor(options.nodeFill ?? DEFAULTS.nodeFill),
+    nodeStroke: cssColor(options.nodeStroke ?? DEFAULTS.nodeStroke),
+    nodeText: cssColor(options.nodeText ?? DEFAULTS.nodeText),
+    edge: cssColor(options.edge ?? DEFAULTS.edge),
+    edgeText: cssColor(options.edgeText ?? DEFAULTS.edgeText),
+    edgeLabelBackground: cssColor(options.edgeLabelBackground ?? DEFAULTS.edgeLabelBackground),
+    groupFill: cssColor(options.groupFill ?? DEFAULTS.groupFill),
+    groupStroke: cssColor(options.groupStroke ?? DEFAULTS.groupStroke),
+    title: cssColor(options.title ?? DEFAULTS.title),
     paletteText: contrastWith(
-      cssColour(options.paletteText ?? DEFAULTS.paletteText),
-      cssColour(options.nodeText ?? DEFAULTS.nodeText)
+      cssColor(options.paletteText ?? DEFAULTS.paletteText),
+      cssColor(options.nodeText ?? DEFAULTS.nodeText)
     ),
-    palette: (options.palette ?? DEFAULTS.palette).map(token => cssColour(token))
+    palette: (options.palette ?? DEFAULTS.palette).map(token => cssColor(token))
   };
 }
 

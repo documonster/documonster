@@ -53,6 +53,9 @@ export interface PositionedRun {
    * could not be justified at all without it, and `w:jc="both"` rendered as
    * left-aligned.
    *
+   * A run's own `w:spacing` (character spacing, which may be negative) is
+   * included.
+   *
    * `width` already includes the total this adds, so a caller measuring or
    * hit-testing the run needs no correction. Renderers apply it with PDF's `Tc`
    * operator or SVG's `letter-spacing`.
@@ -98,6 +101,13 @@ export interface LineBox {
   readonly height: number;
   readonly baseline: number; // distance from top of line to baseline
   /**
+   * How much of `height` may run past the bottom margin: the space a line
+   * spacing multiple above single (`w:lineRule="auto"`) adds. Word fits a line
+   * on a page by its single-spaced height (Word for Mac 16: a 259/240 line of
+   * 11pt Calibri still fits 0.98pt past the margin, not 1.28pt).
+   */
+  readonly bottomSlack?: number;
+  /**
    * Items on the line. For backwards-compatibility the field is still
    * named `runs`, but its element type now includes inline images.
    * Renderers that previously assumed every entry was a text run
@@ -114,6 +124,12 @@ export interface LayoutBorderEdge {
   readonly color: string;
   /** Gap between the border and the content it surrounds, in points (`w:space`). */
   readonly space: number;
+  /**
+   * Thickness the edge takes across its own line, in points, when that is not
+   * `width` — a compound style's lines and gaps together (three widths for a
+   * `double`). Absent for a single line.
+   */
+  readonly extent?: number;
 }
 
 /** The four drawable edges of a block. */
@@ -169,7 +185,7 @@ export interface LayoutParagraph {
   /** Where the borders and shading sit relative to `rect`. */
   readonly decorationInsets?: LayoutDecorationInsets;
   /**
-   * Footnote / endnote ids referenced from each line, parallel to `lines`.
+   * Footnote ids referenced from each line, parallel to `lines`.
    *
    * A paragraph split across a page boundary keeps only the entries for the lines
    * it kept, so each note is claimed by the page its reference actually landed
@@ -184,6 +200,12 @@ export interface LayoutParagraph {
    * and moving all of it put the text preceding the break on the wrong page.
    */
   readonly pageBreakAfterLines?: readonly number[];
+  /**
+   * Indices of lines ended by a `w:br w:type="column"`: the rest of the
+   * paragraph continues at the top of the next column — on the next page when
+   * the column was the last.
+   */
+  readonly columnBreakAfterLines?: readonly number[];
   /**
    * Bookmark names starting on each line, parallel to `lines`.
    *
@@ -217,6 +239,12 @@ export interface LayoutTableCell {
   readonly content: readonly (LayoutParagraph | LayoutTable)[];
   /** Exact-height row whose overflowing content must be clipped to this cell. */
   readonly clipToBounds?: boolean;
+  /**
+   * Rows a vertically merged cell covers (`w:vMerge`), from `row` down, when
+   * more than one. Its `rect` covers them all; the continuing cells below keep
+   * their own rows' rects and draw no rule across the merge.
+   */
+  readonly rowSpan?: number;
   readonly backgroundColor?: string;
   readonly borders?: {
     readonly top?: { width: number; color: string };
@@ -455,8 +483,9 @@ export interface LayoutPage {
    *   newly-referenced footnotes; per Microsoft Word convention this
    *   is a short horizontal rule taking ~⅓ of the content width.
    * - `kind: "continuationSeparator"` — drawn on pages whose
-   *   footnote area only carries notes deferred from a previous page;
-   *   the rule spans the full content width to signal continuation.
+   *   footnote area opens with a note continued (or deferred whole)
+   *   from a previous page; the rule spans the full content width to
+   *   signal continuation.
    *
    * `y` is in page-absolute coordinates (same convention as
    * `footnoteArea[i].rect.y`) and points at the line's vertical

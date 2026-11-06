@@ -74,7 +74,10 @@ const ALLOWED: Record<ModuleName, ReadonlySet<ModuleName>> = {
   word: new Set(["draw", "formula", "archive", "xml", "csv", "markdown", "stream", "utils"]),
   // pdf may reach excel/word ONLY via the bridge files (see EXCEPTIONS); the
   // base allow-set covers the unconditional dependencies.
-  pdf: new Set(["draw", "archive", "utils"])
+  // xml: XMP metadata is XML, and the editor edits it with the real parser — the regex
+  // editor it replaced wrote unbound prefixes, duplicated properties and edited nested
+  // descriptions. A downward import (Layer 5 → Layer 1).
+  pdf: new Set(["draw", "archive", "xml", "utils"])
 };
 
 /**
@@ -86,7 +89,10 @@ const EXCEPTIONS: Record<string, ReadonlySet<ModuleName>> = {
   "src/modules/pdf/word-chart-bridge.ts": new Set(["excel", "word"]),
   "src/modules/pdf/word-bridge.ts": new Set(["word"]),
   "src/modules/pdf/word-layout-to-pdf.ts": new Set(["word"]),
-  "src/modules/word/bridge/excel-bridge.ts": new Set(["excel"])
+  "src/modules/word/bridge/excel-bridge.ts": new Set(["excel"]),
+  // `Draw.toPng`: a PNG is DEFLATE plus CRC-32, and the encoder lives with them in archive.
+  // archive depends on stream and utils only, so this cannot form a cycle.
+  "src/modules/draw/api/png.ts": new Set(["archive"])
 };
 
 const ALIAS_RE = /@(draw|mermaid|excel|word|formula|pdf|csv|markdown|xml|archive|stream|utils)\b/;

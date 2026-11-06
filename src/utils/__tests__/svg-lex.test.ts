@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isNoPaintColor,
   parseCssColor,
   parseSvgAttributes,
   parseSvgNumberList,
@@ -131,10 +132,41 @@ describe("parseCssColor", () => {
   it("returns undefined for no-paint keywords and junk", () => {
     expect(parseCssColor("none")).toBeUndefined();
     expect(parseCssColor("transparent")).toBeUndefined();
+    expect(parseCssColor("Transparent")).toBeUndefined();
     expect(parseCssColor("")).toBeUndefined();
     expect(parseCssColor(undefined)).toBeUndefined();
     expect(parseCssColor("#12345")).toBeUndefined();
-    expect(parseCssColor("rebeccapurple")).toBeUndefined();
+    expect(parseCssColor("notacolour")).toBeUndefined();
+    expect(parseCssColor("constructor")).toBeUndefined();
+  });
+
+  it("tells the no-paint keywords apart from junk", () => {
+    expect(isNoPaintColor("none")).toBe(true);
+    expect(isNoPaintColor(" TRANSPARENT ")).toBe(true);
+    expect(isNoPaintColor("notacolour")).toBe(false);
+    expect(isNoPaintColor(undefined)).toBe(false);
+  });
+
+  it("reads the CSS named colours, case-insensitively", () => {
+    // Previously every name read as junk, so `fill:red` in a Mermaid classDef drew black.
+    expect(parseCssColor("red")).toEqual({ r: 1, g: 0, b: 0, a: 1 });
+    expect(parseCssColor("White")).toEqual({ r: 1, g: 1, b: 1, a: 1 });
+    const purple = parseCssColor("rebeccapurple");
+    expect(purple?.r).toBeCloseTo(0x66 / 255, 6);
+    expect(purple?.g).toBeCloseTo(0x33 / 255, 6);
+    expect(purple?.b).toBeCloseTo(0x99 / 255, 6);
+    expect(parseCssColor("grey")).toEqual(parseCssColor("gray"));
+  });
+
+  it("reads hsl() and hsla() per CSS Color 4", () => {
+    expect(parseCssColor("hsl(0, 100%, 50%)")).toEqual({ r: 1, g: 0, b: 0, a: 1 });
+    expect(parseCssColor("hsl(120deg 100% 25%)")).toEqual({ r: 0, g: 0.5, b: 0, a: 1 });
+    expect(parseCssColor("hsl(0.5turn, 100%, 50%)")).toEqual({ r: 0, g: 1, b: 1, a: 1 });
+    const translucent = parseCssColor("hsla(240, 100%, 50%, 0.25)");
+    expect(translucent).toEqual({ r: 0, g: 0, b: 1, a: 0.25 });
+    expect(parseCssColor("hsl(-120, 100%, 50%)")).toEqual({ r: 0, g: 0, b: 1, a: 1 });
+    expect(parseCssColor("hsl(junk, 100%, 50%)")).toBeUndefined();
+    expect(parseCssColor("hsl(1, 2)")).toBeUndefined();
   });
 });
 

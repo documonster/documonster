@@ -26,10 +26,12 @@
  */
 import type { PartWriter } from "@excel/utils/package-sink";
 import { encodeBiffRecords } from "@excel/xlsb/binary";
+import type { PtgContext } from "@excel/xlsb/formula/ptg";
 import type { Emitted } from "@excel/xlsb/write/emit";
 import type { SheetRow } from "@excel/xlsb/write/types";
 import type { WriteWorksheetPartOptions } from "@excel/xlsb/write/worksheet";
 import {
+  createMasterLedger,
   encodeRowRecords,
   worksheetEpilogueRecords,
   worksheetPrologueRecords
@@ -53,8 +55,11 @@ export interface WorksheetPartStream {
    * leaving as an omission: a forward writer has already emitted the preceding rows, so it could only report
    * the problem, not fix it — and the caller that would trip it (`Stream.WorkbookWriter`) commits rows in order
    * by construction. Excel reads an out-of-order `BrtRowHdr` sequence as a corrupt sheet.
+   *
+   * `formulaContext` replaces the one the part was opened with, for a writer whose defined-name list grows as rows
+   * arrive (a future function's stub is allocated when the first row calling it is committed).
    */
-  row(row: SheetRow): void;
+  row(row: SheetRow, formulaContext?: PtgContext): void;
   /** Close the part: epilogue records, then the underlying writer's `end()`. */
   end(): void;
   /** Losses accumulated so far, in the same form `writeWorksheetPart` reports them. */
@@ -83,18 +88,29 @@ export function beginWorksheetPart(
 ): WorksheetPartStream {
   const unsupported: string[] = [];
   const opened = options();
-  const { strings, formats, formulaContext = {} } = opened;
+  const { strings, formats, formulaContext = {}, features } = opened;
   // `omitDimension` is not a choice the caller gets to make here. A forward pass cannot state the used range,
   // so offering the option would only let a caller ask for a sheet this function cannot produce.
   const prologueOptions: WriteWorksheetPartOptions = { ...opened, rows: [], omitDimension: true };
   write(writer, worksheetPrologueRecords(prologueOptions));
   let ended = false;
+  const masters = createMasterLedger();
   return {
-    row(row: SheetRow): void {
+    row(row: SheetRow, context: PtgContext = formulaContext): void {
       if (ended) {
         throw new Error("xlsb: row written after the sheet part was ended");
       }
-      write(writer, encodeRowRecords(row, { strings, formats, formulaContext, unsupported }));
+      write(
+        writer,
+        encodeRowRecords(row, {
+          strings,
+          formats,
+          formulaContext: context,
+          unsupported,
+          features,
+          masters
+        })
+      );
     },
     end(): void {
       if (ended) {

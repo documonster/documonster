@@ -87,7 +87,7 @@ async function packageWithExtraParts(
       )
     );
   }
-  return await archive.bytes();
+  return await archive.toBuffer();
 }
 
 const addOverride = (partName: string, contentType: string) => (xml: string) =>
@@ -259,7 +259,7 @@ describe("opaque part round-trip", () => {
     reordered.unshift(model.sheets![frontIndex]);
     Workbook.setModel(wb, { ...model, sheets: reordered });
 
-    const names = Workbook.getWorksheets(wb).map(sheet => Worksheet.getName(sheet));
+    const names = Workbook.listWorksheets(wb).map(sheet => Worksheet.getName(sheet));
     expect(names[0]).toBe("Front");
     expect(names[1]).toBe("Data");
 
@@ -659,7 +659,7 @@ describe("opaque part round-trip", () => {
     for (const [path, entry] of first) {
       repacked.add(path, entry.data);
     }
-    await Workbook.read(wb, await repacked.bytes());
+    await Workbook.read(wb, await repacked.toBuffer());
     const second = await extractAll(await Workbook.toBuffer(wb));
 
     expect(second.get("xl/vbaProject.bin")?.data).toEqual(first.get("xl/vbaProject.bin")?.data);

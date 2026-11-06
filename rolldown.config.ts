@@ -106,6 +106,8 @@ export default defineConfig(
       output: {
         dir: "./dist/iife",
         format: "iife" as const,
+        // A `<script>` bundle is one file: every `import()` is inlined rather than left to rolldown to decide.
+        codeSplitting: false,
         name: `Documonster.${global}`,
         extend: true,
         sourcemap: false,

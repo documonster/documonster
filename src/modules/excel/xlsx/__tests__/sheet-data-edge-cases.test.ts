@@ -5,6 +5,7 @@ import type { CellData } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
 import { Cell, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
+import { Readable } from "@stream";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -29,7 +30,7 @@ async function withSheetData(sheetData: string): Promise<Uint8Array> {
         : file.data
     );
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 async function loadWorkbook(buffer: Uint8Array) {
@@ -108,6 +109,79 @@ describe("row and cell references", () => {
     const buffer = await withSheetData(sheet('<row r="5"><c r="$C$5"><v>7</v></c></row>'));
     expect(Cell.getValue(await readFull(buffer), "C5")).toBe(7);
     expect(await readStream(buffer)).toEqual({ C5: 7 });
+  });
+});
+
+describe("a cell outside any row", () => {
+  // A `<c>` directly inside `<sheetData>`, from a damaged file. Before the first row, `Workbook.read` and
+  // `Workbook.readStream` threw an untyped `TypeError` out of `RowXform.parseClose`: the row parser took the stray
+  // cell as a child of a row that was not open, and dereferenced the row it did not have. After a row, the same
+  // mistake attached the cell to the row that had already closed — while the streaming reader skipped it.
+  const cases = {
+    "before the first row": sheet(
+      '<c r="B1"><v>2</v></c>',
+      '<row r="1"><c r="A1"><v>1</v></c></row>',
+      '<row r="2"><c r="A2"><v>3</v></c></row>'
+    ),
+    "between two rows": sheet(
+      '<row r="1"><c r="A1"><v>1</v></c></row>',
+      '<c r="B1"><v>2</v></c>',
+      '<row r="2"><c r="A2"><v>3</v></c></row>'
+    )
+  };
+  const values = (ws: ReturnType<typeof Workbook.addWorksheet>) =>
+    ["A1", "B1", "A2"].map(address => Cell.getValue(ws, address));
+
+  it.each(Object.entries(cases))(
+    "is skipped by every reader when it is %s",
+    async (_where, xml) => {
+      const buffer = await withSheetData(xml);
+      expect(values(await readFull(buffer))).toEqual([1, null, 3]);
+      const streamed = Workbook.create();
+      await Workbook.readStream(streamed, Readable.from([buffer]));
+      expect(values(Workbook.getWorksheet(streamed, "Sheet1")!)).toEqual([1, null, 3]);
+      expect(await readStream(buffer)).toEqual({ A1: 1, A2: 3 });
+    }
+  );
+});
+
+describe("a cell inside a cell", () => {
+  // `<c>` is not a child of `<c>`, but a damaged file can nest one. The inner cell ends the outer one, as the start
+  // of a sibling would; the outer's surplus `</c>` then closes nothing. Before, the full reader read that surplus close
+  // as the row's own and the next one as `<sheetData>`'s, losing A1, B1 and every following row — and the streaming
+  // reader wrote the inner cell's value over the outer's, at the outer's address.
+  const cases = {
+    "after the outer value": sheet(
+      '<row r="1"><c r="A1"><v>1</v><c r="X1"><v>4</v></c></c><c r="B1"><v>3</v></c></row>',
+      '<row r="2"><c r="A2"><v>2</v></c></row>'
+    ),
+    "inside rich text": sheet(
+      '<row r="1"><c r="A1" t="inlineStr"><is><r><t>a</t></r><r><t>b</t><c r="X1"><v>4</v></c></r></is></c>',
+      '<c r="B1"><v>3</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>'
+    ),
+    "with content after the inner cell": sheet(
+      '<row r="1"><c r="A1"><v>1</v><c r="X1"><v>4</v></c><v>9</v></c><c r="B1"><v>3</v></c></row>',
+      '<row r="2"><c r="A2"><v>2</v></c></row>'
+    )
+  };
+  const addresses = ["A1", "X1", "B1", "A2"];
+
+  it.each(Object.entries(cases))("is read the same way by every reader, %s", async (where, xml) => {
+    const buffer = await withSheetData(xml);
+    const a1 = where === "inside rich text" ? "ab" : 1;
+    const expected = [a1, 4, 3, 2];
+    const plain = (v: unknown) =>
+      v && typeof v === "object" && "richText" in v
+        ? (v.richText as { text: string }[]).map(r => r.text).join("")
+        : v;
+    const full = await readFull(buffer);
+    expect(addresses.map(a => plain(Cell.getValue(full, a)))).toEqual(expected);
+    const streamed = Workbook.create();
+    await Workbook.readStream(streamed, Readable.from([buffer]));
+    const ws = Workbook.getWorksheet(streamed, "Sheet1")!;
+    expect(addresses.map(a => plain(Cell.getValue(ws, a)))).toEqual(expected);
+    const cells = await readStream(buffer);
+    expect(addresses.map(a => plain(cells[a]))).toEqual(expected);
   });
 });
 

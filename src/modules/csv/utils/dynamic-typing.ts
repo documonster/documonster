@@ -6,8 +6,13 @@
  */
 
 import type { DynamicTypingConfig, CastDateConfig } from "@csv/types";
+import { argumentError, castDateSchema, dynamicTypingSchema } from "@csv/utils/check-options";
+import type { DecimalSeparator } from "@csv/utils/number";
 import type { DateParser } from "@utils/datetime";
 import { createIsoDateParser } from "@utils/datetime";
+import { isRecordArgument } from "@utils/object";
+import { check, s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 // =============================================================================
 // Pre-compiled Regex Constants
@@ -49,7 +54,21 @@ export function tryParseDate(value: string): Date | null {
   if (!value || value.length < 10) {
     return null;
   }
-  return getIsoDateParser().parse(value);
+  const date = getIsoDateParser().parse(value);
+  if (date === null) {
+    return null;
+  }
+  // A date with no time is UTC midnight, as ECMAScript reads `new Date("2020-01-02")`: the
+  // shared parser builds local midnight, which made the result depend on the machine's
+  // timezone and moved the calendar day when it was written back east of UTC. Forms with a
+  // time and no offset stay local, which is ECMAScript's reading of them too.
+  const s = value.trim();
+  if (s.length === 10) {
+    const utc = new Date(0);
+    utc.setUTCFullYear(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
+    return utc;
+  }
+  return date;
 }
 
 /**
@@ -102,8 +121,15 @@ function isCharEqualIgnoreCase(code: number, lowercaseCode: number): boolean {
  * Special cases:
  * - Leading zeros (e.g., "007") → preserved as string (for zip codes, IDs)
  * - "Infinity", "-Infinity", "NaN" → corresponding number values
+ * - An integer beyond `Number.MAX_SAFE_INTEGER` (an ID such as "9007199254740993") or a
+ *   literal outside the double range ("1e400") → preserved as string, since no number
+ *   holds it exactly
+ * - With `decimalSeparator: ","`, "1,5" → 1.5 and a value holding "." stays a string
  */
-export function convertValue(value: string): string | number | boolean | null {
+export function convertValue(
+  value: string,
+  decimalSeparator: DecimalSeparator = "."
+): string | number | boolean | null {
   const len = value.length;
 
   // Empty string stays empty (not converted to null)
@@ -193,9 +219,30 @@ export function convertValue(value: string): string | number | boolean | null {
     }
 
     // Check for valid number format (avoid converting "123abc" or "1.2.3")
-    if (NUMERIC_REGEX.test(value)) {
-      const num = Number(value);
+    let numeric = value;
+    if (decimalSeparator === ",") {
+      if (value.indexOf(".") !== -1) {
+        return value;
+      }
+      numeric = value.replace(",", ".");
+    }
+    if (NUMERIC_REGEX.test(numeric)) {
+      const num = Number(numeric);
       if (!isNaN(num)) {
+        if (!Number.isFinite(num)) {
+          return value;
+        }
+        // An integer literal that no double holds exactly — an ID, an account number — keeps
+        // its text rather than turning into a neighbouring value.
+        if (
+          !Number.isSafeInteger(num) &&
+          numeric.indexOf(".") === -1 &&
+          numeric.indexOf("e") === -1 &&
+          numeric.indexOf("E") === -1 &&
+          BigInt(num) !== BigInt(numeric)
+        ) {
+          return value;
+        }
         return num;
       }
     }
@@ -225,11 +272,31 @@ function isCustomConverter(
 /**
  * Apply dynamic typing to a single field value
  *
+ * `columnConfig` is positional although it may be a boolean: it is not a flag about the call but
+ * the value one column has in `options.dynamicTyping` (`true`, `false` or a converter), so a caller
+ * hands that entry across as it is.
+ *
  * @param value - The string value to convert
- * @param columnConfig - Column-specific config (true, false, or custom function)
+ * @param columnConfig - Column-specific config: `true` (the default) converts, `false` leaves
+ *   the text, a function converts it your way
  * @returns Converted value
  */
 export function applyDynamicTyping(
+  value: string,
+  columnConfig: boolean | ((value: string) => unknown) = true
+): unknown {
+  const where = "Csv.applyDynamicTyping";
+  check(s.string(), value, { where, field: "value", error: argumentError });
+  check(
+    s.union([s.boolean(), s.function()], { expected: "true, false or a function" }),
+    columnConfig,
+    { where, field: "columnConfig", error: argumentError }
+  );
+  return applyColumnConfig(value, columnConfig);
+}
+
+/** {@link applyDynamicTyping} for a value and config already known to be valid. */
+function applyColumnConfig(
   value: string,
   columnConfig: boolean | ((value: string) => unknown)
 ): unknown {
@@ -263,7 +330,8 @@ function convertSingleValue(
   value: string,
   columnName: string | undefined,
   dynamicTyping: DynamicTypingConfig,
-  castDate: CastDateConfig | undefined
+  castDate: CastDateConfig | undefined,
+  decimalSeparator: DecimalSeparator
 ): unknown {
   // Try date parsing first if castDate is enabled for this column
   if (shouldCastDate(castDate, columnName)) {
@@ -275,7 +343,7 @@ function convertSingleValue(
 
   // Apply dynamic typing based on config type
   if (dynamicTyping === true) {
-    return convertValue(value);
+    return convertValue(value, decimalSeparator);
   }
 
   if (dynamicTyping === false) {
@@ -287,6 +355,11 @@ function convertSingleValue(
     return value;
   }
 
+  // Own entries only: `config["toString"]` would otherwise be Object.prototype.toString,
+  // called as a converter, and `config["constructor"]` would wrap the value in an object.
+  if (!Object.hasOwn(dynamicTyping, columnName)) {
+    return value;
+  }
   const config = (dynamicTyping as Record<string, boolean | ((value: string) => unknown)>)[
     columnName
   ];
@@ -294,12 +367,33 @@ function convertSingleValue(
     return value;
   }
 
-  return applyDynamicTyping(value, config);
+  if (config === true) {
+    return convertValue(value, decimalSeparator);
+  }
+  return applyColumnConfig(value, config);
 }
 
 // =============================================================================
 // Row Conversion Functions
 // =============================================================================
+
+/** The settings of {@link applyDynamicTypingToRow}, as `CsvParseOptions` names them. */
+export interface CsvDynamicTypingOptions {
+  /** Columns whose ISO date strings become `Date`s, as `CsvParseOptions.castDate` takes it. */
+  castDate?: CastDateConfig;
+  /** Decimal separator numbers are read with (default `"."`), as `CsvParseOptions` takes it. */
+  decimalSeparator?: DecimalSeparator;
+}
+
+const dynamicTypingOptionsSchema = s.object({
+  castDate: castDateSchema.optional(),
+  decimalSeparator: s.oneOf([".", ","], { expected: '"." or ","' }).optional()
+});
+const _dynamicTypingOptionsMatch: SchemaMatches<
+  typeof dynamicTypingOptionsSchema,
+  CsvDynamicTypingOptions
+> = true;
+void _dynamicTypingOptionsMatch;
 
 /**
  * Apply dynamic typing to an entire row (object form).
@@ -307,15 +401,60 @@ function convertSingleValue(
  * Performance: Converts values IN PLACE to avoid allocating a new object.
  * The input object is mutated and returned with converted values.
  *
+ * `dynamicTyping` stays positional: it is the conversion being applied — the same value
+ * `CsvParseOptions.dynamicTyping` takes, whose per-column form is itself a record and so could
+ * not share an options object without colliding with a column named like an option.
+ *
  * @param row - Row object with string values (will be mutated)
  * @param dynamicTyping - DynamicTyping configuration
- * @param castDate - CastDate configuration for date parsing
+ * @param options - Date casting and the decimal separator
  * @returns The same row object with converted values
  */
 export function applyDynamicTypingToRow(
   row: Record<string, string>,
   dynamicTyping: DynamicTypingConfig,
-  castDate?: CastDateConfig
+  options?: CsvDynamicTypingOptions
+): Record<string, unknown>;
+/** @deprecated Pass `castDate` as `{ castDate }`. Removed in 1.0. */
+export function applyDynamicTypingToRow(
+  row: Record<string, string>,
+  dynamicTyping: DynamicTypingConfig,
+  castDate: CastDateConfig | undefined
+): Record<string, unknown>;
+export function applyDynamicTypingToRow(
+  row: Record<string, string>,
+  dynamicTyping: DynamicTypingConfig,
+  options?: CsvDynamicTypingOptions | CastDateConfig
+): Record<string, unknown> {
+  const where = "Csv.applyDynamicTypingToRow";
+  check(s.record(s.string(), { expected: "an object of column values" }), row, {
+    where,
+    field: "row",
+    error: argumentError
+  });
+  check(dynamicTypingSchema, dynamicTyping, {
+    where,
+    field: "dynamicTyping",
+    error: argumentError
+  });
+  if (!isRecordArgument(options)) {
+    return typeRecord(row, dynamicTyping, options, ".");
+  }
+  check(dynamicTypingOptionsSchema, options, { where, field: "options", error: argumentError });
+  const { castDate, decimalSeparator = "." } = options;
+  return typeRecord(row, dynamicTyping, castDate, decimalSeparator);
+}
+
+/**
+ * {@link applyDynamicTypingToRow} with the parser's `decimalSeparator`.
+ *
+ * @internal
+ */
+export function typeRecord(
+  row: Record<string, string>,
+  dynamicTyping: DynamicTypingConfig,
+  castDate: CastDateConfig | undefined,
+  decimalSeparator: DecimalSeparator
 ): Record<string, unknown> {
   if (dynamicTyping === false && !castDate) {
     // No conversion - return as-is (fast path)
@@ -329,7 +468,8 @@ export function applyDynamicTypingToRow(
         row[key],
         key,
         dynamicTyping,
-        castDate
+        castDate,
+        decimalSeparator
       );
     }
   }
@@ -349,7 +489,8 @@ export function applyDynamicTypingToArrayRow(
   row: string[],
   headers: string[] | null,
   dynamicTyping: DynamicTypingConfig,
-  castDate?: CastDateConfig
+  castDate?: CastDateConfig,
+  decimalSeparator: DecimalSeparator = "."
 ): unknown[] {
   if (dynamicTyping === false && !castDate) {
     // No conversion - return as-is (fast path)
@@ -363,6 +504,6 @@ export function applyDynamicTypingToArrayRow(
 
   return row.map((value, index) => {
     const columnName = headers?.[index];
-    return convertSingleValue(value, columnName, dynamicTyping, castDate);
+    return convertSingleValue(value, columnName, dynamicTyping, castDate, decimalSeparator);
   });
 }

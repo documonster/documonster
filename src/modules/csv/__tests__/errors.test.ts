@@ -10,7 +10,7 @@
  */
 
 import type { CsvRecordError } from "@csv/index";
-import { Csv } from "@csv/index";
+import { Csv, CsvError } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
 import { describe, it, expect } from "vitest";
 
@@ -117,9 +117,14 @@ describe("Malformed Input Recovery", () => {
     it("handles mid-quote EOF", () => {
       const csv = generateMalformedCsv("truncated");
 
-      // With skipRecordsWithError, should not throw
-      const result = Csv.parse(csv, { skipRecordsWithError: true });
+      // The plain string[][] result has no `errors`, so the unterminated record is thrown
+      // unless `onSkip` receives it. (`skipRecordsWithError` has no effect; this test used to
+      // pin that such a record was returned with nothing reported.)
+      expect(() => Csv.parse(csv, { skipRecordsWithError: true })).toThrow(CsvError);
+      const skipped: string[] = [];
+      const result = Csv.parse(csv, { onSkip: e => void skipped.push(e.code) });
       expect(Array.isArray(result)).toBe(true);
+      expect(skipped).toEqual(["MissingQuotes"]);
     });
   });
 });
@@ -276,7 +281,7 @@ describe("parseCsvRows Errors", () => {
     const skipped: number[] = [];
     const rows: Record<string, string>[] = [];
 
-    for await (const row of Csv.parseRows(csv, {
+    for await (const row of Csv.parseStream(csv, {
       headers: true,
       skipRecordsWithError: true,
       onSkip: (error, _record) => {
@@ -295,7 +300,7 @@ describe("parseCsvRows Errors", () => {
     let errorCount = 0;
     const rows: string[][] = [];
 
-    for await (const row of Csv.parseRows(csv, {
+    for await (const row of Csv.parseStream(csv, {
       skipRecordsWithError: true,
       onSkip: () => {
         errorCount++;

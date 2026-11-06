@@ -268,7 +268,7 @@ describe("list leading", () => {
     // `ListParagraph` declares only `spacing.after`. Style resolution replaced
     // the whole `w:spacing` value instead of merging its attributes, so the
     // document default's `line` was dropped and every list item fell back to
-    // single spacing — 13.2pt against the 17.27pt of the prose beside it, a 24%
+    // single spacing — 13.4pt against the 17.6pt of the prose beside it, a 24%
     // difference that made every list look cramped.
     const doc = await markdownToDocx("Body text here.\n\n- first item\n- second item");
     const page = layoutDocumentFull(doc).pages[0];
@@ -279,8 +279,9 @@ describe("list leading", () => {
       return lines[0].height;
     };
     expect(leadingOf(1)).toBeCloseTo(leadingOf(0), 5);
-    // 11pt × 1.2 natural × 314/240 — the `--markdown-line-height: 22px` default.
-    expect(leadingOf(1)).toBeCloseTo(17.27, 2);
+    // 11pt × Calibri's own 2500/2048 em line × 314/240 — the
+    // `--markdown-line-height: 22px` default.
+    expect(leadingOf(1)).toBeCloseTo(((11 * 2500) / 2048) * (314 / 240), 2);
   });
 });
 

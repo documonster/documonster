@@ -10,7 +10,7 @@
 
 import type { NumFmt } from "@excel/types";
 import { isGeneralFormat, numberFormatFacets } from "@utils/number-format";
-import { renderNumberFormat } from "@utils/number-format-render";
+import { formatDateAsGeneral, renderNumberFormat } from "@utils/number-format-render";
 import { dateToExcel } from "@utils/utils";
 
 /**
@@ -81,17 +81,6 @@ export function dateFormatKind(fmt: string | undefined): DateFormatKind {
 }
 
 /**
- * Default format applied to Date values whose numFmt is `General` or empty.
- *
- * Excel itself substitutes a locale-dependent short date in this case (US:
- * `m/d/yyyy`). We pick an ISO-like `yyyy-mm-dd` so consumers who never set a
- * `numFmt` still get a sensible, unambiguous rendering instead of the raw
- * Excel serial number.
- */
-const DEFAULT_DATE_FORMAT = "yyyy-mm-dd";
-const DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd hh:mm:ss";
-
-/**
  * Format a value according to the given format string.
  * Handles Date objects with timezone-independent Excel serial conversion.
  *
@@ -114,16 +103,12 @@ export function formatCellValue(
       }
       return renderNumberFormat(fmt, serial, { date1904 });
     }
-    // For Date values whose numFmt is missing or General, Excel substitutes a
-    // default short-date format. Without this, `format("General", serial)`
-    // would emit the raw Excel serial (e.g. "43567") — almost never what the
-    // caller wants. Pick a datetime-aware default based on whether the value
-    // carries a non-midnight time component.
+    // A Date whose numFmt is missing or General: the shared rule (see `formatDateAsGeneral`).
     let effectiveFmt: string;
     if (dateFormat && isDateDisplayFormat(fmt)) {
       effectiveFmt = dateFormat;
     } else if (isGeneralFormat(fmt)) {
-      effectiveFmt = serial % 1 === 0 ? DEFAULT_DATE_FORMAT : DEFAULT_DATETIME_FORMAT;
+      return formatDateAsGeneral(value, date1904);
     } else {
       effectiveFmt = fmt;
     }

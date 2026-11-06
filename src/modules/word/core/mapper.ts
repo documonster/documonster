@@ -8,13 +8,27 @@
  * a new document without mutating the input.
  */
 
-import { isRun } from "@word/core/text-utils";
+import type { SchemaMatches } from "@utils/schema";
+import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { checkSchema, w } from "@word/core/option-schema";
+import { markDerived } from "@word/core/ownership";
+import {
+  foldRangeMarkers,
+  listChildRangeMarkers,
+  listRangeMarkers,
+  settleRangeMarkers,
+  withParagraphChildren
+} from "@word/core/range-markers";
+import { hyperlinkContent, isRun, withHyperlinkContent } from "@word/core/text-utils";
 import type { WalkPath } from "@word/core/walker";
+import { walkOptionsShape } from "@word/core/walker";
+import { DocxArgumentError } from "@word/errors";
 import type {
   BodyContent,
   DocxDocument,
   Paragraph,
   ParagraphChild,
+  RangeMarker,
   Run,
   RunContent,
   StructuredDocumentTag,
@@ -54,6 +68,10 @@ export interface MapOptions {
   readonly includeComments?: boolean;
 }
 
+const mapOptionsSchema = w.record(walkOptionsShape);
+const _mapOptionsMatch: SchemaMatches<typeof mapOptionsSchema, MapOptions> = true;
+void _mapOptionsMatch;
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -62,6 +80,9 @@ export interface MapOptions {
  * Immutable document tree transformation.
  * Rebuilds the document tree, allowing callers to replace or filter nodes.
  * Never mutates the input document.
+ *
+ * Does not modify `doc`; the result may share unchanged nodes with it; `Document.*`
+ * copies what it edits, so an edit made through one never reaches the other.
  *
  * @param doc - The document to transform.
  * @param transformer - Callbacks to transform each node type.
@@ -73,6 +94,9 @@ export function mapDocument(
   transformer: DocxTransformer,
   options?: MapOptions
 ): DocxDocument {
+  checkHandle(doc, "document", "doc", "Transform.map");
+  checkRecord(transformer, "transformer", "Transform.map");
+  checkSchema(mapOptionsSchema.optional(), options, "Transform.map");
   const opts: Required<MapOptions> = {
     includeHeaders: options?.includeHeaders ?? true,
     includeFooters: options?.includeFooters ?? true,
@@ -187,15 +211,18 @@ export function mapDocument(
     });
   }
 
-  return {
-    ...doc,
-    body,
-    headers,
-    footers,
-    footnotes,
-    endnotes,
-    comments
-  };
+  return markDerived(
+    {
+      ...doc,
+      body,
+      headers,
+      footers,
+      footnotes,
+      endnotes,
+      comments
+    },
+    doc
+  );
 }
 
 // =============================================================================
@@ -207,7 +234,16 @@ function mapBlocks(
   transformer: DocxTransformer,
   basePath: WalkPath
 ): readonly BodyContent[] {
-  const result: BodyContent[] = [];
+  // A removed block leaves its range markers in place, so every range it
+  // opened or closed stays paired.
+  const result: (BodyContent | RangeMarker)[] = [];
+  const push = (source: BodyContent, mapped: BodyContent | null): void => {
+    if (mapped === null) {
+      result.push(...listRangeMarkers([source]));
+    } else {
+      result.push(mapped);
+    }
+  };
 
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
@@ -217,33 +253,20 @@ function mapBlocks(
     if (transformer.transformBodyContent) {
       const transformed = transformer.transformBodyContent(block, currentPath);
       if (transformed === null) {
+        push(block, null);
         continue;
       }
-      if (Array.isArray(transformed)) {
-        // Flat-map: one block becomes multiple blocks
-        for (const item of transformed) {
-          const mapped = mapBodyContent(item, transformer, currentPath);
-          if (mapped !== null) {
-            result.push(mapped);
-          }
-        }
-        continue;
-      }
-      // Single replacement
-      const mapped = mapBodyContent(transformed, transformer, currentPath);
-      if (mapped !== null) {
-        result.push(mapped);
+      // An array flat-maps: one block becomes multiple blocks
+      for (const item of Array.isArray(transformed) ? transformed : [transformed]) {
+        push(item, mapBodyContent(item, transformer, currentPath));
       }
     } else {
       // No transformBodyContent — just recurse
-      const mapped = mapBodyContent(block, transformer, currentPath);
-      if (mapped !== null) {
-        result.push(mapped);
-      }
+      push(block, mapBodyContent(block, transformer, currentPath));
     }
   }
 
-  return result;
+  return settleRangeMarkers(result);
 }
 
 /**
@@ -298,8 +321,9 @@ function mapBodyContent(
         if (b.type === "paragraph") {
           filtered.push(b);
         } else {
-          throw new Error(
-            `mapDocument: textBox.content must remain Paragraph[] but a ` +
+          throw new DocxArgumentError(
+            "transformer.transformBodyContent",
+            `Transform.map: textBox.content must remain Paragraph[] but a ` +
               `transform produced "${b.type}". Either rewrite the transform ` +
               `to return only paragraphs here, or restructure the document ` +
               `at the body level instead.`
@@ -327,8 +351,9 @@ function mapBodyContent(
         if (b.type === "paragraph") {
           filtered.push(b);
         } else {
-          throw new Error(
-            `mapDocument: drawingShape.textContent must remain Paragraph[] ` +
+          throw new DocxArgumentError(
+            "transformer.transformBodyContent",
+            `Transform.map: drawingShape.textContent must remain Paragraph[] ` +
               `but a transform produced "${b.type}".`
           );
         }
@@ -354,8 +379,9 @@ function mapBodyContent(
         if (b.type === "paragraph") {
           filtered.push(b);
         } else {
-          throw new Error(
-            `mapDocument: tableOfContents.cachedParagraphs must remain ` +
+          throw new DocxArgumentError(
+            "transformer.transformBodyContent",
+            `Transform.map: tableOfContents.cachedParagraphs must remain ` +
               `Paragraph[] but a transform produced "${b.type}".`
           );
         }
@@ -383,16 +409,15 @@ function mapParagraph(
 
   // Map children (runs)
   if (transformer.transformRun || transformer.transformRunContent) {
-    const newChildren: ParagraphChild[] = [];
+    // A removed child leaves its range markers in place, so every range it
+    // opened or closed stays paired.
+    const items: (ParagraphChild | RangeMarker)[] = [];
     for (let i = 0; i < current.children.length; i++) {
       const child = current.children[i];
       const childPath: WalkPath = { ...path, index: i, depth: path.depth + 1 };
-      const mapped = mapParagraphChild(child, transformer, childPath);
-      if (mapped !== null) {
-        newChildren.push(mapped);
-      }
+      items.push(...mapParagraphChild(child, transformer, childPath));
     }
-    current = { ...current, children: newChildren };
+    current = withParagraphChildren(current, items);
   }
 
   return current;
@@ -402,9 +427,11 @@ function mapParagraphChild(
   child: ParagraphChild,
   transformer: DocxTransformer,
   path: WalkPath
-): ParagraphChild | null {
+): (ParagraphChild | RangeMarker)[] {
+  const kept = (mapped: ParagraphChild | null): (ParagraphChild | RangeMarker)[] =>
+    mapped === null ? listChildRangeMarkers(child) : [mapped];
   if (isRun(child)) {
-    return mapRun(child, transformer, path);
+    return kept(mapRun(child, transformer, path));
   }
 
   if ("type" in child) {
@@ -413,46 +440,34 @@ function mapParagraphChild(
       case "hyperlink": {
         const hl = child as Hyperlink;
         if (transformer.transformRun || transformer.transformRunContent) {
-          const newChildren: Run[] = [];
-          for (let i = 0; i < hl.children.length; i++) {
-            const run = hl.children[i];
-            const runPath: WalkPath = { ...path, index: i, depth: path.depth + 1 };
-            const mapped = mapRun(run, transformer, runPath);
-            if (mapped !== null) {
-              newChildren.push(mapped);
-            }
-          }
-          return { ...hl, children: newChildren } as ParagraphChild;
+          // The link's content is mapped like a paragraph's: a removed item
+          // leaves its markers in place, which ride on the next item kept.
+          // Markers left after the last one stay inside the link.
+          const items: (ParagraphChild | RangeMarker)[] = [];
+          hyperlinkContent(hl).forEach((item, i) => {
+            const itemPath: WalkPath = { ...path, index: i, depth: path.depth + 1 };
+            items.push(...mapParagraphChild(item, transformer, itemPath));
+          });
+          return [withHyperlinkContent(hl, items)];
         }
-        return child;
+        return [child];
       }
       case "insertedRun": {
         const ins = child as InsertedRun;
         const mappedRun = mapRun(ins.run, transformer, path);
-        if (mappedRun === null) {
-          return null;
-        }
-        return { ...ins, run: mappedRun } as ParagraphChild;
+        return kept(mappedRun === null ? null : ({ ...ins, run: mappedRun } as ParagraphChild));
       }
       case "movedToRun": {
         const moved = child as MovedToRun;
         const mappedRun = mapRun(moved.run, transformer, path);
-        if (mappedRun === null) {
-          return null;
-        }
-        return { ...moved, run: mappedRun } as ParagraphChild;
+        return kept(mappedRun === null ? null : ({ ...moved, run: mappedRun } as ParagraphChild));
       }
       default:
-        return child;
+        return [child];
     }
   }
 
-  // Default: treat as Run if isRun matches.
-  if (isRun(child)) {
-    return mapRun(child, transformer, path);
-  }
-
-  return child;
+  return [child];
 }
 
 function mapRun(run: Run, transformer: DocxTransformer, path: WalkPath): Run | null {
@@ -528,35 +543,46 @@ function mapSdt(
 
   // Recurse into content
   const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
-  const newContent: (Paragraph | Run | Table | StructuredDocumentTag)[] = [];
+  const newContent: (Paragraph | Run | Table | StructuredDocumentTag | RangeMarker)[] = [];
   for (let i = 0; i < current.content.length; i++) {
     const item = current.content[i];
     const itemPath: WalkPath = { ...innerPath, index: i };
     if ("type" in item && item.type === "paragraph") {
       const mapped = mapParagraph(item as Paragraph, transformer, itemPath);
-      if (mapped !== null) {
-        newContent.push(mapped);
-      }
+      newContent.push(
+        ...(mapped === null ? listRangeMarkers([item as BodyContent | Run]) : [mapped])
+      );
     } else if ("type" in item && item.type === "table") {
       const mapped = mapTable(item as Table, transformer, itemPath);
-      if (mapped !== null) {
-        newContent.push(mapped);
-      }
+      newContent.push(
+        ...(mapped === null ? listRangeMarkers([item as BodyContent | Run]) : [mapped])
+      );
     } else if ("type" in item && item.type === "sdt") {
       // Recurse into nested SDTs (e.g. repeating-section item SDTs).
       const mapped = mapSdt(item as StructuredDocumentTag, transformer, itemPath);
-      if (mapped !== null) {
-        newContent.push(mapped);
-      }
+      newContent.push(
+        ...(mapped === null ? listRangeMarkers([item as BodyContent | Run]) : [mapped])
+      );
     } else if ("content" in item && Array.isArray((item as Run).content)) {
       const mapped = mapRun(item as Run, transformer, innerPath);
-      if (mapped !== null) {
-        newContent.push(mapped);
-      }
+      newContent.push(
+        ...(mapped === null ? listRangeMarkers([item as BodyContent | Run]) : [mapped])
+      );
     } else {
       newContent.push(item);
     }
   }
 
-  return { ...current, content: newContent };
+  // A removed item leaves its range markers in place; any no item can hold
+  // go to the end of the content.
+  const unhosted: RangeMarker[] = [];
+  const content = foldRangeMarkers(newContent, unhosted);
+  if (unhosted.length === 0) {
+    return { ...current, content };
+  }
+  return {
+    ...current,
+    content,
+    contentRangeMarkersAfter: [...unhosted, ...(current.contentRangeMarkersAfter ?? [])]
+  };
 }

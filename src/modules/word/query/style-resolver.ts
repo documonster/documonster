@@ -15,7 +15,8 @@ import {
   resolveParagraphNumbering,
   resolveRunStyle,
   resolveStyle,
-  resolveTableCellFill
+  resolveTableCellFill,
+  resolveTableProperties
 } from "@word/query/style-resolve";
 import type {
   ResolvedParagraphStyle,
@@ -31,7 +32,8 @@ import type {
   Run,
   RunProperties,
   Table,
-  TableCell
+  TableCell,
+  TableProperties
 } from "@word/types";
 
 /** Style resolution bound to one document snapshot. */
@@ -48,11 +50,30 @@ export interface StyleResolver {
   heading(para: Paragraph): HeadingInfo | undefined;
   /** {@link resolveTableCellFill} */
   tableCellFill(table: Table, cell: TableCell, position: TableCellPosition): string | undefined;
+  /** {@link resolveTableProperties}: `table`'s properties with its table style's beneath. */
+  tableProperties(table: Table): TableProperties | undefined;
+  /**
+   * The context a paragraph in `table`'s cell at `rowIndex`/`colIndex` (grid
+   * column) resolves in — the table's effective style, look and band sizes.
+   */
+  cellContext(
+    table: Table,
+    rowIndex: number,
+    colIndex: number,
+    totalCols: number
+  ): StyleResolveContext;
 }
 
 /** Bind style resolution to `doc`'s current styles. */
 export function createStyleResolver(doc: DocxDocument): StyleResolver {
   const styles = indexStyles(doc);
+  const tableProps = new WeakMap<Table, TableProperties | undefined>();
+  const tableProperties = (table: Table): TableProperties | undefined => {
+    if (!tableProps.has(table)) {
+      tableProps.set(table, resolveTableProperties(doc, table, styles));
+    }
+    return tableProps.get(table);
+  };
   return {
     doc,
     styles,
@@ -61,6 +82,22 @@ export function createStyleResolver(doc: DocxDocument): StyleResolver {
     numbering: para => resolveParagraphNumbering(doc, para, styles),
     heading: para => resolveHeadingLevel(doc, para, styles),
     tableCellFill: (table, cell, position) =>
-      resolveTableCellFill(doc, table, cell, position, styles)
+      resolveTableCellFill(doc, table, cell, position, styles),
+    tableProperties,
+    cellContext: (table, rowIndex, colIndex, totalCols) => {
+      const props = tableProperties(table);
+      return {
+        tableContext: {
+          tableStyleId: props?.style,
+          tblLook: props?.look,
+          rowIndex,
+          colIndex,
+          totalRows: table.rows.length,
+          totalCols,
+          rowBandSize: props?.rowBandSize,
+          colBandSize: props?.colBandSize
+        }
+      };
+    }
   };
 }

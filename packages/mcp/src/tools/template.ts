@@ -16,8 +16,8 @@
 
 import path from "node:path";
 
-import { Io, Template } from "documonster/word";
-import type { BodyContent, TemplateImage } from "documonster/word";
+import { Document, Template } from "documonster/word";
+import type { BodyContent, DocxTemplateImage } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -64,7 +64,7 @@ export const templateInspectTool = defineTool({
     const resolved = await resolveInRoot(config, args.path, { mustExist: true });
     await assertReadableSize(config, resolved, args.path);
     const doc = await readTemplate(resolved, args.path);
-    const tags = Template.listTemplateTags(doc);
+    const tags = Template.listTags(doc);
 
     if (tags.length === 0) {
       return textResult(
@@ -207,7 +207,7 @@ export const templateFillTool = defineTool({
     // Read fresh: a fill may mutate the document in place, so a cached or reused
     // instance would be filled twice.
     const doc = await readTemplate(templatePath, args.template);
-    const before = Template.listTemplateTags(doc);
+    const before = Template.listTags(doc);
 
     if (before.length === 0) {
       throw toolError.invalidInput(
@@ -229,25 +229,25 @@ export const templateFillTool = defineTool({
 
     // Typed explicitly: a bare `let` is implicitly `any`, which would silently
     // erase the tag types read off the result below.
-    let filled: ReturnType<typeof Template.fillTemplateEnhanced>;
+    let filled: ReturnType<typeof Template.fill>;
     try {
       // strict is the engine's default and the right one here: it names the
       // first unresolved placeholder and produces no file, rather than saving a
       // document with a blank where a client's name should be.
       //
-      // `fillTemplateEnhanced` rather than `fillTemplate`: it is the same engine
+      // `richPlaceholders: true` rather than the basic fill: it is the same engine
       // plus a pass that understands `{{%image}}`, so this is a superset of the
       // previous behaviour. With the basic fill an image placeholder could only
       // ever end up unresolved, which is why the tool could not fill one at all.
       //
-      // **Use the return value.** Unlike `fillTemplate`, the enhanced form is not
-      // in-place: substituting an image replaces the whole paragraph, so it builds
-      // a new body and deliberately leaves the caller's document untouched — it
-      // even clones the headers to stop edits leaking back. Ignoring the result
+      // **Use the return value.** `Template.fill` is not in-place: substituting an
+      // image replaces the whole paragraph, so it builds a new document and
+      // deliberately leaves the caller's untouched. Ignoring the result
       // writes the *unfilled* template out, and because the fill itself succeeded
       // nothing reports a failure.
-      filled = Template.fillTemplateEnhanced(doc, templateData, {
-        strict: args.allowMissing !== true
+      filled = Template.fill(doc, templateData, {
+        strict: args.allowMissing !== true,
+        richPlaceholders: true
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -264,14 +264,14 @@ export const templateFillTool = defineTool({
     const dropped = pruneUnreferencedMedia(filled, media);
 
     await writeWithPolicy(target, args.overwrite === true, temporary =>
-      Io.writeFile(filled, temporary)
+      Document.writeFile(filled, temporary)
     );
 
     // Verified against the file on disk, not against the in-memory document the
     // writer was handed: a media part that failed to serialise, or a run pointing
     // at a relationship that does not exist, is invisible until it is read back.
     const verified = await verifyWrittenImages(target, media);
-    const remaining = Template.listTemplateTags(filled);
+    const remaining = Template.listTags(filled);
 
     const lines = [
       `Filled **${args.template}** → **${outputDisplay(args.out)}**`,
@@ -506,7 +506,7 @@ function firstFree(preferred: string, taken: (candidate: string) => boolean): st
  *    assigned down the path instead.
  * 2. **A collision must be refused, not silently won.** With `{{logo}}` and
  *    `{{%logo}}` in one template, a flat spread overwrote the text value with the
- *    image object — and the plain placeholder rendered the whole `TemplateImage` as
+ *    image object — and the plain placeholder rendered the whole `DocxTemplateImage` as
  *    JSON, pixel bytes included, into the document. Nine hundred characters of
  *    `{"0":137,"1":80,…}` where a client's name belonged.
  */
@@ -531,12 +531,12 @@ function mergeTemplateData(
   return merged;
 }
 
-/** The `TemplateImage` values, keyed by placeholder path. */
+/** The `DocxTemplateImage` values, keyed by placeholder path. */
 function imageValues(
   images: Map<string, ResolvedImage>,
   media: Map<string, MediaName>
-): Map<string, TemplateImage> {
-  const values = new Map<string, TemplateImage>();
+): Map<string, DocxTemplateImage> {
+  const values = new Map<string, DocxTemplateImage>();
   for (const [name, entry] of media) {
     const image = images.get(name);
     if (image === undefined) {
@@ -730,7 +730,7 @@ async function verifyWrittenImages(
   if (media.size === 0) {
     return new Set();
   }
-  const reopened = await Io.readFile(target).catch((cause: unknown) => {
+  const reopened = await Document.readFile(target).catch((cause: unknown) => {
     throw new McpToolError(
       "internal",
       `the document was written but could not be re-opened for verification: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -836,7 +836,7 @@ function assignPath(target: Record<string, unknown>, dotted: string, value: unkn
 }
 
 async function readTemplate(resolved: string, displayPath: string) {
-  return await Io.readFile(resolved).catch((cause: unknown) => {
+  return await Document.readFile(resolved).catch((cause: unknown) => {
     throw toolError.unsupported(
       `could not read ${displayPath} as a Word document`,
       "Templates must be .docx. Run doc_inspect to check the real file type.",

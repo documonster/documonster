@@ -12,12 +12,17 @@
  * would lose accuracy for nothing if the flattening happened upstream.
  */
 
+import { checkSurfaceCall } from "@draw/arguments";
+import { DrawArgumentError, DrawError } from "@draw/errors";
 import { BasicRasterCanvas } from "@draw/raster/canvas";
+import type { DrawRasterStrokeOptions } from "@draw/raster/canvas";
 import type { RasterFontSource } from "@draw/raster/glyph-outline";
 import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import { DEFAULT_TEXT_FAMILY, flattenPath, roundedRectToPath, sectorToPath } from "@draw/types";
 import type { DrawClip, DrawList, DrawPaint, DrawPoint } from "@draw/types";
+import { asPlainBytes } from "@utils/binary";
+import { parseCssColor } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
 
 /** Options for {@link rasterizeToRgba}. */
@@ -37,12 +42,16 @@ export interface RasterizeOptions {
    * including any added later, rather than teaching each one to compute coverage.
    */
   readonly samples?: number;
-  /** Background fill. Omitted leaves the canvas transparent. */
-  readonly background?: Rgba01;
+  /**
+   * Background fill: an IR colour `{ r, g, b, a }` or a CSS colour string — the same two forms
+   * `ToSvgOptions.background` takes. Omitted, `"none"` or `"transparent"` leaves the canvas
+   * transparent.
+   */
+  readonly background?: Rgba01 | string;
   /**
    * Fonts to draw text with, ahead of anything discovered on the host.
    *
-   * Raw `.ttf`/`.ttc` bytes, a `RasterFont` from `parseRasterFont`, or
+   * Raw `.ttf`/`.ttc` bytes, a `RasterFont` from `Draw.parseRasterFont`, or
    * `{ data, collectionIndex }` to name a face inside a collection. In Node these
    * outrank the discovered face; in a **browser they are the only way to get a glyph
    * outside ASCII at all**, since there is no font directory to search and the
@@ -88,6 +97,8 @@ export interface RgbaImage {
  * report something only this function can know.
  */
 export interface RasterizedImage extends RgbaImage {
+  /** {@link RgbaImage.data}, over an ordinary `ArrayBuffer` (so it is a `BufferSource`). */
+  readonly data: Uint8Array<ArrayBuffer>;
   /**
    * Code points no available font could draw, sorted.
    *
@@ -138,7 +149,7 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
   const pixelWidth = Math.max(1, Math.round(width * scale));
   const pixelHeight = Math.max(1, Math.round(height * scale));
   if (pixelWidth * pixelHeight > MAX_OUTPUT_PIXELS) {
-    throw new Error(
+    throw new DrawError(
       `raster output ${pixelWidth}x${pixelHeight} is ${Math.round(
         (pixelWidth * pixelHeight) / 1e6
       )}M pixels, over the ${Math.round(MAX_OUTPUT_PIXELS / 1e6)}M limit — ` +
@@ -147,19 +158,23 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
   }
   const samples = normalizeSamples(options.samples, pixelWidth, pixelHeight);
   const canvas = new BasicRasterCanvas(pixelWidth * samples, pixelHeight * samples);
-  if (options.background) {
-    canvas.fillRect(0, 0, pixelWidth * samples, pixelHeight * samples, token(options.background));
+  const background =
+    typeof options.background === "string" ? parseCssColor(options.background) : options.background;
+  if (background) {
+    canvas.fillRect(0, 0, pixelWidth * samples, pixelHeight * samples, token(background));
   }
   // Scoped to this canvas, not to the process: see `BasicRasterCanvas.setFonts`. The
   // defaults here are the canvas's own, so this is unconditional rather than guarded.
   canvas.setFonts(options.fonts ?? [], { useSystemFonts: options.useSystemFonts ?? true });
-  renderDrawList(list, createRasterSurface(canvas, fit * scale * samples));
+  renderDrawList(list, createRasterSurface(canvas, { scale: fit * scale * samples }));
   return {
     width: pixelWidth,
     height: pixelHeight,
-    data: samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples),
-    uncoveredCodePoints: [...canvas.uncoveredCodePoints].sort((a, b) => a - b),
-    textWarnings: canvas.textWarnings()
+    data: asPlainBytes(
+      samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples)
+    ),
+    uncoveredCodePoints: canvas.getUncoveredCodePoints(),
+    textWarnings: canvas.getTextWarnings()
   };
 }
 
@@ -260,7 +275,10 @@ export function normalizeSamples(
 ): number {
   const requested = samples === undefined ? 3 : samples;
   if (!Number.isFinite(requested) || requested < 1) {
-    throw new Error("raster samples must be a finite number >= 1");
+    throw new DrawArgumentError(
+      "samples",
+      `raster samples must be a finite number >= 1, got ${String(requested)}`
+    );
   }
   let allowed = Math.max(1, Math.min(4, Math.floor(requested)));
   while (allowed > 1 && pixelWidth * allowed * pixelHeight * allowed > MAX_INTERNAL_PIXELS) {
@@ -269,19 +287,41 @@ export function normalizeSamples(
   return allowed;
 }
 
+/** How {@link createRasterSurface} maps a list onto its canvas. */
+export interface RasterSurfaceOptions {
+  /** Factor from list user units to canvas pixels. Defaults to 1. */
+  readonly scale?: number;
+}
+
 /**
  * Build a surface over an existing canvas.
  *
  * @param canvas - Target canvas.
- * @param scale - Factor from list user units to canvas pixels.
  */
-export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawSurface {
+export function createRasterSurface(
+  canvas: BasicRasterCanvas,
+  options: RasterSurfaceOptions = {}
+): DrawSurface {
+  return createScaledRasterSurface(canvas, options.scale ?? 1);
+}
+
+/**
+ * {@link createRasterSurface} with the factor as its own argument — the signature the deprecated
+ * `createRasterSurface(canvas, scale)` of `documonster/draw` had, defaults included, so that
+ * forward behaves exactly as before for any `scale` it was given.
+ */
+export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawSurface {
   const at = (value: number): number => value * scale;
   const points = (input: readonly DrawPoint[]): DrawPoint[] =>
     input.map(point => ({ x: at(point.x), y: at(point.y) }));
+  // The surface is a public object as well as the one `Draw.toRgba` walks, so a caller
+  // driving it by hand gets a typed error rather than a `TypeError` from inside a primitive.
+  const check = (method: string, args: readonly unknown[]): void =>
+    checkSurfaceCall(`Draw.Backend.createRasterSurface(…).${method}`, method, args);
 
   return {
     pushClip(clip: DrawClip) {
+      check("pushClip", [clip]);
       canvas.pushClip(at(clip.x), at(clip.y), at(clip.width), at(clip.height));
     },
 
@@ -290,6 +330,7 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
     },
 
     rect(x, y, width, height, rx, paint) {
+      check("rect", [x, y, width, height, rx, paint]);
       const fill = token(paint.fill);
       if (fill !== undefined) {
         if (rx > 0) {
@@ -309,10 +350,7 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
         for (const subpath of flattenPath(roundedRectToPath(x, y, width, height, rx), scale)) {
           canvas.drawPolyline(
             subpath.closed ? [...subpath.points, subpath.points[0]] : [...subpath.points],
-            stroke,
-            strokeWidth(paint, scale),
-            paint.dash?.map(part => part * scale),
-            strokeShape(paint, subpath.closed)
+            strokeOptions(paint, stroke, scale, subpath.closed)
           );
         }
         return;
@@ -329,14 +367,12 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
           { x: at(x), y: at(y + height) },
           { x: at(x), y: at(y) }
         ],
-        stroke,
-        strokeWidth(paint, scale),
-        paint.dash?.map(part => part * scale),
-        strokeShape(paint, true)
+        strokeOptions(paint, stroke, scale, true)
       );
     },
 
     ellipse(cx, cy, rx, ry, paint) {
+      check("ellipse", [cx, cy, rx, ry, paint]);
       const fill = token(paint.fill);
       if (fill !== undefined) {
         canvas.fillEllipse(at(cx), at(cy), at(rx), at(ry), fill);
@@ -348,16 +384,14 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
           at(cy),
           at(rx),
           at(ry),
-          stroke,
-          strokeWidth(paint, scale),
-          paint.dash?.map(part => part * scale),
           // A closed outline: its first and last vertex is a corner like any other.
-          strokeShape(paint, true)
+          strokeOptions(paint, stroke, scale, true)
         );
       }
     },
 
     sector(cx, cy, radius, innerRadius, startAngle, endAngle, paint) {
+      check("sector", [cx, cy, radius, innerRadius, startAngle, endAngle, paint]);
       const fill = token(paint.fill);
       if (fill !== undefined) {
         // Per-pixel radius and angle test: an exact edge, no polygon facets. This
@@ -378,19 +412,18 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
       )) {
         canvas.drawPolyline(
           subpath.closed ? [...subpath.points, subpath.points[0]] : [...subpath.points],
-          stroke,
-          strokeWidth(paint, scale),
-          paint.dash?.map(part => part * scale),
-          strokeShape(paint, subpath.closed)
+          strokeOptions(paint, stroke, scale, subpath.closed)
         );
       }
     },
 
     polyline(input, closed, paint) {
+      check("polyline", [input, closed, paint]);
       paintPolygon(canvas, points(input), closed, paint, scale);
     },
 
     path(commands, paint) {
+      check("path", [commands, paint]);
       const subpaths = flattenPath(commands, scale);
       const fill = token(paint.fill);
       if (fill !== undefined) {
@@ -412,15 +445,13 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
       for (const subpath of subpaths) {
         canvas.drawPolyline(
           subpath.closed ? [...subpath.points, subpath.points[0]] : [...subpath.points],
-          stroke,
-          strokeWidth(paint, scale),
-          paint.dash?.map(part => part * scale),
-          strokeShape(paint, subpath.closed)
+          strokeOptions(paint, stroke, scale, subpath.closed)
         );
       }
     },
 
     text(x, y, lines, style, rotate) {
+      check("text", [x, y, lines, style, rotate]);
       const fill = token(style.fill);
       if (fill === undefined) {
         return;
@@ -429,20 +460,15 @@ export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawS
         if (line.text === "") {
           continue;
         }
-        canvas.drawText(
-          at(line.x ?? x),
-          at(y + line.dy),
-          line.text,
-          at(style.size),
-          fill,
-          style.anchor ?? "start",
-          rotate === 0 ? undefined : { angle: rotate, originX: at(x), originY: at(y) },
-          {
-            family: style.family ?? DEFAULT_TEXT_FAMILY,
-            ...(style.bold === undefined ? {} : { bold: style.bold }),
-            ...(style.italic === undefined ? {} : { italic: style.italic })
-          }
-        );
+        canvas.drawText(at(line.x ?? x), at(y + line.dy), line.text, {
+          fontSize: at(style.size),
+          color: fill,
+          anchor: style.anchor ?? "start",
+          ...(rotate === 0 ? {} : { rotation: { angle: rotate, originX: at(x), originY: at(y) } }),
+          family: style.family ?? DEFAULT_TEXT_FAMILY,
+          ...(style.bold === undefined ? {} : { bold: style.bold }),
+          ...(style.italic === undefined ? {} : { italic: style.italic })
+        });
       }
     }
   };
@@ -467,26 +493,28 @@ function paintPolygon(
   if (stroke !== undefined) {
     canvas.drawPolyline(
       closed ? [...points, points[0]] : [...points],
-      stroke,
-      strokeWidth(paint, scale),
-      paint.dash?.map(part => part * scale),
-      strokeShape(paint, closed)
+      strokeOptions(paint, stroke, scale, closed)
     );
   }
 }
 
 /**
- * The join and cap the canvas should apply.
+ * How the canvas should stroke `paint` in colour `color`, in canvas pixels.
  *
  * A closed run has no ends, so its first and last vertex is a corner like any other
  * and a round *join* has to round it — asking for a cap there would leave the seam
  * notched.
  */
-function strokeShape(
+function strokeOptions(
   paint: DrawPaint,
+  color: string,
+  scale: number,
   closed: boolean
-): { join?: "miter" | "round" | "bevel"; cap?: "butt" | "round" | "square" } {
+): DrawRasterStrokeOptions {
   return {
+    color,
+    width: strokeWidth(paint, scale),
+    ...(paint.dash === undefined ? {} : { dash: paint.dash.map(part => part * scale) }),
     ...(paint.lineJoin === undefined ? {} : { join: paint.lineJoin }),
     ...(closed
       ? paint.lineJoin === "round"
@@ -526,7 +554,10 @@ function normalizeScale(scale: number | undefined): number {
     return 1;
   }
   if (!Number.isFinite(scale) || scale <= 0) {
-    throw new Error("raster scale must be a positive finite number");
+    throw new DrawArgumentError(
+      "scale",
+      `raster scale must be a positive finite number, got ${String(scale)}`
+    );
   }
   return Math.min(8, scale);
 }

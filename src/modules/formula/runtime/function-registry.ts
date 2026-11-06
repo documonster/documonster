@@ -968,7 +968,13 @@ import {
   fnGROWTH,
   fnTREND,
   fnLINEST,
-  fnLOGEST
+  fnLOGEST,
+  fnTDIST,
+  fnTINV,
+  fnBETADIST,
+  fnLOGNORMDIST,
+  fnNEGBINOMDIST,
+  fnHYPGEOMDIST
 } from "@formula/functions/statistical";
 
 function registerNativeStatisticalFunctions(): void {
@@ -1083,6 +1089,26 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("TREND", 1, 4, fnTREND);
   defineEager("LINEST", 1, 4, fnLINEST);
   defineEager("LOGEST", 1, 4, fnLOGEST);
+  // Compatibility names. Those that only rename a successor share its implementation.
+  defineEager("TDIST", 3, 3, fnTDIST);
+  defineEager("TINV", 2, 2, fnTINV);
+  defineEager("CHIDIST", 2, 2, fnCHISQ_DIST_RT);
+  defineEager("CHIINV", 2, 2, fnCHISQ_INV_RT);
+  defineEager("FDIST", 3, 3, fnF_DIST_RT);
+  defineEager("FINV", 3, 3, fnF_INV_RT);
+  defineEager("BETADIST", 3, 5, fnBETADIST);
+  defineEager("BETAINV", 3, 5, fnBETA_INV);
+  defineEager("GAMMADIST", 4, 4, fnGAMMA_DIST);
+  defineEager("GAMMAINV", 3, 3, fnGAMMA_INV);
+  defineEager("LOGINV", 3, 3, fnLOGNORM_INV);
+  defineEager("LOGNORMDIST", 3, 3, fnLOGNORMDIST);
+  defineEager("EXPONDIST", 3, 3, fnEXPON_DIST);
+  defineEager("WEIBULL", 4, 4, fnWEIBULL_DIST);
+  defineEager("NEGBINOMDIST", 3, 3, fnNEGBINOMDIST);
+  defineEager("HYPGEOMDIST", 4, 4, fnHYPGEOMDIST);
+  defineEager("POISSON", 3, 3, fnPOISSON_DIST);
+  defineEager("CRITBINOM", 3, 3, fnBINOM_INV);
+  defineEager("COVAR", 2, 2, fnCOVARIANCE_P);
 }
 
 // ============================================================================

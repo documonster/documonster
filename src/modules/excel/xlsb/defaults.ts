@@ -13,8 +13,8 @@
  * self-checking or carries a value that could not be a coincidence — noted per record. Nothing here
  * is a field this library interprets; it is the floor a reader is entitled to assume is present.
  */
-import { encodeWideString } from "@excel/xlsb/binary";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { encodeWideString, XlsbReader } from "@excel/xlsb/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils.base";
 
 /**
@@ -131,7 +131,7 @@ export function bookView(view?: WorkbookViewLike): Uint8Array {
 /** Read a `BrtBookView`, or `undefined` when it is short. */
 export function readBookView(payload: Uint8Array, part: string): WorkbookViewLike | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const x = reader.readInt32();
     const y = reader.readInt32();
     const width = reader.readUint32();
@@ -197,7 +197,7 @@ export function readBookProtection(
   part: string
 ): BookProtectionLike | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     reader.readUint16(); // protpwdBook
     reader.readUint16(); // protpwdRev
     const flags = reader.readUint16();
@@ -300,7 +300,7 @@ export function readCalculationProperties(
   part: string
 ): CalcPropertiesLike | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     reader.readUint32(); // recalcID
     reader.readUint32(); // fAutoRecalc
     const iterateCount = reader.readUint32();
@@ -401,7 +401,7 @@ export function readWorksheetView(
   part: string
 ): WorksheetViewLike | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const flags = reader.readUint16();
     const style = viewStyle(reader.readUint32());
     reader.readUint32(); // rwTop
@@ -723,7 +723,7 @@ export function readIsoPasswordData(
   if (payload.length < offset + 12) {
     return undefined;
   }
-  const reader = new BinaryReader(payload);
+  const reader = new XlsbReader(payload);
   reader.position = spinCountAt;
   const spinCount = reader.readUint32();
   reader.position = offset;
@@ -769,7 +769,7 @@ export function readSheetProtection(
   part: string
 ): SheetProtectionLike | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     reader.readUint16(); // protpwd — a verifier this reader does not attempt to reverse.
     if (reader.readUint32() === 0) {
       // `fLocked` is 0, so every field after it is undefined by the specification and MUST be ignored.

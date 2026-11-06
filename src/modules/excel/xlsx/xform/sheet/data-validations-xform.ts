@@ -1,7 +1,13 @@
 import type { DataValidationRule, DataValidationWithFormulae } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
+import { fromFileFormula, toFileFormula } from "@excel/utils/future-functions";
+import {
+  isSameValidation,
+  mergeValidations,
+  slideValidation,
+  validationAnchor
+} from "@excel/utils/validation-anchor";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { deepEqual } from "@utils/object";
 import { parseBoolean, dateToExcel, excelToDate, parseOoxmlDate } from "@utils/utils";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
@@ -78,7 +84,7 @@ function optimiseDataValidations(model: DataValidationModel | undefined): Render
 
   // If no regular entries, just return range validations
   if (Object.keys(regularModel).length === 0) {
-    return rangeValidations;
+    return mergeRendered(rangeValidations);
   }
 
   const dvList = Object.entries(regularModel)
@@ -96,9 +102,10 @@ function optimiseDataValidations(model: DataValidationModel | undefined): Render
   ): boolean => {
     for (let i = 0; i < height; i++) {
       const otherAddress = colCache.encodeAddress(addr.row + i, col);
+      const other = regularModel[otherAddress];
       if (
-        !regularModel[otherAddress] ||
-        !deepEqual(regularModel[addr.address], regularModel[otherAddress])
+        other === undefined ||
+        !isSameValidation(regularModel[addr.address]!, addr.address, other, otherAddress)
       ) {
         return false;
       }
@@ -125,12 +132,14 @@ function optimiseDataValidations(model: DataValidationModel | undefined): Render
         // iterate downwards - finding matching cells
         let height = 1;
         let otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
+        let below = regularModel[otherAddress];
         while (
-          regularModel[otherAddress] &&
-          deepEqual(dv.dataValidation, regularModel[otherAddress])
+          below !== undefined &&
+          isSameValidation(dv.dataValidation!, dv.address, below, otherAddress)
         ) {
           height++;
           otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
+          below = regularModel[otherAddress];
         }
 
         // iterate rightwards...
@@ -165,7 +174,17 @@ function optimiseDataValidations(model: DataValidationModel | undefined): Render
     })
     .filter((v): v is RenderedValidation => v !== null);
 
-  return [...rangeValidations, ...optimized];
+  return mergeRendered([...rangeValidations, ...optimized]);
+}
+
+/**
+ * One `<dataValidation>` per distinct rule, over every range it covers — which is how a multi-range `sqref` comes back
+ * out as the single rule it was read from. Each formula is restated from the merged sqref's top-left.
+ */
+function mergeRendered(validations: RenderedValidation[]): RenderedValidation[] {
+  return mergeValidations(
+    validations.map(({ sqref, ...rule }) => ({ ranges: [sqref], rule: rule as DataValidationRule }))
+  ).map(({ ranges, rule }) => ({ ...rule, sqref: ranges.join(" ") }) as RenderedValidation);
 }
 
 /**
@@ -189,9 +208,85 @@ function* dateRules(model: DataValidationModel | undefined): Generator<DataValid
   }
 }
 
+/** A formula that is a number and nothing else — `10`, `-2.5`, `1E+3` — as opposed to `A1` or `$B$1+1`. */
+const NUMBER_LITERAL = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+
+/**
+ * A `<formula1>`/`<formula2>` as the model holds it.
+ *
+ * **A bound is a formula, and a literal is only one kind of formula.** `whole`, `decimal`, `textLength` and `date`
+ * bounds were read with `parseInt`/`parseFloat` whatever they held, so a bound Excel writes as `A1`, `$B$1+1` or a
+ * defined name came back as `NaN` — `null` once serialised, and `NaN` once written back — and a `date` one as an
+ * Invalid Date. A numeric bound is still read by the same function as before; anything else is now kept as the
+ * formula text, which the writer writes verbatim. Every other type's bounds are text, as they always were.
+ */
+function readFormula(text: string, type: DataValidationRule["type"]): string | number {
+  switch (type) {
+    case "whole":
+    case "textLength":
+      return NUMBER_LITERAL.test(text.trim()) ? parseInt(text, 10) : text;
+    case "decimal":
+    // A date bound is left as the raw serial. The epoch is not known while the sheet is being tokenised — it lives
+    // in the workbook part — so the conversion happens in `reconcile`, which is where `CellXform` does the same
+    // thing for the same reason.
+    case "date":
+      return NUMBER_LITERAL.test(text.trim()) ? parseFloat(text) : text;
+    default:
+      return text;
+  }
+}
+
+/** `Sheet1!A1`, `'Other Sheet'!$A$1`, `[1]Sheet1!A1`: anything qualified by a sheet or a book. */
+const SHEET_QUALIFIED = /!/;
+/** `TODAY()`, `DATE(2020,1,15)`, `_xlfn.X(…)`. */
+const FUNCTION_CALL = /[A-Za-z_\\][\w.]*\s*\(/;
+/** A cell reference standing as a token — `A1`, `$B$1`, `XFD1048576` — anywhere in the text, so `$B$1+1` is one. */
+const CELL_REFERENCE = /(?:^|[^\w.$])\$?[A-Za-z]{1,3}\$?\d+(?![\w.(])/;
+/** A whole-column or whole-row range: `A:A`, `$B:$D`, `1:3`. */
+const LINE_RANGE = /^\s*(?:\$?[A-Za-z]{1,3}\s*:\s*\$?[A-Za-z]{1,3}|\$?\d+\s*:\s*\$?\d+)\s*$/;
+/** A bare name — a defined name, or `TRUE` — which a date never is. */
+const DEFINED_NAME = /^\s*[A-Za-z_\\][\w.\\]*\s*$/;
+
+/** Whether `text` names a cell, a range, a sheet, a defined name or a function — a formula rather than a date. */
+function isFormulaText(text: string): boolean {
+  return (
+    SHEET_QUALIFIED.test(text) ||
+    FUNCTION_CALL.test(text) ||
+    CELL_REFERENCE.test(text) ||
+    LINE_RANGE.test(text) ||
+    DEFINED_NAME.test(text)
+  );
+}
+
+/**
+ * A `type: "date"` bound as `<formula1>` text: a date or a serial becomes the serial, and so does a string the date
+ * parser reads — `2020-01-15`, `1/15/2020`, `Jan 15 2020` — unless it is a formula.
+ *
+ * **A parse that succeeds is not enough**, because the engine's date parser accepts nearly anything:
+ * `new Date("'Other Sheet'!$A$1Z")` is 2001-01-01 in V8, so a cross-sheet bound was written as that serial. And a
+ * string it cannot read (`TODAY()`, `A1`, `$B$1+1`, a defined name) was written as `NaN`. Both are formulae and are
+ * written as they are; a string that is neither a date nor a recognisable formula is kept as text too, which is what
+ * Excel would make of it.
+ */
+function writeDateFormula(formula: string | number | Date, date1904: boolean): string {
+  // `dateToExcel` reads the *UTC* fields, which is the library's convention for a `Date` carrying a calendar value.
+  // A string is routed through `parseOoxmlDate` rather than `new Date`, so an unsuffixed `2020-01-15T00:00:00` is
+  // not read as local time — the same defect the strict-format `t="d"` cell branch had.
+  if (typeof formula === "string") {
+    if (isFormulaText(formula)) {
+      return formula;
+    }
+    const when = parseOoxmlDate(formula);
+    return Number.isNaN(when.getTime()) ? formula : String(dateToExcel(when, date1904));
+  }
+  const when = formula instanceof Date ? formula : excelToDate(formula, date1904);
+  return String(dateToExcel(when, date1904));
+}
+
 class DataValidationsXform extends BaseXform<DataValidationModel> {
-  declare private _address: string;
-  declare private _dataValidation: DataValidationRule;
+  declare private _address: string | undefined;
+  // Undefined outside a readable `<dataValidation>`: a damaged one (a mangled open tag, no `sqref`) is skipped.
+  declare private _dataValidation: DataValidationRule | undefined;
   declare private _formula: string[] | undefined;
 
   get tag(): string {
@@ -271,19 +366,11 @@ class DataValidationsXform extends BaseXform<DataValidationModel> {
         formulae.forEach((formula, index) => {
           xmlStream.openNode(`formula${index + 1}`);
           if (value.type === "date") {
-            // `dateToExcel` reads the *UTC* fields, which is the library's convention for a `Date` carrying a
-            // calendar value. A string is routed through `parseOoxmlDate` rather than `new Date`, so an
-            // unsuffixed `2020-01-15T00:00:00` is not read as local time — the same defect the strict-format
-            // `t="d"` cell branch had.
-            const when =
-              formula instanceof Date
-                ? formula
-                : typeof formula === "string"
-                  ? parseOoxmlDate(formula)
-                  : excelToDate(formula, date1904);
-            xmlStream.writeText(dateToExcel(when, date1904));
+            xmlStream.writeText(writeDateFormula(formula, date1904));
           } else {
-            xmlStream.writeText(typeof formula === "string" ? formula : String(formula));
+            xmlStream.writeText(
+              typeof formula === "string" ? toFileFormula(formula) : String(formula)
+            );
           }
           xmlStream.closeNode();
         });
@@ -301,6 +388,10 @@ class DataValidationsXform extends BaseXform<DataValidationModel> {
 
       case "dataValidation": {
         this._address = node.attributes.sqref;
+        if (this._address === undefined) {
+          this._dataValidation = undefined;
+          return true;
+        }
         const dataValidation: Record<string, unknown> = {
           type: node.attributes.type ?? "any",
           formulae: []
@@ -352,7 +443,14 @@ class DataValidationsXform extends BaseXform<DataValidationModel> {
       case "dataValidations":
         return false;
       case "dataValidation": {
-        const dv = this._dataValidation as DataValidationRule & {
+        const parsed = this._dataValidation;
+        const address = this._address;
+        this._dataValidation = undefined;
+        this._address = undefined;
+        if (parsed === undefined || address === undefined) {
+          return true;
+        }
+        const dv = parsed as DataValidationRule & {
           formulae?: (string | number | Date)[];
           operator?: unknown;
         };
@@ -361,41 +459,32 @@ class DataValidationsXform extends BaseXform<DataValidationModel> {
           delete dv.operator;
         }
         // The four known cases: 1. E4:L9 N4:U9  2.E4 L9  3. N4:U9  4. E4
-        const list = this._address.split(/\s+/g);
+        const list = address.split(/\s+/g).filter(Boolean);
+        // The formulae are relative to the top-left of the whole sqref, and each entry made here is relative to its
+        // own — so a relative reference is slid to every range it is stored under.
+        const anchor = validationAnchor(list);
         list.forEach((addr: string) => {
+          const corner = validationAnchor([addr]);
+          const rule =
+            anchor === undefined || corner === undefined
+              ? parsed
+              : (slideValidation(parsed, anchor, corner) ?? parsed);
           if (addr.includes(":")) {
             // Store ranges directly to avoid expanding large (or many) validations.
             // The key format "range:A1:Z100" allows DataValidations.find() to detect it.
-            this.model![`range:${addr}`] = this._dataValidation;
+            this.model![`range:${addr}`] = rule;
           } else {
-            this.model![addr] = this._dataValidation;
+            this.model![addr] = rule;
           }
         });
         return true;
       }
       case "formula1":
       case "formula2": {
-        const dv = this._dataValidation as DataValidationWithFormulae;
-        let formula: string | number | Date = this._formula!.join("");
-        switch (dv.type) {
-          case "whole":
-          case "textLength":
-            formula = parseInt(formula, 10);
-            break;
-          case "decimal":
-            formula = parseFloat(formula);
-            break;
-          case "date":
-            // Left as the raw serial. The epoch is not known while the sheet is being tokenised — it lives in the
-            // workbook part — so the conversion happens in `reconcile`, which is where `CellXform` does the same
-            // thing for the same reason. Converting here is what made a date bound read against a hard-coded 1900
-            // epoch regardless of the workbook's own.
-            formula = parseFloat(formula);
-            break;
-          default:
-            break;
+        const dv = this._dataValidation as DataValidationWithFormulae | undefined;
+        if (dv !== undefined && this._formula !== undefined) {
+          dv.formulae.push(readFormula(fromFileFormula(this._formula.join("")), dv.type));
         }
-        dv.formulae.push(formula);
         this._formula = undefined;
         return true;
       }

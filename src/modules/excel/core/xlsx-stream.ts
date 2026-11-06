@@ -14,7 +14,7 @@
  */
 import type { XlsxReadable, XlsxStreamListener, XlsxWritable } from "@excel/core/xlsx-io-types";
 import type { XlsxWriteOptions } from "@excel/xlsx/types";
-import { createReadable } from "@stream";
+import { Streams } from "@stream";
 
 /** Options accepted by `Workbook.toStream`. */
 export interface XlsxStreamOptions extends XlsxWriteOptions {
@@ -71,7 +71,7 @@ export function createXlsxByteStream(
   // `handleRead` / `handleDestroy` are hoisted function declarations, and no
   // platform `Readable` invokes `_read` from its constructor, so both closures
   // only ever run after `source` and `sink` are initialised.
-  const source = createReadable<Uint8Array>({
+  const source = Streams.createReadable<Uint8Array>({
     highWaterMark,
     read: handleRead,
     destroy: handleDestroy

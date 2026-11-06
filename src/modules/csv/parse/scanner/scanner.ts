@@ -770,6 +770,7 @@ export function scanRow(
 
   let pos = start;
   let hasUnterminatedQuote = false;
+  let hasTextAfterQuote = false;
 
   // Track raw row boundaries for zero-copy extraction
   const rawStart = start;
@@ -823,6 +824,7 @@ export function scanRow(
             quoted,
             endPos: pos + 1,
             complete: true,
+            textAfterQuote: hasTextAfterQuote || undefined,
             needMore: false,
             newline: "\n",
             rawStart,
@@ -837,6 +839,7 @@ export function scanRow(
                 quoted,
                 endPos: pos + 2,
                 complete: true,
+                textAfterQuote: hasTextAfterQuote || undefined,
                 needMore: false,
                 newline: "\r\n",
                 rawStart,
@@ -848,6 +851,7 @@ export function scanRow(
               quoted,
               endPos: pos + 1,
               complete: true,
+              textAfterQuote: hasTextAfterQuote || undefined,
               needMore: false,
               newline: "\r",
               rawStart,
@@ -872,6 +876,7 @@ export function scanRow(
             quoted,
             endPos: pos + 1,
             complete: true,
+            textAfterQuote: hasTextAfterQuote || undefined,
             needMore: false,
             newline: "\r",
             rawStart,
@@ -879,20 +884,77 @@ export function scanRow(
           };
         }
 
-        // Unexpected character after closing quote - skip it (lenient parsing)
-        // This handles cases like: "value"garbage,next
-        // We could also throw an error here for strict mode
+        // Text after the closing quote (`"value"garbage,next`). It is not part of the field
+        // and RFC 4180 has no reading for it, so the row is marked: the parser reports it as a
+        // record error instead of returning a row with the text silently dropped.
+        hasTextAfterQuote = true;
         pos++;
         // Find next delimiter or newline
         while (pos < len) {
           if (isAtDelimiter(input, pos, delimiter)) {
             pos += delimLen;
+            if (pos >= len && isEof) {
+              fields.push("");
+              quoted.push(false);
+            }
             break;
           }
           if (input[pos] === "\n" || input[pos] === "\r") {
             break;
           }
           pos++;
+        }
+        if (pos < len && (input[pos] === "\n" || input[pos] === "\r")) {
+          if (input[pos] === "\n") {
+            return {
+              fields,
+              quoted,
+              endPos: pos + 1,
+              complete: true,
+              needMore: false,
+              newline: "\n",
+              textAfterQuote: true,
+              rawStart,
+              rawEnd: pos
+            };
+          }
+          if (pos + 1 < len) {
+            const crlf = input[pos + 1] === "\n";
+            return {
+              fields,
+              quoted,
+              endPos: pos + (crlf ? 2 : 1),
+              complete: true,
+              needMore: false,
+              newline: crlf ? "\r\n" : "\r",
+              textAfterQuote: true,
+              rawStart,
+              rawEnd: pos
+            };
+          }
+          if (!isEof) {
+            return {
+              fields,
+              quoted,
+              endPos: pos,
+              complete: false,
+              needMore: true,
+              resumePos: start,
+              rawStart,
+              rawEnd: pos
+            };
+          }
+          return {
+            fields,
+            quoted,
+            endPos: pos + 1,
+            complete: true,
+            needMore: false,
+            newline: "\r",
+            textAfterQuote: true,
+            rawStart,
+            rawEnd: pos
+          };
         }
         continue;
       }
@@ -944,6 +1006,7 @@ export function scanRow(
           quoted,
           endPos: pos + 1,
           complete: true,
+          textAfterQuote: hasTextAfterQuote || undefined,
           needMore: false,
           newline: "\n",
           rawStart,
@@ -957,6 +1020,7 @@ export function scanRow(
             quoted,
             endPos: pos + 2,
             complete: true,
+            textAfterQuote: hasTextAfterQuote || undefined,
             needMore: false,
             newline: "\r\n",
             rawStart,
@@ -969,6 +1033,7 @@ export function scanRow(
           quoted,
           endPos: pos + 1,
           complete: true,
+          textAfterQuote: hasTextAfterQuote || undefined,
           needMore: false,
           newline: "\r",
           rawStart,
@@ -987,6 +1052,7 @@ export function scanRow(
         quoted,
         endPos: pos,
         complete: true,
+        textAfterQuote: hasTextAfterQuote || undefined,
         needMore: false,
         unterminatedQuote: hasUnterminatedQuote || undefined,
         rawStart,

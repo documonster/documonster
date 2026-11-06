@@ -4,7 +4,7 @@
  * Tests for utility functions:
  * - RowHashArray helpers (isRowHashArray, rowHashArrayToMap, etc.)
  * - Header deduplication
- * - Csv.quoted/Csv.unquoted helpers
+ * - Csv.forceQuote/Csv.preventQuote helpers
  * - isFormattedValue
  */
 
@@ -70,7 +70,7 @@ describe("RowHashArray Helper Functions", () => {
 
   describe("rowHashArrayToValues", () => {
     it("should extract values from RowHashArray", () => {
-      const result = Csv.rowHashArrayToValues<string | number>([
+      const result = Csv.getRowValues<string | number>([
         ["name", "Alice"],
         ["age", 30]
       ]);
@@ -78,7 +78,7 @@ describe("RowHashArray Helper Functions", () => {
     });
 
     it("should handle empty RowHashArray", () => {
-      expect(Csv.rowHashArrayToValues([])).toEqual([]);
+      expect(Csv.getRowValues([])).toEqual([]);
     });
   });
 
@@ -88,12 +88,12 @@ describe("RowHashArray Helper Functions", () => {
         ["name", "Alice"],
         ["age", 30]
       ];
-      const result = Csv.rowHashArrayToHeaders(data);
+      const result = Csv.getRowHeaders(data);
       expect(result).toEqual(["name", "age"]);
     });
 
     it("should handle empty RowHashArray", () => {
-      expect(Csv.rowHashArrayToHeaders([])).toEqual([]);
+      expect(Csv.getRowHeaders([])).toEqual([]);
     });
   });
 
@@ -120,24 +120,24 @@ describe("RowHashArray Helper Functions", () => {
         ["age", 30],
         ["city", "NYC"]
       ];
-      const result = Csv.rowHashArrayMapByHeaders(row, ["city", "name", "age"]);
+      const result = Csv.getRowValuesByHeaders(row, ["city", "name", "age"]);
       expect(result).toEqual(["NYC", "Alice", 30]);
     });
 
     it("should return undefined for missing keys", () => {
       const row: [string, any][] = [["name", "Alice"]];
-      const result = Csv.rowHashArrayMapByHeaders(row, ["name", "age", "city"]);
+      const result = Csv.getRowValuesByHeaders(row, ["name", "age", "city"]);
       expect(result).toEqual(["Alice", undefined, undefined]);
     });
 
     it("should handle empty RowHashArray", () => {
-      const result = Csv.rowHashArrayMapByHeaders([], ["name", "age"]);
+      const result = Csv.getRowValuesByHeaders([], ["name", "age"]);
       expect(result).toEqual([undefined, undefined]);
     });
 
     it("should handle empty headers", () => {
       const row: [string, any][] = [["name", "Alice"]];
-      const result = Csv.rowHashArrayMapByHeaders(row, []);
+      const result = Csv.getRowValuesByHeaders(row, []);
       expect(result).toEqual([]);
     });
 
@@ -148,7 +148,7 @@ describe("RowHashArray Helper Functions", () => {
         ["b", 2],
         ["c", 3]
       ];
-      const result = Csv.rowHashArrayMapByHeaders(row, ["c", "a", "b"]);
+      const result = Csv.getRowValuesByHeaders(row, ["c", "a", "b"]);
       expect(result).toEqual([3, 1, 2]);
     });
 
@@ -160,7 +160,7 @@ describe("RowHashArray Helper Functions", () => {
         row.push([`key${i}`, `value${i}`]);
         headers.push(`key${14 - i}`); // Reverse order
       }
-      const result = Csv.rowHashArrayMapByHeaders(row, headers);
+      const result = Csv.getRowValuesByHeaders(row, headers);
       // Should be reversed values
       expect(result[0]).toBe("value14");
       expect(result[14]).toBe("value0");
@@ -247,14 +247,14 @@ describe("Header Deduplication", () => {
 describe("Quoting Helpers", () => {
   describe("quoted", () => {
     it("should mark value as pre-quoted", () => {
-      const result = Csv.quoted("test");
+      const result = Csv.forceQuote("test");
       expect(isFormattedValue(result)).toBe(true);
       expect(result.value).toBe("test");
       expect(result.quote).toBe(true);
     });
 
     it("should handle empty string", () => {
-      const result = Csv.quoted("");
+      const result = Csv.forceQuote("");
       expect(result.value).toBe("");
       expect(result.quote).toBe(true);
     });
@@ -262,14 +262,14 @@ describe("Quoting Helpers", () => {
 
   describe("unquoted", () => {
     it("should mark value as never quoted", () => {
-      const result = Csv.unquoted("test,with,commas");
+      const result = Csv.preventQuote("test,with,commas");
       expect(isFormattedValue(result)).toBe(true);
       expect(result.value).toBe("test,with,commas");
       expect(result.quote).toBe(false);
     });
 
     it("should handle empty string", () => {
-      const result = Csv.unquoted("");
+      const result = Csv.preventQuote("");
       expect(result.value).toBe("");
       expect(result.quote).toBe(false);
     });
@@ -277,8 +277,8 @@ describe("Quoting Helpers", () => {
 
   describe("isFormattedValue", () => {
     it("should return true for FormattedValue objects", () => {
-      expect(isFormattedValue(Csv.quoted("test"))).toBe(true);
-      expect(isFormattedValue(Csv.unquoted("test"))).toBe(true);
+      expect(isFormattedValue(Csv.forceQuote("test"))).toBe(true);
+      expect(isFormattedValue(Csv.preventQuote("test"))).toBe(true);
     });
 
     it("should return false for plain values", () => {
@@ -289,5 +289,21 @@ describe("Quoting Helpers", () => {
       expect(isFormattedValue({})).toBe(false);
       expect(isFormattedValue([])).toBe(false);
     });
+  });
+});
+
+describe("deprecated Csv helper names", () => {
+  it("forward to the verb-named members", () => {
+    expect(Csv.quoted).toBe(Csv.forceQuote);
+    expect(Csv.unquoted).toBe(Csv.preventQuote);
+    // The live names check their arguments (X10), so they are no longer the same functions;
+    // the deprecated forwards keep the unchecked forms and give the same results.
+    const row: [string, number][] = [
+      ["a", 1],
+      ["b", 2]
+    ];
+    expect(Csv.rowHashArrayToValues(row)).toEqual(Csv.getRowValues(row));
+    expect(Csv.rowHashArrayToHeaders(row)).toEqual(Csv.getRowHeaders(row));
+    expect(Csv.rowHashArrayMapByHeaders(row, ["b"])).toEqual(Csv.getRowValuesByHeaders(row, ["b"]));
   });
 });

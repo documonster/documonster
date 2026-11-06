@@ -72,7 +72,9 @@ describe("hasDigitalSignatures", () => {
 describe("parseSignatureXml", () => {
   it("extracts signer name from SignatureText", () => {
     const info = parseSignatureXml(SAMPLE_SIGNATURE_XML, "sig1.xml");
-    expect(info.signer).toBe("John Doe");
+    expect(info.claimedSigner).toBe("John Doe");
+    // The deprecated name carries the same value until 1.0.
+    expect(info.signer).toBe(info.claimedSigner);
   });
 
   it("extracts signature comments", () => {
@@ -139,6 +141,7 @@ describe("parseSignatureXml", () => {
       </SignatureProperty></SignatureProperties></Object>
     </Signature>`;
     const info = parseSignatureXml(xml, "sig.xml");
+    expect(info.claimedSigner).toBe("O'Connor & Sons");
     expect(info.signer).toBe("O'Connor & Sons");
   });
 });
@@ -160,6 +163,7 @@ describe("extractSignatures", () => {
     ];
     const signatures = extractSignatures(parts);
     expect(signatures.length).toBe(1);
+    expect(signatures[0].claimedSigner).toBe("John Doe");
     expect(signatures[0].signer).toBe("John Doe");
     expect(signatures[0].fileName).toBe("sig1.xml");
   });

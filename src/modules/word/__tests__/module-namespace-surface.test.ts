@@ -45,22 +45,27 @@ describe("documonster/word namespace surface", () => {
   });
 
   it("Build namespace exposes content-node builders", () => {
-    for (const m of ["paragraph", "text", "table", "heading", "createShape"]) {
+    for (const m of ["paragraph", "text", "table", "heading", "shape"]) {
       expect(isFn(Word.Build, m), `Build.${m}`).toBe(true);
     }
   });
 
-  it("Io namespace exposes package/read + merge/split", () => {
-    for (const m of ["package", "read", "toBuffer", "merge", "split"]) {
+  it("Io namespace exposes read/toBuffer", () => {
+    for (const m of ["read", "toBuffer", "toFlatOpc"]) {
       expect(isFn(Word.Io, m), `Io.${m}`).toBe(true);
+    }
+  });
+
+  it("Transform namespace exposes merge/split", () => {
+    for (const m of ["merge", "split", "updateFields", "map"]) {
+      expect(isFn(Word.Transform, m), `Transform.${m}`).toBe(true);
     }
   });
 
   it("Document builder round-trips a paragraph", () => {
     const doc = Word.Document.create();
     Word.Document.addParagraph(doc, "Hello");
-    const built = Word.Document.build(doc);
-    expect(built.body.length).toBeGreaterThan(0);
+    expect(doc.body.length).toBeGreaterThan(0);
   });
 
   it("data-model types stay flat (error classes exported)", () => {

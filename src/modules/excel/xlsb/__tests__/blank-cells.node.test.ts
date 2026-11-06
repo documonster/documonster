@@ -46,13 +46,13 @@ beforeAll(async () => {
   const sheet = Workbook.addWorksheet(handle, "S");
   for (let row = 1; row <= DATA_ROWS; row++) {
     for (let column = 1; column <= COLUMNS; column++) {
-      Cell.setValue(sheet, row, column, row * column);
+      Cell.setValue(sheet, { row, col: column }, row * column);
     }
   }
   // The formatted tail. This is the shape that costs: a fill applied past the data, one record per cell.
   for (let row = DATA_ROWS + 1; row <= LAST_ROW; row++) {
     for (let column = 1; column <= COLUMNS; column++) {
-      Cell.setStyle(sheet, row, column, {
+      Cell.setStyle(sheet, { row, col: column }, {
         fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEEEEE" } }
       } as never);
     }
@@ -121,7 +121,7 @@ describe("collapse changes the model, not the file", () => {
     // business, and the values are read back rather than assumed.
     const [kept, collapsed] = await Promise.all([readAs("keep"), readAs("collapse")]);
     for (const handle of [kept.handle, collapsed.handle]) {
-      const sheet = Workbook.getWorksheets(handle)[0];
+      const sheet = Workbook.listWorksheets(handle)[0];
       expect(Cell.getValue(sheet, "A1")).toBe(1);
       expect(Cell.getValue(sheet, "J20")).toBe(200);
     }
@@ -131,7 +131,7 @@ describe("collapse changes the model, not the file", () => {
     // The distinction that makes the option safe: only *value-less* cells are collapsed. A styled cell that holds
     // a number keeps its style in the model, where a caller can read it.
     const collapsed = await readAs("collapse");
-    const sheet = Workbook.getWorksheets(collapsed.handle)[0];
+    const sheet = Workbook.listWorksheets(collapsed.handle)[0];
     expect(Cell.getValue(sheet, "A1")).toBe(1);
   });
 });
@@ -202,7 +202,7 @@ describe("reachable through the public API", () => {
     ]) {
       const handle = Workbook.create();
       await read(handle);
-      const sheet = Workbook.getWorksheets(handle)[0];
+      const sheet = Workbook.listWorksheets(handle)[0];
       expect(Cell.getValue(sheet, "A1")).toBe(1);
       expect(Cell.getValue(sheet, "J20")).toBe(200);
     }

@@ -21,7 +21,7 @@ export type { ArchiveFormat };
 // =============================================================================
 
 /** Entry data passed to transform function */
-export interface TransformEntryData {
+export interface ArchiveTransformEntryData {
   name: string;
   isDirectory: boolean;
   size: number;
@@ -34,19 +34,19 @@ export interface TransformEntryData {
 }
 
 /** Transform result: modified data, `false` to skip, or `undefined` to keep as-is */
-export type TransformResult = TransformEntryData | false | undefined;
+export type ArchiveTransformResult = ArchiveTransformEntryData | false | undefined;
 
 /**
  * Transform function for per-entry customization.
  * @example
  * ```ts
- * const transform: TransformFunction = (data) => {
+ * const transform: ArchiveTransformFunction = (data) => {
  *   if (data.name.endsWith('.log')) return false; // skip
  *   return { ...data, name: data.name.replace('src/', 'dist/') }; // rename
  * };
  * ```
  */
-export type TransformFunction = (data: TransformEntryData) => TransformResult;
+export type ArchiveTransformFunction = (data: ArchiveTransformEntryData) => ArchiveTransformResult;
 
 // =============================================================================
 // Overwrite Strategies
@@ -158,7 +158,7 @@ export interface AddDirectoryOptions {
    * });
    * ```
    */
-  transform?: TransformFunction;
+  transform?: ArchiveTransformFunction;
 
   /** Follow symbolic links (default: false) */
   followSymlinks?: boolean;
@@ -209,7 +209,7 @@ export interface AddGlobOptions {
   filter?: (path: string, stats: { isDirectory: boolean; size: number }) => boolean;
 
   /** Transform function to modify entry metadata or skip entries. */
-  transform?: TransformFunction;
+  transform?: ArchiveTransformFunction;
 
   /** Encryption method */
   encryptionMethod?: ZipEncryptionMethod;
@@ -282,7 +282,7 @@ export interface ArchiveStreamOptions {
  */
 export interface ArchiveStreamOperation {
   /** Async iterable of archive output chunks */
-  iterable: AsyncIterable<Uint8Array>;
+  iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 
   /** Abort signal linked to this operation */
   signal: AbortSignal;
@@ -438,17 +438,6 @@ export interface ZipFileOptions {
 }
 
 /**
- * Options for opening an existing ZIP file.
- */
-export interface OpenZipOptions {
-  /** Password for encrypted entries */
-  password?: string | Uint8Array;
-
-  /** Optional string encoding for legacy (non-UTF8) names/comments. */
-  encoding?: ZipStringEncoding;
-}
-
-/**
  * Options for writing an archive file to disk.
  */
 export interface WriteZipOptions {
@@ -568,17 +557,6 @@ export interface TarFileOptions {
   concurrency?: number;
 }
 
-/**
- * Options for opening an existing TAR file.
- */
-export interface OpenTarOptions {
-  /** Archive format */
-  format: "tar";
-
-  /** If true, decompress gzip before parsing */
-  gzip?: boolean;
-}
-
 // =============================================================================
 // Unified ArchiveFile Options (with format discrimination)
 // =============================================================================
@@ -605,25 +583,72 @@ export interface ArchiveFileOptionsTar extends Omit<TarFileOptions, "format"> {
 export type ArchiveFileOptions = ArchiveFileOptionsZip | ArchiveFileOptionsTar;
 
 /**
- * ZIP format options for opening an archive.
+ * ZIP options for opening an existing archive with `ArchiveFile`
+ * (`ArchiveFile.fromFile`, `ArchiveFile.fromFileSync`, `ArchiveFile.fromBuffer`).
  */
-export interface OpenArchiveOptionsZip extends OpenZipOptions {
+export interface ArchiveFileOpenOptionsZip {
   /** Archive format (default: 'zip') */
   format?: "zip";
+
+  /** Password for encrypted entries */
+  password?: string | Uint8Array;
+
+  /** Optional string encoding for legacy (non-UTF8) names/comments. */
+  encoding?: ZipStringEncoding;
+
+  /**
+   * Whether to verify each entry read from the archive against its recorded CRC-32,
+   * throwing `ZipCrc32MismatchError` on a mismatch. Set `false` to read damaged archives as
+   * far as they go. AES entries carry an HMAC instead; ZipCrypto entries are always verified.
+   * @default true
+   */
+  checkCrc32?: boolean;
+
+  /**
+   * Largest uncompressed size, in bytes, of one entry inflated into memory — by a read, or by
+   * a write that re-encodes the entry (`ArchiveFileTooLargeError`), as `unpackZip`'s `maxEntrySize`.
+   * @default 536870912 (512 MiB)
+   */
+  maxEntrySize?: number;
+
+  /**
+   * Most entries the archive may contain (`ArchiveLimitExceededError`), checked when it is opened.
+   * Unbounded by default.
+   */
+  maxEntries?: number;
 }
 
 /**
- * TAR format options for opening an archive.
+ * TAR options for opening an existing archive with `ArchiveFile`.
  */
-export interface OpenArchiveOptionsTar extends Omit<OpenTarOptions, "format"> {
+export interface ArchiveFileOpenOptionsTar {
   /** Archive format */
   format: "tar";
+
+  /** If true, decompress gzip before parsing (auto-detected for `.gz` / `.tgz` paths) */
+  gzip?: boolean;
 }
 
 /**
  * Union type for opening archives.
  */
-export type OpenArchiveOptions = OpenArchiveOptionsZip | OpenArchiveOptionsTar;
+export type ArchiveFileOpenOptions = ArchiveFileOpenOptionsZip | ArchiveFileOpenOptionsTar;
+
+/**
+ * Options for reading one entry from an `ArchiveFile` (`readEntry` / `readEntrySync`).
+ */
+export interface ArchiveFileReadOptions {
+  /** Password for this entry; overrides the one the archive was opened with (ZIP only). */
+  password?: string | Uint8Array;
+}
+
+/**
+ * Options for reading one entry as text from an `ArchiveFile` (`readAsText` / `readAsTextSync`).
+ */
+export interface ArchiveFileReadTextOptions extends ArchiveFileReadOptions {
+  /** Text encoding (default `"utf-8"`). */
+  encoding?: string;
+}
 
 // =============================================================================
 // TAR Entry Options
@@ -672,7 +697,7 @@ export interface AddTarDirectoryOptions extends AddTarFileOptions {
   filter?: (path: string, stats: { isDirectory: boolean; size: number }) => boolean;
 
   /** Transform function to modify entry metadata or skip entries. */
-  transform?: TransformFunction;
+  transform?: ArchiveTransformFunction;
 
   /** Follow symbolic links (default: false) */
   followSymlinks?: boolean;
@@ -698,5 +723,26 @@ export interface AddTarGlobOptions extends AddTarFileOptions {
   filter?: (path: string, stats: { isDirectory: boolean; size: number }) => boolean;
 
   /** Transform function to modify entry metadata or skip entries. */
-  transform?: TransformFunction;
+  transform?: ArchiveTransformFunction;
 }
+
+// =============================================================================
+// Deprecated names (public before the `ArchiveFile…` / `Archive…` prefixes)
+// =============================================================================
+
+/** @deprecated Use {@link ArchiveFileOpenOptionsZip}. Removed in 1.0. */
+export type OpenZipOptions = Omit<ArchiveFileOpenOptionsZip, "format">;
+/** @deprecated Use {@link ArchiveFileOpenOptionsTar}. Removed in 1.0. */
+export type OpenTarOptions = ArchiveFileOpenOptionsTar;
+/** @deprecated Use {@link ArchiveFileOpenOptions}. Removed in 1.0. */
+export type OpenArchiveOptions = ArchiveFileOpenOptions;
+/** @deprecated Use {@link ArchiveFileOpenOptionsZip}. Removed in 1.0. */
+export type OpenArchiveOptionsZip = ArchiveFileOpenOptionsZip;
+/** @deprecated Use {@link ArchiveFileOpenOptionsTar}. Removed in 1.0. */
+export type OpenArchiveOptionsTar = ArchiveFileOpenOptionsTar;
+/** @deprecated Use {@link ArchiveTransformFunction}. Removed in 1.0. */
+export type TransformFunction = ArchiveTransformFunction;
+/** @deprecated Use {@link ArchiveTransformEntryData}. Removed in 1.0. */
+export type TransformEntryData = ArchiveTransformEntryData;
+/** @deprecated Use {@link ArchiveTransformResult}. Removed in 1.0. */
+export type TransformResult = ArchiveTransformResult;

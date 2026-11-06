@@ -11,7 +11,7 @@
  * - Modern browsers (when bundled)
  */
 
-import { Stream } from "@excel/index";
+import { Stream, Workbook } from "@excel/index";
 
 async function main(): Promise<void> {
   // -------------------------------------------------------------------------
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     useSharedStrings: true
   });
 
-  const ws = writer.addWorksheet("Sheet1");
+  const ws = Workbook.addWorksheet(writer, "Sheet1");
   Stream.commitRow(ws.addRow(["Name", "Score"]));
   Stream.commitRow(ws.addRow(["Alice", 98]));
   Stream.commitRow(ws.addRow(["Bob", 87]));
@@ -52,8 +52,8 @@ async function main(): Promise<void> {
   for await (const sheet of reader) {
     console.log("Reading sheet:", sheet.name);
     for await (const row of sheet) {
-      // Row.values includes a leading empty slot at index 0 in many sheet models.
-      console.log("Row", row.number, Stream.rowValues(row));
+      // 0-based, as `Row.getValues` reads a row: column A is at index 0.
+      console.log("Row", row.number, Stream.getRowValues(row));
     }
   }
 }

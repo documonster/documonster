@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -38,7 +38,7 @@ Cell.setValue(ws, "C4", { formula: 'IMARGUMENT("1+1i")' }); // π/4 ≈ 0.7854
 Cell.setValue(ws, "D1", { formula: "ERF(1)" }); // 0.8427
 Cell.setValue(ws, "D2", { formula: "BESSELJ(0.5, 0)" });
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of [
   "A1",

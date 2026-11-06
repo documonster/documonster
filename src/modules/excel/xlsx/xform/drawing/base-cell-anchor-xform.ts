@@ -1,6 +1,21 @@
 import { inferExternalImageExtension } from "@excel/utils/drawing-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag } from "@xml/types";
+import { GenericEchoXform } from "@excel/xlsx/xform/drawing/generic-echo-xform";
+import type { EchoNode } from "@excel/xlsx/xform/drawing/generic-echo-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
+
+/**
+ * The drawing objects an anchor carries that this library does not model: a group, a shape — a text box is one — and
+ * a connector. Each is captured whole and written back as read (see {@link GenericEchoXform}), relationship ids and
+ * all. Without an entry for the tag, the anchor's dispatch fell through to the generic per-tag lookup: a shape parsed
+ * into nothing and was deleted on write, and a picture nested in a group was promoted to the anchor's own.
+ */
+const PRESERVED_TAGS = ["xdr:sp", "xdr:grpSp", "xdr:cxnSp"] as const;
+
+/** Parsers for {@link PRESERVED_TAGS}, to spread into an anchor's `map`. */
+export function preservedObjectXforms(): Record<string, BaseXform> {
+  return Object.fromEntries(PRESERVED_TAGS.map(tag => [tag, new GenericEchoXform(tag)]));
+}
 
 /** The picture fields the anchor reconciler reads off `model.picture`. */
 interface ReconcilePicture {
@@ -59,6 +74,27 @@ abstract class BaseCellAnchorXform extends BaseXform {
     if (this.parser) {
       this.parser.parseText(text);
     }
+  }
+
+  /**
+   * The unmodelled object this anchor parsed, if any, with its parser reset. The parsers are shared across every
+   * anchor of a drawing, so a model left behind would be inherited by the next anchor.
+   */
+  protected takePreserved(): EchoNode | undefined {
+    let preserved: EchoNode | undefined;
+    for (const tag of PRESERVED_TAGS) {
+      const xform = this.map[tag];
+      if (xform?.model) {
+        preserved ??= xform.model as EchoNode;
+        xform.reset();
+      }
+    }
+    return preserved;
+  }
+
+  /** Write an object captured by {@link takePreserved} back as it was read. */
+  protected renderPreserved(xmlStream: XmlSink, preserved: EchoNode): void {
+    this.map[preserved.tag]?.render(xmlStream, preserved);
   }
 
   reconcilePicture(

@@ -14,8 +14,8 @@
 // The browser side is checked through the browser modules directly, because the
 // `@stream` / `.browser` specifier swap only happens in the browser build.
 
-import { createCsvReadStream as portableCsvReadStream } from "@excel/bridge/csv";
-import { createCsvReadStream as nodeCsvReadStream } from "@excel/bridge/csv.node";
+import { ExcelCsv as PortableExcelCsv } from "@excel/bridge/csv";
+import { ExcelCsv as NodeExcelCsv } from "@excel/bridge/csv.node";
 import type { XlsxReadable } from "@excel/core/xlsx-io-types";
 import { Workbook } from "@excel/index";
 import type { IReadable } from "@stream";
@@ -54,16 +54,16 @@ export async function toBufferStaysPortable(): Promise<void> {
   void portable;
 }
 
-// --- `createCsvReadStream` --------------------------------------------------
+// --- `ExcelCsv.toStream` --------------------------------------------------
 // The Node entry adds nominal `stream.Readable`; the cross-platform entry does
 // not. Both must satisfy the portable contract, so code written against the
 // portable type keeps compiling under either resolution.
-const nodeCsvStaysPortable: IReadable<Uint8Array> = nodeCsvReadStream(wb);
-const portableCsv: IReadable<Uint8Array> = portableCsvReadStream(wb);
+const nodeCsvStaysPortable: IReadable<Uint8Array> = NodeExcelCsv.toStream(wb);
+const portableCsv: IReadable<Uint8Array> = PortableExcelCsv.toStream(wb);
 
 // A refinement must be strictly *more* than the portable type, never different:
 // the Node CSV stream has to be usable everywhere the portable one is.
-const nodeCsvSubstitutesForPortable: typeof portableCsv = nodeCsvReadStream(wb);
+const nodeCsvSubstitutesForPortable: typeof portableCsv = NodeExcelCsv.toStream(wb);
 
 void nodeToBrowser;
 void browserToNode;

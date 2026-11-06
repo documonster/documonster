@@ -10,6 +10,7 @@ import type { ZipEntry } from "@archive/unzip/stream";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import type {
   WorkbookReaderInput as CrossPlatformInput,
+  ParseEvent,
   WorkbookReaderOptions,
   WorksheetReadyEvent
 } from "@excel/stream/workbook-reader.browser";
@@ -19,6 +20,8 @@ import {
   handOut
 } from "@excel/stream/workbook-reader.browser";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
+import { containerReadError } from "@excel/utils/container-errors";
+import { fileSystemError } from "@excel/utils/file-path";
 import { iterateStream } from "@excel/utils/iterate-stream";
 import type { Readable } from "@stream";
 import { createReadStream, createWriteStream, createTempDirSync, remove } from "@utils/fs";
@@ -60,6 +63,11 @@ interface WaitingWorksheet {
   isXlsb: boolean;
 }
 
+/**
+ * Read a workbook — a file path, a stream, bytes or a Web stream — one part at a time: `parse()` yields an event per
+ * worksheet (and, by the options, shared strings and hyperlinks), each worksheet a {@link WorksheetReader} whose
+ * rows are read as they arrive. `read()` does the same and raises the events instead.
+ */
 class WorkbookReader extends WorkbookReaderBase<
   WorkbookReaderInput,
   WorksheetReader,
@@ -76,6 +84,30 @@ class WorkbookReader extends WorkbookReaderBase<
       return createReadStream(input);
     }
     return super._getStream(input as CrossPlatformInput);
+  }
+
+  /**
+   * A file path the system will not open is an `ExcelFileError`, as it is for `Workbook.readFile`: the stream
+   * opened in {@link _getStream} reports its refusal only once it is read, so it surfaces here.
+   */
+  override async *parse(
+    input?: WorkbookReaderInput,
+    options?: WorkbookReaderOptions
+  ): AsyncIterableIterator<ParseEvent<WorksheetReader, HyperlinkReader>> {
+    const source = input ?? this.input;
+    try {
+      yield* super.parse(input, options);
+    } catch (error) {
+      const refused = (error as { path?: unknown; syscall?: unknown } | null) ?? {};
+      if (
+        typeof source === "string" &&
+        refused.path === source &&
+        typeof refused.syscall === "string"
+      ) {
+        throw fileSystemError(source, "read", error);
+      }
+      throw error;
+    }
   }
 
   async _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<WaitingWorksheet> {
@@ -144,7 +176,12 @@ class WorkbookReader extends WorkbookReaderBase<
     waitingWorksheets: WaitingWorksheet[]
   ): AsyncIterableIterator<WorksheetReadyEvent<WorksheetReader>> {
     for (const ws of waitingWorksheets) {
-      await ws.writePromise;
+      // Spooling the sheet read its part through, so a damaged part fails here — reported as every reader does.
+      try {
+        await ws.writePromise;
+      } catch (error) {
+        throw containerReadError(error);
+      }
       const fileStream = createReadStream(ws.path);
       const part = handOut(iterateStream<Uint8Array>(fileStream), `worksheet ${ws.sheetNo}`);
       try {

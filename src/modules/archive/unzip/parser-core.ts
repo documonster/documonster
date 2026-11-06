@@ -1,3 +1,4 @@
+import { ZipParseError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import {
   parseFormattedTyped as parseBuffer,
@@ -5,7 +6,7 @@ import {
   writeUint32LE
 } from "@archive/zip-spec/binary";
 import {
-  parseDosDateTimeUTC,
+  parseDosDateTime,
   resolveZipLastModifiedDateFromUnixSeconds
 } from "@archive/zip-spec/timestamps";
 import type { ZipExtraFields, ZipVars } from "@archive/zip-spec/zip-extra-fields";
@@ -190,7 +191,7 @@ export function resolveZipEntryLastModifiedDateTime(
   const dosDate = vars.lastModifiedDate || 0;
   const dosTime = vars.lastModifiedTime || 0;
 
-  const dosDateTime = parseDosDateTimeUTC(dosDate, dosTime);
+  const dosDateTime = parseDosDateTime(dosDate, dosTime);
 
   const unixSecondsMtime = extraFields.mtimeUnixSeconds;
   if (unixSecondsMtime === undefined) {
@@ -317,13 +318,6 @@ function parseDataDescriptorVarsFast(data: Uint8Array): DataDescriptorVars {
   };
 }
 
-export interface ValidatedDataDescriptorScanResult {
-  /** Start index of the descriptor within `view`, or -1 when not found yet. */
-  foundIndex: number;
-  /** Where the caller should resume searching on the next scan of (a mostly unchanged) view. */
-  nextSearchFrom: number;
-}
-
 // =============================================================================
 // Shared Parse Loop (stream-agnostic)
 // =============================================================================
@@ -338,11 +332,26 @@ export interface ParseOptions {
   thresholdBytes?: number;
   /** Optional string encoding for legacy (non-UTF8) names. */
   encoding?: ZipStringEncoding;
+  /**
+   * Whether each entry checks its data against the recorded CRC-32 before it ends,
+   * failing with `ZipCrc32MismatchError`. Autodrained and encrypted entries are not checked
+   * here. @default true
+   */
+  checkCrc32?: boolean;
 }
 
 export interface ParseDriverState {
   crxHeader?: CrxHeader;
   reachedCD?: boolean;
+  /**
+   * The entry whose data is being read from the archive right now. A parser torn down
+   * mid-entry fails it, so whoever reads it is not left waiting for an `end` that cannot come.
+   */
+  currentEntry?: {
+    readonly destroyed: boolean;
+    readonly writableFinished: boolean;
+    destroy(error?: Error): unknown;
+  };
 }
 
 export interface ParseCoreIO {
@@ -417,7 +426,7 @@ export async function runParseLoopCore<IO extends ParseCoreIO, Emitter extends P
       return;
     }
 
-    emitter.emitError(new Error("invalid signature: 0x" + signature.toString(16)));
+    emitter.emitError(new ZipParseError("invalid signature: 0x" + signature.toString(16)));
     emitter.emitClose();
     return;
   }

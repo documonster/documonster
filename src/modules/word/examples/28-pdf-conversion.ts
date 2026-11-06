@@ -2,7 +2,7 @@
  * Word Example 28 — DOCX → PDF
  *
  * Covers:
- *   - Basic conversion using Document.build() → docxToPdf
+ *   - Basic conversion using Document.create() → Pdf.fromDocx
  *   - Custom page size, margins, default font
  *   - Reading an existing .docx and converting it to PDF
  *   - Using a custom chart renderer (the built-in renderer is intentionally
@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Pdf } from "../../pdf";
-import { Document, Build, Io, Units } from "../index";
+import { Document, Build, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,7 +32,7 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addHeading(d, "DOCX → PDF", 1);
   Document.addParagraph(d, "Plain paragraph rendered through the PDF flow renderer.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.text("Mixed run: "),
@@ -64,9 +64,14 @@ fs.mkdirSync(outDir, { recursive: true });
     0x00, 0x00, 0x03, 0x00, 0x01, 0x5b, 0x6e, 0x5e, 0x49, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82
   ]);
-  Document.addImage(d, tinyPng, "png", Units.cmToEmu(1.5), Units.cmToEmu(1.5), { altText: "logo" });
+  Document.addImage(d, tinyPng, {
+    type: "png",
+    width: Units.cmToEmu(1.5),
+    height: Units.cmToEmu(1.5),
+    altText: "logo"
+  });
 
-  const pdfBytes = await Pdf.fromDocx(Document.build(d));
+  const pdfBytes = await Pdf.fromDocx(d);
   fs.writeFileSync(path.join(outDir, "01-basic.pdf"), pdfBytes);
   console.log(`  → 01-basic.pdf (${pdfBytes.length} bytes)`);
 }
@@ -81,15 +86,12 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.addParagraph(d, "This PDF is rendered onto an A5 page (148 × 210 mm).");
   Document.addParagraph(d, "Lorem ipsum… ".repeat(80));
 
-  const pdfBytes = await Pdf.fromDocx(Document.build(d), {
+  const pdfBytes = await Pdf.fromDocx(d, {
     // A5 portrait: 148mm × 210mm = 419.5 × 595.3 points
     pageWidth: 419.5,
     pageHeight: 595.3,
-    marginTop: 36,
-    marginBottom: 36,
-    marginLeft: 36,
-    marginRight: 36,
-    defaultFont: "Helvetica",
+    margins: { top: 36, right: 36, bottom: 36, left: 36 },
+    defaultFontFamily: "Helvetica",
     defaultFontSize: 10
   });
   fs.writeFileSync(path.join(outDir, "02-a5.pdf"), pdfBytes);
@@ -104,10 +106,10 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addHeading(d, "From file", 1);
   Document.addParagraph(d, "This document was first written to disk and then re-read.");
-  const buf = await Io.toBuffer(Document.build(d));
+  const buf = await Document.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "03-source.docx"), buf);
 
-  const reread = await Io.read(buf);
+  const reread = await Document.read(buf);
   const pdfBytes = await Pdf.fromDocx(reread);
   fs.writeFileSync(path.join(outDir, "03-from-file.pdf"), pdfBytes);
   console.log(`  → 03-from-file.pdf (${pdfBytes.length} bytes)`);
@@ -141,7 +143,7 @@ fs.mkdirSync(outDir, { recursive: true });
     }
   });
 
-  const pdfBytes = await Pdf.fromDocx(Document.build(d), {
+  const pdfBytes = await Pdf.fromDocx(d, {
     chartRenderer: (chart, page, rect) => {
       // Draw a coloured filled rectangle then a label so the output is
       // visibly different from the default chart renderer.

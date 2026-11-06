@@ -33,9 +33,9 @@ describe("checkBox builder + w14:checkbox writer", () => {
   it("default checked state renders ☒ and uses the canonical hex 2612", async () => {
     const d = Document.create();
     Document.useDefaultStyles(d);
-    Document.addContent(d, Build.checkBox({ checked: true }));
+    Document.addContent(d, Build.checkbox({ checked: true }));
 
-    const buf = await Io.toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(d);
     const xml = await getDocumentXml(buf);
 
     expect(xml).toContain('<w14:checked w14:val="1"/>');
@@ -47,9 +47,9 @@ describe("checkBox builder + w14:checkbox writer", () => {
   it("default unchecked state renders ☐", async () => {
     const d = Document.create();
     Document.useDefaultStyles(d);
-    Document.addContent(d, Build.checkBox({ checked: false }));
+    Document.addContent(d, Build.checkbox({ checked: false }));
 
-    const buf = await Io.toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(d);
     const xml = await getDocumentXml(buf);
 
     expect(xml).toContain('<w14:checked w14:val="0"/>');
@@ -64,9 +64,9 @@ describe("checkBox builder + w14:checkbox writer", () => {
     // paragraph — otherwise Word refuses to open the file.
     const d = Document.create();
     Document.useDefaultStyles(d);
-    Document.addContent(d, Build.checkBox({ checked: true }));
+    Document.addContent(d, Build.checkbox({ checked: true }));
 
-    const buf = await Io.toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(d);
     const xml = await getDocumentXml(buf);
 
     // The SDT must be wrapped: <w:p><w:sdt>…</w:sdt></w:p>, never <w:body><w:sdt>.
@@ -79,14 +79,14 @@ describe("checkBox builder + w14:checkbox writer", () => {
     Document.useDefaultStyles(d);
     Document.addContent(
       d,
-      Build.checkBox({
+      Build.checkbox({
         checked: true,
         checkedState: { value: "\u2713", font: "Arial" }, // ✓
         uncheckedState: { value: "\u2717", font: "Arial" } // ✗
       })
     );
 
-    const buf = await Io.toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(d);
     const xml = await getDocumentXml(buf);
 
     // Hex normalisation in the attribute …
@@ -101,13 +101,13 @@ describe("checkBox builder + w14:checkbox writer", () => {
     Document.useDefaultStyles(d);
     Document.addContent(
       d,
-      Build.checkBox({
+      Build.checkbox({
         checked: true,
         checkedState: { value: "2611", font: "MS Gothic" } // ☑
       })
     );
 
-    const buf = await Io.toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(d);
     const xml = await getDocumentXml(buf);
 
     expect(xml).toContain('w14:val="2611"');
@@ -120,13 +120,13 @@ describe("checkBox builder + w14:checkbox writer", () => {
     Document.useDefaultStyles(d);
     Document.addContent(
       d,
-      Build.checkBox({
+      Build.checkbox({
         checked: true,
         checkedState: { value: "\u{1F4AF}", font: "Segoe UI Emoji" } // 💯
       })
     );
 
-    const buf = await Io.toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(d);
     const xml = await getDocumentXml(buf);
 
     // Hex form of U+1F4AF is 1F4AF

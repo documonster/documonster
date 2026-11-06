@@ -1,7 +1,11 @@
 import { Enums } from "@excel/core/enums";
 import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/core/range";
-import { InvalidValueTypeError, ExcelError } from "@excel/errors";
+import { ExcelInvalidValueTypeError, ExcelError } from "@excel/errors";
 import type { RichText } from "@excel/types";
+import { claimArrayRange, type ArrayRange } from "@excel/utils/array-ranges";
+import { fromFileFormula, hasUnnamedThisRow, toFileFormula } from "@excel/utils/future-functions";
+import { slideFormula } from "@excel/utils/shared-formula";
+import { isStoredOrdinaryFormula, markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import {
@@ -38,7 +42,7 @@ function getValueType(v) {
   if (v.error) {
     return Enums.ValueType.Error;
   }
-  throw new InvalidValueTypeError(typeof v, "Could not understand type of value");
+  throw new ExcelInvalidValueTypeError(typeof v, "Could not understand type of value");
 }
 
 function getEffectiveCellType(cell) {
@@ -124,11 +128,64 @@ function setDate1904(model: { date1904?: boolean }, date1904: boolean): void {
   }
 }
 
+/**
+ * The table an unnamed this-row reference in a cell's formula resolves to, by cell model, from `prepare`: a name, or
+ * `null` when the cell is in no table. Absent for every other cell.
+ */
+const thisRowTables = new WeakMap<object, string | null>();
+
+/**
+ * The earlier array range an array formula's master sits inside, by cell model, from `prepare`. Such a cell is written
+ * with its cached result alone: Excel refuses a cell that is both a member of one array and the master of another.
+ */
+const overlappedArrays = new WeakMap<object, ArrayRange>();
+
+/**
+ * Cells whose formula Excel would refuse to open, from `prepare` — see `unwritableFormulaReason`. Written with their
+ * cached result alone, and the write reports them (`dropUnwritableFormulas`).
+ */
+const unwritableFormulas = new WeakSet<object>();
+
+/**
+ * Shared-formula dependents whose master is written with its cached result alone (see `thisRowTables`), by cell model.
+ * Such a dependent is written with its cached result too: an `si` naming a group with no master is a file Excel repairs.
+ */
+const detachedFollowers = new WeakSet<object>();
+
+/**
+ * Ordinary formulas written as dynamic arrays over their own cell, by cell model, from `prepare` — see
+ * `needsArrayEvaluation`. Kept beside the model for the reason `thisRowTables` is: `model` is the cell's live record.
+ */
+const arrayEvaluated = new WeakSet<object>();
+
+/**
+ * Shared-formula dependents of an `arrayEvaluated` master, by cell model, with their own formula: a dynamic array
+ * cannot be shared, so each is written as one over its own cell.
+ */
+const arrayEvaluatedFollowers = new WeakMap<object, string>();
+
+/** Whether the last `prepare` decided `model` is written as a dynamic-array formula, `cm` and all. */
+export function writesDynamicArray(model: { readonly isDynamicArray?: boolean }): boolean {
+  return (
+    !unwritableFormulas.has(model) &&
+    (model.isDynamicArray === true ||
+      arrayEvaluated.has(model) ||
+      arrayEvaluatedFollowers.has(model))
+  );
+}
+
+/** The earlier array range `model`'s array formula was lost to in the last `prepare`, if any. */
+export function overlappedArrayRange(model: object): ArrayRange | undefined {
+  return overlappedArrays.get(model);
+}
+
 class CellXform extends BaseXform {
   declare private richTextXform: RichTextXform;
   declare public parser: BaseXform | undefined;
   declare private t: string | undefined;
   declare private currentNode: string | undefined;
+  /** Whether the cell has a `<v>` — an empty one (`<v/>`) is a value: the empty string of a `t="str"` cell. */
+  declare private hasValueElement: boolean;
 
   constructor() {
     super();
@@ -141,6 +198,63 @@ class CellXform extends BaseXform {
   }
 
   prepare(model, options) {
+    // An unnamed this-row reference (`[@x]`) is written with the name of the table the cell sits in; one in a cell
+    // outside every table has no file form, and the cell is written with its cached value alone (the write reports
+    // it — see `unnamedThisRowCells`). Kept beside the model rather than on it: `model` is the cell's live record.
+    // A caller with no table lookup (the streaming writer, whose tables are not known while rows are written) leaves
+    // the reference as given.
+    if (
+      options.tableNameAt !== undefined &&
+      typeof model.formula === "string" &&
+      hasUnnamedThisRow(model.formula)
+    ) {
+      thisRowTables.set(model, options.tableNameAt(model.address) ?? null);
+    } else {
+      thisRowTables.delete(model);
+    }
+    if (
+      typeof model.formula === "string" &&
+      options.unwritableFormula?.(model.formula) !== undefined
+    ) {
+      unwritableFormulas.add(model);
+    } else {
+      unwritableFormulas.delete(model);
+    }
+    // The array ranges claimed so far in this sheet, in row-major order — see `claimArrayRange`. A caller that passes
+    // none (a single cell rendered on its own) has nothing for a range to overlap.
+    const outer =
+      options.arrayRanges !== undefined &&
+      model.shareType === "array" &&
+      typeof model.ref === "string" &&
+      typeof model.formula === "string"
+        ? claimArrayRange(options.arrayRanges, model.address, model.ref)
+        : undefined;
+    if (outer === undefined) {
+      overlappedArrays.delete(model);
+    } else {
+      overlappedArrays.set(model, outer);
+    }
+    // An ordinary formula Excel would evaluate with implicit intersection where this library evaluates over arrays is
+    // written as Excel 365 writes it when typed: a dynamic array over its own cell. Not inside another array's range,
+    // whose member it would then also be the master of. The writer hands the test in (`needsArrayEvaluation`), and only
+    // when the workbook has formulas, so writing one without any does not load a formula parser.
+    if (
+      model.type === Enums.ValueType.Formula &&
+      model.shareType === undefined &&
+      model.sharedFormula === undefined &&
+      !model.isDynamicArray &&
+      !isStoredOrdinaryFormula(model) &&
+      thisRowTables.get(model) !== null &&
+      !unwritableFormulas.has(model) &&
+      typeof model.formula === "string" &&
+      options.needsArrayEvaluation?.(model.formula) === true &&
+      (options.arrayRanges === undefined ||
+        claimArrayRange(options.arrayRanges, model.address, model.address) === undefined)
+    ) {
+      arrayEvaluated.add(model);
+    } else {
+      arrayEvaluated.delete(model);
+    }
     const styleId = options.styles.addStyleModel(model.style || {}, getEffectiveCellType(model));
     if (styleId) {
       model.styleId = styleId;
@@ -189,8 +303,10 @@ class CellXform extends BaseXform {
 
         // Convert isDynamicArray flag to cm attribute for XML rendering.
         // All dynamic array cells share cm=1 pointing to a single XLDAPR metadata record.
-        if (model.isDynamicArray) {
+        if ((model.isDynamicArray && outer === undefined) || arrayEvaluated.has(model)) {
           model.cm = 1;
+        } else {
+          delete model.cm;
         }
 
         // A formula cell may also carry an attached hyperlink (e.g. when the
@@ -209,6 +325,8 @@ class CellXform extends BaseXform {
           model.si = options.siFormulae++;
         }
 
+        detachedFollowers.delete(model);
+        arrayEvaluatedFollowers.delete(model);
         if (model.formula) {
           options.formulae[model.address] = model;
         } else if (model.sharedFormula) {
@@ -218,14 +336,24 @@ class CellXform extends BaseXform {
               `Shared Formula master must exist above and or left of clone for cell ${model.address}`
             );
           }
-          if (master.si === undefined) {
+          if (thisRowTables.get(master) === null || unwritableFormulas.has(master)) {
+            detachedFollowers.add(model);
+          } else if (arrayEvaluated.has(master)) {
+            arrayEvaluatedFollowers.set(
+              model,
+              slideFormula(master.formula, master.address, model.address)
+            );
+            model.cm = 1;
+          } else if (master.si === undefined) {
             master.shareType = "shared";
             master.si = options.siFormulae++;
             master.range = rangeCreate(master.address, model.address);
           } else if (master.range) {
             rangeExpandToAddress(master.range, model.address);
           }
-          model.si = master.si;
+          if (!detachedFollowers.has(model) && !arrayEvaluatedFollowers.has(model)) {
+            model.si = master.si;
+          }
         }
         break;
 
@@ -235,8 +363,28 @@ class CellXform extends BaseXform {
   }
 
   renderFormula(xmlStream, model) {
+    const table = thisRowTables.get(model);
+    if (
+      table === null ||
+      overlappedArrays.has(model) ||
+      detachedFollowers.has(model) ||
+      unwritableFormulas.has(model)
+    ) {
+      this.renderCachedResult(xmlStream, model);
+      return;
+    }
+    const own = model.formula ?? arrayEvaluatedFollowers.get(model);
+    const formula = own === undefined ? undefined : toFileFormula(own, { table });
+    // A dynamic array set with no range of its own (`{ formula, isDynamicArray: true }`) is one over its own cell, as
+    // the XLSB writer writes it: `cm` alone on an ordinary `<f>` is metadata naming an array formula that is not one.
+    const asArray =
+      arrayEvaluated.has(model) ||
+      arrayEvaluatedFollowers.has(model) ||
+      (model.isDynamicArray === true &&
+        model.shareType === undefined &&
+        model.sharedFormula === undefined);
     let attrs: XmlAttributes | null = null;
-    switch (model.shareType) {
+    switch (asArray ? "array" : model.shareType) {
       case "shared":
         attrs = {
           t: "shared",
@@ -248,7 +396,7 @@ class CellXform extends BaseXform {
       case "array":
         attrs = {
           t: "array",
-          ref: model.ref
+          ref: asArray ? model.address : model.ref
         };
         break;
 
@@ -264,58 +412,87 @@ class CellXform extends BaseXform {
 
     switch (getValueType(model.result)) {
       case Enums.ValueType.Null: // ?
-        xmlStream.leafNode("f", attrs, model.formula);
+        xmlStream.leafNode("f", attrs, formula);
         break;
 
       case Enums.ValueType.String:
         // oddly, formula results don't ever use shared strings
         xmlStream.addAttribute("t", "str");
-        xmlStream.leafNode("f", attrs, model.formula);
+        xmlStream.leafNode("f", attrs, formula);
         xmlStream.leafNode("v", null, model.result);
         break;
 
       case Enums.ValueType.Number:
-        xmlStream.leafNode("f", attrs, model.formula);
+        xmlStream.leafNode("f", attrs, formula);
         xmlStream.leafNode("v", null, model.result);
         break;
 
       case Enums.ValueType.Boolean:
         xmlStream.addAttribute("t", "b");
-        xmlStream.leafNode("f", attrs, model.formula);
+        xmlStream.leafNode("f", attrs, formula);
         xmlStream.leafNode("v", null, model.result ? 1 : 0);
         break;
 
       case Enums.ValueType.Error:
         xmlStream.addAttribute("t", "e");
-        xmlStream.leafNode("f", attrs, model.formula);
+        xmlStream.leafNode("f", attrs, formula);
         xmlStream.leafNode("v", null, model.result.error);
         break;
 
       case Enums.ValueType.Date:
-        xmlStream.leafNode("f", attrs, model.formula);
+        xmlStream.leafNode("f", attrs, formula);
         xmlStream.leafNode("v", null, dateToExcel(model.result, model.date1904));
         break;
 
       // case Enums.ValueType.Hyperlink: // ??
       // case Enums.ValueType.Formula:
       default:
-        throw new InvalidValueTypeError(
+        throw new ExcelInvalidValueTypeError(
           String(getValueType(model.result)),
           "Could not understand type of value"
         );
     }
   }
 
+  /** A formula cell's cached result with no `<f>`, for a formula that has no file form. */
+  renderCachedResult(xmlStream, model) {
+    const result = model.result;
+    switch (getValueType(result)) {
+      case Enums.ValueType.String:
+        xmlStream.addAttribute("t", "str");
+        xmlStream.leafNode("v", null, result);
+        break;
+      case Enums.ValueType.Number:
+        xmlStream.leafNode("v", null, result);
+        break;
+      case Enums.ValueType.Boolean:
+        xmlStream.addAttribute("t", "b");
+        xmlStream.leafNode("v", null, result ? 1 : 0);
+        break;
+      case Enums.ValueType.Error:
+        xmlStream.addAttribute("t", "e");
+        xmlStream.leafNode("v", null, result.error);
+        break;
+      case Enums.ValueType.Date:
+        xmlStream.leafNode("v", null, dateToExcel(result, model.date1904));
+        break;
+      default:
+        break;
+    }
+  }
+
   render(xmlStream, model) {
-    if (model.type === Enums.ValueType.Null && !model.styleId) {
-      // if null and no style, exit
+    // A blank cell with no style is not written. `styleId` 0 is a style — the default one, set by the row xform for a
+    // blank cell under a styled row or column — and is written as `s="0"`: a `<c>` with neither a value nor a style
+    // is how a merged cell's covered part reads.
+    if (model.type === Enums.ValueType.Null && model.styleId === undefined) {
       return;
     }
 
     xmlStream.openNode("c");
     xmlStream.addAttribute("r", model.address);
 
-    if (model.styleId) {
+    if (model.styleId !== undefined) {
       xmlStream.addAttribute("s", model.styleId);
     }
 
@@ -436,6 +613,8 @@ class CellXform extends BaseXform {
           style: undefined
         };
         this.t = node.attributes.t;
+        this.currentNode = undefined;
+        this.hasValueElement = false;
         if (node.attributes.s) {
           this.model.styleId = parseInt(node.attributes.s, 10);
         }
@@ -453,6 +632,7 @@ class CellXform extends BaseXform {
 
       case "v":
         this.currentNode = "v";
+        this.hasValueElement = true;
         return true;
 
       case "t":
@@ -497,11 +677,36 @@ class CellXform extends BaseXform {
     switch (name) {
       case "c": {
         const { model } = this;
+        if (typeof model.formula === "string") {
+          // `_xlfn.ANCHORARRAY(A1)` is how the file spells the spill-range operator `A1#`.
+          model.formula = fromFileFormula(model.formula);
+        }
+        if (this.parser) {
+          // A run still open: the cell is being ended early, by a `<c>` nested in it (see `RowXform`). What the run
+          // already holds is kept, and it is closed so that the next cell does not start inside it.
+          const run = this.richTextXform.model;
+          if (
+            run?.text !== undefined &&
+            (model.value === undefined || typeof model.value === "object")
+          ) {
+            model.value = model.value ?? {};
+            model.value.richText = model.value.richText ?? [];
+            model.value.richText.push(run);
+          }
+          this.richTextXform.parser = undefined;
+          this.parser = undefined;
+        }
+        this.currentNode = undefined;
+        // `<v/>` in a `t="str"` cell is the empty string — Excel's save of a formula whose result is `""`
+        // (`<c t="str"><f>""</f><v/></c>`), or of an array formula's cell holding one. No text event arrives for it.
+        if (this.t === "str" && this.hasValueElement && model.value === undefined) {
+          model.value = "";
+        }
 
         // first guess on cell type
         if (model.formula || model.shareType) {
           model.type = Enums.ValueType.Formula;
-          if (model.value) {
+          if (model.value || (this.t === "str" && model.value === "")) {
             if (this.t === "str") {
               model.result = model.value;
             } else if (this.t === "b") {
@@ -560,7 +765,9 @@ class CellXform extends BaseXform {
               model.value = parseFloat(model.value);
               break;
           }
-        } else if (model.styleId) {
+        } else if (model.styleId !== undefined) {
+          // `s="0"` is a style like any other: the default one, which a blank cell carries to stand apart from a
+          // styled row or column.
           model.type = Enums.ValueType.Null;
         } else {
           model.type = Enums.ValueType.Merge;
@@ -697,6 +904,9 @@ class CellXform extends BaseXform {
           }
         }
         delete model.cm;
+        if (!model.isDynamicArray && model.shareType !== "array") {
+          markStoredOrdinaryFormula(model);
+        }
         break;
 
       default:

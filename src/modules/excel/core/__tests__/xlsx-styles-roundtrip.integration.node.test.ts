@@ -1,5 +1,5 @@
 import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { getUniqueTestFilePath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +10,7 @@ describe("xlsx styles roundtrip", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "blort");
 
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Col 1", key: "key", width: 25 },
       { header: "Col 2", key: "name", width: 32 },
       { header: "Col 3", key: "age" }
@@ -56,8 +56,8 @@ describe("xlsx styles roundtrip", () => {
     Cell.setValue(ws, "C5", { formula: "A2", result: 7 });
 
     Row.setHeight(ws, 11, 40);
-    Cell.setValue(ws, 11, 1, "Top Left");
-    Cell.setStyle(ws, 11, 1, { alignment: { horizontal: "left", vertical: "top" } });
+    Cell.setValue(ws, { row: 11, col: 1 }, "Top Left");
+    Cell.setStyle(ws, { row: 11, col: 1 }, { alignment: { horizontal: "left", vertical: "top" } });
 
     await Workbook.writeFile(wb, filename);
     await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
@@ -69,8 +69,8 @@ describe("xlsx styles roundtrip", () => {
     expect(ws2).toBeTruthy();
 
     expect(Column.getWidth(ws2, 1)).toBe(25);
-    expect(Column.getHidden(ws2, 9)).toBe(true);
-    expect(Row.getHidden(ws2, 16)).toBe(true);
+    expect(Column.isHidden(ws2, 9)).toBe(true);
+    expect(Row.isHidden(ws2, 16)).toBe(true);
 
     expect(Cell.getValue(ws2, "A2")).toBe(7);
     expect(Cell.getValue(ws2, "B2")).toBe("Hello, World!");
@@ -90,8 +90,8 @@ describe("xlsx styles roundtrip", () => {
     expect((Cell.getValue(ws2, "C5") as any).formula).toBe("A2");
 
     expect(Row.getHeight(ws2, 11)).toBe(40);
-    expect(Cell.getValue(ws2, 11, 1)).toBe("Top Left");
-    expect(Cell.getStyle(ws2, 11, 1).alignment).toMatchObject({
+    expect(Cell.getValue(ws2, { row: 11, col: 1 })).toBe("Top Left");
+    expect(Cell.getStyle(ws2, { row: 11, col: 1 }).alignment).toMatchObject({
       horizontal: "left",
       vertical: "top"
     });

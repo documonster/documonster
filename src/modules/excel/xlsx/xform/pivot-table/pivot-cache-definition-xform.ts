@@ -5,6 +5,7 @@ import type {
 } from "@excel/core/pivot-table-types";
 import { rangeShortRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
@@ -35,6 +36,10 @@ interface CacheDefinitionModel {
 }
 
 class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> {
+  get writerNamespaces(): WriterNamespaces {
+    return PIVOT_CACHE_WRITER_NAMESPACES;
+  }
+
   // Parser state
   private currentCacheField: CacheFieldXform | null = null;
   private inCacheFields = false;
@@ -414,5 +419,11 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
     "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
   };
 }
+
+/** The pivot cache writer declares the main namespace and `r`, and writes back the root's others. */
+const PIVOT_CACHE_WRITER_NAMESPACES: WriterNamespaces = {
+  fixed: PivotCacheDefinitionXform.PIVOT_CACHE_DEFINITION_ATTRIBUTES,
+  preservesDocumentPrefixes: true
+};
 
 export { PivotCacheDefinitionXform };
