@@ -18,6 +18,7 @@
  *    formatting reached H8000. Excel treats the dimension as advisory, which is why a wrong one ships unnoticed.
  */
 import { extractAll } from "@archive/unzip/extract";
+import { createZipSync } from "@archive/zip/zip-bytes";
 import { Cell, Workbook } from "@excel";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -131,6 +132,65 @@ describe("collapse changes the model, not the file", () => {
     const sheet = Workbook.listWorksheets(collapsed.handle)[0];
     expect(Cell.getValue(sheet, "A1")).toBe(1);
     expect(Cell.getValue(sheet, "H20")).toBe(160);
+  });
+});
+
+describe("collapse keeps a styled cell that points at a shared formula", () => {
+  it("reads the filled-down cell as a formula, not as a blank", async () => {
+    // A formula filled down from B2 to B3 with no cached results, as writers that do not calculate save it. B3 has a
+    // style and no `<v>`, and its `<f>` carries only the `si` of the formula it shares.
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Cell.setValue(sheet, "A2", 1);
+    Cell.setValue(sheet, "A3", 2);
+    Cell.setValue(sheet, "B2", { formula: "A2" });
+    Cell.setValue(sheet, "B3", { sharedFormula: "B2" });
+    Cell.setNumFmt(sheet, "B3", "@");
+    const bytes = Uint8Array.from(
+      await Workbook.toBuffer(handle, { format: "xlsx", validate: false })
+    );
+    const xml = new TextDecoder().decode(
+      (await extractAll(bytes)).get("xl/worksheets/sheet1.xml")!.data
+    );
+    expect(xml).toMatch(/<c r="B3" s="\d+"><f t="shared" si="0"\/><\/c>/);
+
+    for (const blankCells of ["keep", "collapse"] as const) {
+      const read = Workbook.create();
+      await Workbook.read(read, bytes, { blankCells });
+      expect(Cell.getValue(Workbook.listWorksheets(read)[0], "B3"), blankCells).toEqual({
+        sharedFormula: "B2"
+      });
+    }
+  });
+
+  it("keeps it in the default style too", async () => {
+    // `s="0"` is a style like any other for collapsing, so the dependent must be recognised there as well.
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Cell.setValue(sheet, "A2", 1);
+    Cell.setValue(sheet, "B2", { formula: "A2" });
+    Cell.setValue(sheet, "B3", { sharedFormula: "B2" });
+    const written = Uint8Array.from(
+      await Workbook.toBuffer(handle, { format: "xlsx", validate: false })
+    );
+    const entries = await extractAll(written);
+    const part = "xl/worksheets/sheet1.xml";
+    const xml = new TextDecoder().decode(entries.get(part)!.data);
+    const patched = xml.replace(
+      '<c r="B3"><f t="shared" si="0"/>',
+      '<c r="B3" s="0"><f t="shared" si="0"/>'
+    );
+    expect(patched).not.toBe(xml);
+    const bytes = createZipSync(
+      [...entries.values()].map(entry => ({
+        name: entry.path,
+        data: entry.path === part ? new TextEncoder().encode(patched) : entry.data
+      }))
+    );
+
+    const read = Workbook.create();
+    await Workbook.read(read, bytes, { blankCells: "collapse" });
+    expect(Cell.getValue(Workbook.listWorksheets(read)[0], "B3")).toEqual({ sharedFormula: "B2" });
   });
 });
 
