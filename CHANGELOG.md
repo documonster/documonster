@@ -1,5 +1,109 @@
 # Changelog
 
+## [0.22.0](https://github.com/documonster/documonster/compare/v0.21.1...v0.22.0) (2026-11-06)
+
+### A note on the API changes first
+
+This release changes a lot of the public API, and I want to say up front why.
+
+Nobody likes API churn, and I don't either. But the old API had grown in pieces: each module had its own naming,
+its own way of reporting a bad argument, its own idea of who owned a returned object, and the same operation could
+look completely different from one module to the next. It confused people — the issues and questions made that
+clear — and it was not something I could keep patching one name at a time.
+
+So this release is one thorough refactor of the whole surface: one vocabulary across every module (`Workbook.*`,
+`Document.*`, `Csv.*`, `Pdf.*`, …), typed `<Module>ArgumentError`s with the field that was wrong, plain `Uint8Array`
+results everywhere, and one rule for absence (`undefined`). **This is the shape the API keeps.** I won't be
+reshaping it again, and the documentation website will be generated from it.
+
+**What this means for you:**
+
+- **Nothing you use stops working today.** Almost every old name still works as a deprecated forward to the new one.
+  The few things that did change behaviour are listed under ⚠ Breaking changes below.
+- **The old names stay for about three months.** They are removed together when **1.0** ships, so you migrate once,
+  not a little every release. Please move to the new API before then.
+- **If anything breaks or looks wrong while you migrate, open an issue** and I'll fix it.
+
+**The fastest way to migrate is to let an AI assistant do it — it takes a few minutes.** Point it at your code and at
+these documents:
+
+- [MIGRATION.md → How to upgrade from 0.21.1](https://github.com/documonster/documonster/blob/main/MIGRATION.md#how-to-upgrade-from-0211) — the steps, in order
+- [MIGRATION.md → Every deprecation in this release](https://github.com/documonster/documonster/blob/main/MIGRATION.md#every-deprecation-in-this-release) — every old name and what replaces it
+- [docs/api-changes-since-v0.21.1.md](https://github.com/documonster/documonster/blob/main/docs/api-changes-since-v0.21.1.md) — the complete per-name diff, old and new signatures side by side
+- Coming from another library: [exceljs](https://github.com/documonster/documonster/blob/main/MIGRATION_EXCELJS_TO_DOCUMONSTER.md) · [excelts](https://github.com/documonster/documonster/blob/main/MIGRATION_EXCELTS_TO_DOCUMONSTER.md)
+
+A prompt that works well: *"Upgrade this project from documonster 0.21.1 to 0.22.0 following MIGRATION.md. Replace
+every deprecated name using the 'Every deprecation in this release' list, then run the type check and tests."*
+Turning on `@typescript-eslint/no-deprecated` (or watching for your editor's strike-through) shows every call left
+to change.
+
+If you migrate by hand, I'm sorry for the extra work — every change is documented, with the reason and a
+before/after example.
+
+`@documonster/mcp` is released with the same version. No tool changed its name or lost an argument.
+
+### ⚠ BREAKING CHANGES
+
+These are the changes that can affect working code. Everything else is a deprecation that keeps working until 1.0.
+
+* **Byte results are plain `Uint8Array`s on every platform.** `Workbook.toBuffer` no longer resolves to a Node
+  `Buffer`, so `slice()` copies and Buffer-only methods are gone. Wrap without copying with
+  `Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)`. `Archive.randomBytes()` without a length throws
+  `ArchiveArgumentError`.
+* **Absence is `undefined` in every public return.** Results that used to be `null` (archive readers,
+  `Fs.safeStats`, `Watermark.get`, several PDF fields) are now `undefined`. TypeScript won't flag an `=== null`
+  check that stopped matching; search for them.
+* **Errors are the module's own classes.** A wrong argument is `<Module>ArgumentError` with `field` set, a refused
+  file operation is `<Module>FileError`, a configured read limit is `<Module>LimitExceededError`. Arguments that
+  used to be coerced or silently ignored now throw.
+* **Excel behaviour changes:** a read returns a new workbook; inserting, deleting and renaming keep every reference
+  (formulas, names, tables, charts, validations) consistent; facet getters return copies; values and notes are
+  copied in; a six-digit `argb` is written as `FF` + rgb, as the file format requires.
+* **Word:** `Document.*` edits in place and no longer reaches documents that share nodes with the one edited.
+* **A small number of names were removed without a forward** — see [Removed without a forward](https://github.com/documonster/documonster/blob/main/MIGRATION.md#removed-without-a-forward).
+* Full details: [MIGRATION.md → Unreleased](https://github.com/documonster/documonster/blob/main/MIGRATION.md#unreleased).
+
+### Features
+
+* Unify the public API, tighten its contracts and fix correctness across modules ([9098a00](https://github.com/documonster/documonster/commit/9098a0040967810fe37d5445b12b0e1afb7140a6))
+* Hold every public API to one contract — argument errors, ownership, naming and type surface ([4893bd3](https://github.com/documonster/documonster/commit/4893bd3fcac1f930d80a2108cbde7f672f959b7a))
+* Final pre-freeze consistency pass — read limits on every path, one schema vocabulary, isolation fixes ([45b59b3](https://github.com/documonster/documonster/commit/45b59b3c3c71ebe11a16f0ab0bdbd9f974813ded))
+* Migration guides from exceljs and excelts, generated API change reports, plain Uint8Array byte results ([e7ad7fe](https://github.com/documonster/documonster/commit/e7ad7fee6a976bf7d00987caa56788409d7eea1f))
+* **word:** Fill a template from XML as an ERP exports it, keep each run's formatting, and format values with Word's field switches ([9d44abc](https://github.com/documonster/documonster/commit/9d44abc1c1c9c778d7ac7942740704f15903d1a9))
+  * A loop over one item works the same as a loop over many — XML can't say "a list of one", so an invoice with a single line used to fail or lose it.
+  * The XML data source keeps attributes (`{{amount.@currency}}`), mixed content and `xsi:nil`, and ignores namespace prefixes.
+  * Filling a placeholder keeps each run's formatting, tabs and line breaks instead of merging the paragraph into its first run.
+  * Word's field switches in placeholders: `{{total \# "#,##0.00"}}`, `{{due \@ "d MMMM yyyy"}}`, `{{name \* Upper}}`, `{{phone \b "Tel: "}}`.
+  * `TemplateOptions.locale` writes numbers and dates the way Word's regional settings do (German `1.234,50`, Indian `12,34,567.00`, localized month names).
+  * Loop variables `{{@number}}`, `{{@first}}`, `{{@last}}`.
+  * `@documonster/mcp`: `template_inspect` shapes data by path; `template_fill` takes `locale`.
+
+### Bug Fixes
+
+* **mcp (security):** `template_inspect` no longer lets a placeholder path such as `{{__proto__.x}}` write onto the server's `Object.prototype` when inspecting an untrusted template ([f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **excel:** Keep a styled cell that points at a shared formula when collapsing blank cells ([#255](https://github.com/documonster/documonster/issues/255)) ([067d1ae](https://github.com/documonster/documonster/commit/067d1ae09350a3404f4db7e955c93e0b261afefd))
+* **excel:** Keep a styled blank's cell when a hyperlink or a comment lands on it ([6dc8962](https://github.com/documonster/documonster/commit/6dc8962da0f2b63b7d6525eba04a4cd48ba1e923))
+* **excel:** Edit a collapsed sheet as if its styled blanks were cells ([59f2350](https://github.com/documonster/documonster/commit/59f2350514024cf5fe9f5c7c06d41ac4e4668500))
+* **excel:** Refuse a splice that would push cells off the sheet before anything moves ([52fb5c9](https://github.com/documonster/documonster/commit/52fb5c92a5302ef7ff1f42253a34ddbb1afddf0f))
+* **excel:** A function name is written as a function passed by name (`_xleta.`) only in the argument a `LAMBDA` goes in — `COS(NA)`, `BYROW(SUM, …)` and `GROUPBY(…, SUM, NA)` no longer change meaning on write, in XLSX and XLSB ([6f129b0](https://github.com/documonster/documonster/commit/6f129b045949b76d24caabf0cd236ec241900111), [a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6))
+* **excel:** Deleting the last column no longer fails halfway with its cells already moved, and makes room to insert a column again; moving columns keeps each column's width, key and settings exactly ([f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **excel:** `Row.spliceCells` and `Row.duplicate` check the sheet's edge before changing anything, so a refused edit leaves the sheet as it was ([f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **excel:** Reading an XLSB with `blankCells: "collapse"` no longer expands a large or unresolvable hyperlink range cell by cell; taking styled rows back in any order is linear ([a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6), [f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **excel:** `Stream.WorkbookReader` over a missing file reports `ExcelFileError` on Windows and Bun too ([6f129b0](https://github.com/documonster/documonster/commit/6f129b045949b76d24caabf0cd236ec241900111))
+* **word:** Field switches reject an unknown switch or an unclosed quote before filling — even inside a branch not taken or an empty loop — and leave the document unchanged ([a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6))
+* **word:** Dates are validated (no `99:99`, no `+15:00` zone, no 30 February), years below 100 are written as written, XML Schema `24:00:00` and fractional seconds without a zone are read, and month names are always Gregorian ([a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6), [f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **word:** Numeric pictures in locales that group with a space (`fr`) or an apostrophe (`de-CH`) keep literal spaces and quotes ([a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6))
+* **word:** `{{#cols}}` treats a missing or `null` collection as empty, and keeps the table's column widths in step with the columns it repeats ([f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **word:** A tab or a line break inside run text is laid out and converted to HTML and Markdown as one, instead of as a missing glyph ([9d44abc](https://github.com/documonster/documonster/commit/9d44abc1c1c9c778d7ac7942740704f15903d1a9))
+* **word:** The locale cache is bounded by the locales the platform has data for, so a long-running server no longer grows with every distinct locale tag ([f7a91e5](https://github.com/documonster/documonster/commit/f7a91e53020cd451bf085eba1ccbae756b8563ed))
+* **archive:** A reproducible ZIP's timestamp is local midnight in the time zone of the write, not of the module load ([6f129b0](https://github.com/documonster/documonster/commit/6f129b045949b76d24caabf0cd236ec241900111))
+* Make CI pass on every platform and clear the CodeQL findings ([6f129b0](https://github.com/documonster/documonster/commit/6f129b045949b76d24caabf0cd236ec241900111))
+* **test:** Run the browser suite in shards and remove timing from three tests ([a754ccd](https://github.com/documonster/documonster/commit/a754ccd1bed3cc4924a33eadce2c0cd2cf57f0b6))
+
+### Performance Improvements
+
+* Finding a system font reads only the tables that decide whether a face fits, not the whole file — a label with a character no installed font has (an emoji, a private-use symbol) used to read every font on the machine first, 8–30 s on Windows. The face chosen is still read whole ([d9201a3](https://github.com/documonster/documonster/commit/d9201a34439050d7f6ff44fc30513968ec6368a4))
+
 ## [0.21.1](https://github.com/documonster/documonster/compare/v0.21.0...v0.21.1) (2026-10-25)
 
 
