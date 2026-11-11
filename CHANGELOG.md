@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/documonster/documonster/compare/v0.22.1...v0.23.0) (2026-11-11)
+
+
+### Features
+
+* **xml:** SkipLeadingText — read a document that has text before its first `<` ([2356278](https://github.com/documonster/documonster/commit/2356278d057933e99703ea51cd512b7c5e62e467))
+
 ## [0.22.1](https://github.com/documonster/documonster/compare/v0.22.0...v0.22.1) (2026-11-11)
 
 
