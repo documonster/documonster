@@ -152,7 +152,8 @@ const saxShape = {
   resume: flag(),
   internalEntities: flag(),
   maxContextBytes: byteCount(),
-  context: contextSchema.optional()
+  context: contextSchema.optional(),
+  skipLeadingText: flag()
 };
 const saxOptionsSchema = s.object(saxShape, OPTIONS);
 const SAX_KEYS = Object.keys(saxShape) as Array<keyof XmlSaxOptions>;
@@ -207,7 +208,8 @@ const readRecordsShape = {
   maxEntityExpansionLength: limit(),
   invalidCharHandling: invalidCharHandling(),
   maxContextBytes: byteCount(),
-  signal: s.abortSignal().optional()
+  signal: s.abortSignal().optional(),
+  skipLeadingText: flag()
 };
 const readRecordsOptionsSchema = s.object(readRecordsShape, OPTIONS);
 const READ_RECORDS_KEYS = Object.keys(readRecordsShape) as Array<keyof XmlReadRecordsOptions>;
@@ -223,7 +225,8 @@ const readRootShape = {
   maxContextBytes: byteCount(),
   maxEntityExpansions: limit(),
   maxEntityExpansionLength: limit(),
-  signal: s.abortSignal().optional()
+  signal: s.abortSignal().optional(),
+  skipLeadingText: flag()
 };
 const readRootOptionsSchema = s.object(readRootShape, OPTIONS);
 const READ_ROOT_KEYS = Object.keys(readRootShape) as Array<keyof XmlReadRootOptions>;

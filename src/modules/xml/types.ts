@@ -262,6 +262,16 @@ export interface XmlSaxOptions {
    */
   invalidCharHandling?: XmlInvalidCharHandling;
   /**
+   * Skip whatever comes before the document's first `<` — text no XML document holds there, such as
+   * the two lines `unzip -c` writes before a file's content (`Archive:  …` / `  inflating: …`) — as
+   * not part of the document: it is neither reported as text nor refused, and the XML declaration may
+   * follow it. Positions stay positions in what was given; how much was skipped is
+   * {@link SaxParser.skippedLeadingText}. The skipped text must still decode, and what follows must be
+   * a whole document: only its start moves. No effect on a parser that resumes, or reads a fragment.
+   * @default false
+   */
+  skipLeadingText?: boolean;
+  /**
    * Offset in the file of the first byte the parser is given, so the byte positions it reports
    * (`XmlParseError.byte`, `startByte`, `endByte`) are positions in the file. Only bytes
    * have positions: it has no effect on a parser given text. A byte order mark is stripped only at
@@ -384,6 +394,14 @@ export interface XmlReadRecordsOptions extends XmlToPlainObjectOptions {
   /** Offset in the file of the first byte of the source, and the start of the chunk to read. */
   offset?: number;
   /**
+   * Skip what comes before the document's first `<` — such as the lines `unzip -c` writes before a
+   * file's content — as `Xml.SaxParser`'s `skipLeadingText` does; the result's `skippedLeadingBytes`
+   * says how much. Applies to a read from offset 0, where the document starts; byte positions stay
+   * the file's. Give it to every range of a partition and to `Xml.readRoot` alike.
+   * @default false
+   */
+  skipLeadingText?: boolean;
+  /**
    * Length of the chunk to read, in bytes: the records whose start tag begins in
    * `[offset, offset + size)` are read. Omitted, every record from `offset` on.
    */
@@ -413,6 +431,8 @@ export interface XmlReadRecordsOptions extends XmlToPlainObjectOptions {
 export interface XmlReadRecordsResult {
   /** How many records were given to `onRecord`. */
   readonly records: number;
+  /** How many bytes `skipLeadingText` passed over before the document; absent for none. */
+  readonly skippedLeadingBytes?: number;
   /**
    * Offset in the file of the first byte not parsed: the read went past the chunk's end until its
    * last record closed and the next chunk's start was placed.
@@ -485,6 +505,12 @@ export interface XmlReadRootOptions {
   maxEntityExpansionLength?: number;
   /** Cancels the read: the source is closed and the call rejects with an `AbortError` whose `cause` is the signal's reason. */
   signal?: AbortSignal;
+  /**
+   * Skip what comes before the document's first `<`, as `Xml.readRecords`' `skipLeadingText` does.
+   * The skipped bytes count toward `maxStartByte`.
+   * @default false
+   */
+  skipLeadingText?: boolean;
 }
 
 /** The root element `Xml.readRoot` read, and the prolog before it. */
@@ -498,6 +524,8 @@ export interface XmlRootElement {
   readonly attributes: Readonly<Record<string, string>>;
   /** What a reader that starts later in the file needs: `Xml.readRecords`' `context`. */
   readonly context: XmlPrologContext;
+  /** How many bytes `skipLeadingText` passed over before the document; absent for none. */
+  readonly skippedLeadingBytes?: number;
 }
 
 // =============================================================================

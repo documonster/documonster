@@ -315,6 +315,12 @@ class SaxParser {
   private trackPosition: boolean;
   private fileName?: string;
   private fragment: boolean;
+  /** `skipLeadingText`, for a parser that reads from the document's start. */
+  private readonly skipLeading: boolean;
+  /** Whether what is read now is still before the document: skipped while `skipLeading`. */
+  private beforeDocument = false;
+  /** How much was skipped before the document: see {@link skippedLeadingText}. */
+  private skippedLeading = 0;
   private xmlns: boolean;
   private maxDepth: number;
   private maxEntityExpansions: number;
@@ -560,6 +566,7 @@ class SaxParser {
     this.trackPosition = options?.position !== false;
     this.fileName = options?.fileName;
     this.fragment = options?.fragment ?? false;
+    this.skipLeading = (options?.skipLeadingText ?? false) && !this.fragment && !options?.resume;
     this.xmlns = options?.xmlns ?? false;
     this.maxDepth = options?.maxDepth !== undefined ? options.maxDepth : 256;
     this.maxEntityExpansions =
@@ -587,6 +594,15 @@ class SaxParser {
   /** Characters consumed so far, counted across every chunk written. */
   get position(): number {
     return this.chunkPosition + this.i;
+  }
+
+  /**
+   * How much `skipLeadingText` passed over before the document's first `<` — bytes when given bytes,
+   * characters when given text — or 0 when nothing was, or the option is off. It stays readable after
+   * `close()`, until the parser is given the next document.
+   */
+  get skippedLeadingText(): number {
+    return this.skippedLeading;
   }
 
   /**
@@ -743,6 +759,7 @@ class SaxParser {
     this.sawDoctype = false;
     this.closedRoot = this.fragment;
     this.reportedTextBeforeRoot = this.fragment || this.resume;
+    this.beforeDocument = this.skipLeading;
     this.reportedTextAfterRoot = this.fragment || this.resume;
     this.carriedFromPrevious = undefined;
     this._bomStripped = false;
@@ -1069,6 +1086,8 @@ class SaxParser {
       }
       this._closed = false;
       this._init();
+      // A new document: what was skipped before the last one is kept until here, for after `close()`.
+      this.skippedLeading = 0;
     }
     if (chunk === null) {
       if (this.decoder !== undefined) {
@@ -2191,6 +2210,9 @@ class SaxParser {
   }
 
   private handleTextOutsideRoot(): void {
+    if (this.beforeDocument && !this.skipBeforeDocument()) {
+      return;
+    }
     const { chunk } = this;
     let { i: start } = this;
     const handler = this._handlers.text;
@@ -2276,6 +2298,43 @@ class SaxParser {
         this.textOutsideRoot();
       }
     }
+  }
+
+  /**
+   * With `skipLeadingText`, before the document: pass over the chunk up to its first `<`, which begins
+   * the document — counting what is passed over in positions, reporting none of it — and say whether
+   * the document began in this chunk.
+   */
+  private skipBeforeDocument(): boolean {
+    const chunk = this.chunk;
+    const from = this.i;
+    const at = chunk.indexOf("<", from);
+    const end = at === -1 ? chunk.length : at;
+    if (end > from) {
+      if (!this.chunkOneUnit) {
+        this.extra += utf8Length(chunk, from, end) - (end - from);
+      }
+      if (this.trackPosition) {
+        for (let k = from; k < end; k++) {
+          if (chunk.charCodeAt(k) === NL) {
+            this.line++;
+            this.column = 0;
+            this.positionAtNewLine = this.chunkPosition + k + 1;
+          } else {
+            this.column++;
+          }
+        }
+      }
+      this.i = this.prevI = end;
+    }
+    if (at === -1) {
+      return false;
+    }
+    this.beforeDocument = false;
+    const start = this.unitAt(at);
+    this.skippedLeading = start - this.documentStart;
+    this.markupStart = this.textStart = this.documentStart = start;
+    return true;
   }
 
   /**

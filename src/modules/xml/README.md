@@ -290,6 +290,7 @@ parser that is calling it: that is refused with an `XmlError`.
 | `internalEntities`         | `false`    | Read and expand the internal subset's general entities                                      |
 | `maxContextBytes`          | `65536`    | Largest prolog context (UTF-8 bytes of its JSON) and markup declaration (UTF-16 code units) |
 | `context`                  | —          | A prolog context, for a `resume` parser                                                     |
+| `skipLeadingText`          | `false`    | Skip what comes before the document's first `<` (see below)                                 |
 
 **Bytes.** Given `Uint8Array` chunks, the parser decodes UTF-8 itself — a character split between
 chunks is read whole — and gives every event its byte range (`startByte` / `endByte`) and every
@@ -425,6 +426,15 @@ bound where the root may begin and how long its start tag may be, by byte positi
 answer however the source is chunked. It expands the internal subset's entities in the root's
 attributes, bounded by `maxEntityExpansions` (default 10,000) and `maxEntityExpansionLength`
 (default 10,000,000 UTF-16 code units), as the parser options of the same names are.
+
+**Text before the document.** Some files carry text before the XML that no document holds there —
+saved from `unzip -c`, they begin with its two lines `Archive:  …` and `  inflating: …`. With
+`skipLeadingText: true`, `Xml.SaxParser`, `Xml.readRoot` and `Xml.readRecords` take the first `<` as
+the document's start: what comes before it is skipped, not reported as text, and the XML declaration
+may follow it. Byte positions stay the file's, and the result says how much was skipped
+(`skippedLeadingBytes`; `skippedLeadingText` on a parser). Nothing else is relaxed: a `<` in that text
+begins the document there, and text after the root is still refused. Give the option to `readRoot`
+and to every range of a partition alike. It is off by default, since such a file is not XML.
 
 Both functions throw this module's errors for what they read. Two kinds of failure are not
 `XmlError`s: a cancelled `signal` is the package's `AbortError` (`isAbortError` is true,

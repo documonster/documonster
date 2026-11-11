@@ -704,7 +704,9 @@ async function readRecords(
     maxEntityExpansions: options.maxEntityExpansions,
     maxEntityExpansionLength: options.maxEntityExpansionLength,
     invalidCharHandling: options.invalidCharHandling,
-    maxContextBytes: options.maxContextBytes
+    maxContextBytes: options.maxContextBytes,
+    // Only a read from the file's start has a document start to look for.
+    skipLeadingText: !resumed && options.skipLeadingText
   });
 
   /** Checks of later chunks still running, earliest first. */
@@ -1062,9 +1064,11 @@ async function readRecords(
     }
     structure?.finish(main.parser);
     succeeded = true;
+    const skipped = main.parser.skippedLeadingText;
     return {
       records: delivered,
       endByte: pos,
+      ...(skipped > 0 && { skippedLeadingBytes: skipped }),
       structure: {
         start: offset,
         end: size === Infinity ? null : end,

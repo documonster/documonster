@@ -277,6 +277,7 @@ DOCTYPE 内部子集中的处理指令同样会报告（`Xml.parse` 不把它放
 | `internalEntities`         | `false`    | 读取并展开内部子集声明的通用实体                                             |
 | `maxContextBytes`          | `65536`    | 文件开头上下文（其 JSON 的 UTF-8 字节数）和单条标记声明（UTF-16 码元）的上限 |
 | `context`                  | —          | 文件开头上下文，供 `resume` 解析器使用                                       |
+| `skipLeadingText`          | `false`    | 跳过文档第一个 `<` 之前的内容（见下文）                                      |
 
 **字节输入。** 传入 `Uint8Array` 时，解析器自行解码 UTF-8——跨数据块的字符会被完整读出——并给每个事件
 附上字节范围（`startByte` / `endByte`），给每个错误附上 `byte`。不属于合法 UTF-8 序列的字节是无效字符，按
@@ -387,6 +388,13 @@ try {
 （默认 1,000,000）和 `maxTagBytes`（默认 65,536）按字节位置限制根元素的起点和开始标签的长度——无论数据源怎样
 分块，结果都相同。它会展开根元素属性中内部子集声明的实体，受 `maxEntityExpansions`（默认 10,000）和
 `maxEntityExpansionLength`（默认 10,000,000 个 UTF-16 单位）限制，含义与同名解析器选项相同。
+
+**文档之前的文本。** 有些文件在 XML 之前带有任何 XML 文档都不会有的文本，例如从 `unzip -c` 的输出保存下来的文件，
+开头是 `Archive:  …` 和 `  inflating: …` 两行。设置 `skipLeadingText: true` 后，`Xml.SaxParser`、`Xml.readRoot`
+和 `Xml.readRecords` 把第一个 `<` 作为文档的开始：之前的内容被跳过，不作为文本报告，其后可以是 XML 声明。字节位置
+仍是原文件中的位置，结果中报告跳过了多少（`skippedLeadingBytes`；解析器上为 `skippedLeadingText`）。其余规则不变：
+这段文本中的 `<` 就是文档的开始，根元素之后的文本仍会被拒绝。`readRoot` 和分区的每个范围都应传入同样的设置。默认关闭，
+因为这样的文件不是 XML。
 
 两个函数对读到的内容抛出本模块的错误。有两类失败不是 `XmlError`：`signal` 取消时抛出包内的 `AbortError`
 （`isAbortError` 为 true，`isXmlError` 为 false）；`source` 自身或 `onRecord`、`isArray` 等回调抛出的异常原样传出。

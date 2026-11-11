@@ -55,7 +55,8 @@ async function readRoot(
     internalEntities: true,
     maxContextBytes: options?.maxContextBytes,
     maxEntityExpansions: options?.maxEntityExpansions,
-    maxEntityExpansionLength: options?.maxEntityExpansionLength
+    maxEntityExpansionLength: options?.maxEntityExpansionLength,
+    skipLeadingText: options?.skipLeadingText
   });
   let root: XmlRootElement | undefined;
   let startByte = 0;
@@ -64,7 +65,13 @@ async function readRoot(
     throw err;
   });
   parser.on("opentag", tag => {
-    root = { name: tag.name, attributes: tag.attributes, context: parser.getPrologContext()! };
+    const skipped = parser.skippedLeadingText;
+    root = {
+      name: tag.name,
+      attributes: tag.attributes,
+      context: parser.getPrologContext()!,
+      ...(skipped > 0 && { skippedLeadingBytes: skipped })
+    };
     startByte = parser.startByte!;
     endByte = parser.endByte!;
     parser.stop();
