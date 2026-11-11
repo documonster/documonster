@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/documonster/documonster/compare/v0.22.0...v0.22.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **xml:** Harden SAX, partition reads, DOM/query/writers and XML consumers; restore performance ([14b6454](https://github.com/documonster/documonster/commit/14b6454e8cc9da1f3b38b8d8d0651ade0b16bac4))
+
 ## [0.22.0](https://github.com/documonster/documonster/compare/v0.21.1...v0.22.0) (2026-11-06)
 
 ### A note on the API changes first
