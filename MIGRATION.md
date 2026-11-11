@@ -2459,7 +2459,7 @@ errors and a row over `maxRowBytes` (`CsvError`), malformed XML (`XmlParseError`
   refuse a leading single `/` (it searched every depth) and a path they do not support (empty step, `.`, `..`,
   `[@id]`, `[last()]`, other predicates, an empty path) instead of matching nothing. `Xml.Writer` /
   `Xml.StreamWriter` refuse `openXml()` once anything has been written (`XmlWriteError`); it wrote a declaration after
-  content, such as `<a<?xml …?>`, which no parser accepts. `Xml.parse` stays lenient about a misplaced declaration.
+  content, such as `<a<?xml …?>`, which no parser accepts. `Xml.parse` refuses a misplaced declaration too (it used to drop it).
   `writeRaw` refuses a non-string (field `xml`); `undefined` was written as nothing and `42` as `42`. Attribute errors
   name `attributes.<key>` (a map) or `value` (`addAttribute`). `maxDepth` / `maxEntityExpansions` that are not an integer ≥ 0
   (`NaN` and `-1` switched the limit off), an unknown `invalidCharHandling`, non-boolean flags, non-string input to

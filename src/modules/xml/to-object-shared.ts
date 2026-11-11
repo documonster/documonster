@@ -5,7 +5,7 @@
  * `parseXmlToObject` (SAX-direct path). Not part of the public API.
  */
 
-import { checkPlainObjectOptions } from "@xml/arguments";
+import { checkPlainObjectOptions, snapshotPlainObjectOptions } from "@xml/arguments";
 import type { XmlToPlainObjectOptions } from "@xml/types";
 
 // =============================================================================
@@ -21,12 +21,34 @@ export interface ResolvedOptions {
   readonly isArray: ((name: string) => boolean) | null;
   readonly preserveCData: boolean;
   readonly ignoreWS: boolean;
+  /**
+   * The key of each attribute name, prefixed: built once per name, since a fresh concatenation is
+   * a new string to intern every time it is used as a key.
+   */
+  readonly attrKeys: Map<string, string>;
+}
+
+/** The key `name`'s attribute takes in the object: the prefix and the name. */
+export function attributeKey(opts: ResolvedOptions, name: string): string {
+  if (opts.attrPrefix === "") {
+    return name;
+  }
+  let key = opts.attrKeys.get(name);
+  if (key === undefined) {
+    key = opts.attrPrefix + name;
+    if (opts.attrKeys.size < 4096) {
+      opts.attrKeys.set(name, key);
+    }
+  }
+  return key;
 }
 
 export function resolveOptions(
-  options?: XmlToPlainObjectOptions,
+  given?: XmlToPlainObjectOptions,
   where = "Xml.toPlainObject"
 ): ResolvedOptions {
+  // Read once, so what is checked is what is used.
+  const options = snapshotPlainObjectOptions(given);
   checkPlainObjectOptions(where, options);
   return {
     ignoreAttributes: options?.ignoreAttributes ?? false,
@@ -35,7 +57,8 @@ export function resolveOptions(
     alwaysArray: options?.alwaysArray ?? false,
     isArray: options?.isArray ?? null,
     preserveCData: options?.preserveCData ?? true,
-    ignoreWS: options?.ignoreWhitespaceText ?? true
+    ignoreWS: options?.ignoreWhitespaceText ?? true,
+    attrKeys: new Map()
   };
 }
 
@@ -44,7 +67,7 @@ export function resolveOptions(
 // =============================================================================
 
 /** Check if a string contains only whitespace without allocating a trimmed copy. */
-function isWhitespaceOnly(s: string): boolean {
+export function isWhitespaceOnly(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
     const ch = s.charCodeAt(i);
     // space, tab, newline, carriage return
@@ -86,7 +109,7 @@ export function resolveValue(
 
   // Add text content
   if (hasText) {
-    obj[opts.textKey] = text;
+    addTextValue(obj, text, opts);
   }
 
   // Empty element with no attributes → empty string
@@ -122,5 +145,25 @@ export function addChildValue(
   } else {
     const wrap = alwaysArray || (isArray !== null && isArray(name));
     parent[name] = wrap ? [value] : value;
+  }
+}
+
+/**
+ * Put an element's text under `textKey`. When an attribute (`attributePrefix: ""`) or a child
+ * element already took that key, the text is merged with it as a repeated child name is — into
+ * an array, the earlier value first — rather than overwriting it.
+ */
+export function addTextValue(
+  obj: Record<string, unknown>,
+  text: string,
+  opts: ResolvedOptions
+): void {
+  const existing = obj[opts.textKey];
+  if (existing === undefined) {
+    obj[opts.textKey] = text;
+  } else if (Array.isArray(existing)) {
+    existing.push(text);
+  } else {
+    obj[opts.textKey] = [existing, text];
   }
 }

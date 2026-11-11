@@ -1,4 +1,5 @@
 import { parseXml, textContent, attr } from "@xml/dom";
+import { XmlArgumentError } from "@xml/errors";
 import { query, queryAll } from "@xml/query";
 import { describe, it, expect } from "vitest";
 
@@ -217,5 +218,34 @@ describe("queryAll", () => {
       expect(first).toBeDefined();
       expect(attr(first!, "r")).toBe("A1");
     });
+  });
+});
+
+describe("path syntax", () => {
+  const doc = parseXml('<r><a href="a/b"><b/></a><a href="c"/><名 名="x"/></r>');
+
+  it("keeps a / inside a quoted predicate in its step", () => {
+    expect(queryAll(doc.root, "a[@href='a/b']")).toHaveLength(1);
+    expect(queryAll(doc.root, "a[@href='a/b']/b")).toHaveLength(1);
+  });
+
+  it("accepts Unicode names in a step and in a predicate", () => {
+    expect(queryAll(doc.root, "名[@名='x']")).toHaveLength(1);
+  });
+
+  it.each(["a|b", "1a", "!a", "a+b", "a?b", "a[@href='x", "a[0"])(
+    "refuses %s instead of matching nothing",
+    path => {
+      expect(() => queryAll(doc.root, path)).toThrow(XmlArgumentError);
+    }
+  );
+
+  it("searches a deep tree without overflowing the stack", () => {
+    const depth = 6000;
+    const deep = parseXml("<a>".repeat(depth) + "</a>".repeat(depth), { maxDepth: 0 });
+    const all = queryAll(deep.root, "//a");
+    expect(all).toHaveLength(depth - 1);
+    expect(all[0]).toBe(deep.root.children[0]);
+    expect(query(deep.root, "//a[0]")).toBe(deep.root.children[0]);
   });
 });

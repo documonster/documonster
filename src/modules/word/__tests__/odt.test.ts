@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 
 import { readOdt, writeOdt } from "../convert/odt/odt";
+import { DocxParseError } from "../errors";
 import type { DocxDocument, Paragraph, Run, NumberFormat, AbstractNumbering } from "../types";
 
 // =============================================================================
@@ -650,5 +651,76 @@ describe("ODT module", () => {
       expect(referenced).not.toMatch(/\.\./);
       expect(entries.has(referenced)).toBe(true);
     });
+  });
+});
+
+describe("readOdt — namespaces and errors", () => {
+  /** An ODT holding one paragraph, `content.xml` changed by `edit`. */
+  async function odtWith(edit: (content: string) => string): Promise<Uint8Array> {
+    const { Archive } = await import("@archive/index");
+    const doc = {
+      body: [{ type: "paragraph", children: [{ content: [{ type: "text", text: "Hello" }] }] }]
+    } as unknown as DocxDocument;
+    const files = await Archive.unpackZip(await writeOdt(doc));
+    const entries: Array<[string, Uint8Array | string]> = [];
+    for (const [path, { data }] of files) {
+      entries.push([path, path === "content.xml" ? edit(new TextDecoder().decode(data)) : data]);
+    }
+    return Archive.packZip(entries);
+  }
+
+  const text = (doc: DocxDocument): string =>
+    JSON.stringify(doc.body).match(/"text":"([^"]*)"/)?.[1] ?? "";
+
+  it("reads ODF's elements and attributes under whatever prefixes the file binds", async () => {
+    const renamed = await odtWith(xml =>
+      // Names only: the namespace URIs hold `:text:` too.
+      xml
+        .replace(/(<\/?|\s)office:/g, "$1o:")
+        .replace(/xmlns:office=/g, "xmlns:o=")
+        .replace(/(<\/?|\s)text:/g, "$1t:")
+        .replace(/xmlns:text=/g, "xmlns:t=")
+    );
+    expect(text(await readOdt(renamed))).toBe("Hello");
+  });
+
+  it("refuses a content.xml whose document element is not ODF's", async () => {
+    const foreign = await odtWith(xml =>
+      xml
+        .replace("<office:document-content", '<x:document-content xmlns:x="urn:other"')
+        .replace("</office:document-content>", "</x:document-content>")
+    );
+    await expect(readOdt(foreign)).rejects.toThrow(/document element/);
+  });
+
+  it("reports a content.xml that is not well-formed as the module's parse error", async () => {
+    await expect(readOdt(await odtWith(() => "<a>"))).rejects.toBeInstanceOf(DocxParseError);
+  });
+
+  it("refuses a body whose office prefix is bound to another namespace", async () => {
+    const wrong = await odtWith(xml =>
+      xml.replace(/xmlns:office="[^"]*"/, 'xmlns:office="urn:WRONG"')
+    );
+    await expect(readOdt(wrong)).rejects.toBeInstanceOf(DocxParseError);
+  });
+
+  it("refuses a part whose prefixes do not resolve rather than reading them by name", async () => {
+    const unbound = await odtWith(xml => xml.replace(/xmlns:text="[^"]*"/, ""));
+    await expect(readOdt(unbound)).rejects.toBeInstanceOf(DocxParseError);
+  });
+
+  it("does not read elements of another namespace as ODF text", async () => {
+    const wrongText = await odtWith(xml =>
+      xml.replace(/xmlns:text="[^"]*"/, 'xmlns:text="urn:WRONG"')
+    );
+    expect(text(await readOdt(wrongText))).toBe("");
+    const foreign = await odtWith(xml =>
+      xml.replace(
+        /<office:text([^>]*)>/,
+        '<office:text$1><x:p xmlns:x="urn:foreign">WRONG</x:p><p>WRONG</p>'
+      )
+    );
+    expect(JSON.stringify((await readOdt(foreign)).body)).not.toContain("WRONG");
+    expect(text(await readOdt(foreign))).toBe("Hello");
   });
 });

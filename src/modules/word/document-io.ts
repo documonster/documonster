@@ -63,14 +63,14 @@ export async function toBuffer(
   options?: DocxWriteOptions
 ): Promise<Uint8Array<ArrayBuffer>> {
   checkHandle(doc, "document", "doc", "Document.toBuffer");
-  checkWriteOptions(options, "Document.toBuffer");
+  options = checkWriteOptions(options, "Document.toBuffer");
   return asPlainBytes(await encryptIfRequested(await packageDocx(doc, options), options));
 }
 
 /** Package a DocxDocument model to base64 string — encrypted with `{ password }`, as {@link toBuffer}. */
 export async function toBase64(doc: DocxDocument, options?: DocxWriteOptions): Promise<string> {
   checkHandle(doc, "document", "doc", "Document.toBase64");
-  checkWriteOptions(options, "Document.toBase64");
+  options = checkWriteOptions(options, "Document.toBase64");
   const bytes = await encryptIfRequested(await packageDocx(doc, options), options);
   return bytesToBase64(bytes);
 }
@@ -97,14 +97,14 @@ export async function toBase64(doc: DocxDocument, options?: DocxWriteOptions): P
  */
 export async function readFile(path: string, options?: ReadDocxOptions): Promise<DocxDocument> {
   checkPath(path, "Document.readFile");
-  checkReadOptions(options, "Document.readFile");
+  const securityPolicy = checkReadOptions(options, "Document.readFile");
   let bytes: Uint8Array;
   try {
     bytes = await readFileBytes(path);
   } catch (error) {
     throw fileSystemError(path, "read", error);
   }
-  return readDocx(bytes, options);
+  return readDocx(bytes, { ...options, securityPolicy });
 }
 
 /**
@@ -126,7 +126,7 @@ export async function writeFile(
 ): Promise<void> {
   checkHandle(doc, "document", "doc", "Document.writeFile");
   checkPath(path, "Document.writeFile");
-  checkWriteOptions(options, "Document.writeFile");
+  options = checkWriteOptions(options, "Document.writeFile");
   const bytes = await encryptIfRequested(await packageDocx(doc, options), options);
   try {
     await writeFileBytes(path, bytes);
@@ -173,11 +173,18 @@ const toFlatOpcOptionsSchema = w.record({
 const _toFlatOpcOptionsMatch: SchemaMatches<typeof toFlatOpcOptionsSchema, ToFlatOpcOptions> = true;
 void _toFlatOpcOptionsMatch;
 
-/** The security policy of a write's options; `null` has always read as the default policy. */
-function checkWritePolicy(options: { securityPolicy?: unknown } | undefined, where: string): void {
-  if (options?.securityPolicy != null) {
-    checkSecurityPolicy(options.securityPolicy, "options.securityPolicy", where);
-  }
+/**
+ * The security policy of a write's options, each value read once and checked — the call then uses
+ * these, never `options.securityPolicy` again; `null` has always read as the default policy.
+ */
+function checkWritePolicy(
+  options: { securityPolicy?: unknown } | undefined,
+  where: string
+): DocxSecurityPolicy | undefined {
+  const policy = options?.securityPolicy;
+  return policy != null
+    ? (checkSecurityPolicy(policy, "options.securityPolicy", where) as DocxSecurityPolicy)
+    : undefined;
 }
 
 /**
@@ -185,16 +192,20 @@ function checkWritePolicy(options: { securityPolicy?: unknown } | undefined, whe
  * `where` — the security policy included, so a bad one is reported as
  * `options.securityPolicy.…` of the call, not by the packager.
  */
-function checkWriteOptions(options: unknown, where: string): void {
+function checkWriteOptions(
+  options: DocxWriteOptions | undefined,
+  where: string
+): DocxWriteOptions | undefined {
   checkSchema(writeOptionsSchema.optional(), options, where);
-  checkWritePolicy(options, where);
+  const securityPolicy = checkWritePolicy(options, where);
   checkWriteEncryption(options, where);
+  return options === undefined ? undefined : { ...options, securityPolicy };
 }
 
 /** The write side of a `Package` function's options (`PatchOptions`), checked in the name of `where`. */
-function checkPatchOptions(options: unknown, where: string): void {
+function checkPatchOptions(options: unknown, where: string): DocxSecurityPolicy | undefined {
   checkSchema(patchOptionsSchema.optional(), options, where);
-  checkWritePolicy(options, where);
+  return checkWritePolicy(options as { securityPolicy?: unknown } | undefined, where);
 }
 
 /** A file path as `Workbook.readFile` takes one: a non-empty string. */
@@ -278,10 +289,10 @@ export async function patchTemplate(
     );
   }
   checkPatches(patches, "Package.patchTemplate");
-  checkPatchOptions(options, "Package.patchTemplate");
+  const policy = checkPatchOptions(options, "Package.patchTemplate");
   // Deep clone the document to avoid mutating the cached template
   const patched = applyPatchesToDocument(structuredClone(template._doc), patches);
-  return asPlainBytes(await packageDocx(patched, writeOptions(options)));
+  return asPlainBytes(await packageDocx(patched, writeOptions(options, policy)));
 }
 
 /**
@@ -311,29 +322,40 @@ export async function patchDocument(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const where = "Package.patch";
   checkPatches(patches, where);
-  checkPatchOptions(options, where);
-  const doc = await readPackage(buffer, options, where);
+  const policy = checkPatchOptions(options, where);
+  const doc = await readPackage(buffer, options, where, policy);
   const patched = applyPatchesToDocument(doc, patches);
-  return asPlainBytes(await packageDocx(patched, writeOptions(options)));
+  return asPlainBytes(await packageDocx(patched, writeOptions(options, policy)));
 }
 
-/** `Document.read` under the name of the `Package` function that reads. */
+/**
+ * `Document.read` under the name of the `Package` function that reads, with the policy its options
+ * were checked to hold — read from them once, for the read and the write alike.
+ */
 async function readPackage(
   buffer: unknown,
   options: ReadDocxOptions | undefined,
-  where: string
+  where: string,
+  securityPolicy?: DocxSecurityPolicy
 ): Promise<DocxDocument> {
   const bytes = checkBytes(buffer, "buffer", where);
-  checkReadOptions(options, where);
-  return readDocx(bytes, options);
+  // Checked here, in the name of the call; the policy read for it is the one the read uses.
+  const policy = checkReadOptions(
+    securityPolicy === undefined ? options : { ...options, securityPolicy },
+    where
+  );
+  return readDocx(bytes, { ...options, securityPolicy: policy });
 }
 
 /** The write side of a `Package` function's options, as `Document.toBuffer` takes them. */
-function writeOptions(options: PatchOptions | undefined): DocxWriteOptions {
+function writeOptions(
+  options: PatchOptions | undefined,
+  securityPolicy: DocxSecurityPolicy | undefined
+): DocxWriteOptions {
   return {
     compressionLevel: options?.compressionLevel,
     modTime: options?.modTime,
-    securityPolicy: options?.securityPolicy
+    securityPolicy
   };
 }
 
@@ -383,10 +405,10 @@ export async function fillBuffer(
   const where = "Package.fillTemplate";
   // Checked before the file is read, so a bad argument costs no parse.
   fillData(data, where);
-  checkPatchOptions(options, where);
-  const doc = await readPackage(buffer, options, where);
+  const policy = checkPatchOptions(options, where);
+  const doc = await readPackage(buffer, options, where, policy);
   return asPlainBytes(
-    await packageDocx(fillDocument(doc, data, options, where), writeOptions(options))
+    await packageDocx(fillDocument(doc, data, options, where), writeOptions(options, policy))
   );
 }
 

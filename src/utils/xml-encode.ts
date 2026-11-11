@@ -18,14 +18,17 @@
 // Constants
 // =============================================================================
 
-/** Standard XML entity decode map. */
-const DECODE_MAP: Record<string, string> = {
-  lt: "<",
-  gt: ">",
-  amp: "&",
-  quot: '"',
-  apos: "'"
-};
+/** Standard XML entity decode map. No prototype, so `&constructor;` finds nothing rather than `Object`. */
+const DECODE_MAP: Record<string, string> = Object.assign(
+  Object.create(null) as Record<string, string>,
+  {
+    lt: "<",
+    gt: ">",
+    amp: "&",
+    quot: '"',
+    apos: "'"
+  }
+);
 
 /** Regex for decoding XML entities (named + numeric). */
 const DECODE_RE = /&(#\d+|#[xX][0-9A-Fa-f]+|\w+);/g;
@@ -378,8 +381,20 @@ export function stripXmlIllegalChars(text: string): string {
  * stays well-formed.
  *
  * The sequence `]]>` cannot appear inside CDATA, so each occurrence is split
- * into adjacent CDATA sections: `<![CDATA[...]]]]><![CDATA[>...]]>`.
+ * into adjacent CDATA sections: `<![CDATA[...]]]]><![CDATA[>...]]>`. A carriage return would be read
+ * back as a line feed, so it is written between sections as `&#xD;`, as text writes it.
  */
 export function encodeCData(text: string): string {
-  return "<![CDATA[" + stripXmlIllegalChars(text).split("]]>").join("]]]]><![CDATA[>") + "]]>";
+  const clean = stripXmlIllegalChars(text);
+  if (!clean.includes("\r")) {
+    return "<![CDATA[" + clean.split("]]>").join("]]]]><![CDATA[>") + "]]>";
+  }
+  // A carriage return inside CDATA is read back as a line feed (XML 1.0 §2.11), and a character
+  // reference there is not a reference: each one is written between two sections, as `&#xD;`.
+  return clean
+    .split("\r")
+    .map(part =>
+      part === "" ? "" : "<![CDATA[" + part.split("]]>").join("]]]]><![CDATA[>") + "]]>"
+    )
+    .join("&#xD;");
 }

@@ -6,6 +6,7 @@
  * orchestration of the higher-level parsers.
  */
 
+import { NS_W, STRICT_TO_TRANSITIONAL_NS } from "@word/constants";
 import { resolvePartPath } from "@word/core/opc-paths";
 import type { ParsedRelationship } from "@word/reader/reader-context";
 import { hashAlgorithmOfSid } from "@word/security/hash-names";
@@ -63,6 +64,23 @@ export function localName(name: string): string {
  */
 export function stripWPrefix(name: string): string {
   return name.charCodeAt(0) === 0x77 && name.charCodeAt(1) === 0x3a ? name.slice(2) : name;
+}
+
+/**
+ * Whether `el` is the root of a main document part: `w:document` in Word's main namespace,
+ * Transitional or Strict. The part has been read with its names normalised (`parsePartXml`), so the
+ * main namespace is bound to `w` on the root whichever prefix — or the default namespace — the file
+ * used; an element of another namespace, or a `w:` prefix bound to nothing, is not Word's.
+ */
+export function isWordDocumentRoot(el: {
+  readonly name: string;
+  readonly attributes: Readonly<Record<string, string>>;
+}): boolean {
+  if (el.name !== "w:document") {
+    return false;
+  }
+  const uri = el.attributes["xmlns:w"];
+  return uri === NS_W || (uri !== undefined && STRICT_TO_TRANSITIONAL_NS.get(uri) === NS_W);
 }
 
 /** Find a child element by local name (matches both `w:name` and bare `name`). */

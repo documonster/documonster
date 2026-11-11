@@ -446,7 +446,7 @@ describe("WorkbookReader", () => {
       const workbook = Workbook.create();
       await expect(
         Workbook.readFile(workbook, streamTestDataPath("invalid-xml.xlsx"))
-      ).rejects.toThrow("3:1: text data outside of root node.");
+      ).rejects.toThrow("2:1: text data outside of root node.");
 
       // Wait a tick to verify no unhandled rejection fires
       await new Promise(setImmediate);

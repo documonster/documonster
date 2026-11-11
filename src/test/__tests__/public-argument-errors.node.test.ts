@@ -107,7 +107,6 @@ const EXEMPT: Record<string, string> = {
   "Csv.rowHashArrayToValues": DEPRECATED,
   "Xml.attr": DEPRECATED,
   "Xml.findChildren": DEPRECATED,
-  "Xml.textContent": DEPRECATED,
   "Xml.walk": DEPRECATED,
   "Archive.editZip": DEPRECATED,
   "Archive.editZipUrl": DEPRECATED,

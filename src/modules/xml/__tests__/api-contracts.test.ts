@@ -134,6 +134,20 @@ describe("Xml.query / queryAll", () => {
     expect(names(Xml.queryAll(doc.root, "//b"))).toEqual(["b#2", "b#4"]);
   });
 
+  it("returns document order for a child step below nested // matches", () => {
+    const nested = Xml.parse(
+      '<r><a><b id="1"/><a><b id="2"/></a><b id="3"/></a><a><b id="4"/></a></r>'
+    );
+    expect(names(Xml.queryAll(nested.root, "//a/b"))).toEqual(["b#1", "b#2", "b#3", "b#4"]);
+    expect(names(Xml.queryAll(nested.root, "//a/b[1]"))).toEqual(["b#3"]);
+    expect(names(Xml.queryAll(nested.root, "//a/*"))).toEqual(["b#1", "a", "b#2", "b#3", "b#4"]);
+  });
+
+  it("names the call that was made when it refuses a path", () => {
+    expect(() => Xml.queryAll(doc.root, "/c")).toThrow(/^Xml\.queryAll: /);
+    expect(() => Xml.query(doc.root, "/c")).toThrow(/^Xml\.query: /);
+  });
+
   it("refuses an absolute path instead of searching every depth", () => {
     expect(() => Xml.queryAll(doc.root, "/c")).toThrow(XmlError);
   });

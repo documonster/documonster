@@ -2,16 +2,16 @@
  * XML Performance Benchmark: documonster vs fast-xml-parser
  *
  * Compares:
- * 1. DOM parse (non-streaming): parseXml() vs XMLParser.parse()
- * 2. SAX parse (streaming): SaxParser callback vs (no equivalent in fxp)
- * 3. Write (buffered): XmlWriter vs XMLBuilder
+ * 1. DOM parse (non-streaming): Xml.parse() vs XMLParser.parse()
+ * 2. SAX parse (streaming): Xml.SaxParser callback vs (no equivalent in fxp)
+ * 3. Write (buffered): Xml.Writer vs XMLBuilder
  *
- * Run: npx tsx scripts/xml-benchmark.ts
+ * Run: pnpm build:esm && node scripts/benchmark-xml.ts
  */
 
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
-import { SaxParser, parseXml, XmlWriter } from "../dist/esm/modules/xml/index.js";
+import { Xml } from "../dist/esm/modules/xml/index.js";
 
 // =============================================================================
 // Test Data Generation
@@ -140,9 +140,9 @@ for (const size of sizes) {
   });
 
   const domOurs = bench(
-    "documonster parseXml",
+    "documonster Xml.parse",
     () => {
-      parseXml(xml);
+      Xml.parse(xml);
     },
     size.iters
   );
@@ -162,10 +162,10 @@ for (const size of sizes) {
   // -------------------------------------------------------------------------
 
   const saxOurs = bench(
-    "documonster SaxParser",
+    "documonster Xml.SaxParser",
     () => {
       let tagCount = 0;
-      const parser = new SaxParser({ position: false });
+      const parser = new Xml.SaxParser({ position: false });
       parser.on("opentag", () => {
         tagCount++;
       });
@@ -188,9 +188,9 @@ for (const size of sizes) {
   const rowData = generateRowData(size.rows, size.cols);
 
   const writeOurs = bench(
-    "documonster XmlWriter",
+    "documonster Xml.Writer",
     () => {
-      const w = new XmlWriter();
+      const w = new Xml.Writer();
       w.openXml();
       w.openNode("worksheet", {
         xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -207,7 +207,7 @@ for (const size of sizes) {
       }
       w.closeNode();
       w.closeNode();
-      const result = w.xml;
+      const result = w.toString();
       if (result.length === 0) throw new Error("unreachable");
     },
     size.iters
@@ -251,8 +251,8 @@ for (const size of sizes) {
 console.log("=".repeat(70));
 console.log("Notes:");
 console.log("  - fast-xml-parser has no SAX/streaming parse mode");
-console.log("  - documonster SaxParser shown solo for reference");
+console.log("  - documonster Xml.SaxParser shown solo for reference");
 console.log("  - 'min' is the best single run (least noise)");
-console.log("  - DOM parse comparison is parseXml() vs XMLParser.parse()");
-console.log("  - Write comparison is XmlWriter vs XMLBuilder");
+console.log("  - DOM parse comparison is Xml.parse() vs XMLParser.parse()");
+console.log("  - Write comparison is Xml.Writer vs XMLBuilder");
 console.log("=".repeat(70));

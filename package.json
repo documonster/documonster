@@ -292,6 +292,7 @@
     "benchmark:formula": "pnpm build && node --expose-gc benchmark/formula-benchmark.mjs",
     "benchmark:xlsb": "node --expose-gc --import @oxc-node/core/register benchmark/xlsb-benchmark.ts",
     "benchmark:xlsb-scale": "node --expose-gc --import @oxc-node/core/register benchmark/xlsb-streaming-scale.ts",
+    "benchmark:xml-records": "node --import @oxc-node/core/register benchmark/xml-records-benchmark.ts",
     "build": "pnpm generate:csv-worker && node scripts/clean.ts dist && concurrently \"pnpm build:esm\" \"pnpm build:browser:bundle\" && pnpm build:verify && pnpm verify:treeshake",
     "build:browser:bundle": "rolldown -c rolldown.config.ts",
     "build:esm": "tsc --project tsconfig.esm.json && node scripts/fix-esm-imports.ts && node scripts/link-platform-variants.ts",

@@ -48,6 +48,18 @@ export type {
   // Parse options
   XmlParseOptions,
 
+  // Byte readers
+  XmlByteSource,
+  XmlPrologContext,
+  XmlAttributeDeclaration,
+  XmlRecord,
+  XmlReadRecordsOptions,
+  XmlReadRecordsResult,
+  XmlPartitionStructure,
+  XmlPartitionStep,
+  XmlReadRootOptions,
+  XmlRootElement,
+
   // Conversion options
   XmlToPlainObjectOptions,
   XmlParseToObjectOptions,
@@ -78,11 +90,16 @@ export {
   XmlArgumentError,
   XmlParseError,
   XmlLimitExceededError,
+  XmlTruncatedError,
+  XmlChunkAmbiguityError,
   XmlWriteError,
   isXmlError,
   isXmlParseError
 } from "@xml/errors";
-export type { XmlParseLimit } from "@xml/errors";
+// What `Xml.readRecords` and `Xml.readRoot` reject with when their signal fires, and its guard (also
+// true for a native `DOMException` named "AbortError").
+export { AbortError, isAbortError } from "@utils/errors";
+export type { XmlParseErrorContext, XmlParseLimit } from "@xml/errors";
 
 // The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
 export type { BaseErrorOptions } from "@utils/errors";

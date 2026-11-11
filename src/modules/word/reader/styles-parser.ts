@@ -30,7 +30,11 @@ import type {
 export function parseStyles(
   xmlStr: string,
   maxDepth?: number
-): { docDefaults?: DocDefaults; styles: StyleDef[]; preservedXml?: PreservedXml } {
+): {
+  docDefaults?: DocDefaults;
+  styles: StyleDef[];
+  preservedXml?: PreservedXml;
+} {
   const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const rootScope = namespacesInScope({}, root);
@@ -118,7 +122,10 @@ export function parseStyles(
     const misplacedOutline = findChildNs(styleEl, "outlineLvl");
     const misplacedLevel = misplacedOutline ? attrInt(misplacedOutline, "val") : undefined;
     if (misplacedLevel !== undefined && s.paragraphProperties?.outlineLevel === undefined) {
-      s.paragraphProperties = { ...s.paragraphProperties, outlineLevel: misplacedLevel };
+      s.paragraphProperties = {
+        ...s.paragraphProperties,
+        outlineLevel: misplacedLevel
+      };
     }
 
     const rPrEl = findChildNs(styleEl, "rPr");

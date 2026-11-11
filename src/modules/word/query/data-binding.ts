@@ -5,6 +5,7 @@
  * against CustomXML parts and populating the SDT content with values.
  */
 
+import { trimXmlPartLead } from "@utils/xml-part";
 import {
   checkHandle,
   checkNamedValues,
@@ -124,11 +125,18 @@ function resolveSdtBinding(sdt: StructuredDocumentTag, xmlStore: Map<string, str
 
   // Resolve the value from CustomXML using simple XPath evaluation
   const value = evaluateSimpleXPath(binding, xmlStore);
+  if (value === UNSUPPORTED) {
+    // An expression this evaluator cannot read leaves the SDT as it is.
+    return sdt;
+  }
 
   if (sdt.properties?.repeatingSection) {
     // Repeating section: value should be a collection
     // Each child in the data produces a copy of the repeatingSection item template
     const values = evaluateRepeatingXPath(binding, xmlStore);
+    if (values === UNSUPPORTED) {
+      return sdt;
+    }
     if (values.length === 0) {
       // Remove the SDT entirely if no data
       return removedSdtParagraph(sdt);
@@ -195,157 +203,268 @@ function removedSdtParagraph(sdt: StructuredDocumentTag): Paragraph {
 }
 
 /**
+ * The result of a binding whose XPath, or whose `w:prefixMappings`, is outside the subset this
+ * evaluator reads. The SDT keeps its content: evaluating some other expression in its place would
+ * put a value in it the binding never named.
+ */
+const UNSUPPORTED = Symbol("unsupported binding");
+type Unsupported = typeof UNSUPPORTED;
+
+/**
  * Evaluate an XPath expression against CustomXML stored as a string.
  *
  * Supports the XPath 1.0 subset that real-world OpenDoPE-style bindings
  * exercise:
- *   - Absolute paths: `/root/child/grandchild`
- *   - Namespace prefixes (matched by local name): `/ns0:root/ns0:child`
- *   - Position predicates: `/root/item[1]`, `/root/item[last()]`
- *   - Attribute access: `/root/element/@attr`
+ *   - Absolute location paths of child steps: `/root/child/grandchild` — what
+ *     Word and OpenDoPE write
+ *   - Namespace prefixes, resolved through the binding's `w:prefixMappings`;
+ *     a prefix it does not map is matched by local name
+ *   - Position predicates: `/root/item[1]`, `/root/item[last()]` (1-based, so
+ *     `[0]` matches nothing)
+ *   - A final attribute step: `/root/element/@attr`
  *   - Text content extraction from leaf nodes (CDATA-aware,
  *     entity-decoded by the XML parser)
  *
- * Does NOT support: axes (ancestor::, following::), functions
- * (count(), string()), arithmetic, union (|), or complex predicates.
+ * Anything else — other axes, functions, arithmetic, unions, other
+ * predicates — is reported as {@link UNSUPPORTED}, never approximated.
  *
- * Implemented on top of the project's XML DOM parser. The previous
- * regex-based scanner was unsafe — it returned entity-encoded text
- * verbatim and could be confused by CDATA, comments, attributes
- * containing `>`, etc.
- *
- * @returns The text content of the matched element/attribute, or null if
- *          not found. Returns the empty string for an element that exists
+ * @returns The text content of the first matched element/attribute, or null if
+ *          nothing matched. Returns the empty string for an element that exists
  *          but has no text — callers that need to distinguish empty from
  *          missing must compare to `null` explicitly.
  */
 function evaluateSimpleXPath(
   binding: SdtDataBinding,
   xmlStore: Map<string, string>
-): string | null {
-  const root = loadStoreRoot(binding, xmlStore);
-  if (!root) {
-    return null;
+): string | null | Unsupported {
+  const evaluated = evaluateBinding(binding, xmlStore);
+  if (evaluated === UNSUPPORTED || evaluated === null) {
+    return evaluated;
   }
-  const xpath = binding.xpath;
-
-  // Attribute access: /path/to/element/@attr
-  const attrMatch = xpath.match(/^(.+)\/@([a-zA-Z0-9_:-]+)$/);
-  if (attrMatch) {
-    const elementPath = attrMatch[1]!;
-    const attrName = attrMatch[2]!;
-    const localAttr = stripPrefix(attrName);
-    const el = findElementByPath(root, elementPath);
-    if (!el) {
-      return null;
-    }
-    // Match attribute by local name, ignoring any prefix in the source.
-    for (const [name, value] of Object.entries(el.attributes)) {
-      if (stripPrefix(name) === localAttr) {
+  const { path, chains, mappings } = evaluated;
+  if (!path.attribute) {
+    return chains.length > 0 ? collectTextContent(chains[0]!.at(-1)!) : null;
+  }
+  const wanted = path.attribute;
+  const uri = wanted.prefix === undefined ? undefined : mappings.get(wanted.prefix);
+  for (const chain of chains) {
+    for (const [name, value] of Object.entries(chain.at(-1)!.attributes)) {
+      const { prefix, local } = splitQName(name);
+      if (local !== wanted.local || prefix === "xmlns" || name === "xmlns") {
+        continue;
+      }
+      if (wanted.prefix === undefined) {
+        // An unprefixed attribute step names an attribute in no namespace, and an unprefixed
+        // attribute is the only one that is.
+        if (prefix === undefined) {
+          return value;
+        }
+      } else if (uri === undefined) {
+        // A prefix the binding does not map is matched by local name, as it always was.
+        return value;
+      } else if (prefix !== undefined && namespaceOfPrefix(prefix, chain) === uri) {
         return value;
       }
     }
-    return null;
   }
-
-  const el = findElementByPath(root, xpath);
-  if (!el) {
-    return null;
-  }
-  return collectTextContent(el);
+  return null;
 }
 
 interface PathSegment {
+  /** The step's prefix, when it has one. */
+  readonly prefix?: string;
   readonly localName: string;
-  /** 1-based position; 0 = first/any; -1 = last(). */
-  readonly position: number;
+  /** 1-based position (`[0]` matches nothing); -1 = last(); absent without a predicate. */
+  readonly position?: number;
 }
 
-function parsePathSegment(raw: string): PathSegment {
-  let seg = stripPrefix(raw);
-  let position = 0;
-  const predMatch = seg.match(/\[(\d+|last\(\))\]$/);
-  if (predMatch) {
-    seg = seg.substring(0, seg.indexOf("["));
-    if (predMatch[1] === "last()") {
-      position = -1;
-    } else {
-      position = parseInt(predMatch[1]!, 10);
-    }
+interface ParsedPath {
+  readonly segments: readonly PathSegment[];
+  /** A final `@name` step. */
+  readonly attribute?: { readonly prefix?: string; readonly local: string };
+}
+
+const NAME = "[A-Za-z_][\\w.-]*";
+const QNAME = `${NAME}(?::${NAME})?`;
+const STEP = new RegExp(`^/(${QNAME})(?:\\[(\\d+|last\\(\\))\\])?`);
+const ATTRIBUTE_STEP = new RegExp(`^/@(${QNAME})$`);
+
+/**
+ * Parse the supported location-path subset. A path without a leading `/` is relative to the
+ * document node, which is what a binding evaluates against, so it reads as the absolute path.
+ */
+function parsePath(xpath: string): ParsedPath | undefined {
+  let rest = xpath.trim();
+  if (rest.length > 0 && !rest.startsWith("/")) {
+    rest = `/${rest}`;
   }
-  return { localName: seg, position };
+  const segments: PathSegment[] = [];
+  while (rest.length > 0) {
+    const attr = rest.match(ATTRIBUTE_STEP);
+    if (attr) {
+      return segments.length > 0 ? { segments, attribute: splitQName(attr[1]!) } : undefined;
+    }
+    const step = rest.match(STEP);
+    if (!step) {
+      return undefined;
+    }
+    const { prefix, local } = splitQName(step[1]!);
+    const predicate = step[2];
+    segments.push({
+      ...(prefix !== undefined && { prefix }),
+      localName: local,
+      ...(predicate !== undefined && {
+        position: predicate === "last()" ? -1 : parseInt(predicate, 10)
+      })
+    });
+    rest = rest.slice(step[0].length);
+  }
+  return segments.length > 0 ? { segments } : undefined;
 }
 
-function stripPrefix(name: string): string {
+function splitQName(name: string): { prefix?: string; local: string } {
   const i = name.indexOf(":");
-  return i >= 0 ? name.substring(i + 1) : name;
+  return i >= 0 ? { prefix: name.substring(0, i), local: name.substring(i + 1) } : { local: name };
 }
 
 function elementLocal(el: XmlElement): string {
-  return el.local ?? stripPrefix(el.name);
+  return el.local ?? splitQName(el.name).local;
 }
 
-function loadStoreRoot(binding: SdtDataBinding, xmlStore: Map<string, string>): XmlElement | null {
+/**
+ * The binding's `w:prefixMappings` — `xmlns:p="uri" xmlns:q='uri'` — as prefix → namespace: what
+ * its XPath's prefixes stand for, whatever prefixes the data itself uses. They are XML namespace
+ * declarations, so they are read by the XML parser (references decoded); `undefined` when they
+ * are not well-formed declarations.
+ */
+function parsePrefixMappings(
+  mappings: string | undefined
+): ReadonlyMap<string, string> | undefined {
+  const out = new Map<string, string>();
+  if (mappings === undefined || mappings.trim() === "") {
+    return out;
+  }
+  let root: XmlElement;
+  try {
+    root = parseXml(`<m ${mappings}/>`).root;
+  } catch {
+    return undefined;
+  }
+  for (const [name, value] of Object.entries(root.attributes)) {
+    const { prefix, local } = splitQName(name);
+    if (prefix !== "xmlns") {
+      // Only namespace declarations belong in prefixMappings.
+      return undefined;
+    }
+    out.set(local, value);
+  }
+  return out;
+}
+
+/** The namespace `prefix` is bound to on the last element of `chain`, from the root down. */
+function namespaceOfPrefix(prefix: string, chain: readonly XmlElement[]): string | undefined {
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const uri = chain[i]!.ns?.[prefix];
+    if (uri !== undefined) {
+      return uri;
+    }
+  }
+  return undefined;
+}
+
+interface StoreRoot {
+  readonly root: XmlElement;
+  /** Whether the store's namespaces resolved, so elements carry the URI they are in. */
+  readonly namespaced: boolean;
+}
+
+/**
+ * Whether `el` is what `seg` names: a prefix the binding maps names a namespace, and the element
+ * must be in it — the data may bind any prefix to it, or none. A store whose namespaces did not
+ * resolve cannot show that, so it matches no mapped step. A step whose prefix the binding does
+ * not map, or that has none, is matched by local name, as it always was.
+ */
+function matchesSegment(
+  el: XmlElement,
+  seg: PathSegment,
+  mappings: ReadonlyMap<string, string>,
+  namespaced: boolean
+): boolean {
+  if (elementLocal(el) !== seg.localName) {
+    return false;
+  }
+  const uri = seg.prefix === undefined ? undefined : mappings.get(seg.prefix);
+  return uri === undefined || (namespaced && el.uri === uri);
+}
+
+function loadStoreRoot(binding: SdtDataBinding, xmlStore: Map<string, string>): StoreRoot | null {
   const storeId = binding.storeItemId.replace(/[{}]/g, "").toLowerCase();
   const xmlContent = xmlStore.get(storeId) ?? xmlStore.get(`{${storeId}}`);
   if (!xmlContent) {
     return null;
   }
+  const text = trimXmlPartLead(xmlContent);
   try {
-    return parseXml(xmlContent).root;
+    // With namespaces, so a mapped prefix is matched by the namespace it stands for.
+    return { root: parseXml(text, { xmlns: true }).root, namespaced: true };
   } catch {
-    // Malformed CustomXML store. Treat as empty rather than throwing —
-    // resolveDataBindings is best-effort by design.
-    return null;
+    try {
+      // Data whose namespaces do not resolve is still read by local name, but no mapped prefix
+      // can match in it (see `matchesSegment`).
+      return { root: parseXml(text).root, namespaced: false };
+    } catch {
+      // Malformed CustomXML store. Treat as empty rather than throwing —
+      // resolveDataBindings is best-effort by design.
+      return null;
+    }
   }
 }
 
-/** Direct-child elements of `el` filtered by local name. */
-function directChildren(el: XmlElement, localName: string): XmlElement[] {
-  const out: XmlElement[] = [];
-  for (const child of el.children) {
-    if (child.type === "element" && elementLocal(child) === localName) {
-      out.push(child);
-    }
+/**
+ * Evaluate the binding's path: every matching element, in document order, as the chain of
+ * elements from the root down to it. `null` when there is no store to evaluate against.
+ */
+function evaluateBinding(
+  binding: SdtDataBinding,
+  xmlStore: Map<string, string>
+):
+  | { path: ParsedPath; chains: XmlElement[][]; mappings: ReadonlyMap<string, string> }
+  | null
+  | Unsupported {
+  const path = parsePath(binding.xpath);
+  const mappings = parsePrefixMappings(binding.prefixMappings);
+  if (!path || !mappings) {
+    return UNSUPPORTED;
   }
-  return out;
-}
-
-/** Resolve a path of segments against `root`. The first segment is matched
- *  against `root` itself (XPath absolute paths begin with the document root). */
-function findElementByPath(root: XmlElement, xpath: string): XmlElement | null {
-  const segments = xpath
-    .split("/")
-    .filter(s => s.length > 0)
-    .map(parsePathSegment);
-  if (segments.length === 0) {
-    return root;
-  }
-
-  // First segment must match the document root by local name.
-  const first = segments[0]!;
-  if (elementLocal(root) !== first.localName) {
+  const store = loadStoreRoot(binding, xmlStore);
+  if (!store) {
     return null;
   }
-  let current: XmlElement | null = root;
-  for (let i = 1; i < segments.length; i++) {
-    if (!current) {
-      return null;
+  // The context starts at the document node, whose only child is the root element.
+  let contexts: XmlElement[][] = [[]];
+  for (const seg of path.segments) {
+    // Each context's children are its own, so no element is reached twice.
+    const next: XmlElement[][] = [];
+    for (const origin of contexts) {
+      const children = origin.length === 0 ? [store.root] : elementChildren(origin.at(-1)!);
+      const matches = children.filter(c => matchesSegment(c, seg, mappings, store.namespaced));
+      const picked =
+        seg.position === undefined
+          ? matches
+          : [seg.position === -1 ? matches.at(-1) : matches[seg.position - 1]].filter(
+              (m): m is XmlElement => m !== undefined
+            );
+      for (const el of picked) {
+        next.push([...origin, el]);
+      }
     }
-    const seg = segments[i]!;
-    const matches = directChildren(current, seg.localName);
-    if (matches.length === 0) {
-      return null;
-    }
-    if (seg.position === -1) {
-      current = matches[matches.length - 1]!;
-    } else if (seg.position > 0) {
-      current = matches[seg.position - 1] ?? null;
-    } else {
-      current = matches[0]!;
-    }
+    contexts = next;
   }
-  return current;
+  return { path, chains: contexts, mappings };
+}
+
+function elementChildren(el: XmlElement): XmlElement[] {
+  return el.children.filter((c): c is XmlElement => c.type === "element");
 }
 
 /** Concatenate descendant text and CDATA content. */
@@ -368,55 +487,19 @@ function collectTextContent(el: XmlElement): string {
   return out;
 }
 
-function evaluateRepeatingXPath(binding: SdtDataBinding, xmlStore: Map<string, string>): string[] {
-  const root = loadStoreRoot(binding, xmlStore);
-  if (!root) {
+/** One entry per element a repeating section's XPath matches. */
+function evaluateRepeatingXPath(
+  binding: SdtDataBinding,
+  xmlStore: Map<string, string>
+): string[] | Unsupported {
+  const evaluated = evaluateBinding(binding, xmlStore);
+  if (evaluated === UNSUPPORTED) {
+    return UNSUPPORTED;
+  }
+  if (evaluated === null || evaluated.path.attribute) {
     return [];
   }
-  const segments = binding.xpath
-    .split("/")
-    .filter(s => s.length > 0)
-    .map(parsePathSegment);
-  if (segments.length === 0) {
-    return [];
-  }
-
-  // Walk to the parent of the last segment, then count occurrences of the
-  // last segment's local name as direct children.
-  const parentSegments = segments.slice(0, -1);
-  const last = segments[segments.length - 1]!;
-
-  // Resolve the parent path. If only the root segment was provided we
-  // treat root as parent; if the parent has its own segments we walk
-  // them through findElementByPath against the root using a synthesised
-  // path.
-  let parent: XmlElement | null;
-  if (parentSegments.length === 0) {
-    parent = elementLocal(root) === last.localName ? null : root;
-    // Special case: `/root` itself as the repeating xpath — treat as one item.
-    if (elementLocal(root) === last.localName) {
-      return ["0"];
-    }
-  } else {
-    const parentPath =
-      "/" +
-      parentSegments
-        .map(s =>
-          s.position > 0
-            ? `${s.localName}[${s.position}]`
-            : s.position === -1
-              ? `${s.localName}[last()]`
-              : s.localName
-        )
-        .join("/");
-    parent = findElementByPath(root, parentPath);
-  }
-
-  if (!parent) {
-    return [];
-  }
-  const count = directChildren(parent, last.localName).length;
-  return Array.from({ length: count }, (_, i) => String(i));
+  return evaluated.chains.map((_, i) => String(i));
 }
 
 /**
@@ -461,7 +544,7 @@ function resolveInnerBindings(
     };
 
     const value = evaluateSimpleXPath(modifiedBinding, xmlStore);
-    if (value !== null) {
+    if (value !== null && value !== UNSUPPORTED) {
       obj.content = [boundTextParagraph(obj as unknown as StructuredDocumentTag, value)];
       delete obj.contentRangeMarkersAfter;
     }

@@ -12,8 +12,11 @@
 import type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import type { OoxmlThemeColorName } from "@utils/theme-colors";
+import { trimXmlPartLead } from "@utils/xml-part";
 import { parseXml } from "@xml/dom";
 import type { XmlElement, XmlNode } from "@xml/types";
+
+const DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
 
 const SLOTS: readonly OoxmlThemeColorName[] = [
   "dk1",
@@ -57,10 +60,16 @@ export function themeXmlColors(xml: string): ChartThemeColors | undefined {
   }
   let colors: ChartThemeColors | undefined;
   try {
-    const scheme = findDescendant(parseXml(xml).root, "clrScheme");
+    const root = parseXml(trimXmlPartLead(xml), { xmlns: true }).root;
+    const scheme = isDrawingMl(root, "theme")
+      ? drawingMlChild(drawingMlChild(root, "themeElements"), "clrScheme")
+      : undefined;
     if (scheme) {
       const out: Partial<Record<OoxmlThemeColorName, string>> = {};
       for (const slot of elementChildren(scheme)) {
+        if (slot.uri !== DRAWINGML_NS) {
+          continue;
+        }
         const name = localName(slot) as OoxmlThemeColorName;
         if (!SLOTS.includes(name)) {
           continue;
@@ -85,7 +94,7 @@ export function themeXmlColors(xml: string): ChartThemeColors | undefined {
 
 /** `a:srgbClr/@val`, or a system colour's last computed value (`a:sysClr/@lastClr`). */
 function slotColor(element: XmlElement | undefined): string | undefined {
-  if (!element) {
+  if (!element || element.uri !== DRAWINGML_NS) {
     return undefined;
   }
   const kind = localName(element);
@@ -111,15 +120,10 @@ function elementChildren(element: XmlElement): XmlElement[] {
   return element.children.filter((child: XmlNode): child is XmlElement => child.type === "element");
 }
 
-function findDescendant(element: XmlElement, name: string): XmlElement | undefined {
-  if (localName(element) === name) {
-    return element;
-  }
-  for (const child of elementChildren(element)) {
-    const found = findDescendant(child, name);
-    if (found) {
-      return found;
-    }
-  }
-  return undefined;
+function isDrawingMl(element: XmlElement, name: string): boolean {
+  return element.uri === DRAWINGML_NS && localName(element) === name;
+}
+
+function drawingMlChild(element: XmlElement | undefined, name: string): XmlElement | undefined {
+  return element && elementChildren(element).find(child => isDrawingMl(child, name));
 }

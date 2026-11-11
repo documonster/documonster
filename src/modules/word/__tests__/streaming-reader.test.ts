@@ -6,6 +6,7 @@
  * iteration, metadata loaded up-front, per-element size cap).
  */
 
+import { Archive } from "@archive/index";
 import { describe, it, expect } from "vitest";
 
 import { WordCrypto } from "../crypto";
@@ -15,6 +16,7 @@ import {
   DocxDecryptionError,
   DocxEncryptedError,
   DocxError,
+  DocxLimitExceededError,
   DocxParseError,
   Io,
   Stream
@@ -343,4 +345,98 @@ describe("Stream.DocumentReader — leaving the loop early", () => {
       }, 60000);
     }
   }
+});
+
+describe("Stream.DocumentReader holds a package to the limits Document.read does", () => {
+  const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const body = (inner: string): string =>
+    `<?xml version="1.0"?><w:document xmlns:w="${W}"><w:body>${inner}</w:body></w:document>`;
+  const paragraph = "<w:p><w:r><w:t>ok</w:t></w:r></w:p>";
+
+  /** What each reader makes of a package of `parts`: the body's length, or the limit it hit. */
+  async function both(
+    parts: Array<[string, string]>,
+    options: Parameters<typeof Document.read>[1]
+  ): Promise<[string, string]> {
+    const bytes = await Archive.packZip(parts, { level: 9 });
+    const outcome = async (read: () => Promise<number>): Promise<string> => {
+      try {
+        return `read ${await read()}`;
+      } catch (err) {
+        return err instanceof DocxLimitExceededError ? `limit ${err.limit}` : String(err);
+      }
+    };
+    return [
+      await outcome(async () => (await Document.read(bytes, options)).body.length),
+      await outcome(async () => (await collectStreamWith(bytes, options)).length)
+    ];
+  }
+
+  async function collectStreamWith(
+    bytes: Uint8Array,
+    options: ConstructorParameters<typeof Stream.DocumentReader>[1]
+  ): Promise<BodyContent[]> {
+    const out: BodyContent[] = [];
+    for await (const item of new Stream.DocumentReader(bytes, options)) {
+      out.push(item);
+    }
+    return out;
+  }
+
+  it.each<[string, Array<[string, string]>, Parameters<typeof Document.read>[1], string]>([
+    [
+      "white space before the declaration",
+      [["word/document.xml", ` \n${body(paragraph)}`]],
+      {},
+      "read 1"
+    ],
+    [
+      "the body nested past maxXmlDepth",
+      [["word/document.xml", body(paragraph)]],
+      { securityPolicy: { maxXmlDepth: 3 } },
+      "limit xmlDepth"
+    ],
+    [
+      "styles nested past maxXmlDepth",
+      [
+        ["word/document.xml", body("")],
+        ["word/styles.xml", `<w:styles xmlns:w="${W}"><a><b><c/></b></a></w:styles>`]
+      ],
+      { securityPolicy: { maxXmlDepth: 3 } },
+      "limit xmlDepth"
+    ],
+    [
+      "a body past maxPartSize",
+      [["word/document.xml", body(paragraph)]],
+      { securityPolicy: { maxPartSize: 32 } },
+      "limit partSize"
+    ],
+    [
+      "a body that compresses well past maxPackageSize",
+      [["word/document.xml", body(paragraph.repeat(150))]],
+      { securityPolicy: { maxPackageSize: 1000 } },
+      "limit packageSize"
+    ]
+  ])("%s", async (_label, parts, options, expected) => {
+    expect(await both(parts, options)).toEqual([expected, expected]);
+  });
+
+  it("counts an element's attributes toward maxElementBytes, and says it is that limit", async () => {
+    const bytes = await Archive.packZip([
+      ["word/document.xml", body(paragraph.replace("<w:p>", `<w:p data="${"x".repeat(4096)}">`))]
+    ]);
+    await expect(collectStreamWith(bytes, { maxElementBytes: 64 })).rejects.toMatchObject({
+      name: "DocxLimitExceededError",
+      limit: "elementBytes",
+      allowed: 64
+    });
+    // Multi-byte text counts its bytes.
+    const wide = await Archive.packZip([
+      ["word/document.xml", body(`<w:p><w:r><w:t>${"日".repeat(30)}</w:t></w:r></w:p>`)]
+    ]);
+    await expect(collectStreamWith(wide, { maxElementBytes: 80 })).rejects.toMatchObject({
+      limit: "elementBytes"
+    });
+    expect(await collectStreamWith(wide, { maxElementBytes: 200 })).toHaveLength(1);
+  });
 });

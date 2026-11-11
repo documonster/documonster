@@ -48,7 +48,11 @@ export function parseThemeXml(xmlStr: string, maxDepth?: number): DocumentTheme 
     name: "Office",
     colors: { ...DEFAULT_OFFICE_THEME } as Record<ThemeColorName, string>
   };
-  const defaultFontScheme = { name: "Office", majorFont: "Calibri Light", minorFont: "Calibri" };
+  const defaultFontScheme = {
+    name: "Office",
+    majorFont: "Calibri Light",
+    minorFont: "Calibri"
+  };
 
   if (!themeElements) {
     return {
@@ -89,7 +93,10 @@ export function parseThemeXml(xmlStr: string, maxDepth?: number): DocumentTheme 
             }
             const val = sys.attributes["val"];
             if (val) {
-              systemColors[colorName] = { val, ...(lastClr ? { lastClr } : {}) };
+              systemColors[colorName] = {
+                val,
+                ...(lastClr ? { lastClr } : {})
+              };
             }
           }
         }

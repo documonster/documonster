@@ -51,6 +51,7 @@ import {
   OOXML_PATHS,
   worksheetPath
 } from "@excel/utils/ooxml-paths";
+import { partText } from "@excel/utils/part-decoder";
 import { snapshotChartModel } from "@excel/xlsx/chart-snapshot";
 import type { OpaqueDrop, OpaquePart, OpaqueRelationship } from "@excel/xlsx/opaque-parts";
 import { isRelationshipsPart, ownerOfRelationshipsPart } from "@excel/xlsx/opaque-parts";
@@ -76,8 +77,8 @@ import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { concatUint8Arrays } from "@utils/binary";
-import { bufferToString, base64ToUint8Array } from "@utils/utils";
+import { concatUint8Arrays, textDecoder } from "@utils/binary";
+import { base64ToUint8Array } from "@utils/utils";
 
 /**
  * One package entry as every handler below consumes it.
@@ -102,7 +103,7 @@ interface XlsxPart {
  * passed through as bytes.
  */
 function bufferedPart(entryName: string, data: Uint8Array): XlsxPart {
-  const chunk = isBinaryEntryPath(entryName) ? data : bufferToString(data);
+  const chunk = isBinaryEntryPath(entryName) ? data : partText(data);
   return { stream: [chunk], bytes: () => Promise.resolve(data) };
 }
 
@@ -385,9 +386,8 @@ async function processKnownEntry(
       // reconcile can attach the list to the workbook. Silently
       // ignored when malformed — threaded comments degrade to
       // "unknown author" rather than breaking the whole load.
-      const data = await part.bytes();
-      const raw = new TextDecoder().decode(data);
-      model.persons = parsePersonList(raw);
+      // Read as every part is, from its first `<` (see `partText`).
+      model.persons = parsePersonList(partText(await part.bytes()));
       return true;
     }
     default: {
@@ -396,8 +396,7 @@ async function processKnownEntry(
       const threadedMatch = /^xl\/threadedComments\/threadedComment(\d+)\.xml$/.exec(entryName);
       if (threadedMatch) {
         const sheetIndex = parseInt(threadedMatch[1], 10);
-        const data = await part.bytes();
-        const raw = new TextDecoder().decode(data);
+        const raw = partText(await part.bytes());
         model.threadedCommentsByIndex ??= {} as Record<
           number,
           Array<{ ref: string; comment: unknown }>
@@ -645,7 +644,7 @@ async function processDrawingEntry(part: XlsxPart, model: any, name: string): Pr
   // Parse the drawing for normal processing (images, etc.)
   const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
   const xform = new DrawingXform();
-  const xmlString = bufferToString(data);
+  const xmlString = partText(data);
   const drawing = await parseXformStream(xform, [xmlString]);
   model.drawings[name] = drawing;
   // Also stash the original bytes — chart user-shape drawings use a
@@ -718,7 +717,8 @@ async function processVmlDrawingRelsEntry(part: XlsxPart, model: any, name: stri
 }
 
 async function processThemeEntry(part: XlsxPart, model: any, name: string): Promise<void> {
-  model.themes[name] = bufferToString(await part.bytes());
+  // Kept as the file holds it, to be written back so: what parses it reads it from its first `<`.
+  model.themes[name] = textDecoder.decode(await part.bytes());
 }
 
 async function processPivotTableEntry(part: XlsxPart, model: any, name: string): Promise<void> {
@@ -799,7 +799,7 @@ async function processChartEntry(part: XlsxPart, model: any, chartNumber: number
   // The bytes are kept and patched in place on write, by expressions that name Excel's prefixes — so
   // a part that binds the chart namespace to another prefix is stored in canonical form.
   const bytes = await part.bytes();
-  const source = bufferToString(bytes);
+  const source = partText(bytes);
   const xmlString = canonicalizeXml(source);
   const data = xmlString === source ? bytes : new TextEncoder().encode(xmlString);
 
@@ -1077,11 +1077,12 @@ async function processDefaultEntry(
   if (chartExNumber !== undefined) {
     // Canonical prefixes, for the same reason as a chart's — see `processChartEntry`.
     const bytes = await part.bytes();
-    const source = bufferToString(bytes);
-    const rawXml = canonicalizeXml(source);
-    const data = rawXml === source ? bytes : new TextEncoder().encode(rawXml);
-    model.chartExEntries[chartExNumber] = data;
+    const source = partText(bytes);
+    model.chartExEntries[chartExNumber] = bytes;
     try {
+      const rawXml = canonicalizeXml(source);
+      const data = rawXml === source ? bytes : new TextEncoder().encode(rawXml);
+      model.chartExEntries[chartExNumber] = data;
       const parsed = parseChartEx(rawXml);
       model.chartExStructuredEntries[chartExNumber] = {
         chartExNumber,

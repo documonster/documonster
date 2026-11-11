@@ -47,7 +47,7 @@ import {
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
 import { getCell, setStyledBlankRanges, type WorksheetData } from "@excel/core/worksheet-core";
-import { ExcelFileError, XlsbFormulaDecodeError } from "@excel/errors";
+import { ExcelFileError, XlsbFormulaDecodeError, XlsbParseError } from "@excel/errors";
 import { getValue, setStyle, setValue } from "@excel/surface/cell";
 import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/surface/column";
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
@@ -61,6 +61,7 @@ import {
   findChildrenLocal,
   tryParseXml
 } from "@excel/utils/ooxml-validator/xml-utils";
+import { partText } from "@excel/utils/part-decoder";
 import { setAsideInvalidSheetSettings } from "@excel/utils/sheet-settings-checks";
 import { markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import { slideValidation, validationAnchor } from "@excel/utils/validation-anchor";
@@ -96,6 +97,7 @@ import {
 import { pairCtrlProps } from "@excel/xlsx/xform/drawing/ctrl-prop-pairing";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { excelToDate, isDateFmt } from "@utils/utils";
+import { XmlError } from "@xml/errors";
 
 /** What a read could not fully recover, for the caller to inspect. */
 export interface XlsbReadDiagnostics {
@@ -386,7 +388,7 @@ async function readInto(
   // because a comment without it is attributed to nobody.
   const personPart = findPart(entries, "xl/persons/person.xml");
   if (personPart !== undefined) {
-    const persons = parsePersonList(new TextDecoder().decode(personPart));
+    const persons = parsePersonList(partText(personPart));
     if (persons.length > 0) {
       // Assigned rather than passed through `registerPerson`, and that is the point: the setter mints a
       // *new* GUID, while a threaded comment's `personId` names the one in the file. Registering them
@@ -561,7 +563,7 @@ async function readInto(
       if (bytes === undefined || vmlCheckboxes.has(target!.toLowerCase())) {
         continue;
       }
-      const parsed = await parseVmlDrawing(bytes);
+      const parsed = await parseVmlDrawing(bytes, target!);
       const checkboxes = parsed?.formControls ?? [];
       const legacyControls = parsed?.legacyControls ?? [];
       if (checkboxes.length === 0 && legacyControls.length === 0) {
@@ -591,7 +593,7 @@ async function readInto(
         const attributes =
           ctrlPropBytes === undefined
             ? undefined
-            : (await parseCtrlProp(ctrlPropBytes))?.attributes;
+            : (await parseCtrlProp(ctrlPropBytes, ctrlPropTarget))?.attributes;
         if (attributes !== undefined) {
           ctrlProps.push({ xml: new TextDecoder().decode(ctrlPropBytes), attributes });
         }
@@ -614,7 +616,7 @@ async function readInto(
       if (drawingBytes === undefined) {
         continue;
       }
-      const xml = new TextDecoder().decode(drawingBytes);
+      const xml = partText(drawingBytes);
       const kind = classifyDrawing(xml, controlIds, id =>
         pictureTarget(drawingTarget!, relationshipsBySource.get(drawingTarget!) ?? [], id, entries)
       );
@@ -1138,7 +1140,7 @@ async function readInto(
       const target = resolveRelationshipTarget(path, threadedRel.target, threadedRel.targetMode);
       const bytes = target === undefined ? undefined : findPart(entries, target);
       if (bytes !== undefined) {
-        const parsed = parseThreadedComments(new TextDecoder().decode(bytes));
+        const parsed = parseThreadedComments(partText(bytes));
         if (parsed.length > 0) {
           worksheet.threadedComments = parsed as never;
         }
@@ -1158,7 +1160,7 @@ async function readInto(
           : resolveRelationshipTarget(path, relationship.target, relationship.targetMode);
       const vmlBytes = vmlTarget === undefined ? undefined : findPart(entries, vmlTarget);
       if (vmlBytes !== undefined) {
-        const shapes = await parseVmlDrawing(vmlBytes);
+        const shapes = await parseVmlDrawing(vmlBytes, vmlTarget!);
         const byRelId = new Map(
           (relationshipsBySource.get(vmlTarget!) ?? []).map(entry => [entry.id, entry])
         );
@@ -1669,7 +1671,7 @@ function workbookRelationships(
   if (rels === undefined) {
     return byId;
   }
-  const document = tryParseXml(new TextDecoder().decode(rels), () => {
+  const document = tryParseXml(partText(rels), () => {
     // A malformed rels file leaves the map empty; each caller has its own fallback, which is better than reading
     // nothing at all.
   });
@@ -1887,21 +1889,29 @@ async function readDrawingPictures(
   }
 }
 
-async function parseCtrlProp(bytes: Uint8Array) {
+async function parseCtrlProp(bytes: Uint8Array, part: string) {
   const { CtrlPropXform } = await import("@excel/xlsx/xform/drawing/ctrl-prop-xform");
   const xform = new CtrlPropXform();
-  await parseXformStream(xform, [bytes]);
+  await asPartError(part, () => parseXformStream(xform, [bytes]));
   return xform.parsed;
 }
 
-async function parseVmlDrawing(bytes: Uint8Array) {
+async function parseVmlDrawing(bytes: Uint8Array, part: string) {
   const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
-  return parseXformStream(
-    new VmlDrawingXform(),
-    (async function* () {
-      yield new TextDecoder().decode(bytes);
-    })()
-  );
+  // Bytes, decoded as every part is: from its first `<`, and refused if they are not UTF-8.
+  return asPartError(part, () => parseXformStream(new VmlDrawingXform(), [bytes]));
+}
+
+/** `parse`, with a part that is not well-formed reported as the package's error, naming the part. */
+async function asPartError<T>(part: string, parse: () => Promise<T>): Promise<T> {
+  try {
+    return await parse();
+  } catch (error) {
+    if (error instanceof XmlError) {
+      throw new XlsbParseError(part, error.message, { cause: error });
+    }
+    throw error;
+  }
 }
 
 /** `xl/drawings/drawing1.xml` → `xl/drawings/_rels/drawing1.xml.rels`. */
@@ -2100,7 +2110,7 @@ function readContentTypes(entries: Awaited<ReturnType<typeof extractAll>>): {
   if (part === undefined) {
     return { overrides, defaults };
   }
-  const document = tryParseXml(new TextDecoder().decode(part), () => {
+  const document = tryParseXml(partText(part), () => {
     // A malformed content-types part costs the declarations, not the workbook.
   });
   if (document === undefined) {
@@ -2136,7 +2146,7 @@ function readRelationshipsBySource(
     if (owner === undefined) {
       continue;
     }
-    const document = tryParseXml(new TextDecoder().decode(file.data), () => {
+    const document = tryParseXml(partText(file.data), () => {
       // A malformed rels file costs its relationships, not the workbook.
     });
     if (document === undefined) {

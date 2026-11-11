@@ -378,7 +378,7 @@ export {
   TemplateError,
   isDocxError
 } from "@word/errors";
-export type { DocxIdCollection } from "@word/errors";
+export type { DocxIdCollection, DocxLimit } from "@word/errors";
 
 // --- Stable API ---
 /** @stability stable */

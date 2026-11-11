@@ -579,3 +579,28 @@ describe("toPlainObject", () => {
     });
   });
 });
+
+describe("deep trees", () => {
+  const depth = 6000;
+  const root = () =>
+    parseXml("<a>".repeat(depth) + "x" + "</a>".repeat(depth), { maxDepth: 0 }).root;
+
+  it("textContent, walk and toPlainObject read a tree deeper than the call stack", () => {
+    const r = root();
+    expect(textContent(r)).toBe("x");
+    let count = 0;
+    walk(r, () => count++);
+    expect(count).toBe(depth);
+    let obj: unknown = toPlainObject(r);
+    for (let i = 0; i < depth; i++) {
+      obj = (obj as Record<string, unknown>).a;
+    }
+    expect(obj).toBe("x");
+  });
+
+  it("walk keeps pre-order", () => {
+    const names: string[] = [];
+    walk(parseXml("<a><b><c/></b><d><e/></d></a>").root, el => names.push(el.name));
+    expect(names).toEqual(["a", "b", "c", "d", "e"]);
+  });
+});

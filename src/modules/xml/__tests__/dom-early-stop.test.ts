@@ -67,7 +67,7 @@ describe("DOM builders stop at the first error", () => {
     const write = SaxParser.prototype.write;
     vi.spyOn(SaxParser.prototype, "write").mockImplementation(function (
       this: SaxParser,
-      chunk: string | null
+      chunk: string | Uint8Array | null
     ) {
       this.ENTITIES["x"] = "X";
       return write.call(this, chunk);

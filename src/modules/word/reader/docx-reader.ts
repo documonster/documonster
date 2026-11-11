@@ -88,6 +88,7 @@ import {
   attrVal,
   attrInt,
   findChildNs,
+  isWordDocumentRoot,
   findChildrenNs,
   boolToggle,
   serializeElement,
@@ -99,7 +100,8 @@ import {
   resolveRelTarget,
   stripWPrefix
 } from "@word/reader/parse-utils";
-import { parseContentPartXml, parsePartXml } from "@word/reader/part-xml";
+import { parsePartXml } from "@word/reader/part-xml";
+import { parseBoundContentPart } from "@word/reader/preserved-xml";
 import {
   parseRowHeight,
   parseRunProperties,
@@ -130,7 +132,6 @@ import { findWatermark, withoutWatermark } from "@word/reader/watermark-parser";
 import type { FoundWatermark } from "@word/reader/watermark-parser";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
 import type { DocxSecurityPolicy } from "@word/security/policy";
-import { resolveSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
   BodyContent,
@@ -236,7 +237,10 @@ function parseRunContent(el: XmlElement): RunContent[] {
         break;
       }
       case "ruby": {
-        const ruby: Mutable<RubyContent> & { rubyText: Run[]; baseText: Run[] } = {
+        const ruby: Mutable<RubyContent> & {
+          rubyText: Run[];
+          baseText: Run[];
+        } = {
           type: "ruby",
           rubyText: [],
           baseText: []
@@ -336,7 +340,10 @@ function parseRunContent(el: XmlElement): RunContent[] {
         content.push({ type: "lastRenderedPageBreak" });
         break;
       case "annotationRef":
-        content.push({ type: "annotationReference", id: attrInt(child, "id") ?? 0 });
+        content.push({
+          type: "annotationReference",
+          id: attrInt(child, "id") ?? 0
+        });
         break;
       // `w:commentReference` is not run content in the model: a run in a
       // paragraph (or a tracked change) is split around it by
@@ -529,13 +536,17 @@ function parseDrawingShape(
     }
     const wn = wrapChild.name;
     if (wn === "wp:wrapSquare") {
-      const wrap: Mutable<NonNullable<DrawingShape["wrap"]>> = { style: "square" };
+      const wrap: Mutable<NonNullable<DrawingShape["wrap"]>> = {
+        style: "square"
+      };
       wrap.side = readToken(wrapChild.attributes["wrapText"], WRITTEN.wrapSide, wrap, "side") as
         | NonNullable<DrawingShape["wrap"]>["side"]
         | undefined;
       shape.wrap = wrap;
     } else if (wn === "wp:wrapTight") {
-      const wrap: Mutable<NonNullable<DrawingShape["wrap"]>> = { style: "tight" };
+      const wrap: Mutable<NonNullable<DrawingShape["wrap"]>> = {
+        style: "tight"
+      };
       wrap.side = readToken(wrapChild.attributes["wrapText"], WRITTEN.wrapSide, wrap, "side") as
         | NonNullable<DrawingShape["wrap"]>["side"]
         | undefined;
@@ -733,7 +744,9 @@ function parseSdtProperties(sdtPrEl: XmlElement | undefined): Mutable<SdtPropert
     if (ddlEl) {
       const items: SdtListItem[] = [];
       for (const li of findChildrenNs(ddlEl, "listItem")) {
-        const item: Partial<Mutable<SdtListItem>> = { value: attrVal(li, "value") ?? "" };
+        const item: Partial<Mutable<SdtListItem>> = {
+          value: attrVal(li, "value") ?? ""
+        };
         const dt = attrVal(li, "displayText");
         if (dt) {
           item.displayText = dt;
@@ -747,7 +760,9 @@ function parseSdtProperties(sdtPrEl: XmlElement | undefined): Mutable<SdtPropert
     if (cbEl) {
       const items: SdtListItem[] = [];
       for (const li of findChildrenNs(cbEl, "listItem")) {
-        const item: Partial<Mutable<SdtListItem>> = { value: attrVal(li, "value") ?? "" };
+        const item: Partial<Mutable<SdtListItem>> = {
+          value: attrVal(li, "value") ?? ""
+        };
         const dt = attrVal(li, "displayText");
         if (dt) {
           item.displayText = dt;
@@ -795,7 +810,11 @@ function parseSdtProperties(sdtPrEl: XmlElement | undefined): Mutable<SdtPropert
       const xpath = attrVal(dbEl, "xpath");
       const storeItemId = attrVal(dbEl, "storeItemID");
       if (xpath && storeItemId) {
-        const binding: { xpath: string; storeItemId: string; prefixMappings?: string } = {
+        const binding: {
+          xpath: string;
+          storeItemId: string;
+          prefixMappings?: string;
+        } = {
           xpath,
           storeItemId
         };
@@ -968,12 +987,18 @@ function flattenSdt(
 function flattenSdt(
   sdtEl: XmlElement,
   ctx: ReaderContext,
-  options: { tables: true; controls?: { list: BlockContentControl[]; base: number } }
+  options: {
+    tables: true;
+    controls?: { list: BlockContentControl[]; base: number };
+  }
 ): (Paragraph | Table | RangeMarker)[];
 function flattenSdt(
   sdtEl: XmlElement,
   ctx: ReaderContext,
-  options: { tables: boolean; controls?: { list: BlockContentControl[]; base: number } }
+  options: {
+    tables: boolean;
+    controls?: { list: BlockContentControl[]; base: number };
+  }
 ): (Paragraph | Table | RangeMarker)[] {
   const out: (Paragraph | Table | RangeMarker)[] = [];
   // With `controls`, each SDT is recorded around the blocks it held, by
@@ -1078,7 +1103,9 @@ function parseTocFromSdt(
     if (!field.closed) {
       // The field cannot run on past its block: it ends with the block.
       const last = cachedParagraphs.length - 1;
-      const end: Run = { content: [{ type: "field", fieldChar: "end", instruction: "" }] };
+      const end: Run = {
+        content: [{ type: "field", fieldChar: "end", instruction: "" }]
+      };
       cachedParagraphs[last] = {
         ...cachedParagraphs[last]!,
         children: [...cachedParagraphs[last]!.children, end]
@@ -1215,7 +1242,10 @@ function parseRunParts(
       continue;
     }
     flush();
-    const reference: Mutable<CommentReference> = { type: "commentReference", id };
+    const reference: Mutable<CommentReference> = {
+      type: "commentReference",
+      id
+    };
     if (rPrEl) {
       reference.properties = parseRunProperties(rPrEl);
     }
@@ -1320,7 +1350,10 @@ function fieldPieceRun(piece: FieldPiece): Run {
   if (ffDataEl) {
     fc.formField = parseFfData(ffDataEl);
   }
-  return { properties: piece.rPr ? parseRunProperties(piece.rPr) : undefined, content: [fc] };
+  return {
+    properties: piece.rPr ? parseRunProperties(piece.rPr) : undefined,
+    content: [fc]
+  };
 }
 
 /** The run a field's instruction text kept in place by `splitFieldPieces` is read as. */
@@ -1697,7 +1730,11 @@ function readParagraphContent(
               children.push(
                 "type" in part
                   ? part
-                  : ({ type: "insertedRun", revision: rev, run: part } satisfies InsertedRun)
+                  : ({
+                      type: "insertedRun",
+                      revision: rev,
+                      run: part
+                    } satisfies InsertedRun)
               );
             }
           }
@@ -1722,7 +1759,11 @@ function readParagraphContent(
               children.push(
                 "type" in part
                   ? part
-                  : ({ type: "deletedRun", revision: rev, run: part } satisfies DeletedRun)
+                  : ({
+                      type: "deletedRun",
+                      revision: rev,
+                      run: part
+                    } satisfies DeletedRun)
               );
             }
           }
@@ -1906,7 +1947,12 @@ function parseTableCell(el: XmlElement, ctx: ReaderContext): TableCell {
       // content is flattened into the cell, and the control is recorded
       // around the blocks it held (`TableCell.contentControls`).
       const base = content.filter(item => !isRangeMarker(item)).length;
-      content.push(...flattenSdt(child, ctx, { tables: true, controls: { list: controls, base } }));
+      content.push(
+        ...flattenSdt(child, ctx, {
+          tables: true,
+          controls: { list: controls, base }
+        })
+      );
     }
   }
 
@@ -2025,7 +2071,10 @@ function parseTableCell(el: XmlElement, ctx: ReaderContext): TableCell {
     props = p;
   }
 
-  const cell: Mutable<TableCell> = { properties: props, content: foldRangeMarkers(content) };
+  const cell: Mutable<TableCell> = {
+    properties: props,
+    content: foldRangeMarkers(content)
+  };
   if (controls.length > 0) {
     cell.contentControls = controls;
   }
@@ -2220,7 +2269,7 @@ function parseNotesXml(
   const savedField = ctx.field;
   ctx.field = createFieldState();
   try {
-    const doc = parseContentPartXml(xmlStr, ctx.securityPolicy.maxXmlDepth);
+    const doc = parseBoundContentPart(xmlStr, ctx.securityPolicy.maxXmlDepth);
     const root = doc.root;
     const notes: { id: number; type?: NoteType; content: Paragraph[] }[] = [];
 
@@ -2272,7 +2321,7 @@ function parseNotesXml(
 
 function parseHeaderFooterXml(xmlStr: string, ctx: ReaderContext): HeaderFooterContent {
   return parseHeaderFooterRoot(
-    parseContentPartXml(xmlStr, ctx.securityPolicy.maxXmlDepth).root,
+    parseBoundContentPart(xmlStr, ctx.securityPolicy.maxXmlDepth).root,
     ctx
   );
 }
@@ -2687,7 +2736,7 @@ function parseDocumentXml(
   bodyRangeMarkersAfter?: RangeMarker[];
   background?: DocumentBackground;
 } {
-  const doc = parseContentPartXml(xmlStr, ctx.securityPolicy.maxXmlDepth);
+  const doc = parseBoundContentPart(xmlStr, ctx.securityPolicy.maxXmlDepth);
   const root = doc.root;
 
   // Parse background
@@ -2714,7 +2763,9 @@ function parseDocumentXml(
     background = bg;
   }
 
-  const bodyEl = findChildNs(root, "body") ?? findChild(root, "w:body");
+  // The body is `w:body` in Word's namespace, under a root that is `w:document`: a part in another
+  // namespace — or with `w:` bound to nothing — has no body Word would read.
+  const bodyEl = isWordDocumentRoot(root) ? findChild(root, "w:body") : undefined;
   if (!bodyEl) {
     throw new DocxParseError("Missing w:body element in document.xml");
   }
@@ -3007,11 +3058,12 @@ export async function readDocx(
   // A number or `null` failed on `.length` with an untyped `TypeError`. An `ArrayBuffer` is recognised by its tag,
   // which one from another realm also carries.
   const bytes = typeof input === "string" ? undefined : checkBytes(input, "input", where);
-  checkReadOptions(options, where);
+  const policy = checkReadOptions(options, where);
   checkSchema(base64OptionSchema, options, where);
   return readDocxBytes(
     bytes ?? textPackageBytes(input as string, options?.base64 === true),
-    options
+    options,
+    policy
   );
 }
 
@@ -3039,10 +3091,9 @@ function textPackageBytes(text: string, base64: boolean): Uint8Array {
 
 async function readDocxBytes(
   input: Uint8Array,
-  options: ReadDocxOptions | undefined
+  options: ReadDocxOptions | undefined,
+  policy: Required<DocxSecurityPolicy>
 ): Promise<DocxDocument> {
-  const policy = resolveSecurityPolicy(options?.securityPolicy);
-
   // Defense-in-depth: reject obviously oversized packages up-front. The same
   // limit is also enforced incrementally during entry decompression so a
   // pathological deflate stream can't slip past this check.
@@ -3071,7 +3122,10 @@ async function _readDocxInner(
   policy: Required<DocxSecurityPolicy>,
   checkCrc32?: boolean
 ): Promise<DocxDocument> {
-  const reader = unzipZip(buffer, { checkCrc32 });
+  const reader = unzipZip(buffer, {
+    checkCrc32,
+    maxEntrySize: policy.maxPartSize
+  });
   const entries = new Map<string, Uint8Array>();
 
   const budget = createPartBudget(policy);
@@ -3082,8 +3136,7 @@ async function _readDocxInner(
       continue;
     }
     budget.count();
-    const data = await entry.bytes();
-    budget.charge(entry.path, data.length);
+    const data = await budget.read(entry.path, entry);
     // Normalize path: remove leading slash, normalize separators
     const path = entry.path.replace(/^\//, "").replace(/\\/g, "/");
     entries.set(path, data);
@@ -3309,7 +3362,10 @@ function readDocxEntries(
       const headerRels = readPartRels(headerPartPath);
       const xml = imageTable.bindPart(headerPartPath, headerRels, source);
       try {
-        headerRoots.set(rel.id, { rels: headerRels, root: parseContentPartXml(xml, depth).root });
+        headerRoots.set(rel.id, {
+          rels: headerRels,
+          root: parseBoundContentPart(xml, depth).root
+        });
       } catch {
         // Skip a malformed header; preserve other headers and the document.
       }
@@ -3968,7 +4024,7 @@ function parseGlossaryDocument(
   const unlisted: string[] = [];
   let parsed: { root: XmlElement } | undefined;
   try {
-    parsed = parseContentPartXml(rawXml, securityPolicy.maxXmlDepth);
+    parsed = parseBoundContentPart(rawXml, securityPolicy.maxXmlDepth);
   } catch (e) {
     // A part too deep for the policy is still refused; markup the parser
     // cannot read is kept, as before, and lists no blocks.

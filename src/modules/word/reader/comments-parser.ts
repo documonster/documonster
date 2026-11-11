@@ -11,7 +11,8 @@
 import type { Mutable } from "@word/core/internal-utils";
 import { foldRangeMarkers } from "@word/core/range-markers";
 import { attrInt, attrVal, findChildrenNs } from "@word/reader/parse-utils";
-import { parseContentPartXml, parsePartXml } from "@word/reader/part-xml";
+import { parsePartXml } from "@word/reader/part-xml";
+import { parseBoundContentPart } from "@word/reader/preserved-xml";
 import { takeRangeMarker } from "@word/reader/range-markers";
 import type { ReaderContext } from "@word/reader/reader-context";
 import { createFieldState } from "@word/reader/reader-context";
@@ -29,7 +30,7 @@ export function parseCommentsXml(
   const savedField = ctx.field;
   ctx.field = createFieldState();
   try {
-    const doc = parseContentPartXml(xmlStr, ctx.securityPolicy.maxXmlDepth);
+    const doc = parseBoundContentPart(xmlStr, ctx.securityPolicy.maxXmlDepth);
     const root = doc.root;
     const comments: CommentDef[] = [];
 
@@ -50,7 +51,11 @@ export function parseCommentsXml(
         }
       }
 
-      const comment: Mutable<CommentDef> = { id, author, content: foldRangeMarkers(items) };
+      const comment: Mutable<CommentDef> = {
+        id,
+        author,
+        content: foldRangeMarkers(items)
+      };
       const date = attrVal(commentEl, "date");
       if (date) {
         comment.date = date;

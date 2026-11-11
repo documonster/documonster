@@ -304,7 +304,10 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
   if (tabsEl) {
     const tabs: TabStop[] = [];
     for (const tabEl of findChildrenNs(tabsEl, "tab")) {
-      const tab: Mutable<TabStop> = { type: "left", position: attrInt(tabEl, "pos") ?? 0 };
+      const tab: Mutable<TabStop> = {
+        type: "left",
+        position: attrInt(tabEl, "pos") ?? 0
+      };
       tab.type = readToken(
         attrVal(tabEl, "val"),
         WRITTEN.tabType,

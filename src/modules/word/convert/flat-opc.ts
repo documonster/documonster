@@ -13,14 +13,15 @@
  * - ECMA-376 Part 2 (OPC) Annex C (non-normative)
  */
 
-import { NS_PKG } from "@word/constants";
+import { xmlEncodeAttr } from "@utils/xml-encode";
+import { NS_CONTENT_TYPES, NS_PKG } from "@word/constants";
 import { checkBytes, invalidArgument } from "@word/core/argument-checks";
 import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
 import { getFileExt } from "@word/core/opc-paths";
 import { DocxParseError } from "@word/errors";
-import { parseXml } from "@xml/dom";
 import { XmlParseError } from "@xml/errors";
-import type { XmlElement, XmlNode } from "@xml/types";
+import { SaxParser } from "@xml/sax";
+import type { XmlSaxTag } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 // =============================================================================
@@ -52,12 +53,24 @@ export interface FlatOpcPart {
 export function parseFlatOpc(
   xmlContent: string | Uint8Array | ArrayBuffer | ArrayBufferView
 ): Map<string, Uint8Array> {
-  const xml = checkTextOrBytes(xmlContent, "xmlContent", "Convert.flatOpcToParts");
-  const xmlStr = typeof xml === "string" ? xml : utf8Decoder.decode(xml);
+  const given = checkTextOrBytes(xmlContent, "xmlContent", "Convert.flatOpcToParts");
+  const bytes = typeof given === "string" ? utf8Encoder.encode(given) : given;
+  // Text pasted or saved by an editor often begins with a byte order mark or white space before the
+  // XML declaration, where XML allows neither: a Flat OPC file is read from its first `<`.
+  let lead = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  while (lead < bytes.length && isSpaceByte(bytes[lead]!)) {
+    lead++;
+  }
 
-  let doc: ReturnType<typeof parseXml>;
+  const reader = new FlatOpcReader(bytes);
+  // With namespaces: a package element is one in the package namespace, whatever its prefix.
+  const parser = new SaxParser({ position: false, xmlns: true, byteOffset: lead });
+  parser.on("opentag", tag => reader.open(parser, tag));
+  parser.on("closetag", tag => reader.close(parser, tag));
+  parser.on("text", text => reader.text(parser, text, false));
+  parser.on("cdata", text => reader.text(parser, text, true));
   try {
-    doc = parseXml(xmlStr);
+    parser.write(bytes.subarray(lead)).close();
   } catch (error) {
     if (error instanceof XmlParseError) {
       throw new DocxParseError(`Flat OPC: not well-formed XML: ${error.message}`, {
@@ -66,96 +79,422 @@ export function parseFlatOpc(
     }
     throw error;
   }
-  const root = doc.root;
-  if (!root) {
-    throw new DocxParseError("Flat OPC: missing root element");
-  }
 
-  // Root should be <pkg:package> or <package>
-  const rootName = root.name.replace(/^pkg:/, "");
-  if (rootName !== "package") {
-    throw new DocxParseError(`Flat OPC: expected root element <pkg:package>, got <${root.name}>`);
-  }
-
-  const parts = new Map<string, Uint8Array>();
-  const collectedContentTypes = new Map<string, string>();
-
-  for (const child of root.children) {
-    if (typeof child === "string") {
-      continue;
-    }
-    const el = child as XmlElement;
-    const elName = el.name.replace(/^pkg:/, "");
-    if (elName !== "part") {
-      continue;
-    }
-
-    // Get part name (with leading /)
-    const partName = el.attributes?.["pkg:name"] ?? el.attributes?.["name"] ?? "";
-    if (!partName) {
-      continue;
-    }
-
-    // Normalize: remove leading slash for map key
-    const normalizedPath = partName.startsWith("/") ? partName.substring(1) : partName;
-
-    // Get content type
-    const contentType = el.attributes?.["pkg:contentType"] ?? el.attributes?.["contentType"] ?? "";
-
-    // Find the data child: <pkg:xmlData> or <pkg:binaryData>
-    let data: Uint8Array | undefined;
-
-    for (const partChild of el.children) {
-      if (typeof partChild === "string") {
-        continue;
-      }
-      const pc = partChild as XmlElement;
-      const pcName = pc.name.replace(/^pkg:/, "");
-
-      if (pcName === "xmlData") {
-        // XML content — serialize the child elements back to XML
-        const xmlWriter = new XmlWriter();
-        xmlWriter.openXml({ version: "1.0", encoding: "UTF-8", standalone: "yes" });
-        serializeXmlChildren(xmlWriter, pc);
-        data = utf8Encoder.encode(xmlWriter.xml);
-        break;
-      } else if (pcName === "binaryData") {
-        // Base64 encoded binary content
-        const b64Text = getTextContent(pc).replace(/\s+/g, "");
-        data = base64Decode(b64Text);
-        break;
-      }
-    }
-
-    if (data) {
-      parts.set(normalizedPath, data);
-    }
-    // Collect content type info for [Content_Types].xml reconstruction
-    if (contentType && normalizedPath !== "[Content_Types].xml") {
-      collectedContentTypes.set(normalizedPath, contentType);
-    }
-  }
-
+  const { parts, contentTypes } = reader;
   // Ensure [Content_Types].xml exists
   if (!parts.has("[Content_Types].xml")) {
-    parts.set("[Content_Types].xml", buildContentTypesXml(collectedContentTypes));
+    parts.set("[Content_Types].xml", buildContentTypesXml(contentTypes));
   }
-
   return parts;
 }
 
+function isSpaceByte(byte: number): boolean {
+  return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d;
+}
+
+/** A part being read: where its `xmlData` content lies, or the text of its `binaryData`. */
+interface OpenPart {
+  readonly path: string;
+  readonly contentType: string;
+  data?: Uint8Array;
+  /** `xmlData`: where its content begins in the input, and the namespaces in force there. */
+  xml?: {
+    readonly from: number;
+    readonly scope: ReadonlyMap<string, string>;
+    root?: XmlSaxTag;
+    rootStart?: number;
+  };
+  /** `binaryData`: its base64 text so far. */
+  base64?: string;
+}
+
 /**
- * Check if content appears to be a Flat OPC XML document.
+ * Reads a Flat OPC document's parts off SAX events. A part's XML is taken from the input as it is —
+ * its comments, processing instructions, CDATA sections and references with it — and its root is given
+ * the namespace declarations it used from the elements around it, so the part stands on its own.
+ */
+class FlatOpcReader {
+  readonly parts = new Map<string, Uint8Array>();
+  readonly contentTypes = new Map<string, string>();
+  /** The namespaces in force at each open element: prefix (`""` the default) → URI. */
+  private readonly scopes: Array<ReadonlyMap<string, string>> = [new Map()];
+  private part: OpenPart | undefined;
+  /** Whether the document's DOCTYPE declares entities or attribute lists. */
+  private doctype = false;
+
+  constructor(private readonly bytes: Uint8Array) {}
+
+  open(parser: SaxParser, tag: XmlSaxTag): void {
+    const outer = this.scopes[this.scopes.length - 1]!;
+    let scope = outer;
+    if (tag.ns !== undefined) {
+      const inner = new Map(outer);
+      for (const prefix of Object.keys(tag.ns)) {
+        inner.set(prefix, tag.ns[prefix]!);
+      }
+      scope = inner;
+    }
+    const depth = parser.depth;
+    if (!tag.isSelfClosing) {
+      this.scopes.push(scope);
+    }
+    const part = this.part;
+    if (part?.xml !== undefined && part.data === undefined) {
+      // Inside a part's XML: only its root is looked at, to declare on it what it inherits.
+      if (depth === 3) {
+        if (part.xml.root !== undefined) {
+          throw new DocxParseError(
+            `Flat OPC: the xmlData of part "${part.path}" has more than one root element`
+          );
+        }
+        part.xml.root = tag;
+        part.xml.rootStart = parser.startByte!;
+      }
+      return;
+    }
+    if (part?.base64 !== undefined && part.data === undefined) {
+      throw new DocxParseError(
+        `Flat OPC: the binaryData of part "${part.path}" contains an element <${tag.name}>`
+      );
+    }
+    if (depth === 0) {
+      if (!isPackageElement(tag, "package")) {
+        throw new DocxParseError(
+          `Flat OPC: expected root element <pkg:package> of ${NS_PKG}, got <${tag.name}>`
+        );
+      }
+      this.doctype = scanPrologue(this.bytes, 0, parser.startByte!)?.doctype ?? false;
+    } else if (depth === 1 && isPackageElement(tag, "part")) {
+      // Get part name (with leading /)
+      const name = packageAttribute(tag, scope, "name");
+      this.part = {
+        // Normalize: remove leading slash for map key
+        path: name.startsWith("/") ? name.substring(1) : name,
+        contentType: packageAttribute(tag, scope, "contentType")
+      };
+    } else if (depth === 2 && part !== undefined) {
+      const xmlData = isPackageElement(tag, "xmlData");
+      if (!xmlData && !isPackageElement(tag, "binaryData")) {
+        return;
+      }
+      if (part.xml !== undefined || part.base64 !== undefined) {
+        throw new DocxParseError(
+          `Flat OPC: part "${part.path}" has more than one xmlData or binaryData element`
+        );
+      }
+      if (xmlData) {
+        if (this.doctype) {
+          // Its defaulted attributes and entities would be lost: the part is copied, not re-serialised.
+          throw new DocxParseError(
+            `Flat OPC: part "${part.path}" has xmlData in a document whose DOCTYPE declares entities or attribute lists, which cannot be carried into the part`
+          );
+        }
+        part.xml = { from: parser.endByte!, scope };
+        if (tag.isSelfClosing) {
+          this.endXmlData(part, parser.endByte!);
+        }
+      } else {
+        part.base64 = "";
+        if (tag.isSelfClosing) {
+          this.endBinaryData(part);
+        }
+      }
+    }
+  }
+
+  close(parser: SaxParser, tag: XmlSaxTag): void {
+    if (!tag.isSelfClosing) {
+      this.scopes.pop();
+    }
+    const depth = parser.depth;
+    const part = this.part;
+    if (part === undefined || tag.isSelfClosing) {
+      return;
+    }
+    if (depth === 2 && part.xml !== undefined && part.data === undefined) {
+      this.endXmlData(part, parser.startByte!);
+    } else if (depth === 2 && part.base64 !== undefined && part.data === undefined) {
+      this.endBinaryData(part);
+    } else if (depth === 1) {
+      if (part.path !== "" && part.data !== undefined) {
+        this.parts.set(part.path, part.data);
+      }
+      // Collect content type info for [Content_Types].xml reconstruction
+      if (part.path !== "" && part.contentType && part.path !== "[Content_Types].xml") {
+        this.contentTypes.set(part.path, part.contentType);
+      }
+      this.part = undefined;
+    }
+  }
+
+  text(parser: SaxParser, text: string, cdata: boolean): void {
+    const part = this.part;
+    if (part === undefined || part.data !== undefined) {
+      return;
+    }
+    if (part.base64 !== undefined) {
+      part.base64 += text;
+    } else if (part.xml !== undefined && parser.depth === 3 && (cdata || /[^ \t\r\n]/.test(text))) {
+      throw new DocxParseError(
+        `Flat OPC: the xmlData of part "${part.path}" has character data outside its root element`
+      );
+    }
+  }
+
+  /** The part's XML: its content as the input holds it, from `from` to `to`, made to stand alone. */
+  private endXmlData(part: OpenPart, to: number): void {
+    const xml = part.xml!;
+    const content = this.bytes.subarray(xml.from, to);
+    const declaration = utf8Encoder.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    );
+    const root = xml.root;
+    if (root === undefined) {
+      throw new DocxParseError(`Flat OPC: the xmlData of part "${part.path}" has no root element`);
+    }
+    let declarations = "";
+    const own = root.ns ?? {};
+    const text = utf8Decoder.decode(content);
+    for (const [prefix, uri] of xml.scope) {
+      // A binding the root makes itself, or one nothing in the part could use, is not repeated.
+      if (Object.hasOwn(own, prefix) || prefix === "xml") {
+        continue;
+      }
+      if (prefix === "" ? uri !== "" : text.includes(`${prefix}:`)) {
+        declarations += ` ${prefix === "" ? "xmlns" : `xmlns:${prefix}`}="${xmlEncodeAttr(uri)}"`;
+      }
+    }
+    if (declarations === "") {
+      part.data = concatBytes(declaration, trimLeadingSpace(content));
+      return;
+    }
+    // After the root's name: `<name` is its start tag's first bytes.
+    const at = utf8Encoder.encode(root.name).length + 1 + (xml.rootStart! - xml.from);
+    part.data = concatBytes(
+      declaration,
+      trimLeadingSpace(content.subarray(0, at)),
+      utf8Encoder.encode(declarations),
+      content.subarray(at)
+    );
+  }
+
+  private endBinaryData(part: OpenPart): void {
+    part.data = base64Decode(part.base64!.replace(/\s+/g, ""), part.path);
+  }
+}
+
+/** Whether `tag` is the package element `local`: in the package namespace, or — as some writers leave it — in none. */
+function isPackageElement(tag: XmlSaxTag, local: string): boolean {
+  return tag.local === local && (tag.uri === NS_PKG || tag.uri === "");
+}
+
+/** A package attribute of `tag`: in the package namespace, or unprefixed. */
+function packageAttribute(
+  tag: XmlSaxTag,
+  scope: ReadonlyMap<string, string>,
+  local: string
+): string {
+  for (const name of Object.keys(tag.attributes)) {
+    const colon = name.indexOf(":");
+    if (
+      colon < 0
+        ? name === local
+        : name.slice(colon + 1) === local && scope.get(name.slice(0, colon)) === NS_PKG
+    ) {
+      return tag.attributes[name]!;
+    }
+  }
+  return "";
+}
+
+function trimLeadingSpace(bytes: Uint8Array): Uint8Array {
+  let i = 0;
+  while (i < bytes.length && isSpaceByte(bytes[i]!)) {
+    i++;
+  }
+  return bytes.subarray(i);
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  let length = 0;
+  for (const part of parts) {
+    length += part.length;
+  }
+  const out = new Uint8Array(length);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+/**
+ * Check if content is a Flat OPC XML document: its root element is `package` in the package namespace.
+ * A ZIP is never one, whatever text it stores; the prologue (declaration, comments, processing
+ * instructions, DOCTYPE) is skipped without parsing the rest of the document.
  */
 export function isFlatOpc(content: string | Uint8Array | ArrayBuffer | ArrayBufferView): boolean {
-  const text = checkTextOrBytes(content, "content", "Convert.isFlatOpc");
-  const sample =
-    typeof text === "string" ? text.substring(0, 500) : utf8Decoder.decode(text.subarray(0, 500));
-  // Match the actual opening tag pattern, not just the string presence
-  return (
-    sample.includes("<pkg:package") ||
-    sample.includes('xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage"')
-  );
+  const given = checkTextOrBytes(content, "content", "Convert.isFlatOpc");
+  const bytes = typeof given === "string" ? utf8Encoder.encode(given) : given;
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    return false;
+  }
+  let at = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  const prologue = scanPrologue(bytes, at, bytes.length);
+  if (prologue === undefined || prologue.rootStart === undefined) {
+    return false;
+  }
+  at = prologue.rootStart;
+  const end = findTagEnd(bytes, at, Math.min(bytes.length, at + MAX_ROOT_TAG_BYTES));
+  if (end < 0) {
+    return false;
+  }
+  const tag = utf8Decoder.decode(bytes.subarray(at + 1, end));
+  const name = /^[^\s/>]+/.exec(tag)?.[0] ?? "";
+  const colon = name.indexOf(":");
+  const prefix = colon < 0 ? "" : name.slice(0, colon);
+  if (name.slice(colon + 1) !== "package") {
+    return false;
+  }
+  const attr = prefix === "" ? "xmlns" : `xmlns:${prefix}`;
+  for (const match of tag.matchAll(/([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')/g)) {
+    if (match[1] === attr) {
+      return match[2]!.slice(1, -1) === NS_PKG;
+    }
+  }
+  return false;
+}
+
+/** How far a root start tag is read to find its namespace declarations. */
+const MAX_ROOT_TAG_BYTES = 64 * 1024;
+
+function startsWithAscii(bytes: Uint8Array, at: number, text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (bytes[at + i] !== text.charCodeAt(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function indexOfAscii(bytes: Uint8Array, text: string, from: number, to: number): number {
+  for (let i = from; i + text.length <= to; i++) {
+    if (startsWithAscii(bytes, i, text)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** The index of the `>` closing the tag that starts at `at`, outside quoted values; -1 before `to`. */
+function findTagEnd(bytes: Uint8Array, at: number, to: number): number {
+  let quote = 0;
+  for (let i = at; i < to; i++) {
+    const c = bytes[i]!;
+    if (quote !== 0) {
+      if (c === quote) {
+        quote = 0;
+      }
+    } else if (c === 0x22 || c === 0x27) {
+      quote = c;
+    } else if (c === 0x3e) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Walk the prologue in `[from, to)`: white space, the declaration, comments, processing
+ * instructions and a DOCTYPE (internal subset included). Returns where the first start tag
+ * begins (`undefined` if `to` comes first) and whether a DOCTYPE was passed, or `undefined`
+ * if something else stands there.
+ */
+function scanPrologue(
+  bytes: Uint8Array,
+  from: number,
+  to: number
+): { rootStart: number | undefined; doctype: boolean } | undefined {
+  // `doctype`: whether a DOCTYPE declares entities or attribute lists — what a part cut from the
+  // document would lose.
+  let at = from;
+  let doctype = false;
+  while (at < to) {
+    const c = bytes[at]!;
+    if (isSpaceByte(c)) {
+      at++;
+      continue;
+    }
+    if (c !== 0x3c) {
+      return undefined;
+    }
+    let end: number;
+    if (startsWithAscii(bytes, at, "<?")) {
+      end = indexOfAscii(bytes, "?>", at + 2, to);
+      end = end < 0 ? -1 : end + 2;
+    } else if (startsWithAscii(bytes, at, "<!--")) {
+      end = indexOfAscii(bytes, "-->", at + 4, to);
+      end = end < 0 ? -1 : end + 3;
+    } else if (startsWithAscii(bytes, at, "<!DOCTYPE")) {
+      const skipped = skipDoctype(bytes, at + 9, to);
+      doctype ||= skipped.declares;
+      end = skipped.end;
+    } else if (at + 1 < to && bytes[at + 1] !== 0x21 && bytes[at + 1] !== 0x3f) {
+      return { rootStart: at, doctype };
+    } else {
+      return undefined;
+    }
+    if (end < 0) {
+      return { rootStart: undefined, doctype };
+    }
+    at = end;
+  }
+  return { rootStart: undefined, doctype };
+}
+
+/**
+ * The index after a DOCTYPE whose name starts at `at` — past its `>`, skipping quotes, comments,
+ * processing instructions and its internal subset, or `-1` before `to` — and whether that subset
+ * declares an entity or an attribute list: the declarations that change what an element reads as.
+ */
+function skipDoctype(
+  bytes: Uint8Array,
+  at: number,
+  to: number
+): { end: number; declares: boolean } {
+  let quote = 0;
+  let subset = false;
+  let declares = false;
+  for (let i = at; i < to; i++) {
+    const c = bytes[i]!;
+    if (quote !== 0) {
+      if (c === quote) {
+        quote = 0;
+      }
+    } else if (c === 0x22 || c === 0x27) {
+      quote = c;
+    } else if (subset && (startsWithAscii(bytes, i, "<!--") || startsWithAscii(bytes, i, "<?"))) {
+      const comment = bytes[i + 1] === 0x21;
+      const end = indexOfAscii(bytes, comment ? "-->" : "?>", i + (comment ? 4 : 2), to);
+      if (end < 0) {
+        return { end: -1, declares };
+      }
+      i = end + (comment ? 2 : 1);
+    } else if (
+      subset &&
+      (startsWithAscii(bytes, i, "<!ENTITY") || startsWithAscii(bytes, i, "<!ATTLIST"))
+    ) {
+      declares = true;
+    } else if (c === 0x5b) {
+      subset = true;
+    } else if (c === 0x5d) {
+      subset = false;
+    } else if (c === 0x3e && !subset) {
+      return { end: i + 1, declares };
+    }
+  }
+  return { end: -1, declares };
 }
 
 // =============================================================================
@@ -251,51 +590,11 @@ function writePartElement(
   xml.closeNode(); // </pkg:part>
 }
 
-function serializeXmlChildren(writer: XmlWriter, el: XmlElement): void {
-  for (const child of el.children) {
-    const node = child as XmlNode;
-    switch (node.type) {
-      case "text":
-        writer.writeText(node.value);
-        break;
-      case "cdata":
-        writer.writeRaw(`<![CDATA[${node.value}]]>`);
-        break;
-      case "comment":
-        writer.writeRaw(`<!--${node.value}-->`);
-        break;
-      case "processing-instruction":
-        writer.writeRaw(`<?${node.target} ${node.body}?>`);
-        break;
-      case "element": {
-        const childEl = node as XmlElement;
-        if (childEl.children && childEl.children.length > 0) {
-          writer.openNode(childEl.name, childEl.attributes ?? {});
-          serializeXmlChildren(writer, childEl);
-          writer.closeNode();
-        } else {
-          writer.leafNode(childEl.name, childEl.attributes ?? {});
-        }
-        break;
-      }
-    }
+function base64Decode(b64: string, path: string): Uint8Array {
+  // Checked here, so the native and the manual decoder refuse the same text, as this module's error.
+  if (b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
+    throw new DocxParseError(`Flat OPC: the binaryData of part "${path}" is not base64`);
   }
-}
-
-function getTextContent(el: XmlElement): string {
-  let result = "";
-  for (const child of el.children) {
-    const node = child as XmlNode;
-    if (node.type === "text" || node.type === "cdata") {
-      result += node.value;
-    } else if (node.type === "element") {
-      result += getTextContent(node as XmlElement);
-    }
-  }
-  return result;
-}
-
-function base64Decode(b64: string): Uint8Array {
   // Use atob in browser, Buffer in Node
   if (typeof globalThis.atob === "function") {
     const binary = globalThis.atob(b64);
@@ -369,21 +668,22 @@ function isXmlContentType(ct: string): boolean {
 
 function inferContentTypeFromPath(path: string): string {
   const ext = getFileExt(path);
-  const map: Record<string, string> = {
-    xml: "application/xml",
-    rels: "application/vnd.openxmlformats-package.relationships+xml",
-    png: "image/png",
-    jpeg: "image/jpeg",
-    jpg: "image/jpeg",
-    gif: "image/gif",
-    svg: "image/svg+xml",
-    emf: "image/x-emf",
-    wmf: "image/x-wmf",
-    bin: "application/vnd.openxmlformats-officedocument.oleObject",
-    odttf: "application/vnd.openxmlformats-officedocument.obfuscatedFont"
-  };
-  return map[ext] ?? "application/octet-stream";
+  return INFERRED_CONTENT_TYPES.get(ext) ?? "application/octet-stream";
 }
+
+const INFERRED_CONTENT_TYPES: ReadonlyMap<string, string> = new Map([
+  ["xml", "application/xml"],
+  ["rels", "application/vnd.openxmlformats-package.relationships+xml"],
+  ["png", "image/png"],
+  ["jpeg", "image/jpeg"],
+  ["jpg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["svg", "image/svg+xml"],
+  ["emf", "image/x-emf"],
+  ["wmf", "image/x-wmf"],
+  ["bin", "application/vnd.openxmlformats-officedocument.oleObject"],
+  ["odttf", "application/vnd.openxmlformats-officedocument.obfuscatedFont"]
+]);
 
 /** Extract content types from [Content_Types].xml if present in entries. */
 function extractContentTypes(entries: ReadonlyMap<string, Uint8Array>): Map<string, string> {
@@ -393,44 +693,45 @@ function extractContentTypes(entries: ReadonlyMap<string, Uint8Array>): Map<stri
     return ctMap;
   }
 
-  const xmlStr = utf8Decoder.decode(ctXml);
-  let doc: ReturnType<typeof parseXml>;
+  const defaults = new Map<string, string>();
+  // From the first `<`, as a part is read; elements are matched by namespace and local name.
+  let lead = ctXml[0] === 0xef && ctXml[1] === 0xbb && ctXml[2] === 0xbf ? 3 : 0;
+  while (lead < ctXml.length && isSpaceByte(ctXml[lead]!)) {
+    lead++;
+  }
+  const parser = new SaxParser({ position: false, xmlns: true, byteOffset: lead });
+  parser.on("opentag", tag => {
+    if (parser.depth === 0) {
+      if (tag.uri !== NS_CONTENT_TYPES || tag.local !== "Types") {
+        parser.fail(`expected the root <Types> of ${NS_CONTENT_TYPES}, got <${tag.name}>`);
+      }
+      return;
+    }
+    if (parser.depth !== 1 || tag.uri !== NS_CONTENT_TYPES) {
+      return;
+    }
+    const ct = tag.attributes.ContentType ?? "";
+    if (tag.local === "Default") {
+      const ext = tag.attributes.Extension ?? "";
+      if (ext && ct) {
+        defaults.set(ext.toLowerCase(), ct);
+      }
+    } else if (tag.local === "Override") {
+      const partName = tag.attributes.PartName ?? "";
+      if (partName && ct) {
+        ctMap.set(partName.startsWith("/") ? partName.substring(1) : partName, ct);
+      }
+    }
+  });
   try {
-    doc = parseXml(xmlStr);
+    parser.write(ctXml.subarray(lead)).close();
   } catch (error) {
     if (error instanceof XmlParseError) {
-      throw new DocxParseError(`Flat OPC: not well-formed XML: ${error.message}`, {
+      throw new DocxParseError(`Flat OPC: [Content_Types].xml cannot be read: ${error.message}`, {
         cause: error
       });
     }
     throw error;
-  }
-  const root = doc.root;
-  if (!root) {
-    return ctMap;
-  }
-
-  const defaults = new Map<string, string>();
-
-  for (const child of root.children) {
-    if (typeof child === "string") {
-      continue;
-    }
-    const el = child as XmlElement;
-    if (el.name === "Default") {
-      const ext = el.attributes?.Extension ?? "";
-      const ct = el.attributes?.ContentType ?? "";
-      if (ext && ct) {
-        defaults.set(ext.toLowerCase(), ct);
-      }
-    } else if (el.name === "Override") {
-      const partName = el.attributes?.PartName ?? "";
-      const ct = el.attributes?.ContentType ?? "";
-      if (partName && ct) {
-        const normalized = partName.startsWith("/") ? partName.substring(1) : partName;
-        ctMap.set(normalized, ct);
-      }
-    }
   }
 
   // Apply defaults to entries without explicit overrides

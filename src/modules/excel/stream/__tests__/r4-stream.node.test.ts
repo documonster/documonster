@@ -133,7 +133,11 @@ describe("WorksheetWriter#addConditionalFormatting stores its ref canonical", ()
   });
 });
 
-/** The package with one byte of `partName`'s stored data flipped, so its CRC-32 no longer matches. */
+/**
+ * The package with one byte of `partName`'s stored data flipped, so its CRC-32 no longer matches. The
+ * byte is the `0` of `version="1.0"`, which becomes `1.1`: the part still parses, so it is the CRC-32
+ * check — not the XML parser — that has to find the damage.
+ */
 async function damaged(bytes: Uint8Array, partName: string): Promise<Uint8Array> {
   const parts = await Archive.unpackZip(bytes);
   const out = await Archive.packZip(new Map([...parts].map(([k, v]) => [k, v.data])), { level: 0 });
@@ -146,7 +150,7 @@ async function damaged(bytes: Uint8Array, partName: string): Promise<Uint8Array>
         new TextDecoder().decode(out.subarray(i + 30, i + 30 + n)) ===
         new TextDecoder().decode(name)
       ) {
-        out[i + 30 + n + extra + 10]! ^= 0x01;
+        out[i + 30 + n + extra + 17]! ^= 0x01;
         return out;
       }
     }

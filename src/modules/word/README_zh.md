@@ -116,7 +116,9 @@ Document.setSectionProperties(doc, {
 });
 
 // 页眉/页脚
-Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
+Document.setHeader(doc, "default", {
+  children: [Build.textParagraph("Page Header")]
+});
 
 // 构建与导出
 const bytes = await Document.toBuffer(doc);
@@ -139,6 +141,13 @@ const results = Query.searchText(doc, /pattern/g);
 在 Node 中，`Document.readFile(path)` 与 `Document.writeFile(doc, path)` 直接读写文件；浏览器构建不提供这两个成员——请自行读取字节后交给
 `Document.read`。系统不允许读取或写入的文件报 `DocxFileError`（含 `path`、`operation`），以系统错误为 `cause`（`error.cause.code`
 为 `ENOENT`、`EACCES` 等），与 Excel 的 `ExcelFileError` 一致；读到了但不是有效文档的文件报 `DocxParseError`。
+
+部件中的 XML 按 Word 的方式读取：从第一个 `<` 开始（生成方在 XML 声明之前写的空白不算错误）；不是合法 UTF-8 的字节读作
+U+FFFD，而不是拒绝整个文件，所以有个别损坏字节的文档仍能打开。`Document.read` 与 `Stream.DocumentReader` 读取方式一致，
+受同一 `securityPolicy` 约束；任一方触及限额都报 `DocxLimitExceededError`。
+每个部件都计入 `maxPackageSize`——流式读取不解压的部件（如媒体）按其条目声明的大小计入——且部件在解压前即按
+`maxPartSize` 拒绝，而非解压之后。每次调用只读取一次策略：逐字段复制、校验，读取过程使用该副本。主部件须是 Word
+命名空间（Transitional 或 Strict，前缀不限）中的 `w:document`，其子元素为 `w:body`；模型未表示的标记写回时会带上它依赖的祖先命名空间声明。
 
 ### 唯一的文档对象
 
@@ -361,6 +370,9 @@ const resolved2 = Transform.resolveDataBindings(
 );
 ```
 
+绑定的 XPath 前缀表示它的 `w:prefixMappings` 所绑定的命名空间：`/p:root/p:value` 配合 `xmlns:p="urn:x"` 找到的是 `urn:x`
+命名空间中的元素，无论数据给这个命名空间用了什么前缀。绑定没有映射的前缀按本地名匹配。
+
 ### 带特效的绘图形状
 
 ```typescript
@@ -439,7 +451,9 @@ const diff = Diff.compare(docA, docB);
 ```typescript
 import { Transform } from "documonster/word";
 
-const merged = Transform.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
+const merged = Transform.merge([doc1, doc2, doc3], {
+  sectionBreak: "nextPage"
+});
 ```
 
 ### 流式写入器
@@ -463,7 +477,10 @@ const buffer = await stream.toBuffer();
 import { Security } from "documonster/word";
 
 // 返回新文档，`doc` 本身不变。
-const protectedDoc = await Security.protect(doc, { edit: "readOnly", password: "secret" });
+const protectedDoc = await Security.protect(doc, {
+  edit: "readOnly",
+  password: "secret"
+});
 const isProtected = Security.isProtected(protectedDoc); // true
 const valid = await Security.verifyPassword(protectedDoc, "secret"); // true
 ```
@@ -535,7 +552,9 @@ const again = await Document.read(flatXml); // Document.read 也能读取 Flat O
 const parts = Convert.flatOpcToParts(flatXml); // Map<partPath, bytes>
 
 // Document.toBase64 写出的 base64
-const fromBase64 = await Document.read(await Document.toBase64(doc), { base64: true });
+const fromBase64 = await Document.read(await Document.toBase64(doc), {
+  base64: true
+});
 ```
 
 ### 加密与签名

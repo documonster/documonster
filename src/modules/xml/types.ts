@@ -126,7 +126,7 @@ export interface XmlSink {
   addAttributes(attributes: XmlAttributes): void;
 
   /** Write escaped text content inside the current element. */
-  writeText(text: string | number): void;
+  writeText(text: string | number | boolean): void;
 
   /** Write raw (pre-escaped) XML inside the current element. */
   writeRaw(xml: string): void;
@@ -144,7 +144,7 @@ export interface XmlSink {
    * Convenience: write a complete leaf element.
    * Equivalent to openNode + optional writeText + closeNode.
    */
-  leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void;
+  leafNode(name: string, attributes?: XmlAttributes, text?: string | number | boolean): void;
 }
 
 // =============================================================================
@@ -229,7 +229,10 @@ export interface XmlSaxOptions {
   position?: boolean;
   /** File name for error messages. */
   fileName?: string;
-  /** Parse as fragment (no root element required). Default: false */
+  /**
+   * Parse as a fragment: any number of root elements, none included, with text between them reported
+   * as text. Default: false
+   */
   fragment?: boolean;
   /** Enable namespace processing. Default: false */
   xmlns?: boolean;
@@ -242,6 +245,12 @@ export interface XmlSaxOptions {
    */
   maxEntityExpansions?: number;
   /**
+   * Maximum total length of the text internal entities expand to, in UTF-16 code units — measured
+   * before it is built. A few entities used many times stay within `maxEntityExpansions` and can
+   * still make a string larger than memory. Default: 10,000,000. Set 0 to disable.
+   */
+  maxEntityExpansionLength?: number;
+  /**
    * How to handle invalid XML characters (ASCII control chars, lone surrogates,
    * non-characters U+FFFE/U+FFFF, DEL U+007F, etc.).
    *
@@ -252,6 +261,243 @@ export interface XmlSaxOptions {
    * @default "error"
    */
   invalidCharHandling?: XmlInvalidCharHandling;
+  /**
+   * Offset in the file of the first byte the parser is given, so the byte positions it reports
+   * (`XmlParseError.byte`, `startByte`, `endByte`) are positions in the file. Only bytes
+   * have positions: it has no effect on a parser given text. A byte order mark is stripped only at
+   * offset 0.
+   * @default 0
+   */
+  byteOffset?: number;
+  /**
+   * Start inside the root element, at an unknown depth: the input begins in the content of some
+   * element. An end tag of an element opened before the start is passed over, a root element is not
+   * required and not counted, and a byte input that begins inside a character drops the rest of it.
+   * Elements opened since the start and still open at the end are reported; with `context`, so is
+   * an end that comes after a tag but before the root element's end tag. Pair it with `byteOffset`
+   * and `context`. `maxDepth` counts from the start.
+   * @default false
+   */
+  resume?: boolean;
+  /**
+   * Read the general entities the DOCTYPE internal subset declares (`<!ENTITY name "value">`) and
+   * expand them where they are used, as XML 1.0 §4.4 describes; `getPrologContext()`
+   * then carries them. Replacement text that holds markup (`<`) is refused, not parsed. External
+   * entities, an external DTD subset and parameter entities are never read: a reference to an
+   * entity declared outside the internal subset, or after a parameter-entity reference, is an
+   * undefined entity. Off by default, so such a reference is reported as it always was.
+   * @default false
+   */
+  internalEntities?: boolean;
+  /**
+   * The largest prolog context `internalEntities` may gather, in bytes of its JSON form, and the
+   * longest markup declaration of the DOCTYPE internal subset the parser holds to check — and, in
+   * characters with a small share per entry, what it keeps of that subset's declarations (entity
+   * bindings, attribute declarations) to read the rest by, with or without `internalEntities`. Beyond
+   * either the parse fails with an `XmlLimitExceededError` (`limit: "prologContext"`), rather than
+   * keep part of a context or take a declaration unchecked. `Xml.parse` and `Xml.parseToObject`,
+   * whose input is all in memory, set no such bound.
+   * @default 65536
+   */
+  maxContextBytes?: number;
+  /**
+   * The prolog context of the file a `resume` parser starts inside — what another parser's
+   * `getPrologContext()` returned — so the entities declared there expand here as
+   * they do for a parser that read the file from its start.
+   */
+  context?: XmlPrologContext;
+}
+
+// =============================================================================
+// Prolog Context, Records and Byte Sources
+// =============================================================================
+
+/**
+ * What a reader that starts inside a file's root element needs from the prolog it did not read:
+ * the root element's name and the general entities the DOCTYPE internal subset declares. Plain
+ * data, so it can be sent with `JSON.stringify` to wherever that reader runs.
+ */
+export interface XmlPrologContext {
+  /** Name of the root element. */
+  readonly root: string;
+  /** Replacement text of each internal general entity, by name, with character references expanded. */
+  readonly entities: Readonly<Record<string, string>>;
+  /**
+   * `"ascii"` when the XML declaration names ASCII: a byte past `0x7F` later in the file is then no
+   * character, as it is for a reader that read the declaration. Absent for UTF-8.
+   */
+  readonly encoding?: "ascii";
+  /**
+   * The attributes the internal subset's `<!ATTLIST>` declarations give a default or a type other
+   * than CDATA, by element name and then attribute name. Absent when it declares none.
+   */
+  readonly attributes?: Readonly<Record<string, Readonly<Record<string, XmlAttributeDeclaration>>>>;
+}
+
+/**
+ * What a parser does with an attribute an `<!ATTLIST>` in the internal subset declares, as XML 1.0
+ * §5.1 asks of one that reads the declarations: give an element that does not specify it its
+ * `default`, and — for a type other than CDATA (`tokenized`) — read a value with its spaces
+ * collapsed and trimmed (§3.3.3).
+ */
+export interface XmlAttributeDeclaration {
+  /** Its type is other than CDATA: a value read has runs of spaces collapsed, and none at either end. */
+  readonly tokenized?: true;
+  /** Its default value, normalized as a value read is; absent for `#REQUIRED` and `#IMPLIED`. */
+  readonly default?: string;
+}
+
+/** The bytes of a file, whole or in chunks; a chunk may end anywhere, inside a character too. */
+export type XmlByteSource = Uint8Array | Iterable<Uint8Array> | AsyncIterable<Uint8Array>;
+
+/** A record `Xml.readRecords` read: one element, as `Xml.parseToObject` reads its text. */
+export interface XmlRecord {
+  /** The element's name. */
+  readonly name: string;
+  /**
+   * The element as an object, deep-equal to `Xml.parseToObject` of its text with the same
+   * conversion options: `{ [name]: value }`.
+   */
+  readonly object: Record<string, unknown>;
+  /** Offset in the file of the `<` of its start tag. */
+  readonly startByte: number;
+  /** Offset in the file just past the `>` of its end tag (of its start tag, when it self-closes). */
+  readonly endByte: number;
+  /** Its text as the file holds it, with `rawXml`. */
+  readonly xml?: string;
+}
+
+/** Options for `Xml.readRecords`. */
+export interface XmlReadRecordsOptions extends XmlToPlainObjectOptions {
+  /**
+   * Names of the elements to read as records. A record is an element with one of these names
+   * that is not inside another record: one inside it, of any of the names, is part of it.
+   */
+  tags: readonly string[];
+  /**
+   * Called with each record, in file order. A returned promise is awaited before the next record
+   * is read, so a slow consumer slows the read rather than letting records pile up. Records arrive
+   * as they are read: a call that fails may already have given some, so stage them until the call —
+   * and, for a partition, every range of it — has succeeded.
+   */
+  onRecord: (record: XmlRecord) => void | Promise<void>;
+  /** Offset in the file of the first byte of the source, and the start of the chunk to read. */
+  offset?: number;
+  /**
+   * Length of the chunk to read, in bytes: the records whose start tag begins in
+   * `[offset, offset + size)` are read. Omitted, every record from `offset` on.
+   */
+  size?: number;
+  /**
+   * The prolog context of the file — `Xml.readRoot(...).context` — needed when `offset` is
+   * not 0, where the prolog is not read.
+   */
+  context?: XmlPrologContext;
+  /** Give each record its text as the file holds it (`xml`). Off by default: it costs a copy. */
+  rawXml?: boolean;
+  /** Maximum element nesting depth; from the chunk start when `offset` is not 0. Default: 256. */
+  maxDepth?: number;
+  /** Maximum total entity expansions, counted per call. Default: 10000. */
+  maxEntityExpansions?: number;
+  /** Maximum total length of entity expansions, in UTF-16 code units, counted per call. Default: 10,000,000. */
+  maxEntityExpansionLength?: number;
+  /** How to handle invalid XML characters, and bytes that are not UTF-8. Default: "error". */
+  invalidCharHandling?: XmlInvalidCharHandling;
+  /** The largest prolog context read at offset 0, in bytes of its JSON form. Default: 65536. */
+  maxContextBytes?: number;
+  /** Cancels the read: the source is closed and the call rejects with an `AbortError` whose `cause` is the signal's reason. */
+  signal?: AbortSignal;
+}
+
+/** What `Xml.readRecords` read. */
+export interface XmlReadRecordsResult {
+  /** How many records were given to `onRecord`. */
+  readonly records: number;
+  /**
+   * Offset in the file of the first byte not parsed: the read went past the chunk's end until its
+   * last record closed and the next chunk's start was placed.
+   */
+  readonly endByte: number;
+  /**
+   * The structure of the chunk — the elements it closes that opened before it, the ones it leaves
+   * open, and what it holds outside any element — for `Xml.verifyPartition`, which joins the chunks of
+   * a partition and checks the file is whole. Plain data: it can be sent back from a worker as JSON.
+   */
+  readonly structure: XmlPartitionStructure;
+}
+
+/**
+ * One chunk's share of a file's structure, as `Xml.readRecords` reports it for `Xml.verifyPartition`.
+ * Its fields are for that function to read; they are documented so the object can be stored or sent,
+ * not to be built by hand.
+ */
+export interface XmlPartitionStructure {
+  /** The chunk: `[start, end)`; `end` is `null` for one that runs to the end of the file. */
+  readonly start: number;
+  readonly end: number | null;
+  /** Whether the read reached the end of the file and found it well-formed there. */
+  readonly final: boolean;
+  /** Where the file ends — its length — when the read reached it (`final`). */
+  readonly eof?: number;
+  /**
+   * In file order: `["/", byte, name]` — an end tag closing an element opened before the chunk;
+   * `["e", byte]` — an element begun and ended in the chunk outside any element the chunk opened;
+   * `["t", byte]` — text there that is not white space; `["l", byte]` — such text read from the
+   * very start of the chunk, which may be the end of markup begun before it. Between two `/` steps
+   * no more is kept than the join needs: the `l`, the first other entry, the first element, and the
+   * entry after it.
+   */
+  readonly steps: readonly XmlPartitionStep[];
+  /** The elements the chunk opened and left open at its end, outermost first. */
+  readonly open: readonly string[];
+  /**
+   * What the read found past the chunk's end, before the first markup there: the byte where text
+   * that is not white space begins, or `null` for none. Absent when the read did not go that far.
+   * It tells `Xml.verifyPartition` what the next chunk's `l` step is.
+   */
+  readonly follow?: number | null;
+  /**
+   * Present, `true`, when the read — from a start inside the file — met no markup in the whole chunk:
+   * it took all of it for text, so its `follow` is no surer, and the chunk before speaks for both.
+   */
+  readonly textOnly?: true;
+}
+
+/** One entry of {@link XmlPartitionStructure.steps}. */
+export type XmlPartitionStep =
+  | readonly [kind: "/", byte: number, name: string]
+  | readonly [kind: "e" | "t" | "l", byte: number];
+
+/** Options for `Xml.readRoot`. */
+export interface XmlReadRootOptions {
+  /** The root element's `<` must begin before this offset. Default: 1,000,000. */
+  maxStartByte?: number;
+  /** The longest the root element's start tag may be, in bytes. Default: 65,536. */
+  maxTagBytes?: number;
+  /** The largest prolog context, in bytes of its JSON form. Default: 65,536. */
+  maxContextBytes?: number;
+  /**
+   * Maximum total entity expansions in the root's attributes, as `Xml.readRecords` takes it, so a
+   * file it can read with a raised limit can give its context too. Default: 10000.
+   */
+  maxEntityExpansions?: number;
+  /** Maximum total length of entity expansions, in UTF-16 code units. Default: 10,000,000. */
+  maxEntityExpansionLength?: number;
+  /** Cancels the read: the source is closed and the call rejects with an `AbortError` whose `cause` is the signal's reason. */
+  signal?: AbortSignal;
+}
+
+/** The root element `Xml.readRoot` read, and the prolog before it. */
+export interface XmlRootElement {
+  /** The root element's name. */
+  readonly name: string;
+  /**
+   * Its attributes, references expanded. Namespace declarations (`xmlns`, `xmlns:p`) are among
+   * them.
+   */
+  readonly attributes: Readonly<Record<string, string>>;
+  /** What a reader that starts later in the file needs: `Xml.readRecords`' `context`. */
+  readonly context: XmlPrologContext;
 }
 
 // =============================================================================
@@ -357,14 +603,26 @@ export interface XmlToPlainObjectOptions {
  * `parseXmlToObject` handles both parsing and conversion in a single pass.
  */
 export interface XmlParseToObjectOptions extends XmlToPlainObjectOptions {
-  /** Parse as fragment (no root element required). Default: false */
+  /**
+   * Parse as a fragment: any number of root elements, each becoming a key of the result, none
+   * included (the result is `{}`). Text outside every element has no key to go under and is not in
+   * the result. Default: false
+   */
   fragment?: boolean;
   /** Maximum element nesting depth. Default: 256. */
   maxDepth?: number;
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
+  /** Maximum total length of entity expansions, in UTF-16 code units. Default: 10,000,000. */
+  maxEntityExpansionLength?: number;
   /** How to handle invalid XML characters. Default: "error". */
   invalidCharHandling?: XmlInvalidCharHandling;
+  /**
+   * Read the general entities the DOCTYPE internal subset declares and expand them where they are
+   * used — see `XmlSaxOptions.internalEntities`. External entities are never read.
+   * @default false
+   */
+  internalEntities?: boolean;
 }
 
 // =============================================================================
@@ -379,7 +637,10 @@ export interface XmlParseOptions {
   processingInstructions?: boolean;
   /** Include CDATA as explicit nodes (vs merged into text). Default: false */
   cdataAsNodes?: boolean;
-  /** Parse as fragment (no root element required). Default: false */
+  /**
+   * Accept several root elements: `root` is the first and `roots` holds them all. At least one
+   * element is still required — input with none is refused, as it is without this option. Default: false
+   */
   fragment?: boolean;
   /** Enable namespace processing on elements. Default: false */
   xmlns?: boolean;
@@ -387,8 +648,16 @@ export interface XmlParseOptions {
   maxDepth?: number;
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
+  /** Maximum total length of entity expansions, in UTF-16 code units. Default: 10,000,000. */
+  maxEntityExpansionLength?: number;
   /** How to handle invalid XML characters. Default: "error". */
   invalidCharHandling?: XmlInvalidCharHandling;
+  /**
+   * Read the general entities the DOCTYPE internal subset declares and expand them where they are
+   * used — see `XmlSaxOptions.internalEntities`. External entities are never read.
+   * @default false
+   */
+  internalEntities?: boolean;
 }
 
 /** @deprecated Use {@link XmlToPlainObjectOptions}. Removed in 1.0. */

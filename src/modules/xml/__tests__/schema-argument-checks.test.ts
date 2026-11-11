@@ -46,3 +46,39 @@ describe("Xml argument checks declared as schemas", () => {
     );
   });
 });
+
+describe("DOM helpers refuse a node missing what they read", () => {
+  it("getAttr needs attributes", () => {
+    const r = refusal(() => Xml.getAttr({ type: "element", children: [] } as never, "id"));
+    expect(r.name).toBe("XmlArgumentError");
+    expect(r.message).toBe("Xml.getAttr: element.attributes must be an object, got undefined");
+  });
+
+  it("getText needs a text node's value to be a string, at any depth", () => {
+    expect(refusal(() => Xml.getText({ type: "text", value: 42 } as never)).message).toBe(
+      "Xml.getText: node.value must be a string, got 42"
+    );
+    const deep = {
+      type: "element",
+      name: "a",
+      attributes: {},
+      children: [{ type: "text", value: 42 }]
+    };
+    expect(refusal(() => Xml.getText(deep as never)).name).toBe("XmlArgumentError");
+    expect(refusal(() => Xml.toPlainObject(deep as never)).name).toBe("XmlArgumentError");
+  });
+});
+
+describe("Xml.toPlainObject reads its options once", () => {
+  it("uses the value it checked", () => {
+    let reads = 0;
+    const options = {
+      get textKey() {
+        return reads++ === 0 ? "v" : (42 as never);
+      }
+    };
+    const root = Xml.parse("<r a='1'>x</r>").root;
+    expect(Xml.toPlainObject(root, options)).toEqual({ r: { "@_a": "1", v: "x" } });
+    expect(reads).toBe(1);
+  });
+});

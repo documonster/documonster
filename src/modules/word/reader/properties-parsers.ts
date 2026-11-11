@@ -184,7 +184,10 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
       // run reads as not underlined until something sets one.
       setAsideValue(rPr, "underline", uVal, uColor ? { with: { color: uColor } } : {});
     } else if (uColor) {
-      rPr.underline = { style: (uVal ?? "single") as UnderlineStyle, color: uColor };
+      rPr.underline = {
+        style: (uVal ?? "single") as UnderlineStyle,
+        color: uColor
+      };
     } else {
       rPr.underline = (uVal ?? "single") as UnderlineStyle;
     }

@@ -1,4 +1,5 @@
 import { parseXml, textContent } from "@xml/dom";
+import { XmlWriteError } from "@xml/errors";
 import { XmlStreamWriter } from "@xml/stream-writer";
 import type { XmlWritableTarget } from "@xml/types";
 import { describe, it, expect } from "vitest";
@@ -232,5 +233,36 @@ describe("XmlStreamWriter", () => {
       const sw = new XmlStreamWriter(target);
       expect(() => sw.addAttributes({ a: "1" })).toThrow("no element is open");
     });
+  });
+});
+
+describe("XmlStreamWriter after its target fails", () => {
+  it("passes the target's error on, then refuses every later write", () => {
+    const chunks: string[] = [];
+    const boom = new Error("disk full");
+    let failNext = false;
+    const sw = new XmlStreamWriter({
+      write(chunk: string) {
+        if (failNext) {
+          failNext = false;
+          throw boom;
+        }
+        chunks.push(chunk);
+      }
+    });
+    sw.openNode("r");
+    failNext = true;
+    expect(() => sw.closeNode()).toThrow(boom);
+    let refusal: unknown;
+    try {
+      sw.leafNode("x");
+    } catch (err) {
+      refusal = err;
+    }
+    expect(refusal).toBeInstanceOf(XmlWriteError);
+    expect((refusal as XmlWriteError).cause).toBe(boom);
+    expect(() => sw.writeText("t")).toThrow(XmlWriteError);
+    expect(() => sw.closeAll()).toThrow(XmlWriteError);
+    expect(chunks.join("")).toBe("");
   });
 });

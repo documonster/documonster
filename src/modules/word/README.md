@@ -116,7 +116,9 @@ Document.setSectionProperties(doc, {
 });
 
 // Headers/Footers
-Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
+Document.setHeader(doc, "default", {
+  children: [Build.textParagraph("Page Header")]
+});
 
 // Build & export
 const bytes = await Document.toBuffer(doc);
@@ -142,6 +144,17 @@ them to `Document.read`. A file the system will not read or write is a `DocxFile
 (`path`, `operation`) whose `cause` is the system's error (`error.cause.code` is
 `ENOENT`, `EACCES`, …), as Excel's `ExcelFileError` is; a file that was read but is
 not a valid document is a `DocxParseError`.
+
+A part's XML is read as Word reads it: from its first `<` (white space a producer wrote before the
+XML declaration is no error), and a byte that is not well-formed UTF-8 is read as U+FFFD rather than
+refused, so a document with a damaged byte still opens. `Document.read` and `Stream.DocumentReader`
+read alike, under the same `securityPolicy`; a limit either reaches is a `DocxLimitExceededError`.
+Every part counts toward `maxPackageSize` — one the streaming reader never inflates, such as media,
+by the size its entry declares — and a part is refused at `maxPartSize` before it is inflated, not
+after. The policy is read once per call: each field is copied, checked, and the copy is what the read
+uses. The main part is `w:document` in Word's namespace (Transitional or Strict, under any prefix),
+with `w:body` as its child; markup the model does not represent is written back with the namespace
+declarations it relied on from its ancestors.
 
 ### One Document Object
 
@@ -407,6 +420,17 @@ const resolved2 = Transform.resolveDataBindings(
 );
 ```
 
+A binding's XPath prefixes mean what its `w:prefixMappings` binds them to: `/p:root/p:value` with
+`xmlns:p="urn:x"` finds the elements of `urn:x`, whatever prefix the data gives that namespace. A
+prefix the binding does not map is matched by local name; a store whose namespaces do not resolve
+matches no mapped prefix.
+
+The XPath read is an absolute location path of child steps (`/root/item`), as Word and OpenDoPE
+write them, each with an optional 1-based position (`[2]`, `[last()]`), and an optional final
+attribute step (`/@id`, an unprefixed one naming the attribute in no namespace). A binding using
+anything else — `//`, another axis, a function, a union, another predicate — leaves its SDT as it
+was.
+
 ### Drawing Shapes with Effects
 
 ```typescript
@@ -486,7 +510,9 @@ const diff = Diff.compare(docA, docB);
 ```typescript
 import { Transform } from "documonster/word";
 
-const merged = Transform.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
+const merged = Transform.merge([doc1, doc2, doc3], {
+  sectionBreak: "nextPage"
+});
 ```
 
 ### Streaming Writer
@@ -510,7 +536,10 @@ With `new Stream.DocumentWriter({ sink })` the bytes flow into the sink as they 
 import { Security } from "documonster/word";
 
 // Returns a new document; `doc` is left as it was.
-const protectedDoc = await Security.protect(doc, { edit: "readOnly", password: "secret" });
+const protectedDoc = await Security.protect(doc, {
+  edit: "readOnly",
+  password: "secret"
+});
 const isProtected = Security.isProtected(protectedDoc); // true
 const valid = await Security.verifyPassword(protectedDoc, "secret"); // true
 ```
@@ -588,8 +617,17 @@ const again = await Document.read(flatXml); // Document.read takes Flat OPC text
 const parts = Convert.flatOpcToParts(flatXml); // Map<partPath, bytes>
 
 // Base64, as Document.toBase64 writes it
-const fromBase64 = await Document.read(await Document.toBase64(doc), { base64: true });
+const fromBase64 = await Document.read(await Document.toBase64(doc), {
+  base64: true
+});
 ```
+
+`Convert.isFlatOpc` answers `true` only when the root element (after any declaration, comments,
+processing instructions and DOCTYPE) is `package` in the package namespace; a ZIP is never Flat OPC.
+Reading refuses, with `DocxParseError`, a part whose `xmlData` does not hold exactly one root element,
+a part with more than one `xmlData`/`binaryData`, elements inside `binaryData`, and `xmlData` in a
+document with a DOCTYPE — a part is copied as written, so the DOCTYPE's defaulted attributes and
+entities could not come with it.
 
 ### Encryption & Signatures
 

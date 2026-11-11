@@ -289,3 +289,21 @@ describe("parseXmlToObject", () => {
       }));
   });
 });
+
+describe("text under a key already taken", () => {
+  it("merges with a child element of the textKey's name", () => {
+    const xml = "<r><t>child</t>tail</r>";
+    expect(parseXmlToObject(xml, { textKey: "t" })).toEqual({ r: { t: ["child", "tail"] } });
+    expect(toPlainObject(parseXml(xml).root, { textKey: "t" })).toEqual({
+      r: { t: ["child", "tail"] }
+    });
+  });
+
+  it("merges with an unprefixed attribute of the textKey's name", () => {
+    const xml = '<r t="attr"><c/>tail</r>';
+    const options = { textKey: "t", attributePrefix: "" };
+    expect(parseXmlToObject(xml, options)).toEqual({ r: { t: ["attr", "tail"], c: "" } });
+    expectSameOutput(xml, options);
+    expectSameOutput('<r t="a"><t>b</t><t>c</t>d</r>', options);
+  });
+});

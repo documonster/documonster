@@ -12,6 +12,11 @@
  * register `.on(...)` handlers, then `Xml.feedSax(parser, source)` feeds it every chunk of
  * a source (or call `parser.write()` / `parser.close()` yourself).
  *
+ * Two readers take a file's bytes and read only what they are asked for: `Xml.readRoot(source)`
+ * the root element's start tag and the prolog's context, and `Xml.readRecords(source, options)`
+ * the elements named as records, as objects — of the whole file, or of one byte range of it; then
+ * `Xml.verifyPartition(results)` checks the ranges of a partition join into one whole document.
+ *
  * Single flat namespace (xml is a single-purpose module). Re-exported via
  * `export * as Xml`, tree-shaken per-member on rolldown / rspack.
  */
@@ -54,6 +59,10 @@ export {
 } from "@xml/dom";
 export { parseXmlToObject as parseToObject } from "@xml/to-object";
 export { query, queryAll } from "@xml/query";
+
+// Byte readers
+export { readRecords, verifyPartition } from "@xml/records";
+export { readRoot } from "@xml/read-root";
 
 /** @deprecated Use {@link listChildren}. Removed in 1.0. */
 export const findChildren = findChildrenImpl;

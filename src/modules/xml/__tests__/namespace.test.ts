@@ -283,7 +283,7 @@ describe("Namespace support", () => {
       parser.on("opentag", () => {});
       parser.write('<a xmlns:a="http://a"><a:b:c/></a>');
       parser.close();
-      expect(errors.some(e => e.includes("local part must not contain"))).toBe(true);
+      expect(errors.some(e => e.includes("must be NCNames"))).toBe(true);
     });
 
     it("should error on multi-colon attribute name", () => {
@@ -293,7 +293,7 @@ describe("Namespace support", () => {
       parser.on("opentag", () => {});
       parser.write('<root xmlns:a="http://a" a:b:c="val"/>');
       parser.close();
-      expect(errors.some(e => e.includes("local part must not contain"))).toBe(true);
+      expect(errors.some(e => e.includes("must be NCNames"))).toBe(true);
     });
 
     it("should accept multi-colon when xmlns is false", () => {

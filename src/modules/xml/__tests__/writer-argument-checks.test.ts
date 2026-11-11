@@ -3,7 +3,7 @@
  * attribute, comment or CDATA section leaves the output well-formed and the writer where it
  * was. They used to flush a pending `>` — or half of a start tag — before validating.
  */
-import { Xml, XmlError } from "@xml/index";
+import { Xml, XmlArgumentError, XmlError } from "@xml/index";
 import { describe, expect, it } from "vitest";
 
 interface WriterLike {
@@ -144,5 +144,51 @@ describe.each(writers())("Xml.%s — the XML declaration", (_name, make) => {
     w.openXml();
     w.leafNode("a");
     expect(out()).toBe('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<a/>');
+  });
+});
+
+describe.each(writers())("Xml.%s values read once", (_name, make) => {
+  it("reads a getter attribute once, so it is checked and written as one value", () => {
+    const { w, out } = make();
+    w.openNode("r", { id: "1" });
+    let reads = 0;
+    const attrs = {
+      get id(): string | undefined {
+        reads++;
+        return reads === 1 ? undefined : "2";
+      }
+    };
+    w.addAttributes(attrs as Record<string, unknown>);
+    w.closeAll();
+    expect(out()).toBe('<r id="1"/>');
+    expect(reads).toBe(1);
+  });
+});
+
+describe.each(writers())("Xml.%s#openXml declaration", (_name, make) => {
+  it.each([
+    ["an unknown key", { version: "1.0", foo: "x" }],
+    ["a version that is not 1.x", { version: "2.0" }],
+    ["a version that is a number", { version: 1 }],
+    ["an encoding that is not an EncName", { encoding: "UTF 8" }],
+    ["an encoding with a quote", { encoding: 'a"b' }],
+    ["standalone that is not yes or no", { standalone: "false" }],
+    ["standalone that is a number", { standalone: 1 }]
+  ])("refuses %s before writing anything", (_case, attrs) => {
+    const { w, out } = make();
+    expect(() => w.openXml(attrs)).toThrow(XmlArgumentError);
+    expect(out()).toBe("");
+  });
+
+  it("keeps the default version when it is omitted, and maps a boolean standalone", () => {
+    const { w, out } = make();
+    w.openXml({ version: undefined, encoding: "ISO-8859-1", standalone: false });
+    expect(out()).toBe('<?xml version="1.0" encoding="ISO-8859-1" standalone="no"?>\n');
+  });
+
+  it("writes version first whatever order the keys are given in", () => {
+    const { w, out } = make();
+    w.openXml({ standalone: "no", encoding: "UTF-8", version: "1.1" });
+    expect(out()).toBe('<?xml version="1.1" encoding="UTF-8" standalone="no"?>\n');
   });
 });

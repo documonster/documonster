@@ -393,7 +393,7 @@ describe("Namespace edge cases", () => {
     // Should parse without crashing; prefix is "a", local is "b:c"
     expect(tags.length).toBe(1);
     // Should report the multi-colon error
-    expect(errors.some(e => e.includes("local part must not contain"))).toBe(true);
+    expect(errors.some(e => e.includes("must be NCNames"))).toBe(true);
   });
 
   it("should handle very long namespace URI", () => {

@@ -238,6 +238,9 @@ export class DocxDecryptionError extends DocxError {
   }
 }
 
+/** A resource limit a read of a package holds it to: see {@link DocxLimitExceededError.limit}. */
+export type DocxLimit = "packageSize" | "partSize" | "partCount" | "xmlDepth" | "elementBytes";
+
 /**
  * Error thrown when an input package exceeds a declared resource limit (e.g.
  * total package size, single part size, number of parts, XML nesting depth). Used to defend
@@ -247,9 +250,10 @@ export class DocxLimitExceededError extends DocxParseError {
   override name = "DocxLimitExceededError";
   /**
    * What was exceeded: `"packageSize"` (`securityPolicy.maxPackageSize`), `"partSize"` (`maxPartSize`),
-   * `"partCount"` (`maxPartCount`) or `"xmlDepth"` (`maxXmlDepth`) — options of the `securityPolicy`.
+   * `"partCount"` (`maxPartCount`) or `"xmlDepth"` (`maxXmlDepth`) — options of the `securityPolicy` —
+   * or `"elementBytes"`, `Stream.DocumentReader`'s `maxElementBytes`.
    */
-  readonly limit: "packageSize" | "partSize" | "partCount" | "xmlDepth";
+  readonly limit: DocxLimit;
   /** The configured maximum — named as the other modules' limit errors name it. */
   readonly allowed: number;
   /** @deprecated Use {@link allowed}. Removed in 1.0. */
@@ -257,12 +261,7 @@ export class DocxLimitExceededError extends DocxParseError {
   /** Actual measured value (or the value that would have been reached). */
   readonly actual: number;
 
-  constructor(
-    limit: "packageSize" | "partSize" | "partCount" | "xmlDepth",
-    maximum: number,
-    actual: number,
-    detail?: string
-  ) {
+  constructor(limit: DocxLimit, maximum: number, actual: number, detail?: string) {
     super(
       `DOCX ${limit} limit exceeded: actual ${actual} > maximum ${maximum}` +
         (detail ? ` (${detail})` : "")

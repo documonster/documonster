@@ -176,7 +176,10 @@ function replaceOpaqueCharts(body: BodyContent[], chartRIdToChart: Map<string, C
         body[i] = withChartFrame(
           { type: "chart", chart: enrichedChart } as ChartContent,
           item.rawXml,
-          content => ({ width: content.chart.width, height: content.chart.height })
+          content => ({
+            width: content.chart.width,
+            height: content.chart.height
+          })
         );
       }
     }
@@ -440,7 +443,12 @@ function parseChartXml(
     .map(el => {
       const id = findChartChild(el, "axId")?.attributes["val"] ?? "";
       const role = localName(el.name) === "serAx" ? undefined : roleOf(id);
-      return { el, id, role, axis: role === "secondaryCategory" ? undefined : parseChartAxis(el) };
+      return {
+        el,
+        id,
+        role,
+        axis: role === "secondaryCategory" ? undefined : parseChartAxis(el)
+      };
     });
   const axisFor = (role: ChartKeptAxis["role"]) => axisEls.find(a => a.role === role)?.axis;
   const categoryAxis = axisFor("category");
@@ -521,14 +529,20 @@ function parseChartXml(
           : undefined;
         return {
           ...child,
-          ...(pointIdx !== undefined && { index: pointIdx, read: pointKey(s, pointIdx) }),
+          ...(pointIdx !== undefined && {
+            index: pointIdx,
+            read: pointKey(s, pointIdx)
+          }),
           ...(spPrXml !== undefined && { spPr: spPrXml })
         };
       })
     };
     return {
       ...s,
-      _kept: { node: withPoints, ...(dataLabelsNode && { dataLabels: dataLabelsNode }) }
+      _kept: {
+        node: withPoints,
+        ...(dataLabelsNode && { dataLabels: dataLabelsNode })
+      }
     };
   });
 
@@ -576,7 +590,9 @@ function parseChartXml(
         id,
         role,
         node: keeper.node(el, plotAreaScope, ["scaling", "title"], axisKeys(axis, role)),
-        ...(scalingEl && { scaling: keeper.node(scalingEl, axisScope, [], scalingKeys(axis)) }),
+        ...(scalingEl && {
+          scaling: keeper.node(scalingEl, axisScope, [], scalingKeys(axis))
+        }),
         ...(axisTitleEl && {
           title: keeper.node(axisTitleEl, axisScope, [], titleKeys(axis?.title))
         })
@@ -955,7 +971,10 @@ function rootDeclarations(root: XmlElement): PreservedXml | undefined {
  * refers to, so the writer can drop it when a target is gone.
  */
 function createKeeper(rootScope: Scope) {
-  const written: Record<string, string> = { ...rootScope, ...WRITER_ROOT_NAMESPACES };
+  const written: Record<string, string> = {
+    ...rootScope,
+    ...WRITER_ROOT_NAMESPACES
+  };
   const element = (el: XmlElement, scope: Scope): ChartKeptElement => {
     const inScope = namespacesInScope(scope, el);
     const undeclared: Record<string, string> = {};

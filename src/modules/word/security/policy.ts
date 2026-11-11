@@ -125,20 +125,33 @@ export function resolveSecurityPolicy(
   if (!policy) {
     return DEFAULT_SECURITY_POLICY;
   }
-  checkSecurityPolicy(policy, "policy", "Security.resolvePolicy");
+  // Each field is read once and the copy is what is checked and used: a getter answering
+  // differently on a second read cannot slip past the check.
+  return withPolicyDefaults(checkSecurityPolicy(policy, "policy", "Security.resolvePolicy"));
+}
+
+/**
+ * A policy {@link checkSecurityPolicy} returned, its unset fields given their defaults — the one
+ * policy a call reads with, so nothing reads the caller's object again after it was checked.
+ */
+export function withPolicyDefaults(
+  read: Partial<DocxSecurityPolicy> | undefined
+): Required<DocxSecurityPolicy> {
+  if (!read) {
+    return DEFAULT_SECURITY_POLICY;
+  }
   return {
-    preserveVbaProject: policy.preserveVbaProject ?? DEFAULT_SECURITY_POLICY.preserveVbaProject,
-    preserveOleObjects: policy.preserveOleObjects ?? DEFAULT_SECURITY_POLICY.preserveOleObjects,
-    preserveAltChunks: policy.preserveAltChunks ?? DEFAULT_SECURITY_POLICY.preserveAltChunks,
+    preserveVbaProject: read.preserveVbaProject ?? DEFAULT_SECURITY_POLICY.preserveVbaProject,
+    preserveOleObjects: read.preserveOleObjects ?? DEFAULT_SECURITY_POLICY.preserveOleObjects,
+    preserveAltChunks: read.preserveAltChunks ?? DEFAULT_SECURITY_POLICY.preserveAltChunks,
     dropSignaturesOnModify:
-      policy.dropSignaturesOnModify ?? DEFAULT_SECURITY_POLICY.dropSignaturesOnModify,
-    maxPackageSize: policy.maxPackageSize ?? DEFAULT_SECURITY_POLICY.maxPackageSize,
-    maxPartSize: policy.maxPartSize ?? DEFAULT_SECURITY_POLICY.maxPartSize,
-    maxPartCount: policy.maxPartCount ?? DEFAULT_SECURITY_POLICY.maxPartCount,
-    maxXmlDepth: policy.maxXmlDepth ?? DEFAULT_SECURITY_POLICY.maxXmlDepth,
-    rawXmlPolicy: policy.rawXmlPolicy ?? DEFAULT_SECURITY_POLICY.rawXmlPolicy,
-    allowExternalTargets:
-      policy.allowExternalTargets ?? DEFAULT_SECURITY_POLICY.allowExternalTargets
+      read.dropSignaturesOnModify ?? DEFAULT_SECURITY_POLICY.dropSignaturesOnModify,
+    maxPackageSize: read.maxPackageSize ?? DEFAULT_SECURITY_POLICY.maxPackageSize,
+    maxPartSize: read.maxPartSize ?? DEFAULT_SECURITY_POLICY.maxPartSize,
+    maxPartCount: read.maxPartCount ?? DEFAULT_SECURITY_POLICY.maxPartCount,
+    maxXmlDepth: read.maxXmlDepth ?? DEFAULT_SECURITY_POLICY.maxXmlDepth,
+    rawXmlPolicy: read.rawXmlPolicy ?? DEFAULT_SECURITY_POLICY.rawXmlPolicy,
+    allowExternalTargets: read.allowExternalTargets ?? DEFAULT_SECURITY_POLICY.allowExternalTargets
   };
 }
 
@@ -175,13 +188,18 @@ const POLICY_KEYS: ReadonlySet<string> = new Set([
 ] satisfies (keyof DocxSecurityPolicy)[]);
 
 /**
- * A policy's values, reported as `field` in the name of `where` — the
+ * Check a policy and return its values, each read from `value` once — a getter cannot answer one
+ * value to the check and another to the read that follows. A policy's values, reported as `field` in the name of `where` — the
  * `securityPolicy` option of the call that takes it (`options.securityPolicy`
  * of `Document.read`), or `Security.resolvePolicy`'s own `policy`. A limit is a
  * number ≥ 0 — `Infinity` lifts it — because `NaN` makes every comparison
  * false and so switched the limit off.
  */
-export function checkSecurityPolicy(value: unknown, field: string, where: string): void {
+export function checkSecurityPolicy(
+  value: unknown,
+  field: string,
+  where: string
+): Partial<DocxSecurityPolicy> {
   checkRecord(value, field, where);
   const policy = value as Partial<DocxSecurityPolicy>;
   // Unknown keys are refused here and nowhere else: a misspelt limit
@@ -197,5 +215,13 @@ export function checkSecurityPolicy(value: unknown, field: string, where: string
       );
     }
   }
-  checkSchema(policySchema, value, where, field);
+  const read: Record<string, unknown> = {};
+  for (const key of POLICY_KEYS) {
+    const v = policy[key as keyof DocxSecurityPolicy];
+    if (v !== undefined) {
+      read[key] = v;
+    }
+  }
+  checkSchema(policySchema, read, where, field);
+  return read as Partial<DocxSecurityPolicy>;
 }

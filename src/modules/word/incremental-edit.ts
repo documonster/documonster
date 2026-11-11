@@ -79,8 +79,9 @@ import {
   flatOpcEntries,
   readOptionsShape
 } from "@word/reader/package-limits";
+import { asPartLimitError } from "@word/reader/part-xml";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
-import { resolveSecurityPolicy } from "@word/security/policy";
+import type { DocxSecurityPolicy } from "@word/security/policy";
 import type { BodyContent, DocxDocument, Paragraph, Table } from "@word/types";
 import { assertValidPartName } from "@word/writer/content-types";
 import { renderBodyContent, renderDocument } from "@word/writer/document-writer";
@@ -98,7 +99,7 @@ import {
   exitRevisionIds,
   renderHelpersFor
 } from "@word/writer/render-context";
-import { parseXml } from "@xml/dom";
+import { SaxParser } from "@xml/sax";
 import { XmlWriter } from "@xml/writer";
 
 // =============================================================================
@@ -169,7 +170,10 @@ export interface IncrementalEditOptions extends ReadDocxOptions {
   readonly modTime?: Date;
 }
 
-const incrementalEditOptionsSchema = w.record({ ...readOptionsShape, ...packageOptionsShape });
+const incrementalEditOptionsSchema = w.record({
+  ...readOptionsShape,
+  ...packageOptionsShape
+});
 const _incrementalEditOptionsMatch: SchemaMatches<
   typeof incrementalEditOptionsSchema,
   IncrementalEditOptions
@@ -205,13 +209,13 @@ export async function editDocxIncremental(
   const bytes = checkPackageBytes(buffer, where);
   checkIncrementalEdits(edits, where);
   checkSchema(incrementalEditOptionsSchema.optional(), options, where);
-  checkReadOptions(options, where);
+  const policy = checkReadOptions(options, where);
   // Read all entries from the original ZIP. Some third-party ZIP writers emit
   // entry paths with a leading "/" — strip it so lookups by canonical path
   // (e.g. "word/document.xml") match consistently with the rest of the
   // codebase (see readDocxPart below).
   const parts = new Map<string, Uint8Array>();
-  await readPackageEntries(bytes, options, async (path, entry) => {
+  await readPackageEntries(bytes, options, policy, async (path, entry) => {
     parts.set(path, await entry.bytes());
     return false;
   });
@@ -273,10 +277,13 @@ export async function editDocxIncremental(
     dropOrphanedComments(parts, replacedAnchors);
   }
 
-  typeNewParts(parts, originalPaths);
+  typeNewParts(parts, originalPaths, policy.maxXmlDepth);
 
   // Write back to a new ZIP
-  const archive = createZip({ level: options?.compressionLevel ?? 6, modTime: options?.modTime });
+  const archive = createZip({
+    level: options?.compressionLevel ?? 6,
+    modTime: options?.modTime
+  });
   for (const [path, data] of parts) {
     archive.add(path, data);
   }
@@ -296,9 +303,9 @@ export async function listDocxParts(
 ): Promise<string[]> {
   const where = "Package.listParts";
   const bytes = checkPackageBytes(buffer, where);
-  checkReadOptions(options, where);
+  const policy = checkReadOptions(options, where);
   const paths: string[] = [];
-  await readPackageEntries(bytes, options, path => {
+  await readPackageEntries(bytes, options, policy, path => {
     paths.push(path);
     return false;
   });
@@ -321,12 +328,12 @@ export async function readDocxPart(
   const where = "Package.readPart";
   const bytes = checkPackageBytes(buffer, where);
   checkString(path, "path", where);
-  checkReadOptions(options, where);
+  const policy = checkReadOptions(options, where);
   // A part name is written with a leading "/" in `[Content_Types].xml` and
   // without one as a ZIP entry; either names the same part.
   const wanted = path.replace(/^\/+/, "");
   let found: Uint8Array | undefined;
-  await readPackageEntries(bytes, options, async (entryPath, entry) => {
+  await readPackageEntries(bytes, options, policy, async (entryPath, entry) => {
     if (entryPath !== wanted) {
       return false;
     }
@@ -354,9 +361,9 @@ function checkPackageBytes(buffer: unknown, where: string): Uint8Array {
 async function readPackageEntries(
   input: Uint8Array,
   options: ReadDocxOptions | undefined,
+  policy: Required<DocxSecurityPolicy>,
   visit: (path: string, entry: { bytes(): Promise<Uint8Array> }) => boolean | Promise<boolean>
 ): Promise<void> {
-  const policy = resolveSecurityPolicy(options?.securityPolicy);
   checkPackageSize(input, policy);
   const buffer = await decryptIfEncrypted(input, options?.password, policy.maxPackageSize);
   try {
@@ -369,7 +376,10 @@ async function readPackageEntries(
       return;
     }
     const budget = createPartBudget(policy);
-    for await (const entry of unzipZip(buffer, { checkCrc32: options?.checkCrc32 }).entries()) {
+    for await (const entry of unzipZip(buffer, {
+      checkCrc32: options?.checkCrc32,
+      maxEntrySize: policy.maxPartSize
+    }).entries()) {
       // Folder entries are not parts (OPC §9.1.1.1) and are not written back.
       if (isDirectoryEntry(entry)) {
         continue;
@@ -377,11 +387,7 @@ async function readPackageEntries(
       budget.count();
       const path = entry.path.replace(/^\/+/, "");
       const charged = {
-        async bytes(): Promise<Uint8Array> {
-          const data = await entry.bytes();
-          budget.charge(path, data.length);
-          return data;
-        }
+        bytes: (): Promise<Uint8Array> => budget.read(path, entry)
       };
       if (await visit(path, charged)) {
         return;
@@ -453,7 +459,11 @@ function isDirectoryEntry(entry: { readonly type: string; readonly path: string 
  * one, an `Override`. Parts the original already had are not judged: they
  * are the input's, not this edit's.
  */
-function typeNewParts(parts: Map<string, Uint8Array>, originalPaths: ReadonlySet<string>): void {
+function typeNewParts(
+  parts: Map<string, Uint8Array>,
+  originalPaths: ReadonlySet<string>,
+  maxDepth: number
+): void {
   const added = [...parts.keys()].filter(
     path => !originalPaths.has(path) && path !== CONTENT_TYPES_PART && !path.endsWith(".rels")
   );
@@ -463,24 +473,15 @@ function typeNewParts(parts: Map<string, Uint8Array>, originalPaths: ReadonlySet
   if (added.length === 0) {
     return;
   }
-  const defaults = new Set<string>();
-  const overrides = new Set<string>();
   const ctXml = parts.get(CONTENT_TYPES_PART);
   if (!ctXml) {
     return;
   }
-  for (const el of parseXml(utf8Decoder.decode(ctXml)).root.children) {
-    if (el.type !== "element") {
-      continue;
-    }
-    const local = el.name.slice(el.name.indexOf(":") + 1);
-    if (local === "Default" && el.attributes["Extension"]) {
-      defaults.add(el.attributes["Extension"].toLowerCase());
-    } else if (local === "Override" && el.attributes["PartName"]) {
-      overrides.add(el.attributes["PartName"].replace(/^\/+/, "").toLowerCase());
-    }
-  }
+  const types = readContentTypes(ctXml, maxDepth);
+  const { defaults, overrides } = types;
   const declarations: string[] = [];
+  // Written in the content-types namespace the root is in, with the prefix the root has for it.
+  const prefix = types.rootPrefix === "" ? "" : `${types.rootPrefix}:`;
   for (const path of added) {
     const leaf = path.slice(path.lastIndexOf("/") + 1);
     const dot = leaf.lastIndexOf(".");
@@ -496,23 +497,131 @@ function typeNewParts(parts: Map<string, Uint8Array>, originalPaths: ReadonlySet
     if (ext) {
       defaults.add(ext);
       declarations.push(
-        `<Default Extension="${xmlEncodeAttr(ext)}" ContentType="${GENERIC_CONTENT_TYPE}"/>`
+        `<${prefix}Default Extension="${xmlEncodeAttr(ext)}" ContentType="${GENERIC_CONTENT_TYPE}"/>`
       );
     } else {
       overrides.add(path.toLowerCase());
       declarations.push(
-        `<Override PartName="/${xmlEncodeAttr(path)}" ContentType="${GENERIC_CONTENT_TYPE}"/>`
+        `<${prefix}Override PartName="/${xmlEncodeAttr(path)}" ContentType="${GENERIC_CONTENT_TYPE}"/>`
       );
     }
   }
   if (declarations.length > 0) {
-    const xml = utf8Decoder.decode(ctXml);
-    const close = xml.lastIndexOf("</");
-    parts.set(
-      CONTENT_TYPES_PART,
-      utf8Encoder.encode(xml.slice(0, close) + declarations.join("") + xml.slice(close))
+    // Into the root element, wherever its end is: the rest of the part is kept byte for byte.
+    const inserted = utf8Encoder.encode(
+      types.rootSelfClosing
+        ? `>${declarations.join("")}</${types.rootName}>`
+        : declarations.join("")
+    );
+    const at = types.rootSelfClosing ? types.rootEnd - 2 : types.rootCloseStart;
+    const until = types.rootSelfClosing ? types.rootEnd : at;
+    const out = new Uint8Array(ctXml.length - (until - at) + inserted.length);
+    out.set(ctXml.subarray(0, at));
+    out.set(inserted, at);
+    out.set(ctXml.subarray(until), at + inserted.length);
+    parts.set(CONTENT_TYPES_PART, out);
+  }
+}
+
+const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
+
+/** What `Package.edit` reads of `[Content_Types].xml` to add to it. */
+interface ContentTypes {
+  /** The extensions it gives a `Default`, lowercase. */
+  readonly defaults: Set<string>;
+  /** The part names it gives an `Override`, without the leading `/`, lowercase. */
+  readonly overrides: Set<string>;
+  /** The root element's name, and the prefix it has for the content-types namespace. */
+  readonly rootName: string;
+  readonly rootPrefix: string;
+  readonly rootSelfClosing: boolean;
+  /** Where the root's end tag begins in the part's bytes (not self-closing). */
+  readonly rootCloseStart: number;
+  /** Where the root element ends: just past its `>`. */
+  readonly rootEnd: number;
+}
+
+/**
+ * Read `[Content_Types].xml` from its bytes, with namespaces, so its declarations are known and the
+ * root's end is found where it is — not by searching the text, which a comment or a self-closing root
+ * misleads. A part that is not such a document is a `DocxParseError`.
+ */
+function readContentTypes(bytes: Uint8Array, maxDepth: number): ContentTypes {
+  // From the first `<`: the lead Office tolerates (see `trimXmlPartLead`) is skipped, not parsed.
+  let lead = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  while (
+    lead < bytes.length &&
+    (bytes[lead] === 0x20 || bytes[lead] === 0x09 || bytes[lead] === 0x0a || bytes[lead] === 0x0d)
+  ) {
+    lead++;
+  }
+  const parser = new SaxParser({
+    position: false,
+    xmlns: true,
+    byteOffset: lead,
+    maxDepth
+  });
+  const defaults = new Set<string>();
+  const overrides = new Set<string>();
+  let root: { name: string; prefix: string } | undefined;
+  let rootSelfClosing = false;
+  let rootCloseStart = -1;
+  let rootEnd = -1;
+  parser.on("opentag", tag => {
+    if (parser.depth === 0) {
+      if (tag.uri !== CONTENT_TYPES_NAMESPACE || tag.local !== "Types") {
+        parser.fail(`expected the root <Types> of the content-types namespace, got <${tag.name}>`);
+      }
+      root = { name: tag.name, prefix: tag.prefix ?? "" };
+      rootSelfClosing = tag.isSelfClosing;
+      if (tag.isSelfClosing) {
+        rootEnd = parser.endByte!;
+      }
+      return;
+    }
+    if (parser.depth !== 1 || tag.uri !== CONTENT_TYPES_NAMESPACE) {
+      return;
+    }
+    // A declaration without its content type declares nothing (ECMA-376 Part 2 §10.1.2.2).
+    if (!tag.attributes.ContentType) {
+      return;
+    }
+    if (tag.local === "Default" && tag.attributes.Extension) {
+      defaults.add(tag.attributes.Extension.toLowerCase());
+    } else if (tag.local === "Override" && tag.attributes.PartName) {
+      overrides.add(tag.attributes.PartName.replace(/^\/+/, "").toLowerCase());
+    }
+  });
+  parser.on("closetag", tag => {
+    if (parser.depth === 0 && !tag.isSelfClosing) {
+      rootCloseStart = parser.startByte!;
+      rootEnd = parser.endByte!;
+    }
+  });
+  try {
+    parser.write(bytes.subarray(lead)).close();
+  } catch (error) {
+    const limited = asPartLimitError(error, maxDepth);
+    if (limited !== error) {
+      throw limited;
+    }
+    throw new DocxParseError(
+      `Package.edit: [Content_Types].xml cannot be read: ${(error as Error).message}`,
+      {
+        cause: error
+      }
     );
   }
+  const read = root!;
+  return {
+    defaults,
+    overrides,
+    rootName: read.name,
+    rootPrefix: read.prefix,
+    rootSelfClosing,
+    rootCloseStart,
+    rootEnd
+  };
 }
 
 const GENERIC_CONTENT_TYPE = "application/octet-stream";
@@ -695,7 +804,9 @@ function withoutCommentExtensibleEntries(xml: string, durableIds: ReadonlySet<st
 function commentPartPaths(
   parts: ReadonlyMap<string, Uint8Array>
 ): Record<keyof typeof COMMENT_PARTS, string> {
-  const paths: Record<keyof typeof COMMENT_PARTS, string> = { ...COMMENT_PARTS };
+  const paths: Record<keyof typeof COMMENT_PARTS, string> = {
+    ...COMMENT_PARTS
+  };
   const rels = parts.get("word/_rels/document.xml.rels");
   if (rels) {
     for (const m of utf8Decoder.decode(rels).matchAll(/<Relationship\b[^>]*>/g)) {

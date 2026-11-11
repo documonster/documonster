@@ -320,6 +320,22 @@ export function decodeBytesToString(bytes: Uint8Array, encoding?: string): strin
 /**
  * Convert string to Uint8Array using cached encoder
  */
+/** The `%TypedArray%.prototype[Symbol.toStringTag]` getter: the array's own kind, which no subclass or own property can change. */
+const typedArrayKind = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype) as object,
+  Symbol.toStringTag
+)!.get as (this: unknown) => string | undefined;
+
+/**
+ * Whether `value` is a `Uint8Array` (a Node `Buffer` and any subclass included), recognised by the
+ * internal kind the platform's own getter reads rather than by `instanceof` — so bytes from another
+ * realm (an iframe, a worker's transfer) are recognised too — or by `Object.prototype.toString`,
+ * which a `Symbol.toStringTag` of the array's own can make lie in either direction.
+ */
+export function isUint8Array(value: unknown): value is Uint8Array {
+  return typedArrayKind.call(value) === "Uint8Array";
+}
+
 export function stringToUint8Array(str: string): Uint8Array {
   return textEncoder.encode(str);
 }

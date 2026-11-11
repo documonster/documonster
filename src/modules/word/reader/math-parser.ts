@@ -44,7 +44,10 @@ function parseMathContent(el: XmlElement): MathContent[] {
         // Math run
         const tEl = findMathChild(child, "t");
         const mrPrEl = findMathChild(child, "rPr");
-        const mr: Mutable<MathRun> = { type: "mathRun", text: tEl ? textContent(tEl) : "" };
+        const mr: Mutable<MathRun> = {
+          type: "mathRun",
+          text: tEl ? textContent(tEl) : ""
+        };
         if (mrPrEl) {
           const props: { italic?: boolean; bold?: boolean; font?: string } = {};
           const sty = findMathChild(mrPrEl, "sty");

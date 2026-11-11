@@ -118,7 +118,7 @@ describe("SaxParser", () => {
         ["opentag", { name: "span", attributes: {}, isSelfClosing: false }],
         ["text", "Welcome,"],
         ["closetag", { name: "span", attributes: {}, isSelfClosing: false }],
-        ["error", "1:36: text data outside of root node."],
+        ["error", "1:23: text data outside of root node."],
         ["text", " to monkey land"]
       ]
     });

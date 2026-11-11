@@ -277,7 +277,12 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
       const distL = anchorEl.attributes["distL"];
       const distR = anchorEl.attributes["distR"];
       if (distT || distB || distL || distR) {
-        const margins: { top?: number; bottom?: number; left?: number; right?: number } = {};
+        const margins: {
+          top?: number;
+          bottom?: number;
+          left?: number;
+          right?: number;
+        } = {};
         if (distT) {
           const n = parseInt(distT, 10);
           if (Number.isFinite(n)) {

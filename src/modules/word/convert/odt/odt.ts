@@ -16,6 +16,7 @@
 
 import { createZip } from "@archive/create-archive";
 import { unzipZip } from "@archive/read-archive";
+import { trimXmlPartLead } from "@utils/xml-part";
 import { finalizeDocument } from "@word/builder/document-finalize";
 import { checkBytes, checkHandle } from "@word/core/argument-checks";
 import { withDisplayFields } from "@word/core/field-view";
@@ -27,7 +28,7 @@ import {
   spellOutRangeMarkers
 } from "@word/core/range-markers";
 import { isRun, symbolText } from "@word/core/text-utils";
-import { DocxParseError } from "@word/errors";
+import { DocxError, DocxParseError } from "@word/errors";
 import { finalViewRun, isHiddenRun } from "@word/query/final-view";
 import { resolveNumberingLevelDef } from "@word/query/style-resolve";
 import { createStyleResolver } from "@word/query/style-resolver";
@@ -67,7 +68,7 @@ import type {
 import { EMU_PER_CM, EMU_PER_INCH, EMU_PER_POINT, EMU_PER_PX } from "@word/units";
 import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
 import { xmlValue } from "@xml/encode";
-import type { XmlElement } from "@xml/types";
+import type { XmlDocument, XmlElement } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 // =============================================================================
@@ -278,29 +279,111 @@ function colorToOdf(hex: string): string {
 }
 
 // =============================================================================
+// Parsing: names by namespace
+// =============================================================================
+
+/** ODF's namespaces, by URI, with the prefix the reader matches them by. */
+const ODF_PREFIX: ReadonlyMap<string, string> = new Map([
+  ["urn:oasis:names:tc:opendocument:xmlns:office:1.0", "office"],
+  ["urn:oasis:names:tc:opendocument:xmlns:style:1.0", "style"],
+  ["urn:oasis:names:tc:opendocument:xmlns:text:1.0", "text"],
+  ["urn:oasis:names:tc:opendocument:xmlns:table:1.0", "table"],
+  ["urn:oasis:names:tc:opendocument:xmlns:drawing:1.0", "draw"],
+  ["urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0", "fo"],
+  ["urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0", "svg"],
+  ["urn:oasis:names:tc:opendocument:xmlns:meta:1.0", "meta"],
+  ["urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0", "number"],
+  ["urn:oasis:names:tc:opendocument:xmlns:chart:1.0", "chart"],
+  ["urn:oasis:names:tc:opendocument:xmlns:dr3d:1.0", "dr3d"],
+  ["urn:oasis:names:tc:opendocument:xmlns:form:1.0", "form"],
+  ["urn:oasis:names:tc:opendocument:xmlns:script:1.0", "script"],
+  ["urn:oasis:names:tc:opendocument:xmlns:presentation:1.0", "presentation"],
+  ["http://www.w3.org/1999/xlink", "xlink"],
+  ["http://purl.org/dc/elements/1.1/", "dc"],
+  ["http://www.w3.org/1998/Math/MathML", "math"],
+  ["http://www.w3.org/XML/1998/namespace", "xml"]
+]);
+
+/** The namespace the `xml` prefix is bound to without a declaration. */
+const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
+
+/**
+ * The name the reader matches a node by: `prefix:local` with ODF's own prefix for a name in one of
+ * ODF's namespaces, whatever prefix the file gave it; `{uri}local` for a name in any other
+ * namespace, and the bare local name for one in none. So `text:p` means the element named `p` in
+ * ODF's text namespace and nothing else — a foreign `<x:p>`, or `<text:p>` with `text` bound to
+ * another URI, can never be taken for it.
+ */
+function expandedOdfName(uri: string | undefined, local: string): string {
+  if (uri === undefined || uri === "") {
+    return local;
+  }
+  const prefix = ODF_PREFIX.get(uri);
+  return prefix === undefined ? `{${uri}}${local}` : `${prefix}:${local}`;
+}
+
+/**
+ * Parse an ODF part, its elements and attributes named by {@link expandedOdfName}: by the
+ * namespace each is in, never by the prefix the file wrote. A file is free to bind
+ * `urn:…:office:1.0` to `o`; it means `office` all the same. A part whose namespaces do not
+ * resolve is not ODF and is refused rather than read by the prefixes it happens to use.
+ */
+function parseOdfXml(xml: string): XmlDocument {
+  const doc = parseXml(xml, { xmlns: true });
+  const scopes: Array<ReadonlyMap<string, string>> = [new Map([["xml", XML_NAMESPACE]])];
+  const visit = (el: XmlElement): void => {
+    let scope = scopes[scopes.length - 1]!;
+    if (el.ns !== undefined) {
+      const inner = new Map(scope);
+      for (const prefix of Object.keys(el.ns)) {
+        inner.set(prefix, el.ns[prefix]!);
+      }
+      scope = inner;
+    }
+    el.name = expandedOdfName(el.uri, el.local ?? el.name);
+    const attributes = Object.create(null) as Record<string, string>;
+    for (const name of Object.keys(el.attributes)) {
+      if (name === "xmlns" || name.startsWith("xmlns:")) {
+        continue;
+      }
+      const colon = name.indexOf(":");
+      // An unprefixed attribute is in no namespace.
+      const expanded =
+        colon < 0 ? name : expandedOdfName(scope.get(name.slice(0, colon)), name.slice(colon + 1));
+      attributes[expanded] = el.attributes[name]!;
+    }
+    el.attributes = attributes;
+    scopes.push(scope);
+    for (const child of el.children) {
+      if (child.type === "element") {
+        visit(child);
+      }
+    }
+    scopes.pop();
+  };
+  for (const root of doc.roots) {
+    visit(root);
+  }
+  return doc;
+}
+
+// =============================================================================
 // XML Element Query Helpers (Namespace-Aware)
 // =============================================================================
 
-/**
- * Find a child element by namespace-prefixed name.
- * Tries both "prefix:local" and just "local" for flexibility.
- */
+/** The first child named `local` in ODF's `prefix` namespace (see {@link parseOdfXml}). */
 function findNsChild(el: XmlElement, prefix: string, local: string): XmlElement | undefined {
-  return findChild(el, `${prefix}:${local}`) ?? findChild(el, local);
+  return findChild(el, `${prefix}:${local}`);
 }
 
-/** Find all children by namespace-prefixed name. */
+/** Every child named `local` in ODF's `prefix` namespace. */
 function findNsChildren(el: XmlElement, prefix: string, local: string): XmlElement[] {
-  const result = findChildren(el, `${prefix}:${local}`);
-  if (result.length > 0) {
-    return result;
-  }
-  return findChildren(el, local);
+  return findChildren(el, `${prefix}:${local}`);
 }
 
-/** Get an attribute value with a namespace prefix. */
+/** The attribute named `local` in ODF's `prefix` namespace. */
 function nsAttr(el: XmlElement, prefix: string, local: string): string | undefined {
-  return el.attributes[`${prefix}:${local}`] ?? el.attributes[local];
+  return el.attributes[`${prefix}:${local}`];
 }
 
 // =============================================================================
@@ -550,16 +633,16 @@ function parseTextSpan(el: XmlElement, styles: Map<string, OdfStyle>): Run {
         content.push({ type: "text", text: child.value });
       }
     } else if (child.type === "element") {
-      const local = getLocalName(child.name);
-      if (local === "s") {
+      const name = child.name;
+      if (name === "text:s") {
         // text:s — multiple spaces
         const count = parseInt(nsAttr(child, "text", "c") ?? "1", 10);
         content.push({ type: "text", text: " ".repeat(count) });
-      } else if (local === "tab") {
+      } else if (name === "text:tab") {
         content.push({ type: "tab" });
-      } else if (local === "line-break") {
+      } else if (name === "text:line-break") {
         content.push({ type: "break" });
-      } else if (local === "span") {
+      } else if (name === "text:span") {
         // Nested span — flatten into current run content
         const nestedRun = parseTextSpan(child, styles);
         content.push(...nestedRun.content);
@@ -608,7 +691,7 @@ function parseParagraph(
 ): Paragraph {
   const styleName = nsAttr(el, "text", "style-name");
   const style = styleName ? styles.get(styleName) : undefined;
-  const isHeading = getLocalName(el.name) === "h";
+  const isHeading = el.name === "text:h";
   const outlineLevel = isHeading
     ? parseInt(nsAttr(el, "text", "outline-level") ?? "1", 10)
     : undefined;
@@ -642,10 +725,10 @@ function parseParagraph(
         });
       }
     } else if (child.type === "element") {
-      const local = getLocalName(child.name);
-      if (local === "span") {
+      const name = child.name;
+      if (name === "text:span") {
         children.push(parseTextSpan(child, styles));
-      } else if (local === "a") {
+      } else if (name === "text:a") {
         // Hyperlink. Pass the href through sanitizeUrl so dangerous
         // schemes (javascript:, vbscript:, data: with executable payloads,
         // etc.) coming from an untrusted ODT do not survive into the DOCX
@@ -659,7 +742,7 @@ function parseParagraph(
             if (linkChild.value) {
               runs.push({ content: [{ type: "text", text: linkChild.value }] });
             }
-          } else if (linkChild.type === "element" && getLocalName(linkChild.name) === "span") {
+          } else if (linkChild.type === "element" && linkChild.name === "text:span") {
             runs.push(parseTextSpan(linkChild, styles));
           }
         }
@@ -686,36 +769,36 @@ function parseParagraph(
             children.push(r);
           }
         }
-      } else if (local === "s") {
+      } else if (name === "text:s") {
         const count = parseInt(nsAttr(child, "text", "c") ?? "1", 10);
         children.push({ content: [{ type: "text", text: " ".repeat(count) }] });
-      } else if (local === "tab") {
+      } else if (name === "text:tab") {
         children.push({ content: [{ type: "tab" }] });
-      } else if (local === "line-break") {
+      } else if (name === "text:line-break") {
         children.push({ content: [{ type: "break" }] });
-      } else if (local === "frame") {
+      } else if (name === "draw:frame") {
         // Inline image frame
         const imageRun = parseDrawFrame(child);
         if (imageRun) {
           children.push(imageRun);
         }
-      } else if (local === "bookmark-start") {
+      } else if (name === "text:bookmark-start") {
         const bkName = nsAttr(child, "text", "name") ?? "";
         children.push({ type: "bookmarkStart", id: bookmarks.start(bkName), name: bkName });
-      } else if (local === "bookmark-end") {
+      } else if (name === "text:bookmark-end") {
         const bkName = nsAttr(child, "text", "name") ?? "";
         const id = bookmarks.end(bkName);
         if (id !== undefined) {
           children.push({ type: "bookmarkEnd", id, name: bkName });
         }
-      } else if (local === "bookmark") {
+      } else if (name === "text:bookmark") {
         // A point bookmark: a range that starts and ends at the same place.
         const bkName = nsAttr(child, "text", "name") ?? "";
         const id = bookmarks.start(bkName);
         bookmarks.end(bkName);
         children.push({ type: "bookmarkStart", id, name: bkName });
         children.push({ type: "bookmarkEnd", id, name: bkName });
-      } else if (local === "note") {
+      } else if (name === "text:note") {
         // Footnote/endnote — extract text content
         const noteBodyEl = findNsChild(child, "text", "note-body");
         if (noteBodyEl) {
@@ -741,8 +824,7 @@ function parseDrawFrame(el: XmlElement): Run | undefined {
   const height = odfLengthToEmu(nsAttr(el, "svg", "height"));
   const name = nsAttr(el, "draw", "name");
 
-  const imageEl =
-    findNsChild(el, "draw", "image") ?? findChild(el, "draw:image") ?? findChild(el, "image");
+  const imageEl = findNsChild(el, "draw", "image");
   if (!imageEl) {
     return undefined;
   }
@@ -801,11 +883,11 @@ function parseList(
       if (child.type !== "element") {
         continue;
       }
-      const local = getLocalName(child.name);
-      if (local === "p" || local === "h") {
+      const name = child.name;
+      if (name === "text:p" || name === "text:h") {
         registry.noteLevel(numId, level);
         paragraphs.push(parseParagraph(child, styles, bookmarks, { listStyleName, level, numId }));
-      } else if (local === "list") {
+      } else if (name === "text:list") {
         // Nested list — inherit the enclosing list's numId.
         paragraphs.push(...parseList(child, styles, level + 1, registry, bookmarks, numId));
       }
@@ -848,16 +930,14 @@ function parseTable(
     const orderedCells: XmlElement[] = [];
     for (const child of rowEl.children) {
       if (child.type === "element") {
-        const childLocal = getLocalName(child.name);
-        if (childLocal === "table-cell" || childLocal === "covered-table-cell") {
+        if (child.name === "table:table-cell" || child.name === "table:covered-table-cell") {
           orderedCells.push(child);
         }
       }
     }
 
     for (const cellEl of orderedCells) {
-      const cellLocal = getLocalName(cellEl.name);
-      const isCovered = cellLocal === "covered-table-cell";
+      const isCovered = cellEl.name === "table:covered-table-cell";
 
       const gridSpan = parseInt(nsAttr(cellEl, "table", "number-columns-spanned") ?? "1", 10);
       const rowSpan = parseInt(nsAttr(cellEl, "table", "number-rows-spanned") ?? "1", 10);
@@ -874,12 +954,12 @@ function parseTable(
         if (cellChild.type !== "element") {
           continue;
         }
-        const cellChildLocal = getLocalName(cellChild.name);
-        if (cellChildLocal === "p" || cellChildLocal === "h") {
+        const cellChildName = cellChild.name;
+        if (cellChildName === "text:p" || cellChildName === "text:h") {
           cellContent.push(parseParagraph(cellChild, styles, bookmarks));
-        } else if (cellChildLocal === "table") {
+        } else if (cellChildName === "table:table") {
           cellContent.push(parseTable(cellChild, styles, registry, bookmarks));
-        } else if (cellChildLocal === "list") {
+        } else if (cellChildName === "text:list") {
           cellContent.push(...parseList(cellChild, styles, 0, registry, bookmarks));
         }
       }
@@ -929,30 +1009,21 @@ function parseDocumentBody(
     if (child.type !== "element") {
       continue;
     }
-    const local = getLocalName(child.name);
+    const name = child.name;
 
-    if (local === "p" || local === "h") {
+    if (name === "text:p" || name === "text:h") {
       content.push(parseParagraph(child, styles, bookmarks));
-    } else if (local === "table") {
+    } else if (name === "table:table") {
       content.push(parseTable(child, styles, registry, bookmarks));
-    } else if (local === "list") {
+    } else if (name === "text:list") {
       content.push(...parseList(child, styles, 0, registry, bookmarks));
-    } else if (local === "section") {
+    } else if (name === "text:section") {
       // Sections in ODF are logical containers; flatten their content
       content.push(...parseDocumentBody(child, styles, registry, bookmarks));
     }
   }
 
   return content;
-}
-
-/** Get the local name from a possibly prefixed XML name. */
-function getLocalName(name: string): string {
-  const colonIdx = name.indexOf(":");
-  if (colonIdx >= 0) {
-    return name.substring(colonIdx + 1);
-  }
-  return name;
 }
 
 // =============================================================================
@@ -963,13 +1034,13 @@ function getLocalName(name: string): string {
 function parseMetaXml(xml: string): CoreProperties | undefined {
   let doc;
   try {
-    doc = parseXml(xml);
+    doc = parseOdfXml(xml);
   } catch {
     return undefined;
   }
 
   const root = doc.root;
-  const metaEl = findNsChild(root, "office", "meta") ?? findChild(root, "office:meta") ?? root;
+  const metaEl = findNsChild(root, "office", "meta") ?? root;
 
   const title = getMetaText(metaEl, "dc", "title");
   const subject = getMetaText(metaEl, "dc", "subject");
@@ -1174,15 +1245,15 @@ function parseOdfListStyle(el: XmlElement): Map<number, OdfListLevel> {
     if (child.type !== "element") {
       continue;
     }
-    const local = getLocalName(child.name);
+    const name = child.name;
     const levelAttr = parseInt(nsAttr(child, "text", "level") ?? "1", 10);
     const level = Math.max(0, levelAttr - 1);
-    if (local === "list-level-style-bullet") {
+    if (name === "text:list-level-style-bullet") {
       levels.set(level, {
         format: "bullet",
         bulletChar: nsAttr(child, "text", "bullet-char") ?? ODT_BULLET_CHARS[level] ?? "•"
       });
-    } else if (local === "list-level-style-number") {
+    } else if (name === "text:list-level-style-number") {
       const start = parsePositiveInt(nsAttr(child, "text", "start-value"));
       levels.set(level, {
         format: odfNumFormatToDocx(nsAttr(child, "style", "num-format")),
@@ -1207,7 +1278,7 @@ function collectOdfListStyles(
       if (child.type !== "element") {
         continue;
       }
-      if (getLocalName(child.name) === "list-style") {
+      if (child.name === "text:list-style") {
         const name = nsAttr(child, "style", "name");
         if (name) {
           out.set(name, parseOdfListStyle(child));
@@ -1477,7 +1548,33 @@ export async function readOdt(
     const msg = e instanceof Error ? e.message : String(e);
     throw new DocxParseError(`Failed to read ODT: ${msg}`, { cause: e });
   }
+  try {
+    return odtToDocument(entries);
+  } catch (e) {
+    // A part that is not well-formed, or is not what ODF says it is, is the file's fault, as
+    // `Document.read` reports it; the cause says where.
+    if (e instanceof DocxError) {
+      throw e;
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new DocxParseError(`Failed to read ODT: ${msg}`, { cause: e });
+  }
+}
 
+/** The document an ODT package's parts hold. */
+/**
+ * Refuse a part whose document element is not the one ODF gives it — compared by expanded name, as
+ * `parseOdfXml` writes every name, so a root in another namespace is not read as the part.
+ */
+function checkOdfRoot(doc: XmlDocument, part: string, expected: string): void {
+  if (doc.root.name !== expected) {
+    throw new DocxParseError(
+      `ODT ${part}: the document element is ${doc.root.name}, not ${expected} in the ODF office namespace`
+    );
+  }
+}
+
+function odtToDocument(entries: ReadonlyMap<string, Uint8Array>): DocxDocument {
   const decoder = utf8Decoder;
 
   // Parse content.xml (required)
@@ -1485,21 +1582,22 @@ export async function readOdt(
   if (!contentData) {
     throw new DocxParseError("Required ODT part not found: content.xml");
   }
-  const contentXml = decoder.decode(contentData);
-  const contentDoc = parseXml(contentXml);
+  const contentXml = trimXmlPartLead(decoder.decode(contentData));
+  const contentDoc = parseOdfXml(contentXml);
+  checkOdfRoot(contentDoc, "content.xml", "office:document-content");
 
   // Parse styles.xml (optional)
   const stylesData = entries.get("styles.xml");
   let stylesXml: string | undefined;
   if (stylesData) {
-    stylesXml = decoder.decode(stylesData);
+    stylesXml = trimXmlPartLead(decoder.decode(stylesData));
   }
 
   // Parse meta.xml (optional)
   const metaData = entries.get("meta.xml");
   let coreProperties: CoreProperties | undefined;
   if (metaData) {
-    coreProperties = parseMetaXml(decoder.decode(metaData));
+    coreProperties = parseMetaXml(trimXmlPartLead(decoder.decode(metaData)));
   }
 
   // Collect all styles (from both content.xml and styles.xml)
@@ -1509,7 +1607,8 @@ export async function readOdt(
 
   // Parse styles from styles.xml
   if (stylesXml) {
-    const stylesDoc = parseXml(stylesXml);
+    const stylesDoc = parseOdfXml(stylesXml);
+    checkOdfRoot(stylesDoc, "styles.xml", "office:document-styles");
     const stylesRoot = stylesDoc.root;
     stylesRootEl = stylesRoot;
 
@@ -1517,7 +1616,7 @@ export async function readOdt(
     const officeStylesEl = findNsChild(stylesRoot, "office", "styles");
     if (officeStylesEl) {
       for (const child of officeStylesEl.children) {
-        if (child.type === "element" && getLocalName(child.name) === "style") {
+        if (child.type === "element" && child.name === "style:style") {
           const s = parseOdfStyle(child);
           if (s.name) {
             allStyles.set(s.name, s);
@@ -1531,13 +1630,12 @@ export async function readOdt(
     if (autoStylesEl) {
       for (const child of autoStylesEl.children) {
         if (child.type === "element") {
-          const childLocal = getLocalName(child.name);
-          if (childLocal === "style") {
+          if (child.name === "style:style") {
             const s = parseOdfStyle(child);
             if (s.name) {
               allStyles.set(s.name, s);
             }
-          } else if (childLocal === "page-layout") {
+          } else if (child.name === "style:page-layout") {
             pageLayoutProps = parsePageLayout(child);
           }
         }
@@ -1549,13 +1647,13 @@ export async function readOdt(
     if (masterStylesEl && !pageLayoutProps) {
       // Look for the page layout reference in master pages
       for (const child of masterStylesEl.children) {
-        if (child.type === "element" && getLocalName(child.name) === "master-page") {
+        if (child.type === "element" && child.name === "style:master-page") {
           const pageLayoutName = nsAttr(child, "style", "page-layout-name");
           if (pageLayoutName && autoStylesEl) {
             for (const autoChild of autoStylesEl.children) {
               if (
                 autoChild.type === "element" &&
-                getLocalName(autoChild.name) === "page-layout" &&
+                autoChild.name === "style:page-layout" &&
                 nsAttr(autoChild, "style", "name") === pageLayoutName
               ) {
                 pageLayoutProps = parsePageLayout(autoChild);
@@ -1574,13 +1672,12 @@ export async function readOdt(
   if (contentAutoStylesEl) {
     for (const child of contentAutoStylesEl.children) {
       if (child.type === "element") {
-        const childLocal = getLocalName(child.name);
-        if (childLocal === "style") {
+        if (child.name === "style:style") {
           const s = parseOdfStyle(child);
           if (s.name) {
             allStyles.set(s.name, s);
           }
-        } else if (childLocal === "page-layout" && !pageLayoutProps) {
+        } else if (child.name === "style:page-layout" && !pageLayoutProps) {
           pageLayoutProps = parsePageLayout(child);
         }
       }

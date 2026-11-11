@@ -171,16 +171,13 @@ export async function parseXformStream<TModel>(
   let nsMode = 0;
   let nsPrefix: string | null = null;
 
-  // Suppress errors that occur after we're done parsing (the SAX parser will
-  // encounter unmatched tags when we stop processing close tags).
+  // The xform finishing (`done`) only ends dispatch: the parser still sees every byte to the end, so text after the
+  // root that is not well-formed — or not valid UTF-8 — is refused as it would be by `parseXformEvents`.
   // IMPORTANT: We set error handler FIRST, before any write() calls, to ensure
   // it's always present when fail() is called from within callbacks.
   let parseError: Error | undefined;
   parser.on("error", (err: Error) => {
-    if (!done) {
-      parseError = err;
-    }
-    // When done, silently swallow all SAX errors
+    parseError ??= err;
   });
 
   // Prefixes are normalised to the ones the xforms match first — see `namespace-prefixes.ts`. The
@@ -260,11 +257,20 @@ export async function parseXformStream<TModel>(
     if (!xform.parseClose(name)) {
       done = true;
       finalModel = xform.model;
+      // Nothing listens any more; without handlers the parser validates the rest without building events for it.
+      parser.off("opentag");
+      parser.off("text");
+      parser.off("cdata");
+      parser.off("closetag");
     }
   };
   parser.on("closetag", onCloseTag);
 
   const write = (text: string): void => {
+    if (done) {
+      parser.write(text);
+      return;
+    }
     // Scanned even once active: the normaliser counts declarations to skip looking for them per tag.
     if (prefixes.scan(text) && !normalizing) {
       normalizing = true;
@@ -279,11 +285,9 @@ export async function parseXformStream<TModel>(
   // IMPORTANT: Do not return early from the async iterator.
   // In true streaming scenarios the iterator is backed by a Node.js Readable.
   // Returning early would close/destroy the stream (AbortError).
-  // We must consume all chunks, but once done we skip writing to the parser.
+  // We consume all chunks, and keep writing them to the parser after the xform is done so the whole input is
+  // decoded and checked.
   for await (const chunk of stream) {
-    if (done) {
-      continue;
-    }
     const chunkStr =
       typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
     write(chunkStr);
@@ -292,20 +296,18 @@ export async function parseXformStream<TModel>(
     }
   }
 
-  if (!done) {
-    // Flush trailing bytes from streaming decoder (catches truncated UTF-8)
-    const trailing = decoder.decode();
-    if (trailing) {
-      write(trailing);
-      if (parseError) {
-        throw toError(parseError);
-      }
-    }
-
-    withNamespaceContext(namespaces, () => parser.close());
+  // Flush trailing bytes from streaming decoder (catches truncated UTF-8)
+  const trailing = decoder.decode();
+  if (trailing) {
+    write(trailing);
     if (parseError) {
       throw toError(parseError);
     }
+  }
+
+  withNamespaceContext(namespaces, () => parser.close());
+  if (parseError) {
+    throw toError(parseError);
   }
 
   return done ? finalModel : xform.model;

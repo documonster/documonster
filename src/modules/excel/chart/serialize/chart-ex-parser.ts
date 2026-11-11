@@ -23,6 +23,7 @@ import type {
 import { CHART_EX_ROOT_NAMESPACES } from "@excel/chart/serialize/chart-ex-namespaces";
 import { escapeXml, escapeXmlAttr } from "@excel/chart/shared/chart-utils";
 import { parseSpPr, parseTxPr } from "@excel/chart/shared/shape-properties";
+import { XlsxParseError } from "@excel/errors";
 import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { normalizeElementPrefixes } from "@excel/xlsx/xform/namespace-prefixes";
 import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
@@ -134,7 +135,14 @@ function collectUnknownChildren(
 }
 
 export function parseChartEx(rawXml: string): ChartExModel {
-  const root = parseXml(rawXml).root;
+  const root = parseXml(rawXml, { xmlns: true }).root;
+  // A part may bind ChartEx to any prefix, but only ChartEx's namespace makes it a ChartEx part.
+  if (root.local !== "chartSpace" || root.uri !== CHART_EX_ROOT_NAMESPACES.cx) {
+    throw new XlsxParseError(
+      "chartEx",
+      `ChartEx part root must be chartSpace in ${CHART_EX_ROOT_NAMESPACES.cx}, got ${root.name}${root.uri ? ` in ${root.uri}` : ""}`
+    );
+  }
   // `cx:` is matched below; a part may bind the namespace to any prefix.
   const textViews = normalizeElementPrefixes(root);
   const previous = fragmentSource;

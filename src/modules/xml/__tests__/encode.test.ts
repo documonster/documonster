@@ -1,4 +1,5 @@
 import { xmlEncode, xmlDecode, xmlEncodeAttr, encodeCData } from "@xml/encode";
+import { Xml } from "@xml/index";
 import { describe, it, expect } from "vitest";
 
 describe("xmlEncode", () => {
@@ -37,6 +38,11 @@ describe("xmlEncode", () => {
 });
 
 describe("xmlDecode", () => {
+  it("leaves a name Object.prototype carries undecoded", () => {
+    expect(xmlDecode("&constructor;|&__proto__;|&toString;")).toBe(
+      "&constructor;|&__proto__;|&toString;"
+    );
+  });
   it("should return unchanged string when no entities", () => {
     expect(xmlDecode("hello world")).toBe("hello world");
     expect(xmlDecode("")).toBe("");
@@ -202,7 +208,7 @@ describe("encodeCData", () => {
     // Tabs / newlines / CR are legal XML chars; surrogate pairs
     // encoding a valid supplementary code point stay together.
     expect(encodeCData("tab\tnewline\ncarriage\rend")).toBe(
-      "<![CDATA[tab\tnewline\ncarriage\rend]]>"
+      "<![CDATA[tab\tnewline\ncarriage]]>&#xD;<![CDATA[end]]>"
     );
     // 😀 is U+1F600, encoded as surrogate pair D83D DE00.
     expect(encodeCData("😀")).toBe("<![CDATA[😀]]>");
@@ -221,5 +227,12 @@ describe("encodeCData", () => {
     const loneLow = String.fromCharCode(0xdc00);
     expect(encodeCData(`a${loneHigh}b`)).toBe("<![CDATA[ab]]>");
     expect(encodeCData(`a${loneLow}b`)).toBe("<![CDATA[ab]]>");
+  });
+});
+
+describe("encodeCData keeps a carriage return when read back", () => {
+  it.each(["a\rb\r\nc", "\r", "\r\rx]]>y\r", "plain"])("%j", text => {
+    const xml = `<r>${encodeCData(text)}</r>`;
+    expect(Xml.getText(Xml.parse(xml).root)).toBe(text);
   });
 });

@@ -58,3 +58,19 @@ describe("Io.read of text", () => {
     await expect(Io.read(btoa("hello"), { base64: true })).rejects.toBeInstanceOf(DocxParseError);
   });
 });
+
+describe("Io.read of a package whose parts begin with white space", () => {
+  it("reads each part from its first <, as Word opens it", async () => {
+    const { Archive } = await import("@archive/index");
+    const bytes = await Io.toBuffer(doc());
+    const parts = await Archive.unpackZip(bytes);
+    const editor = await Archive.ZipEditor.open(bytes);
+    const decoder = new TextDecoder();
+    for (const [name, part] of parts) {
+      if (name.endsWith(".xml") || name.endsWith(".rels")) {
+        editor.set(name, "\r\n  " + decoder.decode(part.data));
+      }
+    }
+    expect(Query.getText(await Io.read(await editor.toBuffer()))).toContain("round trip");
+  });
+});

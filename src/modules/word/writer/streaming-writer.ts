@@ -76,6 +76,7 @@ import { walkBlocks } from "@word/core/walker";
 import { planWatermark } from "@word/core/watermark-sections";
 import type { WatermarkPlan } from "@word/core/watermark-sections";
 import { DocxWriteError } from "@word/errors";
+import { checkSecurityPolicy } from "@word/security/policy";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
   AbstractNumbering,
@@ -490,7 +491,19 @@ export class DocumentWriter {
     // `packageDocx` does in `shallowCopyDocForPackaging`.
     assertUniqueReferencedIds(options);
     const sanitized = withHeaderSwitches(sanitizeStreamingOptions(options));
-    this._options = sanitized;
+    // The policy as checked, each value read once: the writer consults it long after this call.
+    const policy = options.securityPolicy;
+    this._options =
+      policy == null
+        ? sanitized
+        : {
+            ...sanitized,
+            securityPolicy: checkSecurityPolicy(
+              policy,
+              "options.securityPolicy",
+              "new Stream.DocumentWriter"
+            ) as DocxSecurityPolicy
+          };
     this._imageIndex = indexImagesByKey(sanitized.images);
     this._initZip();
   }

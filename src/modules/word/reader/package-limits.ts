@@ -7,7 +7,7 @@
 import { parseFlatOpc } from "@word/convert/flat-opc";
 import { checkSchema, model, w } from "@word/core/option-schema";
 import { DocxLimitExceededError } from "@word/errors";
-import { checkSecurityPolicy } from "@word/security/policy";
+import { checkSecurityPolicy, withPolicyDefaults } from "@word/security/policy";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 
 /**
@@ -24,14 +24,16 @@ const readOptionsSchema = w.record(readOptionsShape).optional();
 
 /**
  * The read options every reader of a package takes (`Document.read`, the `Package`
- * functions, the streaming reader), checked in the name of `where`.
+ * functions, the streaming reader), checked in the name of `where`. Returns the security policy
+ * the call reads with: each of its fields read once, checked, and given its default when unset —
+ * a reader uses this, never `options.securityPolicy` again.
  */
-export function checkReadOptions(options: unknown, where: string): void {
+export function checkReadOptions(options: unknown, where: string): Required<DocxSecurityPolicy> {
   checkSchema(readOptionsSchema, options, where);
-  const policy = options?.securityPolicy;
-  if (policy != null) {
-    checkSecurityPolicy(policy, "options.securityPolicy", where);
-  }
+  const policy = (options as { securityPolicy?: unknown } | undefined)?.securityPolicy;
+  return withPolicyDefaults(
+    policy != null ? checkSecurityPolicy(policy, "options.securityPolicy", where) : undefined
+  );
 }
 
 /** A package larger than the policy's `maxPackageSize` is refused before anything reads it. */
@@ -54,11 +56,38 @@ export function checkPackageSize(buffer: Uint8Array, policy: Required<DocxSecuri
 export function createPartBudget(policy: Required<DocxSecurityPolicy>): {
   /** Count one more part, before its bytes are read. */
   count(): void;
-  /** Charge a part's uncompressed bytes. */
+  /**
+   * Charge `size` uncompressed bytes of the part `path` without reading them: a part not read
+   * (by its declared size), or the next piece of one streamed.
+   */
   charge(path: string, size: number): void;
+  /**
+   * Read a part's bytes, held to `maxPartSize` and to what is left of `maxPackageSize` as it is
+   * decompressed: a part declaring more is refused before anything is inflated, and one inflating
+   * past its declaration is stopped at the chunk that crosses the limit.
+   */
+  read(path: string, entry: BudgetedEntry): Promise<Uint8Array>;
 } {
   let parts = 0;
   let total = 0;
+  const check = (path: string, size: number): void => {
+    if (size > policy.maxPartSize) {
+      throw new DocxLimitExceededError(
+        "partSize",
+        policy.maxPartSize,
+        size,
+        `entry "${path}" exceeds maxPartSize`
+      );
+    }
+    if (total + size > policy.maxPackageSize) {
+      throw new DocxLimitExceededError(
+        "packageSize",
+        policy.maxPackageSize,
+        total + size,
+        "cumulative uncompressed entry size exceeds maxPackageSize"
+      );
+    }
+  };
   return {
     count() {
       parts++;
@@ -72,25 +101,38 @@ export function createPartBudget(policy: Required<DocxSecurityPolicy>): {
       }
     },
     charge(path, size) {
-      if (size > policy.maxPartSize) {
-        throw new DocxLimitExceededError(
-          "partSize",
-          policy.maxPartSize,
-          size,
-          `entry "${path}" exceeds maxPartSize`
-        );
+      check(path, size);
+      total += size;
+    },
+    async read(path, entry) {
+      check(path, entry.info.uncompressedSize);
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      for await (const chunk of entry.stream()) {
+        size += chunk.length;
+        check(path, size);
+        chunks.push(chunk);
       }
       total += size;
-      if (total > policy.maxPackageSize) {
-        throw new DocxLimitExceededError(
-          "packageSize",
-          policy.maxPackageSize,
-          total,
-          "cumulative uncompressed entry size exceeds maxPackageSize"
-        );
+      if (chunks.length === 1) {
+        return chunks[0]!;
       }
+      const out = new Uint8Array(size);
+      let at = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, at);
+        at += chunk.length;
+      }
+      return out;
     }
   };
+}
+
+/** What {@link createPartBudget} reads a part from: a ZIP entry. */
+export interface BudgetedEntry {
+  /** The entry's record; `uncompressedSize` is the size it declares. */
+  readonly info: { readonly uncompressedSize: number };
+  stream(): AsyncIterable<Uint8Array>;
 }
 
 /** The parts of a Flat OPC document, held to the limits a ZIP's entries are. */

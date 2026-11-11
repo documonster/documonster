@@ -112,7 +112,13 @@ function parseOtherRangeMarker(el: XmlElement, name: string, id: number): RangeM
       return perm;
     }
     default: {
-      const marker: { type: string; id: number; author?: string; date?: string; name?: string } = {
+      const marker: {
+        type: string;
+        id: number;
+        author?: string;
+        date?: string;
+        name?: string;
+      } = {
         type: name,
         id
       };

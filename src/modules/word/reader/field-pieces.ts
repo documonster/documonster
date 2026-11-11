@@ -212,7 +212,12 @@ interface Scan {
   forced: ReadonlySet<XmlElement> | undefined;
 }
 
-const SCAN: Scan = { stack: [], ownerEls: [], ownerRecords: [], forced: undefined };
+const SCAN: Scan = {
+  stack: [],
+  ownerEls: [],
+  ownerRecords: [],
+  forced: undefined
+};
 
 /** Content met inside the open fields: text-only result content leaves them whole. */
 function holdContent(scan: Scan, textOnly: boolean): void {
@@ -275,7 +280,12 @@ function scanRun(
       }
       if (!record && kind !== "instr") {
         // A separate or end character no field opened: kept where it is.
-        record = { pieces: true, separated: true, container: null, pending: "" };
+        record = {
+          pieces: true,
+          separated: true,
+          container: null,
+          pending: ""
+        };
       }
     }
     if (!record) {
@@ -586,12 +596,18 @@ export function expandBlockSimpleFields(children: XmlNode[]): XmlNode[] {
     const replaced = new Map<XmlElement, XmlElement>();
     const withOpening = (p: XmlElement): XmlElement => {
       const at = p.children.findIndex(c => c.type === "element" && localName(c) === "pPr") + 1;
-      return { ...p, children: [...p.children.slice(0, at), ...opening, ...p.children.slice(at)] };
+      return {
+        ...p,
+        children: [...p.children.slice(0, at), ...opening, ...p.children.slice(at)]
+      };
     };
     const opened = withOpening(first);
     replaced.set(first, opened);
     const closed = last === first ? opened : last;
-    replaced.set(last, { ...closed, children: [...closed.children, fieldCharRun("end")] });
+    replaced.set(last, {
+      ...closed,
+      children: [...closed.children, fieldCharRun("end")]
+    });
     for (const c of content) {
       out.push(c.type === "element" ? (replaced.get(c) ?? c) : c);
     }

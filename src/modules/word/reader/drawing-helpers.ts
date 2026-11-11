@@ -12,7 +12,11 @@ import type { XmlElement } from "@xml/types";
 /** Parse `a:xfrm` element for rotation and flip properties. */
 export function parseXfrm(
   spPrEl: XmlElement,
-  target: { rotation?: number; flipHorizontal?: boolean; flipVertical?: boolean }
+  target: {
+    rotation?: number;
+    flipHorizontal?: boolean;
+    flipVertical?: boolean;
+  }
 ): void {
   const xfrmEl = findChild(spPrEl, "a:xfrm");
   if (xfrmEl) {
