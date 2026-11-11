@@ -364,7 +364,10 @@ A range read from its own start assumes it begins in content, and that is checke
 trusted: the read of each range also reads the next range from that range's start, until the two
 readings agree. If they cannot — a range that begins inside a record holding an element of the
 same name, or inside a comment or CDATA section full of tags — it throws `XmlChunkAmbiguityError`
-(`chunkStart`, `atByte`). Read that range with the one before it. So **if every range of a split
+(`chunkStart`, `atByte`). Read that range with the one before it. A range after the first that
+begins before the root element's start tag — in the prolog, or in text `skipLeadingText` skips — can
+be refused the same way, as it reads an XML declaration or a DOCTYPE as content: the first range reads
+the prolog whole wherever it ends, so ranges longer than the prolog never start there. So **if every range of a split
 reads without an error and `Xml.verifyPartition` accepts the results, its records are exactly the
 whole file's.** Each read goes past its range
 only to finish its last record and place the next range's start — on a typical file, about a
