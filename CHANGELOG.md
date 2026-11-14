@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/documonster/documonster/compare/v0.25.0...v0.25.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **archive:** Accept bytes from another realm in argument checks and native streams ([5c32ebc](https://github.com/documonster/documonster/commit/5c32ebcdd2bbfd324d9e919bafc0b778522dc0c3))
+
 ## [0.25.0](https://github.com/documonster/documonster/compare/v0.24.0...v0.25.0) (2026-11-14)
 
 
