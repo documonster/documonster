@@ -17,6 +17,7 @@ import {
   streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";
 import type { Duplex, PassThrough, Transform } from "@stream";
+import { ASYNC_DISPOSE } from "@utils/dispose";
 
 /**
  * Creates an InflateRaw stream using Node.js native zlib.
@@ -267,7 +268,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           return Promise.resolve({ value: undefined, done: true });
         },
 
-        async [Symbol.asyncDispose](): Promise<void> {
+        async [ASYNC_DISPOSE](): Promise<void> {
           await iterator.return?.();
         },
 

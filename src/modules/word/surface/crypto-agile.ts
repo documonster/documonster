@@ -132,6 +132,9 @@ export async function decryptPackage(
  * against the info's password verifier without decrypting the package.
  * `WordCrypto.verifyPassword(bytes, password)` is the same check starting
  * from the encrypted file; this form starts from already-parsed info.
+ *
+ * @throws {DocxDecryptionError} `reason: "malformed"` when the info's verifier is damaged — not answered as a wrong
+ * password.
  */
 export async function verifyPassword(
   info: AgileEncryptionInfo,

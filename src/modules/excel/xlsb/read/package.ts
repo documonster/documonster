@@ -96,6 +96,7 @@ import {
 } from "@excel/xlsx/xform/comment/threaded-comments-parse";
 import { pairCtrlProps } from "@excel/xlsx/xform/drawing/ctrl-prop-pairing";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
+import { appendAll } from "@utils/array";
 import { excelToDate, isDateFmt } from "@utils/utils";
 import { XmlError } from "@xml/errors";
 
@@ -484,7 +485,10 @@ async function readInto(
   if (styles !== undefined && styles.dxfs.length > 0) {
     workbook._dxfs = [...styles.dxfs];
   }
-  lost.push(...(styles?.dxfUnread ?? []).map(entry => `xl/styles.bin: ${entry}`));
+  appendAll(
+    lost,
+    (styles?.dxfUnread ?? []).map(entry => `xl/styles.bin: ${entry}`)
+  );
   // Font index 0 is what an unstyled cell inherits, so it belongs to the workbook rather than to any
   // cell format. `writeStyles` reads it back from here; without it an XLSB round trip replaced the
   // author's default with Calibri 11.
@@ -829,14 +833,26 @@ async function readInto(
     for (const [id, count] of read.unknownRecords) {
       unknownRecords.set(id, (unknownRecords.get(id) ?? 0) + count);
     }
-    undecodedFormulas.push(...read.undecodedFormulas.map(address => `${name}!${address}`));
-    cachedOnlyFormulas.push(...read.cachedOnlyFormulas.map(address => `${name}!${address}`));
-    lost.push(...read.undecodedFormulas.map(address => `${name}!${address}: formula expression`));
-    lost.push(...read.errorCells.map(address => `${name}!${address}: error value`));
-    lost.push(
-      ...read.unreadConditionalFormats.map(
-        entry => `${name}!${entry} (conditional formatting rule)`
-      )
+    // Appended, not spread: these grow with the sheet's cells — see `appendAll`.
+    appendAll(
+      undecodedFormulas,
+      read.undecodedFormulas.map(address => `${name}!${address}`)
+    );
+    appendAll(
+      cachedOnlyFormulas,
+      read.cachedOnlyFormulas.map(address => `${name}!${address}`)
+    );
+    appendAll(
+      lost,
+      read.undecodedFormulas.map(address => `${name}!${address}: formula expression`)
+    );
+    appendAll(
+      lost,
+      read.errorCells.map(address => `${name}!${address}: error value`)
+    );
+    appendAll(
+      lost,
+      read.unreadConditionalFormats.map(entry => `${name}!${entry} (conditional formatting rule)`)
     );
     // Counted rather than listed: a sheet whose every cell uses an unimplemented record would
     // otherwise produce one line per cell and bury the rest of the report.
@@ -1317,7 +1333,7 @@ async function readInto(
       }
       const legacyControls = vmlLegacyControls.get(target?.toLowerCase() ?? "") ?? [];
       if (legacyControls.length > 0) {
-        (worksheet._legacyControls ??= []).push(...legacyControls);
+        appendAll((worksheet._legacyControls ??= []), legacyControls);
       }
     }
 
@@ -1440,7 +1456,10 @@ async function readInto(
     worksheet.pageSetup = setup as never;
   }
 
-  lost.push(...sharedFormulaCells.map(address => `${address}: shared formula`));
+  appendAll(
+    lost,
+    sharedFormulaCells.map(address => `${address}: shared formula`)
+  );
   return {
     unreadRecords,
     unknownRecords,

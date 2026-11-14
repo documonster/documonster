@@ -151,3 +151,79 @@ describe("a package this library encrypts", () => {
     expect(Buffer.compare(decrypted, big)).toBe(0);
   });
 });
+
+describe("a package whose encryption parameters are malformed", () => {
+  const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]);
+
+  /** `encrypted` with its EncryptionInfo XML edited by `xml`, and its EncryptedPackage stream by `data`. */
+  function edited(
+    encrypted: Uint8Array,
+    xml: (text: string) => string,
+    data: (bytes: Uint8Array) => Uint8Array = bytes => bytes
+  ): Uint8Array {
+    return writeCfb(
+      readCfb(encrypted).map(entry => {
+        if (entry.name === "EncryptionInfo") {
+          const text = new TextDecoder().decode(entry.data.subarray(8));
+          const body = new TextEncoder().encode(xml(text));
+          const info = new Uint8Array(8 + body.length);
+          info.set(entry.data.subarray(0, 8));
+          info.set(body, 8);
+          return { ...entry, data: info };
+        }
+        return entry.name === "EncryptedPackage" ? { ...entry, data: data(entry.data) } : entry;
+      })
+    );
+  }
+
+  // The size is how many bytes of the verifier and of the integrity HMAC are compared: a file free to give less would
+  // have the check compare one byte.
+  it.each(["keyData", "p:encryptedKey"])(
+    "refuses a %s hashSize other than its hash's",
+    async element => {
+      const encrypted = edited(await encryptPackage(zip, "pw", { spinCount: 10 }), xml =>
+        xml.replace(new RegExp(`(<${element}[^>]*?hashSize=")64"`), '$11"')
+      );
+      const error = await failure(decryptPackage(encrypted, "pw"));
+      expect(error.reason).toBe("malformed");
+      expect(error.message).toContain("hashSize");
+    }
+  );
+
+  // Handed to the platform, a blob that is not whole AES blocks failed with OpenSSL's own error.
+  it("refuses a key blob that is not whole AES blocks", async () => {
+    const encrypted = edited(await encryptPackage(zip, "pw", { spinCount: 10 }), xml =>
+      xml.replace(/encryptedKeyValue="([^"]+)"/, (_all, value: string) => {
+        const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0)).subarray(1);
+        return `encryptedKeyValue="${btoa(String.fromCharCode(...bytes))}"`;
+      })
+    );
+    const error = await failure(decryptPackage(encrypted, "pw"));
+    expect(error.reason).toBe("malformed");
+    expect(error.message).toContain("encryptedKeyValue");
+  });
+
+  // A damaged verifier is not a wrong password: the check answered `false` for any failure.
+  it("refuses a verifier that is not whole AES blocks, when only the password is checked", async () => {
+    const encrypted = edited(await encryptPackage(zip, "pw", { spinCount: 10 }), xml =>
+      xml.replace(/encryptedVerifierHashInput="([^"]+)"/, (_all, value: string) => {
+        const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0)).subarray(1);
+        return `encryptedVerifierHashInput="${btoa(String.fromCharCode(...bytes))}"`;
+      })
+    );
+    const error = await failure(verifyPackagePassword(encrypted, "pw"));
+    expect(error.reason).toBe("malformed");
+    expect(error.message).toContain("encryptedVerifierHashInput");
+  });
+
+  it("refuses a package cut off inside a cipher block", async () => {
+    const encrypted = edited(
+      await encryptPackage(new Uint8Array(9000), "pw", { spinCount: 10 }),
+      xml => xml.replace(/<dataIntegrity [^>]*\/>/, ""),
+      bytes => bytes.subarray(0, bytes.length - 1)
+    );
+    const error = await failure(decryptPackage(encrypted, "pw"));
+    expect(error.reason).toBe("malformed");
+    expect(error.message).toContain("not a whole number of AES blocks");
+  });
+});

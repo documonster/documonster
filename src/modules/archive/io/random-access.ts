@@ -112,6 +112,8 @@ import {
   type ArchiveBytes
 } from "@archive/io/archive-source";
 import { asPlainBytes } from "@utils/binary";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 import { s } from "@utils/schema";
 
 /**
@@ -155,6 +157,7 @@ function parseTotalSizeFromContentRange(value: string | null): number | null {
  * await reader.close();
  * ```
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class HttpRangeReader implements RandomAccessReader {
   private readonly url: string;
   private readonly headers: Record<string, string>;
@@ -492,3 +495,11 @@ export function createBufferReader(data: ArchiveBytes): RandomAccessReader {
     }
   };
 }
+
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `HttpRangeReader`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface HttpRangeReader extends AsyncDisposeMember {}
+
+defineAsyncDispose(HttpRangeReader.prototype, function () {
+  return this.close();
+});

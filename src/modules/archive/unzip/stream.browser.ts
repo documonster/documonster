@@ -36,6 +36,7 @@ import {
 } from "@archive/unzip/stream.base";
 import { Duplex, PassThrough } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
+import { ASYNC_DISPOSE } from "@utils/dispose";
 
 // =============================================================================
 // Worker protocol
@@ -1260,7 +1261,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           return Promise.resolve({ value: undefined, done: true });
         },
 
-        async [Symbol.asyncDispose](): Promise<void> {
+        async [ASYNC_DISPOSE](): Promise<void> {
           await iterator.return?.();
         },
 

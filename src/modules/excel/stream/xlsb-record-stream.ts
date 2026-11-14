@@ -28,7 +28,7 @@
  * arrives. Records are never split by the framing itself — a truncated tail at end of stream is a corrupt part and is
  * reported as one, not silently dropped.
  */
-import { XlsbParseError } from "@excel/errors";
+import { readRecordHeader, truncatedRecordError } from "@excel/xlsb/binary";
 import { recordSpec } from "@excel/xlsb/spec/records";
 
 /** One decoded record: its id, its name when known, and its payload. */
@@ -61,112 +61,128 @@ export async function* streamBiffRecords(
  * synchronous pass and handed over together; the caller still drives the stream chunk by chunk.
  *
  * Each record's payload is a view of a buffer this function owns and never writes to again, so a record stays valid
- * after the next chunk arrives, however the source treats its own buffers.
+ * after the next chunk arrives, however the source treats its own buffers. A record longer than the chunks it arrives
+ * in is gathered into a buffer doubled as its bytes arrive, up to the size its header gives: joining each chunk to
+ * what came before copied the record so far every time — 2.5 s for one 32 MB record arriving in 64 KiB chunks — and
+ * allocating the size its header gives at once let five bytes of a damaged part claim 256 MB.
+ *
+ * Malformed bytes are refused as `iterateBiffRecords` refuses them, with the same message, after the records before
+ * them have been handed out.
  */
 export async function* streamBiffRecordBatches(
   chunks: AsyncIterable<Uint8Array>,
   part: string
 ): AsyncIterableIterator<StreamedRecord[]> {
+  /** The unframed tail, too short to hold a record's header. */
   let carry: Uint8Array = EMPTY;
+  /**
+   * A record whose header has been read, being gathered: `filled` bytes of its `size` so far, in a buffer grown as they
+   * arrive — a header alone is five bytes, and cannot be what decides a 256 MB allocation.
+   */
+  let pending: Uint8Array | undefined;
+  let filled = 0;
+  let size = 0;
+  /** Where `carry` or `pending` begins in the part, for the byte an error names. */
+  let base = 0;
   for await (const chunk of chunks) {
     if (chunk.length === 0) {
       continue;
     }
-    // Copied, because a source may reuse its chunk buffer and a record handed out must stay valid; joined to the
-    // unfinished tail in the same copy when there is one.
-    const buffer = concat(carry, chunk);
     const records: StreamedRecord[] = [];
-    let consumed = 0;
-    for (;;) {
-      const framed = frame(buffer, consumed, part);
-      if (framed === undefined) {
-        break;
+    let rest = chunk;
+    if (pending !== undefined) {
+      const taken = Math.min(size - filled, chunk.length);
+      pending = room(pending, filled + taken, size);
+      pending.set(chunk.subarray(0, taken), filled);
+      filled += taken;
+      if (filled < size) {
+        continue;
       }
-      consumed = framed.next;
-      records.push(framed.record);
+      records.push(frame(pending, 0, part, base)!.record);
+      base += size;
+      pending = undefined;
+      rest = chunk.subarray(taken);
     }
-    // Only the unconsumed tail is kept, copied, so a sheet does not pin every buffer it was delivered in.
-    carry = consumed === buffer.length ? EMPTY : buffer.slice(consumed);
+    // Copied, because a source may reuse its chunk buffer and a record handed out must stay valid; joined to the
+    // unframed tail in the same copy.
+    const buffer = concat(carry, rest);
+    let consumed = 0;
+    let failure: unknown;
+    try {
+      for (
+        let framed = frame(buffer, 0, part, base);
+        framed;
+        framed = frame(buffer, consumed, part, base)
+      ) {
+        consumed = framed.next;
+        records.push(framed.record);
+      }
+      const header = readRecordHeader(buffer, consumed, part, base);
+      if (header === undefined) {
+        // Only the unframed tail is kept, copied, so a sheet does not pin every buffer it was delivered in.
+        carry = consumed === buffer.length ? EMPTY : buffer.slice(consumed);
+      } else {
+        size = header.start - consumed + header.length;
+        filled = buffer.length - consumed;
+        pending = room(EMPTY, filled, size);
+        pending.set(buffer.subarray(consumed));
+        carry = EMPTY;
+      }
+      base += consumed;
+    } catch (error) {
+      failure = error;
+    }
     if (records.length > 0) {
       yield records;
     }
+    if (failure !== undefined) {
+      throw failure;
+    }
   }
-  if (carry.length > 0) {
-    throw new XlsbParseError(part, `${carry.length} trailing byte(s) do not form a record`);
+  const tail = pending === undefined ? carry : pending.subarray(0, filled);
+  if (tail.length > 0) {
+    throw truncatedRecordError(tail, 0, part, base);
   }
 }
 
 const EMPTY = new Uint8Array(0);
 
 /**
- * The record starting at `offset`, or `undefined` when the buffer does not hold all of it yet.
- *
- * The header is two variable-length integers, so how many bytes it occupies is not known until it has been read —
- * which is why this cannot simply check for a fixed minimum before decoding.
+ * `buffer`, or a larger copy of its contents, holding at least `needed` bytes of a record of `size`: doubled as the
+ * record arrives, so gathering it copies it about twice in all, and never larger than the record.
  */
+function room(buffer: Uint8Array, needed: number, size: number): Uint8Array {
+  if (needed <= buffer.length) {
+    return buffer;
+  }
+  const grown = new Uint8Array(Math.min(size, Math.max(needed, buffer.length * 2, 64 * 1024)));
+  grown.set(buffer);
+  return grown;
+}
+
+/** The record starting at `offset`, or `undefined` when the buffer does not hold all of it yet. */
 function frame(
   buffer: Uint8Array,
   offset: number,
-  part: string
+  part: string,
+  base: number
 ): { readonly record: StreamedRecord; readonly next: number } | undefined {
-  if (offset >= buffer.length) {
+  const header = offset < buffer.length ? readRecordHeader(buffer, offset, part, base) : undefined;
+  if (header === undefined || header.start + header.length > buffer.length) {
     return undefined;
   }
-  // The two header integers, read without throwing on a short buffer: "not yet" and "malformed" are the same bytes
-  // mid-stream, and only the end-of-stream check above can tell them apart.
-  const idField = varUInt(buffer, offset, 2);
-  if (idField === undefined) {
-    return undefined;
-  }
-  const lengthField = varUInt(buffer, idField.next, 4);
-  if (lengthField === undefined) {
-    return undefined;
-  }
-  const id = idField.value;
-  const length = lengthField.value;
-  const start = lengthField.next;
-  if (start + length > buffer.length) {
-    return undefined;
-  }
+  const end = header.start + header.length;
   return {
     record: {
-      id,
-      name: recordSpec(id)?.name,
-      payload: buffer.subarray(start, start + length)
+      id: header.id,
+      name: recordSpec(header.id)?.name,
+      payload: buffer.subarray(header.start, end)
     },
-    next: start + length
+    next: end
   };
 }
 
-/**
- * A variable-length unsigned integer, or `undefined` when the buffer stops inside it.
- *
- * The same encoding `xlsb/binary` reads — seven bits per byte, the high bit continuing — but returning absence rather
- * than throwing, because a partial header is the normal state of a stream between chunks. Arithmetic rather than
- * shifts for the same reason the buffered reader uses it: a four-byte length reaches bit 28, and `|` would coerce to
- * int32 and turn a large length negative.
- */
-function varUInt(
-  buffer: Uint8Array,
-  start: number,
-  maxBytes: number
-): { readonly value: number; readonly next: number } | undefined {
-  let value = 0;
-  let offset = start;
-  for (let index = 0; index < maxBytes; index++) {
-    if (offset >= buffer.length) {
-      return undefined;
-    }
-    const byte = buffer[offset++]!;
-    value += (byte & 0x7f) * 2 ** (7 * index);
-    if ((byte & 0x80) === 0) {
-      return { value, next: offset };
-    }
-  }
-  return { value, next: offset };
-}
-
-/** `left` followed by `right`, in a new buffer. */
+/** `left`, then `right`, in a new buffer. */
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
   const joined = new Uint8Array(left.length + right.length);
   joined.set(left, 0);

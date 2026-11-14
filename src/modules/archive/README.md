@@ -430,6 +430,16 @@ const stats = reader.getStats();
 console.log(`Downloaded ${stats.http?.bytesDownloaded} bytes (${stats.http?.downloadedPercent}%)`);
 
 await reader.close();
+
+// Or let `await using` close it on every way out of the block — no try/finally needed.
+// `ZipReader`, `RemoteZipReader`, `HttpRangeReader`, `TarReader` and `ZipEditor` support it; the
+// member is typed where your `lib` declares `Symbol.asyncDispose` (`ESNext`, or `@types/node`).
+// Where the runtime has no `Symbol.asyncDispose`, a polyfill must be loaded before this package,
+// or define it as `Symbol.for("Symbol.asyncDispose")` — what esbuild and Babel look up in its absence.
+{
+  await using remote = await Archive.RemoteZipReader.open(url);
+  await remote.extract("path/to/file.txt");
+}
 ```
 
 ---

@@ -11,9 +11,33 @@ packages:
 # major behind put two copies of vitest in the tree. Declaring them once means a
 # renovate bump lands on both at the same time instead of drifting.
 catalog:
-  "@types/node": ^26.6.3
+  "@types/node": ^26.6.6
   typescript: 7.0.2
-  vitest: ^5.0.2
+  vitest: ^5.1.0
 
 allowBuilds:
   esbuild: false
+
+minimumReleaseAgeExclude:
+  - "@oxc-node/core-android-arm-eabi@1.0.2"
+  - "@oxc-node/core-android-arm64@1.0.2"
+  - "@oxc-node/core-darwin-arm64@1.0.2"
+  - "@oxc-node/core-darwin-x64@1.0.2"
+  - "@oxc-node/core-freebsd-x64@1.0.2"
+  - "@oxc-node/core-linux-arm-gnueabihf@1.0.2"
+  - "@oxc-node/core-linux-arm64-gnu@1.0.2"
+  - "@oxc-node/core-linux-arm64-musl@1.0.2"
+  - "@oxc-node/core-linux-ppc64-gnu@1.0.2"
+  - "@oxc-node/core-linux-s390x-gnu@1.0.2"
+  - "@oxc-node/core-linux-x64-gnu@1.0.2"
+  - "@oxc-node/core-linux-x64-musl@1.0.2"
+  - "@oxc-node/core-openharmony-arm64@1.0.2"
+  - "@oxc-node/core-wasm32-wasi@1.0.2"
+  - "@oxc-node/core-win32-arm64-msvc@1.0.2"
+  - "@oxc-node/core-win32-ia32-msvc@1.0.2"
+  - "@oxc-node/core-win32-x64-msvc@1.0.2"
+  - "@oxc-node/core@1.0.2"
+  - fast-xml-builder@1.3.2
+  - fast-xml-parser@5.12.1
+  - playwright-core@1.65.1
+  - playwright@1.65.1

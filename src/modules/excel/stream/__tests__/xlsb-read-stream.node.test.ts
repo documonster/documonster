@@ -24,7 +24,7 @@ import { Cell, Workbook } from "@excel";
 import { rowGetModel } from "@excel/core/row";
 import { streamBiffRecordBatches, streamBiffRecords } from "@excel/stream/xlsb-record-stream";
 import { streamXlsbRows } from "@excel/stream/xlsb-worksheet-reader";
-import { iterateInterpretableRecords } from "@excel/xlsb/binary";
+import { iterateBiffRecords, iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { readSharedStrings } from "@excel/xlsb/read/parts";
 import { recordSpec } from "@excel/xlsb/spec/records";
 import { readStyles } from "@excel/xlsb/styles";
@@ -155,14 +155,83 @@ describe("the record frame decoder", () => {
     }
   );
 
+  it("frames a record far larger than a chunk, held across them while the source reuses its buffer", async () => {
+    // A record still incomplete is held rather than joined to each chunk as it arrives — which copied the record so far
+    // every time, quadratic in its length — and what is held must be the bytes, not the source's reused buffer.
+    const payload = new Uint8Array(3 * 1024 * 1024).map((_, i) => (i * 13) & 255);
+    const length: number[] = [];
+    for (let rest = payload.length; ;) {
+      const low = rest & 0x7f;
+      rest = Math.floor(rest / 128);
+      length.push(rest > 0 ? low | 0x80 : low);
+      if (rest === 0) {
+        break;
+      }
+    }
+    const head = [0x9c, 0x01, ...length];
+    const part = new Uint8Array(head.length + payload.length + 2);
+    part.set(head, 0);
+    part.set(payload, head.length);
+    // A `Buffer`, whose `slice` is a view of the scratch the source goes on writing into: what is held must be copied
+    // some other way.
+    async function* reusing(): AsyncIterable<Uint8Array> {
+      const scratch = Buffer.alloc(4096);
+      for (let offset = 0; offset < part.length; offset += scratch.length) {
+        const piece = part.subarray(offset, Math.min(offset + scratch.length, part.length));
+        scratch.set(piece);
+        yield scratch.subarray(0, piece.length);
+        scratch.fill(0xee);
+      }
+    }
+    const records: { id: number; payload: Uint8Array }[] = [];
+    for await (const batch of streamBiffRecordBatches(reusing(), "s")) {
+      records.push(...batch);
+    }
+    expect(records.map(record => record.id)).toEqual([156, 0]);
+    expect(records[0]!.payload.length).toBe(payload.length);
+    expect(records[0]!.payload.every((byte, i) => byte === payload[i])).toBe(true);
+  });
+
+  it.each([
+    ["a record id", [0x80, 0x80, 0x00]],
+    ["a record length", [0x01, 0x02, 0xaa, 0xbb, 0x01, 0x80, 0x80, 0x80, 0x80, 0x01]]
+  ])(
+    "refuses %s longer than the format allows, as the buffered decoder does",
+    async (_name, bytes) => {
+      // A variable-length field whose last allowed byte still continues is malformed however many bytes follow. The
+      // streamed decoder took it for a value, so a streamed read accepted a part the buffered read rejected.
+      const part = new Uint8Array(bytes);
+      const buffered: number[] = [];
+      let expected = "";
+      try {
+        for (const record of iterateBiffRecords(part, "s")) {
+          buffered.push(record.id);
+        }
+      } catch (error) {
+        expected = (error as Error).message;
+      }
+      expect(expected).not.toBe("");
+      // The records before the malformed one are handed out first, as the buffered decoder hands them out.
+      for (const size of [part.length, 1]) {
+        const streamed: number[] = [];
+        await expect(async () => {
+          for await (const batch of streamBiffRecordBatches(inChunks(part, size), "s")) {
+            streamed.push(...batch.map(record => record.id));
+          }
+        }).rejects.toThrow(expected);
+        expect(streamed).toEqual(buffered);
+      }
+    }
+  );
+
   it("rejects a truncated tail rather than dropping it", async () => {
     // Silently discarding an incomplete record would turn a corrupt part into a short sheet, which reads as data loss
     // with no error to attribute it to.
     //
     // A partial header is *appended* rather than bytes cut from the end: the last records of a sheet carry empty
     // payloads, so cutting a few bytes can land exactly on a boundary and leave nothing incomplete — which is what a
-    // first version of this test did, and it passed for the wrong reason. `0x81` is a complete one-byte record id with
-    // no length following it, so the decoder cannot finish it however much it waits.
+    // first version of this test did, and it passed for the wrong reason. `0x81` starts a record id the part never
+    // finishes.
     const truncated = new Uint8Array(sheet.length + 1);
     truncated.set(sheet, 0);
     truncated[sheet.length] = 0x81;
@@ -170,7 +239,56 @@ describe("the record frame decoder", () => {
       for await (const _record of streamBiffRecords(inChunks(truncated, 64), "s")) {
         void _record;
       }
-    }).rejects.toThrow(/trailing byte/);
+    }).rejects.toThrow(`s: truncated record id at byte ${sheet.length}`);
+  });
+
+  it.each([
+    ["inside a header", [0x01, 0x02, 0xaa, 0xbb, 0x05]],
+    ["inside a payload", [0x01, 0x02, 0xaa, 0xbb, 0x13, 0x05, 0x01, 0x02]],
+    [
+      "inside a payload longer than a chunk",
+      [0x01, 0x00, 0x13, 0xc8, 0x01, ...new Array<number>(150).fill(7)]
+    ]
+  ])(
+    "reports a part cut off %s as the buffered decoder does, after the records before it",
+    async (_name, bytes) => {
+      const part = new Uint8Array(bytes);
+      const buffered: number[] = [];
+      let expected = "";
+      try {
+        for (const record of iterateBiffRecords(part, "s")) {
+          buffered.push(record.id);
+        }
+      } catch (error) {
+        expected = (error as Error).message;
+      }
+      expect(expected).toMatch(/truncated|declares/);
+      for (const size of [part.length, 64, 1]) {
+        const streamed: number[] = [];
+        await expect(async () => {
+          for await (const record of streamBiffRecords(inChunks(part, size), "s")) {
+            streamed.push(record.id);
+          }
+        }).rejects.toThrow(expected);
+        expect(streamed).toEqual(buffered);
+      }
+    }
+  );
+
+  // A header is five bytes: allocating the size it declares let a damaged part claim 256 MB before the bytes ran out.
+  it("allocates for the bytes of a record that arrive, not the size its header declares", async () => {
+    const part = new Uint8Array(5 + 16 * 1024);
+    part.set([0x01, 0xff, 0xff, 0xff, 0x7f]);
+    const before = process.memoryUsage().arrayBuffers;
+    let grown = 0;
+    await expect(async () => {
+      for await (const _batch of streamBiffRecordBatches(inChunks(part, 4096), "s")) {
+        void _batch;
+      }
+      grown = process.memoryUsage().arrayBuffers - before;
+    }).rejects.toThrow("s: record 1 at byte 0 declares 268435455 byte(s), but only 16384 remain");
+    grown = Math.max(grown, process.memoryUsage().arrayBuffers - before);
+    expect(grown).toBeLessThan(64 * 1024 * 1024);
   });
 });
 

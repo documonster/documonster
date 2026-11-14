@@ -6,13 +6,16 @@
  * styles, charts and the auxiliary parts alike.
  */
 
+import { appendAll } from "@utils/array";
 import { trimXmlPartLead } from "@utils/xml-part";
+import { paceChunks, runSteps, runStepsPaced } from "@utils/yield";
+import type { Steps, YieldPoint } from "@utils/yield";
 import { DocxLimitExceededError } from "@word/errors";
 import { WORD_NAMESPACES } from "@word/reader/namespaces";
-import { parseXml } from "@xml/dom";
+import { createDomBuilder } from "@xml/dom";
 import { XmlParseError } from "@xml/errors";
-import { needsPrefixNormalization, normalizeElementPrefixes } from "@xml/namespace-prefixes";
-import type { XmlDocument, XmlElement, XmlNode } from "@xml/types";
+import { needsPrefixNormalization, normalizeElementPrefixesSteps } from "@xml/namespace-prefixes";
+import type { ParseOpenTag, XmlDocument, XmlElement, XmlNode } from "@xml/types";
 
 /**
  * `parseXml` with a nesting-depth limit (`undefined` = the XML module's
@@ -23,30 +26,85 @@ export function parsePartXml(xml: string, maxDepth: number | undefined): XmlDocu
   return parsePart(xml, maxDepth).doc;
 }
 
+/**
+ * {@link parsePartXml} a slice of the text at a time, asking `yieldPoint` (a `createYieldBudget`) between the slices —
+ * for the streaming reader, which must give the event loop a turn while it parses a large part.
+ *
+ * Not the form every reader takes: writing the text in slices costs a whole-part read about a tenth more, measured on
+ * a 5 MB body, which a reader that does not yield pays for nothing.
+ */
+export async function parsePartXmlPaced(
+  xml: string,
+  maxDepth: number | undefined,
+  yieldPoint: YieldPoint
+): Promise<XmlDocument> {
+  return (await parsePartPaced(xml, maxDepth, yieldPoint)).doc;
+}
+
 /** {@link parsePartXml}, and the text it parsed. */
 function parsePart(xml: string, maxDepth: number | undefined): { doc: XmlDocument; text: string } {
   // From its first `<`: white space before the XML declaration is refused by XML, opened by Office.
   const text = trimXmlPartLead(xml);
-  let doc: XmlDocument;
+  const builder = partBuilder(maxDepth);
   try {
-    doc = parseXml(text, maxDepth === undefined ? undefined : { maxDepth });
+    builder.write(text);
+    return runSteps(finishPart(builder.close(), text));
   } catch (error) {
     throw asPartLimitError(error, maxDepth);
   }
-  // Its names in the prefixes the reader matches, whatever prefixes the part binds (`namespaces.ts`),
-  // renamed in the tree the one parse built — so a part is read under the policy above whichever
-  // prefixes it uses. Each element takes its text view, as the streaming reader's tags do: a subtree
-  // the reader keeps is written back from it. A part that already uses them — every part Word
-  // writes — is left as it is.
-  if (needsPrefixNormalization(WORD_NAMESPACES, text)) {
-    const texts = normalizeElementPrefixes(WORD_NAMESPACES, doc.root);
-    for (const [element, tag] of texts) {
-      element.name = tag.name;
-      element.attributes = tag.attributes;
+}
+
+/** {@link parsePart}, a slice at a time — see {@link parsePartXmlPaced}. */
+async function parsePartPaced(
+  xml: string,
+  maxDepth: number | undefined,
+  yieldPoint: YieldPoint
+): Promise<{ doc: XmlDocument; text: string }> {
+  const text = trimXmlPartLead(xml);
+  const builder = partBuilder(maxDepth);
+  try {
+    for await (const slice of paceChunks([text], yieldPoint)) {
+      builder.write(slice);
     }
+    return await runStepsPaced(finishPart(builder.close(), text), yieldPoint);
+  } catch (error) {
+    throw asPartLimitError(error, maxDepth);
+  }
+}
+
+function partBuilder(maxDepth: number | undefined): ReturnType<typeof createDomBuilder> {
+  return createDomBuilder(maxDepth === undefined ? undefined : { maxDepth });
+}
+
+/**
+ * The part's names in the prefixes the reader matches, whatever prefixes the part binds (`namespaces.ts`), renamed in
+ * the tree the one parse built — so a part is read under the policy above whichever prefixes it uses. Each element
+ * takes its text view, as the streaming reader's tags do: a subtree the reader keeps is written back from it. A part
+ * that already uses them — every part Word writes — is left as it is.
+ */
+function* finishPart(doc: XmlDocument, text: string): Steps<{ doc: XmlDocument; text: string }> {
+  if (needsPrefixNormalization(WORD_NAMESPACES, text)) {
+    yield* renamePrefixes(yield* normalizeElementPrefixesSteps(WORD_NAMESPACES, doc.root));
   }
   return { doc, text };
 }
+
+/** Give each element the text view {@link finishPart} describes, in steps of {@link RENAME_STEP} elements. */
+function* renamePrefixes(
+  texts: ReadonlyMap<{ name: string; attributes: Record<string, string> }, ParseOpenTag>
+): Steps<void> {
+  let renamed = 0;
+  for (const [element, tag] of texts) {
+    element.name = tag.name;
+    element.attributes = tag.attributes;
+    if (++renamed % RENAME_STEP === 0) {
+      yield;
+    }
+  }
+}
+
+/** How many elements {@link renamePrefixes} renames in one step. */
+const RENAME_STEP = 4096;
 
 /**
  * What a parse of a part threw, as the reader reports it: a nesting depth past `maxDepth` is a
@@ -78,7 +136,19 @@ const CUSTOM_XML_TAG = /customXml[\s/>]/;
  * {@link unwrapCustomXml}.
  */
 export function parseContentPartXml(xml: string, maxDepth: number | undefined): XmlDocument {
-  const { doc, text } = parsePart(xml, maxDepth);
+  return withoutCustomXml(parsePart(xml, maxDepth));
+}
+
+/** {@link parseContentPartXml} a slice at a time — see {@link parsePartXmlPaced}. */
+export async function parseContentPartXmlPaced(
+  xml: string,
+  maxDepth: number | undefined,
+  yieldPoint: YieldPoint
+): Promise<XmlDocument> {
+  return withoutCustomXml(await parsePartPaced(xml, maxDepth, yieldPoint));
+}
+
+function withoutCustomXml({ doc, text }: { doc: XmlDocument; text: string }): XmlDocument {
   // The regex is the fast test here: measured 0.8 ms over a 9 MB body, against 4.7 ms for
   // `includes("customXml")`.
   if (CUSTOM_XML_TAG.test(text)) {
@@ -111,7 +181,7 @@ export function unwrapCustomXml(el: XmlElement): void {
   for (const child of el.children) {
     if (child.type === "element" && isCustomXmlElement(child)) {
       changed = true;
-      children.push(...customXmlContent(child));
+      appendAll(children, customXmlContent(child));
       continue;
     }
     if (child.type === "element") {

@@ -62,32 +62,67 @@ export interface BiffRecord {
 export function* iterateBiffRecords(bytes: Uint8Array, context: string): Generator<BiffRecord> {
   let offset = 0;
   while (offset < bytes.length) {
-    const recordOffset = offset;
-
-    const id = readVarUInt(bytes, offset, 2, context, "record id");
-    offset = id.next;
-    const length = readVarUInt(bytes, offset, 4, context, "record length");
-    offset = length.next;
-
-    // No upper-bound check on the id: a two-byte varint holds seven value bits per
-    // byte, so it cannot exceed 0x3FFF, which is already below MAX_RECORD_ID. The
-    // limit is enforced where it is reachable — on the writing side, where a caller
-    // supplies the number.
-    if (length.value > bytes.length - offset) {
-      throw new XlsbParseError(
-        context,
-        `record ${id.value} at byte ${recordOffset} declares ${length.value} byte(s), ` +
-          `but only ${bytes.length - offset} remain`
-      );
+    const header = readRecordHeader(bytes, offset, context);
+    if (header === undefined || header.length > bytes.length - header.start) {
+      throw truncatedRecordError(bytes, offset, context);
     }
-
     yield {
-      id: id.value,
-      payload: bytes.subarray(offset, offset + length.value),
-      offset: recordOffset
+      id: header.id,
+      payload: bytes.subarray(header.start, header.start + header.length),
+      offset
     };
-    offset += length.value;
+    offset = header.start + header.length;
   }
+}
+
+/** A record's header: its id, its payload length, and where in the bytes read its payload starts. */
+export interface BiffRecordHeader {
+  readonly id: number;
+  readonly length: number;
+  readonly start: number;
+}
+
+/**
+ * The header of the record at `offset`, or `undefined` where `bytes` stops inside it — which a streamed part is between
+ * chunks, and only its end says it always will be ({@link truncatedRecordError}). A field longer than the format
+ * allows is malformed however many bytes follow, and is refused. `base` is where `bytes` begins in the part, for the
+ * byte an error names.
+ *
+ * No upper-bound check on the id: a two-byte varint holds seven value bits per byte, so it cannot exceed 0x3FFF, which
+ * is already below MAX_RECORD_ID. The limit is enforced where it is reachable — on the writing side, where a caller
+ * supplies the number.
+ */
+export function readRecordHeader(
+  bytes: Uint8Array,
+  offset: number,
+  context: string,
+  base = 0
+): BiffRecordHeader | undefined {
+  const id = readVarUInt(bytes, offset, 2, context, "record id", base);
+  const length = id && readVarUInt(bytes, id.next, 4, context, "record length", base);
+  return length && { id: id.value, length: length.value, start: length.next };
+}
+
+/** The error for a part whose bytes end inside the record at `offset` — in its header or its payload. */
+export function truncatedRecordError(
+  bytes: Uint8Array,
+  offset: number,
+  context: string,
+  base = 0
+): XlsbParseError {
+  const id = readVarUInt(bytes, offset, 2, context, "record id", base);
+  if (id === undefined) {
+    return new XlsbParseError(context, `truncated record id at byte ${base + offset}`);
+  }
+  const length = readVarUInt(bytes, id.next, 4, context, "record length", base);
+  if (length === undefined) {
+    return new XlsbParseError(context, `truncated record length at byte ${base + id.next}`);
+  }
+  return new XlsbParseError(
+    context,
+    `record ${id.value} at byte ${base + offset} declares ${length.value} byte(s), ` +
+      `but only ${bytes.length - length.next} remain`
+  );
 }
 
 interface VarUInt {
@@ -95,18 +130,20 @@ interface VarUInt {
   readonly next: number;
 }
 
+/** A variable-length unsigned integer, or `undefined` where `bytes` stops inside it. */
 function readVarUInt(
   bytes: Uint8Array,
   start: number,
   maxBytes: number,
   context: string,
-  label: string
-): VarUInt {
+  label: string,
+  base: number
+): VarUInt | undefined {
   let value = 0;
   let offset = start;
   for (let i = 0; i < maxBytes; i++) {
     if (offset >= bytes.length) {
-      throw new XlsbParseError(context, `truncated ${label} at byte ${start}`);
+      return undefined;
     }
     const byte = bytes[offset++]!;
     // Multiplication rather than `<<`: a four-byte length reaches bit 28, and
@@ -117,7 +154,7 @@ function readVarUInt(
       return { value, next: offset };
     }
   }
-  throw new XlsbParseError(context, `${label} at byte ${start} exceeds ${maxBytes} byte(s)`);
+  throw new XlsbParseError(context, `${label} at byte ${base + start} exceeds ${maxBytes} byte(s)`);
 }
 
 /** Encode a record identifier or payload length. */
@@ -511,22 +548,31 @@ export function* iterateInterpretableRecords(
   bytes: Uint8Array,
   part: string
 ): Generator<BiffRecord> {
-  let depth = 0;
+  const interpretable = createInterpretableRecordFilter();
   for (const record of iterateBiffRecords(bytes, part)) {
-    if (FUTURE_OPEN.has(record.id)) {
-      depth++;
-      yield record;
-      continue;
-    }
-    if (FUTURE_CLOSE.has(record.id)) {
-      depth = Math.max(0, depth - 1);
-      yield record;
-      continue;
-    }
-    if (depth === 0 || MODELLED_FUTURE_RECORDS.has(record.id)) {
+    if (interpretable(record.id)) {
       yield record;
     }
   }
+}
+
+/**
+ * The test {@link iterateInterpretableRecords} applies, one record id at a time and in order, for a part whose records
+ * arrive in pieces rather than as one buffer.
+ */
+export function createInterpretableRecordFilter(): (id: number) => boolean {
+  let depth = 0;
+  return id => {
+    if (FUTURE_OPEN.has(id)) {
+      depth++;
+      return true;
+    }
+    if (FUTURE_CLOSE.has(id)) {
+      depth = Math.max(0, depth - 1);
+      return true;
+    }
+    return depth === 0 || MODELLED_FUTURE_RECORDS.has(id);
+  };
 }
 
 /** Grid limits, which several checks and both codecs need. */

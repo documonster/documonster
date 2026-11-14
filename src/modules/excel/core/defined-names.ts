@@ -349,10 +349,21 @@ function refuseTableName(dn: DefinedNamesData, name: string): void {
   }
 }
 
-/** Whether `dn` defines `name`, in any scope, compared as Excel compares names. */
+/**
+ * Whether `dn` defines `name`, in any scope, compared as Excel compares names — a name {@link definedNamesModel}
+ * writes: a reference name with no cells left is not one. Decided from the storage keys, which hold the compared
+ * form of the name, without building any name's entry.
+ */
 export function definedNamesHasName(dn: DefinedNamesData, name: string): boolean {
   const key = excelNameKey(name);
-  return definedNamesModel(dn).some(entry => excelNameKey(entry.name) === key);
+  const isName = (sKey: string): boolean => sKey === key || sKey.startsWith(`${key}\0`);
+  return (
+    Object.keys(dn.matrixMap).some(
+      sKey => isName(sKey) && !cellRegionIsEmpty(dn.matrixMap[sKey]!)
+    ) ||
+    Object.keys(dn.formulaMap).some(sKey => isName(sKey) && !Object.hasOwn(dn.matrixMap, sKey)) ||
+    Object.keys(dn.opaqueMap).some(isName)
+  );
 }
 
 /**
@@ -703,45 +714,52 @@ export function definedNamesGetAllNames(
 export function definedNamesGetAllEntries(dn: DefinedNamesData): DefinedNameModel[] {
   const result: DefinedNameModel[] = [];
   const seen = new Set<string>();
-  // `hidden` is part of what an entry is: leaving it off made a hidden name read as a visible one.
-  const withHidden = (sKey: string, entry: DefinedNameModel): DefinedNameModel =>
-    dn.hiddenMap[sKey] ? { ...entry, hidden: true } : entry;
-  for (const sKey of Object.keys(dn.matrixMap)) {
-    if (seen.has(sKey)) {
-      continue;
+  for (const map of [dn.matrixMap, dn.formulaMap, dn.opaqueMap]) {
+    for (const sKey of Object.keys(map)) {
+      if (!seen.has(sKey)) {
+        seen.add(sKey);
+        result.push(definedNamesGetEntry(dn, sKey)!);
+      }
     }
-    seen.add(sKey);
-    const model = definedNamesGetRanges(dn, sKey);
-    const localSheetId = dn.localSheetIdMap[sKey];
-    result.push(withHidden(sKey, localSheetId !== undefined ? { ...model, localSheetId } : model));
-  }
-  for (const sKey of Object.keys(dn.formulaMap)) {
-    if (seen.has(sKey)) {
-      continue;
-    }
-    seen.add(sKey);
-    const model = definedNamesGetRanges(dn, sKey);
-    const localSheetId = dn.localSheetIdMap[sKey];
-    result.push(withHidden(sKey, localSheetId !== undefined ? { ...model, localSheetId } : model));
-  }
-  for (const sKey of Object.keys(dn.opaqueMap)) {
-    if (seen.has(sKey)) {
-      continue;
-    }
-    seen.add(sKey);
-    const bareName = dn.nameForKey[sKey] ?? sKey;
-    const entry = dn.opaqueMap[sKey];
-    result.push(
-      withHidden(sKey, {
-        name: bareName,
-        ranges: [],
-        rawText: entry.rawText,
-        localSheetId: entry.localSheetId,
-        kind: "opaque" as const
-      })
-    );
   }
   return result;
+}
+
+/**
+ * The entry {@link definedNamesGetAllEntries} lists for the storage key `sKey` (`storageKey(name, localSheetId)`), or
+ * `undefined` when the registry holds none: a lookup of one name, without building every other name's entry —
+ * `DefinedNames.add` reports the name it added through it, and building the whole list there made adding names
+ * quadratic, 39 seconds for 4,000.
+ */
+function definedNamesGetEntry(dn: DefinedNamesData, sKey: string): DefinedNameModel | undefined {
+  // `hidden` is part of what an entry is: leaving it off made a hidden name read as a visible one.
+  const withHidden = (entry: DefinedNameModel): DefinedNameModel =>
+    dn.hiddenMap[sKey] ? { ...entry, hidden: true } : entry;
+  if (Object.hasOwn(dn.matrixMap, sKey) || Object.hasOwn(dn.formulaMap, sKey)) {
+    const model = definedNamesGetRanges(dn, sKey);
+    const localSheetId = dn.localSheetIdMap[sKey];
+    return withHidden(localSheetId !== undefined ? { ...model, localSheetId } : model);
+  }
+  if (Object.hasOwn(dn.opaqueMap, sKey)) {
+    const entry = dn.opaqueMap[sKey];
+    return withHidden({
+      name: dn.nameForKey[sKey] ?? sKey,
+      ranges: [],
+      rawText: entry.rawText,
+      localSheetId: entry.localSheetId,
+      kind: "opaque" as const
+    });
+  }
+  return undefined;
+}
+
+/** {@link definedNamesGetEntry} for `name` in the scope `localSheetId` — the workbook's when omitted. */
+export function definedNamesGetEntryScoped(
+  dn: DefinedNamesData,
+  name: string,
+  localSheetId?: number
+): DefinedNameModel | undefined {
+  return definedNamesGetEntry(dn, storageKey(name, localSheetId));
 }
 
 /**

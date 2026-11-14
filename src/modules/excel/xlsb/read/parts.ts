@@ -111,6 +111,9 @@ import type { StyleTable } from "@excel/xlsb/styles";
 import { ROW_FLAG_UNSYNCED } from "@excel/xlsb/write/rows";
 import { NodeType } from "@formula/syntax/ast";
 import { printAst } from "@formula/syntax/print";
+import { appendAll } from "@utils/array";
+import { runSteps } from "@utils/yield";
+import type { Steps } from "@utils/yield";
 
 /** A cell as read from a worksheet part. */
 /** One `BrtBeginPivotCacheID`: a cache identifier and the workbook relationship naming its definition. */
@@ -344,6 +347,13 @@ export interface ReadHyperlink {
   readonly tooltip: string;
 }
 
+/** What `xl/sharedStrings.bin` holds — see {@link readSharedStrings}. */
+export interface ReadSharedStrings {
+  readonly texts: string[];
+  readonly runs: ReadonlyMap<number, readonly { readonly at: number; readonly font: number }[]>;
+  readonly richCount: number;
+}
+
 /**
  * Read `xl/sharedStrings.bin` into the string table a worksheet indexes into.
  *
@@ -352,51 +362,63 @@ export interface ReadHyperlink {
  *          so — a workbook of styled text read back as plain text. The count remains for what is genuinely
  *          unread: phonetic data, and any record longer than the shape it declares.
  */
-export function readSharedStrings(
-  bytes: Uint8Array,
-  part: string
-): {
-  readonly texts: string[];
-  readonly runs: ReadonlyMap<number, readonly { readonly at: number; readonly font: number }[]>;
-  readonly richCount: number;
+export function readSharedStrings(bytes: Uint8Array, part: string): ReadSharedStrings {
+  const reader = createSharedStringsReader(part);
+  for (const record of iterateInterpretableRecords(bytes, part)) {
+    reader.add(record);
+  }
+  return reader.finish();
+}
+
+/**
+ * {@link readSharedStrings} one record at a time, for a part read in pieces: `add` takes the part's interpretable
+ * records in order — what `iterateInterpretableRecords` yields — and `finish` returns the table once they are all in.
+ */
+export function createSharedStringsReader(part: string): {
+  add(record: Pick<BiffRecord, "id" | "payload">): void;
+  finish(): ReadSharedStrings;
 } {
   const texts: string[] = [];
   const runs = new Map<number, readonly { at: number; font: number }[]>();
   let richCount = 0;
-  for (const record of iterateInterpretableRecords(bytes, part)) {
-    if (recordSpec(record.id)?.name !== "BrtSSTItem") {
-      continue;
+  return {
+    add(record) {
+      if (recordSpec(record.id)?.name !== "BrtSSTItem") {
+        return;
+      }
+      const decoded = decodeRecord(record, part);
+      const text = decoded?.fields.get("text");
+      const index = texts.length;
+      texts.push(typeof text === "string" ? text : "");
+      if (decoded === undefined || decoded.trailingBytes === 0) {
+        return;
+      }
+      // **The runs are read now, not counted** — but only when the record says it has them.
+      //
+      // `RichStr` (MS-XLSB 2.5.122) puts `fRichStr` in bit 0 of the first byte, and only then does a
+      // four-byte count and that many `StrRun`s follow — each an `ich` character offset and an `ifnt` index
+      // into the styles part's font collection. Verified against `poi-sample.xlsb`, whose entries end
+      // `01 00 00 00 07 00 03 00`: one run, from character 7, in font 3.
+      //
+      // Dispatching on the flag rather than on the presence of trailing bytes matters. Bit 1 is `fExtStr`,
+      // phonetic data, which nothing here models; and a record with *neither* flag and bytes past its text is
+      // simply longer than the shape it declares. Both are counted as unread. Trying to read runs from either
+      // would invent formatting out of whatever those bytes happen to be.
+      if ((record.payload[0]! & 0x01) === 0) {
+        richCount++;
+        return;
+      }
+      const parsed = readStringRuns(record.payload, record.payload.length - decoded.trailingBytes);
+      if (parsed === undefined) {
+        richCount++;
+        return;
+      }
+      runs.set(index, parsed);
+    },
+    finish() {
+      return { texts, runs, richCount };
     }
-    const decoded = decodeRecord(record, part);
-    const text = decoded?.fields.get("text");
-    const index = texts.length;
-    texts.push(typeof text === "string" ? text : "");
-    if (decoded === undefined || decoded.trailingBytes === 0) {
-      continue;
-    }
-    // **The runs are read now, not counted** — but only when the record says it has them.
-    //
-    // `RichStr` (MS-XLSB 2.5.122) puts `fRichStr` in bit 0 of the first byte, and only then does a
-    // four-byte count and that many `StrRun`s follow — each an `ich` character offset and an `ifnt` index
-    // into the styles part's font collection. Verified against `poi-sample.xlsb`, whose entries end
-    // `01 00 00 00 07 00 03 00`: one run, from character 7, in font 3.
-    //
-    // Dispatching on the flag rather than on the presence of trailing bytes matters. Bit 1 is `fExtStr`,
-    // phonetic data, which nothing here models; and a record with *neither* flag and bytes past its text is
-    // simply longer than the shape it declares. Both are counted as unread. Trying to read runs from either
-    // would invent formatting out of whatever those bytes happen to be.
-    if ((record.payload[0]! & 0x01) === 0) {
-      richCount++;
-      continue;
-    }
-    const parsed = readStringRuns(record.payload, record.payload.length - decoded.trailingBytes);
-    if (parsed === undefined) {
-      richCount++;
-      continue;
-    }
-    runs.set(index, parsed);
-  }
-  return { texts, runs, richCount };
+  };
 }
 
 export interface ReadSheet {
@@ -504,6 +526,28 @@ export interface ReadDefinedName {
 
 /** Read `xl/workbook.bin`. */
 export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook {
+  const reader = createWorkbookPartReader(part);
+  for (const record of iterateInterpretableRecords(bytes, part)) {
+    reader.add(record);
+  }
+  return runSteps(reader.finish());
+}
+
+/** How many defined names {@link createWorkbookPartReader}'s `finish` decodes in one step. */
+const NAME_STEP = 256;
+
+/**
+ * {@link readWorkbookPart} one record at a time, for a part read in pieces: `add` takes the part's interpretable
+ * records in order — what `iterateInterpretableRecords` yields — and `finish` returns the workbook once they are
+ * all in.
+ *
+ * `finish` is steps of {@link NAME_STEP} defined names: their formulas are decoded only once the whole part is in,
+ * as a name's definition may use a later name, and a workbook can define tens of thousands.
+ */
+export function createWorkbookPartReader(part: string): {
+  add(record: Pick<BiffRecord, "id" | "payload">): void;
+  finish(): Steps<ReadWorkbook>;
+} {
   const sheets: ReadSheet[] = [];
   /** `BrtName` records, decoded once the whole part is read — a name's definition may use a later name. */
   const rawNames: RawName[] = [];
@@ -518,19 +562,19 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
   let bookProtection: BookProtectionLike | undefined;
   const pivotCaches: { cacheId: number; relationshipId: string }[] = [];
 
-  for (const record of iterateInterpretableRecords(bytes, part)) {
+  function add(record: Pick<BiffRecord, "id" | "payload">): void {
     const recordName = recordSpec(record.id)?.name;
     switch (recordName) {
       case "BrtWbProp": {
         const flags = numberField(decodeRecord(record, part), "flags") ?? 0;
         date1904 = (flags & WORKBOOK_FLAG_1904) !== 0;
-        continue;
+        return;
       }
       case "BrtBookView": {
         // The first only. `BrtBeginBookViews` may hold several and the model's list does too, but this
         // writer emits one — so reading more than the first would report views a write cannot reproduce.
         bookViews.push(readBookView(record.payload, part));
-        continue;
+        return;
       }
       case "BrtBeginPivotCacheID": {
         // `idSx` then a `RelID`. The relationship it names is itself an opaque-part edge that the writer
@@ -541,44 +585,44 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
         if (relationshipId.length > 0) {
           pivotCaches.push({ cacheId, relationshipId });
         }
-        continue;
+        return;
       }
       case "BrtBookProtectionIso": {
         // The password half only. The locks come from the legacy record that MUST follow, which carries the
         // same `wFlags` — so this is held aside and merged when that one arrives, rather than duplicating
         // the flag decoding.
         bookProtectionPassword = readIsoPasswordData(record.payload, 10, 0);
-        continue;
+        return;
       }
       case "BrtBookProtection": {
         const locks = readBookProtection(record.payload, part);
         bookProtection =
           locks === undefined ? undefined : { ...locks, ...(bookProtectionPassword ?? {}) };
-        continue;
+        return;
       }
       case "BrtCalcProp": {
         calcProperties = readCalculationProperties(record.payload, part);
-        continue;
+        return;
       }
       case "BrtExternSheet": {
-        externSheets.push(...readExternSheets(record.payload, part));
-        continue;
+        appendAll(externSheets, readExternSheets(record.payload, part));
+        return;
       }
       // The supporting links, in the order `BrtExternSheet` entries index them. Only this workbook and add-ins can
       // be resolved; an external workbook is recorded so a reference into one fails by name rather than resolving
       // into this workbook.
       case "BrtSupSelf":
         supportingLinks.push({ kind: "self" });
-        continue;
+        return;
       case "BrtSupSame":
         supportingLinks.push({ kind: "same" });
-        continue;
+        return;
       case "BrtSupAddin":
         supportingLinks.push({ kind: "addin", names: [] });
-        continue;
+        return;
       case "BrtSupBookSrc":
         supportingLinks.push({ kind: "external" });
-        continue;
+        return;
       case "BrtPlaceholderName": {
         // An add-in function's name; a `PtgNameX` through the add-in's link indexes these one-based.
         const link = supportingLinks[supportingLinks.length - 1];
@@ -591,7 +635,7 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
             (link.names as string[]).push("");
           }
         }
-        continue;
+        return;
       }
       case "BrtBundleSh": {
         const decoded = decodeRecord(record, part);
@@ -609,7 +653,7 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
           // one silently retargets every reference after it, and the failure is reported.
           malformedSheets.push(sheets.length + 1);
           sheets.push({ name: `Sheet${sheets.length + 1}`, state: "visible" });
-          continue;
+          return;
         }
         const relId = decoded?.fields.get("relId");
         sheets.push({
@@ -619,7 +663,7 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
           // guessing it from the sheet's position, which a chartsheet makes wrong.
           ...(typeof relId === "string" ? { relId } : {})
         });
-        continue;
+        return;
       }
       case "BrtName": {
         // Every name enters the table, hidden ones included, because `PtgName` is a one-based index into the
@@ -634,76 +678,84 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
             extra: new Uint8Array(0)
           }
         );
-        continue;
+        return;
       }
       default:
-        continue;
+        return;
     }
   }
 
-  const sheetNames = sheets.map(sheet => sheet.name);
-  const formulaContext: PtgContext = {
-    sheetNames,
-    externSheets,
-    ...(supportingLinks.length === 0 ? {} : { supportingLinks }),
-    definedNames: rawNames.map(raw => raw.name),
-    definedNameScopes: rawNames.map(raw => raw.sheetIndex),
-    definedNameEmpty: rawNames.map(raw => raw.tokens.length === 0)
-  };
-  const namedRanges: { name: string; ranges: string[]; localSheetId?: number }[] = [];
-  const names: ReadDefinedName[] = [];
-  const undecodableNames: string[] = [];
-  const undefinedNames: string[] = [];
-  rawNames.forEach(raw => {
-    if (
-      raw.name === "" ||
-      (raw.flags & NAME_FLAG_FUNCTION) !== 0 ||
-      /^_xl(pm|eta)\./i.test(raw.name)
-    ) {
-      // A future-function stub, a `LET`/`LAMBDA` parameter (`_xlpm.x`) or a function passed by name (`_xleta.SUM`):
-      // machinery, not something a user named — Excel's XLSX lists none of them.
-      return;
+  function* finish(): Steps<ReadWorkbook> {
+    const sheetNames = sheets.map(sheet => sheet.name);
+    const formulaContext: PtgContext = {
+      sheetNames,
+      externSheets,
+      ...(supportingLinks.length === 0 ? {} : { supportingLinks }),
+      definedNames: rawNames.map(raw => raw.name),
+      definedNameScopes: rawNames.map(raw => raw.sheetIndex),
+      definedNameEmpty: rawNames.map(raw => raw.tokens.length === 0)
+    };
+    const namedRanges: { name: string; ranges: string[]; localSheetId?: number }[] = [];
+    const names: ReadDefinedName[] = [];
+    const undecodableNames: string[] = [];
+    const undefinedNames: string[] = [];
+    for (let index = 0; index < rawNames.length; index++) {
+      if (index % NAME_STEP === NAME_STEP - 1) {
+        yield;
+      }
+      const raw = rawNames[index]!;
+      if (
+        raw.name === "" ||
+        (raw.flags & NAME_FLAG_FUNCTION) !== 0 ||
+        /^_xl(pm|eta)\./i.test(raw.name)
+      ) {
+        // A future-function stub, a `LET`/`LAMBDA` parameter (`_xlpm.x`) or a function passed by name (`_xleta.SUM`):
+        // machinery, not something a user named — Excel's XLSX lists none of them.
+        continue;
+      }
+      if (raw.tokens.length === 0) {
+        undefinedNames.push(raw.name);
+        continue;
+      }
+      const decoded = decodeName(raw, formulaContext, part);
+      if (decoded === undefined) {
+        undecodableNames.push(raw.name);
+        continue;
+      }
+      const scope = raw.sheetIndex === undefined ? {} : { localSheetId: raw.sheetIndex };
+      names.push({
+        name: raw.name,
+        text: decoded.text,
+        ...scope,
+        ...((raw.flags & NAME_FLAG_HIDDEN) !== 0 ? { hidden: true } : {})
+      });
+      if (decoded.ranges !== undefined) {
+        namedRanges.push({ name: raw.name, ranges: decoded.ranges, ...scope });
+      }
     }
-    if (raw.tokens.length === 0) {
-      undefinedNames.push(raw.name);
-      return;
-    }
-    const decoded = decodeName(raw, formulaContext, part);
-    if (decoded === undefined) {
-      undecodableNames.push(raw.name);
-      return;
-    }
-    const scope = raw.sheetIndex === undefined ? {} : { localSheetId: raw.sheetIndex };
-    names.push({
-      name: raw.name,
-      text: decoded.text,
-      ...scope,
-      ...((raw.flags & NAME_FLAG_HIDDEN) !== 0 ? { hidden: true } : {})
-    });
-    if (decoded.ranges !== undefined) {
-      namedRanges.push({ name: raw.name, ranges: decoded.ranges, ...scope });
-    }
-  });
 
-  return {
-    sheets,
-    sheetNames,
-    definedNames: formulaContext.definedNames!,
-    formulaContext,
-    namedRanges,
-    names,
-    undecodableNames,
-    undefinedNames,
-    externSheets,
-    malformedSheets,
-    date1904,
-    ...(calcProperties === undefined ? {} : { calcProperties }),
-    ...(pivotCaches.length === 0 ? {} : { pivotCaches }),
-    ...(bookViews.length === 0
-      ? {}
-      : { bookViews: bookViews.filter((view): view is WorkbookViewLike => view !== undefined) }),
-    ...(bookProtection === undefined ? {} : { bookProtection })
-  };
+    return {
+      sheets,
+      sheetNames,
+      definedNames: formulaContext.definedNames!,
+      formulaContext,
+      namedRanges,
+      names,
+      undecodableNames,
+      undefinedNames,
+      externSheets,
+      malformedSheets,
+      date1904,
+      ...(calcProperties === undefined ? {} : { calcProperties }),
+      ...(pivotCaches.length === 0 ? {} : { pivotCaches }),
+      ...(bookViews.length === 0
+        ? {}
+        : { bookViews: bookViews.filter((view): view is WorkbookViewLike => view !== undefined) }),
+      ...(bookProtection === undefined ? {} : { bookProtection })
+    };
+  }
+
+  return { add, finish };
 }
 
 /**
@@ -995,7 +1047,7 @@ export function readWorksheetPart(
       continue;
     }
     if (spec.name === "BrtCellIgnoreEC") {
-      ignoredErrors.push(...readIgnoredErrors(record.payload, part));
+      appendAll(ignoredErrors, readIgnoredErrors(record.payload, part));
       continue;
     }
 

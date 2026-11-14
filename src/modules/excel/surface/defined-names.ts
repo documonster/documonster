@@ -20,6 +20,7 @@ import {
   definedNamesAddFormula,
   definedNamesCheckName,
   definedNamesGetAllEntries,
+  definedNamesGetEntryScoped,
   definedNamesIsPlaceable,
   definedNamesModel
 } from "@excel/core/defined-names";
@@ -90,10 +91,7 @@ export function get(
   check.required("name", name);
   check.string("name", name);
   const localSheetId = checkScope(check, options);
-  const key = excelNameKey(name);
-  return list(dn).find(
-    entry => excelNameKey(entry.name) === key && entry.localSheetId === localSheetId
-  );
+  return definedNamesGetEntryScoped(dn, name, localSheetId);
 }
 
 function checkScope(check: ArgumentChecks, options: unknown): number | undefined {

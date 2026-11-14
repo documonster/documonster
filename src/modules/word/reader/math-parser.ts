@@ -6,6 +6,7 @@
  * corresponding model interface (MathFraction, MathRadical, MathDelimiter, etc).
  */
 
+import { appendAll } from "@utils/array";
 import type { Mutable } from "@word/core/internal-utils";
 import {
   attrLocal as mathAttrVal,
@@ -430,7 +431,7 @@ function parseMathContent(el: XmlElement): MathContent[] {
       }
       // Recurse into oMath elements
       case "oMath": {
-        result.push(...parseMathContent(child));
+        appendAll(result, parseMathContent(child));
         break;
       }
     }
@@ -444,7 +445,7 @@ function parseMathBlock(oMathParaEl: XmlElement): MathBlock {
     if (child.type === "element") {
       const n = child.name.replace(/^m:/, "");
       if (n === "oMath") {
-        content.push(...parseMathContent(child));
+        appendAll(content, parseMathContent(child));
       }
     }
   }

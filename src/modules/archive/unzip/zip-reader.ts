@@ -44,6 +44,8 @@ import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
 import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
 import { isReadableStream, isWritableStream } from "@stream/core/type-guards";
 import { concatUint8Arrays, getTextDecoder, asPlainBytes } from "@utils/binary";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 
 function attachAbortToParseEntry(entry: ParseZipEntry, signal: AbortSignal): void {
   let cleanedUp = false;
@@ -772,6 +774,7 @@ export class UnzipEntry {
  *
  * Bytes, a string or a `Blob` are read again by every call and are unaffected.
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class ZipReader {
   private readonly _source: ArchiveSource | ArchiveBytes;
   private readonly _options: UnzipOptions;
@@ -1166,3 +1169,11 @@ export interface UnzipOptionsTar extends Omit<UnzipOptions, "onProgress"> {
 export interface UnzipOptionsZip extends UnzipOptions {
   format?: "zip";
 }
+
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `ZipReader`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface ZipReader extends AsyncDisposeMember {}
+
+defineAsyncDispose(ZipReader.prototype, function () {
+  return this.close();
+});

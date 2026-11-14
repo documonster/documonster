@@ -17,6 +17,8 @@ import type { Hyperlink } from "@excel/stream/hyperlink-reader";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
 import type { WorksheetReaderWorkbook } from "@excel/stream/worksheet-reader";
+import { streamBiffRecordBatches } from "@excel/stream/xlsb-record-stream";
+import type { StreamedRecord } from "@excel/stream/xlsb-record-stream";
 import { XlsbWorksheetReader } from "@excel/stream/xlsb-worksheet-stream-reader";
 import type {
   WorksheetState,
@@ -42,6 +44,7 @@ import {
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
 import { createPartDecoder } from "@excel/utils/part-decoder";
+import { createInterpretableRecordFilter } from "@excel/xlsb/binary";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 
@@ -52,26 +55,6 @@ import type { SchemaMatches } from "@utils/schema";
  */
 function iterateStream<T = Uint8Array | string>(stream: IterableStreamLike<T>): AsyncGenerator<T> {
   return withContainerErrors(iterateRawStream(stream));
-}
-
-/** The binary package's fixed part paths — the `.bin` counterparts of `OOXML_PATHS`. */
-/** A ZIP entry's bytes, joined. Used only for the three small binary parts every sheet depends on. */
-async function collectXlsbBytes(entry: AsyncIterable<Uint8Array | string>): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of entry as AsyncIterable<Uint8Array | string>) {
-    chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk);
-  }
-  let total = 0;
-  for (const chunk of chunks) {
-    total += chunk.length;
-  }
-  const joined = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return joined;
 }
 
 /**
@@ -119,6 +102,7 @@ import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { Readable, Transform, Streams } from "@stream";
 import { EventEmitter } from "@utils/event-emitter";
 import { decodeOoxmlEscape } from "@utils/utils";
+import { createYieldBudget, PACED_SLICE_LENGTH, paceChunks, runStepsPaced } from "@utils/yield";
 import { SaxParser, saxStream } from "@xml/sax";
 import type { XmlSaxTag } from "@xml/types";
 
@@ -511,6 +495,19 @@ export abstract class WorkbookReaderBase<
   /** Number formats by style index, from `styles.bin`. */
   protected _xlsbNumberFormats?: readonly (string | undefined)[];
   protected _sheetByRelId?: Record<string, SheetMetadata>;
+  /** The read's yield point, shared by every part so the budget counts the work of the whole read. */
+  private _yieldPoint = createYieldBudget();
+
+  /**
+   * A part's chunks as a part reader is to consume them: in slices, with the event loop given a turn whenever the read
+   * has worked for its budget — see `paceChunks`. Every part goes through here, so a read lets the event loop run
+   * however its source delivers the data: a stored part of a workbook in memory, a sheet spooled in memory, a file.
+   */
+  protected _readPart(
+    chunks: AsyncIterable<Uint8Array | string> | Iterable<Uint8Array | string>
+  ): AsyncGenerator<Uint8Array | string> {
+    return paceChunks(chunks, this._yieldPoint);
+  }
 
   getHyperlinkReader(sheetNo: number | string): THyperlinkReader | undefined {
     return this._hyperlinkReadersBySheetNo?.[String(sheetNo)];
@@ -661,6 +658,7 @@ export abstract class WorkbookReaderBase<
       this.options = resolveReaderOptions(options);
     }
     const stream = (this.stream = this._getStream(input || this.input));
+    this._yieldPoint = createYieldBudget();
     const waitingWorksheets: TWaitingWorksheet[] = [];
 
     try {
@@ -689,7 +687,7 @@ export abstract class WorkbookReaderBase<
 
   private async _parseRels(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new RelationshipsXform();
-    this.workbookRels = await parseXformStream(xform, iterateStream(entry));
+    this.workbookRels = await parseXformStream(xform, this._readPart(iterateStream(entry)));
 
     // Build fast lookup for worksheet relationship ids.
     this._workbookRelIdByTarget = Object.create(null) as Record<string, string>;
@@ -703,7 +701,7 @@ export abstract class WorkbookReaderBase<
   private async _parseWorkbook(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     this._emitEntry({ type: "workbook" });
     const workbook = new WorkbookXform();
-    this.model = await parseXformStream(workbook, iterateStream(entry));
+    this.model = await parseXformStream(workbook, this._readPart(iterateStream(entry)));
     this.properties = workbook.map?.workbookPr as WorkbookPropertiesXform;
 
     // Build fast lookup for sheet metadata by relationship id.
@@ -841,7 +839,7 @@ export abstract class WorkbookReaderBase<
         }
       });
 
-      await saxStream(parser, scanningChunks(iterateStream(entry), parserPrefixes));
+      await saxStream(parser, scanningChunks(this._readPart(iterateStream(entry)), parserPrefixes));
       return;
     }
 
@@ -956,7 +954,7 @@ export abstract class WorkbookReaderBase<
       }
     });
 
-    for await (const chunk of iterateStream(entry)) {
+    for await (const chunk of this._readPart(iterateStream(entry))) {
       const chunkStr =
         typeof chunk === "string"
           ? chunk
@@ -990,13 +988,13 @@ export abstract class WorkbookReaderBase<
     this._emitEntry({ type: "styles" });
     if (this.options.styles === "cache") {
       this.styles = new StylesXform();
-      await parseXformStream(this.styles, iterateStream(entry));
+      await parseXformStream(this.styles, this._readPart(iterateStream(entry)));
     }
   }
 
   private async _parseMetadata(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new MetadataXform();
-    const result = await parseXformStream(xform, iterateStream(entry));
+    const result = await parseXformStream(xform, this._readPart(iterateStream(entry)));
     if (result) {
       this.hasDynamicArrayMetadata = !!result.hasDynamicArrays;
       this.dynamicArrayCmIndices = result.dynamicArrayCmIndices;
@@ -1006,18 +1004,17 @@ export abstract class WorkbookReaderBase<
   /**
    * The binary workbook part: sheet names, ids, states and `date1904`.
    *
-   * Read whole rather than streamed, and that is not a compromise — `workbook.bin` is the package's table of contents.
-   * It is kilobytes for a workbook of any size, and every sheet after it needs all of it.
+   * Every sheet after it needs all of it, so it is held whole once read — but read record by record as the others are:
+   * it grows with the workbook's sheets and defined names, and is not always small.
    */
   protected async _parseXlsbWorkbook(
     entry: IterableStreamLike<Uint8Array | string>
   ): Promise<void> {
     this._emitEntry({ type: "workbook" });
-    const { readWorkbookPart } = await import("@excel/xlsb/read/parts");
-    this._xlsbWorkbook = readWorkbookPart(
-      await collectXlsbBytes(iterateStream(entry)),
-      XLSB_PATHS.workbook
-    ) as never;
+    const { createWorkbookPartReader } = await import("@excel/xlsb/read/parts");
+    const reader = createWorkbookPartReader(XLSB_PATHS.workbook);
+    await this._readXlsbRecords(entry, XLSB_PATHS.workbook, record => reader.add(record));
+    this._xlsbWorkbook = (await runStepsPaced(reader.finish(), this._yieldPoint)) as never;
   }
 
   /**
@@ -1030,11 +1027,10 @@ export abstract class WorkbookReaderBase<
   protected async _parseXlsbSharedStrings(
     entry: IterableStreamLike<Uint8Array | string>
   ): Promise<void> {
-    const { readSharedStrings } = await import("@excel/xlsb/read/parts");
-    this._xlsbSharedStrings = readSharedStrings(
-      await collectXlsbBytes(iterateStream(entry)),
-      XLSB_PATHS.sharedStrings
-    ).texts;
+    const { createSharedStringsReader } = await import("@excel/xlsb/read/parts");
+    const reader = createSharedStringsReader(XLSB_PATHS.sharedStrings);
+    await this._readXlsbRecords(entry, XLSB_PATHS.sharedStrings, record => reader.add(record));
+    this._xlsbSharedStrings = reader.finish().texts;
   }
 
   /** The style table, for the number formats that turn a serial into a date. */
@@ -1044,11 +1040,34 @@ export abstract class WorkbookReaderBase<
     // constructor, so it has no choice), which is why the module cannot move into a chunk of its
     // own. It is still absent from a reader-only bundle — measured on
     // `console.log(Stream.WorkbookReader)` — and that is the consumer this protects.
-    const { readStyles } = await import("@excel/xlsb/styles");
-    const table = readStyles(await collectXlsbBytes(iterateStream(entry)), XLSB_PATHS.styles);
-    this._xlsbNumberFormats = (
-      table as unknown as { numberFormats?: readonly (string | undefined)[] }
-    ).numberFormats;
+    const { createStylesReader } = await import("@excel/xlsb/styles");
+    const reader = createStylesReader(XLSB_PATHS.styles);
+    await this._readXlsbRecords(entry, XLSB_PATHS.styles, record => reader.add(record));
+    this._xlsbNumberFormats = reader.finish().numberFormats;
+  }
+
+  /**
+   * Hand a binary part's interpretable records to `add` as the part arrives.
+   *
+   * Record by record rather than collected and decoded in one call, as an XML part is read element by element: the
+   * shared-string table grows with the workbook's distinct strings, the style table with its distinct formats and the
+   * workbook part with its sheets and names, and a single call blocked the event loop for as long as each took — 100 ms
+   * for 200,000 strings.
+   */
+  private async _readXlsbRecords(
+    entry: IterableStreamLike<Uint8Array | string>,
+    part: string,
+    add: (record: StreamedRecord) => void
+  ): Promise<void> {
+    const interpretable = createInterpretableRecordFilter();
+    const chunks = this._readPart(iterateStream(entry)) as AsyncIterable<Uint8Array>;
+    for await (const batch of streamBiffRecordBatches(chunks, part)) {
+      for (const record of batch) {
+        if (interpretable(record.id)) {
+          add(record);
+        }
+      }
+    }
   }
 
   /**
@@ -1165,7 +1184,16 @@ export abstract class WorkbookReaderBase<
         format: "workbook"
       })
     ) as unknown as Readable;
-    const zip = createParse({ forceStream: true, checkCrc32: this._checkCrc32 });
+    // The parser's one-shot `inflateRawSync` path inflates a part of up to 5 MB in a single call and hands it over
+    // whole: slicing a chunk (see `_readPart`) cannot shorten that call, and the part would be held whole besides,
+    // so it is kept to parts no larger than a slice — a fraction of a millisecond each, where setting up a
+    // streaming inflate for every small part of a workbook of hundreds of sheets cost a quarter more. Larger parts
+    // are inflated as a stream, in pieces. The browser parser has no such path.
+    const zip = createParse({
+      forceStream: true,
+      checkCrc32: this._checkCrc32,
+      thresholdBytes: PACED_SLICE_LENGTH
+    });
     // Bidirectional error propagation, guarded against re-entry: each side
     // marks itself "settled" before forwarding so the partner's destroy/emit
     // doesn't bounce the error back into an infinite loop.
@@ -1249,15 +1277,15 @@ export abstract class WorkbookReaderBase<
                 break;
             }
 
-            // A part the caller has not asked for is not opened at all: it falls through to `autodrain`. One that is handed
-            // out is drained once the caller moves past it — see `handOut`.
+            // A part the caller has not asked for is not opened at all: it falls through to `autodrain`. One that
+            // is handed out is drained once the caller moves past it — see `handOut`.
             sheetNo = emitWorksheets ? getXlsbWorksheetNo(normalizedPath)?.toString() : undefined;
             if (sheetNo) {
               // The same prerequisite test the XML branch makes, for the same reason: a cell record holds an index into
               // the shared-string table rather than a string, so a sheet that arrives first has to be spooled and come
               // back later. `_storeWaitingWorksheet` is shared.
               if (this._xlsbSharedStrings !== undefined && !!this._xlsbWorkbook) {
-                const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
+                const part = handOut(this._readPart(iterateStream(entry)), `worksheet ${sheetNo}`);
                 yield* this._parseXlsbWorksheet(part.chunks, sheetNo);
                 await releasePart(entry, part, false);
                 continue;
@@ -1278,7 +1306,7 @@ export abstract class WorkbookReaderBase<
                 !!this.model &&
                 (this.options.sharedStrings !== "cache" || !!this.sharedStrings);
               if (hasPrerequisites) {
-                const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
+                const part = handOut(this._readPart(iterateStream(entry)), `worksheet ${sheetNo}`);
                 yield* this._parseWorksheet(part.chunks, sheetNo);
                 await releasePart(entry, part, false);
                 continue;
@@ -1294,7 +1322,10 @@ export abstract class WorkbookReaderBase<
               (this.options.hyperlinks === "cache" || this.options.hyperlinks === "emit")
             ) {
               const source = boundedPart(entry, this._maxEntrySize);
-              const part = handOut(iterateStream(source), `the hyperlinks of sheet ${sheetNo}`);
+              const part = handOut(
+                this._readPart(iterateStream(source)),
+                `the hyperlinks of sheet ${sheetNo}`
+              );
               yield* this._parseHyperlinks(part.chunks, sheetNo);
               await releasePart(entry, part, true);
               continue;
@@ -1387,12 +1418,7 @@ class WorkbookReader extends WorkbookReaderBase<
     waitingWorksheets: WaitingWorksheet[]
   ): AsyncIterableIterator<WorksheetReadyEvent<WorksheetReader>> {
     for (const ws of waitingWorksheets) {
-      const part = handOut(
-        (async function* () {
-          yield* ws.data;
-        })(),
-        `worksheet ${ws.sheetNo}`
-      );
+      const part = handOut(this._readPart(ws.data), `worksheet ${ws.sheetNo}`);
       yield* ws.isXlsb
         ? this._parseXlsbWorksheet(part.chunks, ws.sheetNo)
         : this._parseWorksheet(part.chunks, ws.sheetNo);

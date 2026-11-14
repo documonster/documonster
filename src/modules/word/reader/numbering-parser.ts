@@ -6,6 +6,8 @@
  * (`numbering-writer.ts` is already separate from `styles-writer.ts`).
  */
 
+import { runSteps } from "@utils/yield";
+import type { Steps } from "@utils/yield";
 import type { Mutable } from "@word/core/internal-utils";
 import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
 import {
@@ -26,17 +28,24 @@ import type {
 } from "@word/types";
 import { ptToEmu } from "@word/units";
 import { findChild } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
+import type { XmlDocument, XmlElement } from "@xml/types";
 
-export function parseNumberingXml(
-  xmlStr: string,
-  maxDepth?: number
-): {
+/** What `word/numbering.xml` holds — see {@link parseNumberingXml}. */
+export interface ParsedNumbering {
   abstractNums: AbstractNumbering[];
   instances: NumberingInstance[];
   numPicBullets: NumPicBullet[];
-} {
-  const doc = parsePartXml(xmlStr, maxDepth);
+}
+
+export function parseNumberingXml(xmlStr: string, maxDepth?: number): ParsedNumbering {
+  return runSteps(numberingOfPart(parsePartXml(xmlStr, maxDepth)));
+}
+
+/**
+ * The definitions of a parsed `word/numbering.xml`, a definition per step — so the streaming reader can give the event
+ * loop a turn while it reads a large numbering part (`runStepsPaced`), with the code {@link parseNumberingXml} runs.
+ */
+export function* numberingOfPart(doc: XmlDocument): Steps<ParsedNumbering> {
   const root = doc.root;
   const abstractNums: AbstractNumbering[] = [];
   const instances: NumberingInstance[] = [];
@@ -87,6 +96,7 @@ export function parseNumberingXml(
       }
     }
     numPicBullets.push(pb);
+    yield;
   }
 
   for (const absEl of findChildrenNs(root, "abstractNum")) {
@@ -112,6 +122,7 @@ export function parseNumberingXml(
       abs.styleLink = attrVal(styleLinkEl, "val");
     }
     abstractNums.push(abs);
+    yield;
   }
 
   for (const numEl of findChildrenNs(root, "num")) {
@@ -139,6 +150,7 @@ export function parseNumberingXml(
       abstractNumId: absIdEl ? (attrInt(absIdEl, "val") ?? 0) : 0,
       overrides: overrides.length > 0 ? overrides : undefined
     });
+    yield;
   }
 
   return { abstractNums, instances, numPicBullets };

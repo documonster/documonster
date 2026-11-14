@@ -54,7 +54,10 @@ export interface DecodedRecord {
  *          two different kinds of "not decoded", both of which mean the caller must
  *          not pretend to know what the bytes say.
  */
-export function decodeRecord(record: BiffRecord, context: string): DecodedRecord | undefined {
+export function decodeRecord(
+  record: Pick<BiffRecord, "id" | "payload">,
+  context: string
+): DecodedRecord | undefined {
   const spec = recordSpec(record.id);
   if (!spec?.fields) {
     return undefined;

@@ -28,6 +28,12 @@ export interface CfbReadOptions {
    * never be longer than the file, so this bounds memory only below the input's own size.
    */
   readonly maxStreamSize?: number;
+  /**
+   * Hand a stream stored in consecutive sectors out as a view of `buffer` rather than a copy — for a caller that only
+   * reads the streams, and not after it has let go of `buffer`. A stream in scattered sectors is still assembled.
+   * Default: `false`, so a caller can keep and edit what it is given without touching its input.
+   */
+  readonly views?: boolean;
 }
 
 /** A stream entry extracted from/written to a CFB file. */
@@ -90,6 +96,13 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
   // Helper: sector offset in file
   const sectorOffset = (sector: number) => (sector + 1) * sectorSize;
 
+  // The header's counts bound the walk below, but are not trusted to: an 11 KB file claiming two hundred million
+  // DIFAT sectors in a chain that named itself ran for seconds and two gigabytes before failing with `Invalid array
+  // length`. What is read is held to what the file holds instead — a DIFAT chain that comes back to a sector it has
+  // been through is a loop, and a file of N sectors has at most N FAT sectors — so a count that is merely wrong,
+  // over tables that are whole, still reads.
+  const fileSectors = Math.max(0, Math.floor(buffer.length / sectorSize) - 1);
+
   // Read DIFAT: first 109 entries in header, then chained
   const difat: number[] = [];
   for (let i = 0; i < 109 && difat.length < fatSectorCount; i++) {
@@ -99,12 +112,21 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
     }
   }
   // Follow DIFAT chain
+  const difatVisited = new Uint8Array(fileSectors);
   let difatSector = firstDifatSector;
-  for (let i = 0; i < difatSectorCount && difatSector !== ENDOFCHAIN; i++) {
+  for (
+    let i = 0;
+    i < difatSectorCount && difatSector !== ENDOFCHAIN && difat.length < fatSectorCount;
+    i++
+  ) {
     const off = sectorOffset(difatSector);
     if (off + sectorSize > buffer.length) {
       throw new CfbError(`CFB: DIFAT sector ${difatSector} lies outside the file`);
     }
+    if (difatVisited[difatSector] === 1) {
+      throw new CfbError(`CFB: the DIFAT chain comes back to sector ${difatSector}`);
+    }
+    difatVisited[difatSector] = 1;
     const entriesPerSector = sectorSize / 4 - 1; // last 4 bytes = next DIFAT sector
     for (let j = 0; j < entriesPerSector && difat.length < fatSectorCount; j++) {
       const val = view.getUint32(off + j * 4, true);
@@ -113,6 +135,11 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
       }
     }
     difatSector = view.getUint32(off + entriesPerSector * 4, true);
+  }
+  if (difat.length > fileSectors) {
+    throw new CfbError(
+      `CFB: the DIFAT lists ${difat.length} FAT sectors; the file holds ${fileSectors}`
+    );
   }
 
   // Build FAT (sector allocation table). Every FAT sector must lie inside the file, so the table is never longer
@@ -128,19 +155,30 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
     }
   }
 
-  // Read sector chain. `visited` stops a cycle, and only sectors inside the file are read, so a chain is never longer
-  // than the file; `maxStreamSize` bounds it below that.
+  // Read sector chain. A sector seen twice stops a cycle, and only sectors inside the file are read, so a chain is
+  // never longer than the file; `maxStreamSize` bounds it below that. `limit` is how much of it the caller keeps:
+  // the walk stops once the chain has that much, so a stream is read up to its declared size and no further.
+  //
+  // One allocation and one copy per run of consecutive sectors — a stream is usually written in consecutive
+  // sectors, so mostly one `set`. The sectors a chain has visited are marked with the chain's number in one array
+  // for the whole file, so a file of many small streams pays for the marks once.
   const MAX_CHAIN_BYTES = options.maxStreamSize ?? 256 * 1024 * 1024;
-  const readChain = (startSector: number): Uint8Array => {
-    const sectors: Uint8Array[] = [];
+  const visitedBy = new Uint32Array(fat.length);
+  let chain = 0;
+  const readChain = (startSector: number, limit = Infinity): Uint8Array => {
+    const sectors: number[] = [];
+    chain++;
     let sector = startSector;
     let totalBytes = 0;
-    const visited = new Set<number>();
-    while (sector !== ENDOFCHAIN && sector < fat.length && !visited.has(sector)) {
-      visited.add(sector);
-      const off = sectorOffset(sector);
-      if (off + sectorSize <= buffer.length) {
-        sectors.push(buffer.slice(off, off + sectorSize));
+    while (
+      sector !== ENDOFCHAIN &&
+      sector < fat.length &&
+      visitedBy[sector] !== chain &&
+      totalBytes < limit
+    ) {
+      visitedBy[sector] = chain;
+      if (sectorOffset(sector) + sectorSize <= buffer.length) {
+        sectors.push(sector);
         totalBytes += sectorSize;
         if (totalBytes > MAX_CHAIN_BYTES) {
           throw new CfbError(
@@ -149,15 +187,25 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
           );
         }
       }
-      sector = fat[sector];
+      sector = fat[sector]!;
     }
-    // Concatenate
-    const total = sectors.reduce((sum, s) => sum + s.length, 0);
-    const result = new Uint8Array(total);
-    let pos = 0;
-    for (const s of sectors) {
-      result.set(s, pos);
-      pos += s.length;
+    const length = Math.min(totalBytes, limit);
+    if (options.views === true && isOneRun(sectors)) {
+      const from = sectors.length === 0 ? 0 : sectorOffset(sectors[0]!);
+      return buffer.subarray(from, from + length);
+    }
+    const result = new Uint8Array(length);
+    for (let i = 0, pos = 0; i < sectors.length && pos < result.length;) {
+      // The run of consecutive sectors starting here, copied in one piece.
+      let run = 1;
+      while (i + run < sectors.length && sectors[i + run] === sectors[i]! + run) {
+        run++;
+      }
+      const from = sectorOffset(sectors[i]!);
+      const length = Math.min(run * sectorSize, result.length - pos);
+      result.set(buffer.subarray(from, from + length), pos);
+      pos += length;
+      i += run;
     }
     return result;
   };
@@ -186,9 +234,10 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
         ? Number(dirView.getBigUint64(off + 120, true))
         : dirView.getUint32(off + 120, true);
 
-    // Decode UTF-16LE name (nameSize includes null terminator)
+    // Decode UTF-16LE name (nameSize includes null terminator). The name field is 64 bytes: a larger size read on into
+    // the entry's other fields, and past the last entry out of the directory (a bare `RangeError`).
     let name = "";
-    const nameLen = Math.max(0, nameSize - 2); // exclude null terminator
+    const nameLen = Math.min(Math.max(0, nameSize - 2), 62); // exclude null terminator
     for (let j = 0; j < nameLen; j += 2) {
       name += String.fromCharCode(dirView.getUint16(off + j, true));
     }
@@ -213,6 +262,10 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
     miniStream = readChain(rootEntry.startSector);
   }
 
+  const miniVisitedBy = new Uint32Array(
+    miniStream === undefined ? 0 : Math.ceil(miniStream.length / miniSectorSize)
+  );
+
   // Read a stream from mini-sectors. The declared `size` originates from a
   // directory entry inside the file and must therefore be treated as
   // untrusted; cap it at the actual mini-stream length to prevent malformed
@@ -225,9 +278,15 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
     const result = new Uint8Array(safeSize);
     let sector = startSector;
     let pos = 0;
-    const visited = new Set<number>();
-    while (sector !== ENDOFCHAIN && pos < safeSize && !visited.has(sector)) {
-      visited.add(sector);
+    // Marked with the chain's number, as `readChain` marks sectors.
+    chain++;
+    while (
+      sector !== ENDOFCHAIN &&
+      pos < safeSize &&
+      sector < miniVisitedBy.length &&
+      miniVisitedBy[sector] !== chain
+    ) {
+      miniVisitedBy[sector] = chain;
       const off = sector * miniSectorSize;
       const copyLen = Math.min(miniSectorSize, safeSize - pos);
       if (off + copyLen <= miniStream.length) {
@@ -239,8 +298,10 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
     return result;
   };
 
-  // Extract stream entries
+  // Extract stream entries. Each sector belongs to one stream, so together they cannot hold more than the file: several
+  // entries naming one chain each copied it again, and a 1.6 MB file of 3,000 such entries allocated 3 GB.
   const entries: CfbEntry[] = [];
+  let total = 0;
   for (let i = 1; i < dirEntries.length; i++) {
     const entry = dirEntries[i];
     if (entry.type !== 2 || entry.name === "") {
@@ -257,14 +318,29 @@ export function readCfb(buffer: Uint8Array, options: CfbReadOptions = {}): CfbEn
       data = readMiniChain(entry.startSector, safeSize);
     } else {
       // Read from regular sectors
-      const raw = readChain(entry.startSector);
-      data = raw.slice(0, safeSize);
+      data = readChain(entry.startSector, safeSize);
+    }
+    total += data.length;
+    if (total > buffer.length) {
+      throw new CfbError(
+        `CFB: the streams hold more than the file's ${buffer.length} bytes — entries share sectors`
+      );
     }
 
     entries.push({ name: entry.name, data });
   }
 
   return entries;
+}
+
+/** Whether `sectors` are consecutive, each the one after the last. */
+function isOneRun(sectors: readonly number[]): boolean {
+  for (let i = 1; i < sectors.length; i++) {
+    if (sectors[i] !== sectors[i - 1]! + 1) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // =============================================================================

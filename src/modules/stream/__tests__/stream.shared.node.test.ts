@@ -40,9 +40,26 @@ import {
 import { EventEmitter } from "@utils/event-emitter";
 import { describe } from "vitest";
 
-// Node.js v24+ moved Readable.prototype.compose out of streamReturningOperators,
-// so it returns a Duplex directly instead of wrapping through Readable.from().
-const nodeMajor = parseInt(process.versions.node, 10);
+// What the running Node does, probed rather than read off its version: the behaviour changed inside a major line —
+// Node 24.11 still wraps `compose`'s result through `Readable.from()` and leaves a `duplexPair` peer open, which later
+// releases do not — so a version number named the wrong one.
+const nativeComposeReturnsDuplex = ((): boolean => {
+  const composed = Readable.from([]).compose(new PassThrough());
+  // Destroyed unfinished, it emits an `AbortError` nothing else would listen for.
+  composed.on("error", () => {});
+  composed.destroy();
+  return typeof (composed as { write?: unknown }).write === "function";
+})();
+const duplexPairDestroysPeerOnError = await new Promise<boolean>(resolve => {
+  const [side, peer] = duplexPair();
+  side.on("error", () => {});
+  peer.on("error", () => {});
+  side.destroy(new Error("probe"));
+  setTimeout(() => {
+    resolve(peer.destroyed === true);
+    peer.destroy();
+  }, 20);
+});
 
 describe("Stream Module - Shared Tests (Node)", () => {
   const imports: StreamModuleImports = {
@@ -99,8 +116,8 @@ describe("Stream Module - Shared Tests (Node)", () => {
     uint8ArrayToString,
     uint8ArrayEquals,
     uint8ArrayIndexOf,
-    nativeComposeReturnsDuplex: nodeMajor >= 24,
-    duplexPairDestroysPeerOnError: nodeMajor >= 24
+    nativeComposeReturnsDuplex,
+    duplexPairDestroysPeerOnError
   };
 
   runStreamTests(imports);

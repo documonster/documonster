@@ -83,9 +83,10 @@ export const AGILE_BLOCK_KEYS = SHARED_BLOCK_KEYS;
  * Verify a password against the encryption info.
  *
  * @returns True if password is correct.
+ * @throws {DocxDecryptionError} `reason: "malformed"` when the info's verifier is damaged.
  */
 export function verifyPassword(password: string, info: AgileEncryptionInfo): Promise<boolean> {
-  return verifyAgilePassword(password, info);
+  return translated(() => verifyAgilePassword(password, info));
 }
 
 /**

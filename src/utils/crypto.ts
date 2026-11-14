@@ -222,14 +222,6 @@ export function hash(algorithm: string, data: Uint8Array): Uint8Array {
   return new Uint8Array(crypto.hash(algo, data, "buffer"));
 }
 
-/**
- * Async version of `hash()` — same behavior, but returns a Promise for API
- * parity with the browser version.
- */
-export async function hashAsync(algorithm: string, data: Uint8Array): Promise<Uint8Array> {
-  return hash(algorithm, data);
-}
-
 // =============================================================================
 // RSA signature operations (async — for digital signatures)
 // =============================================================================

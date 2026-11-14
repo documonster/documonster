@@ -30,6 +30,8 @@ export { hasWorkerSupport } from "@archive/compression/compress";
 export { createAbortError } from "@archive/compression/worker-pool/pool.base";
 
 import { ArchiveWorkerUnsupportedError } from "@archive/core/errors";
+import { defineDispose } from "@utils/dispose";
+import type { DisposeMember } from "@utils/dispose";
 
 function throwStubError(operation: string): never {
   throw new ArchiveWorkerUnsupportedError(operation);
@@ -45,6 +47,7 @@ function rejectStub(operation: string): Promise<never> {
  * every call throws {@link ArchiveWorkerUnsupportedError} (the constructor included) except
  * `terminate`, a no-op.
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class WorkerPool {
   constructor(options?: WorkerPoolOptions) {
     void options;
@@ -146,3 +149,11 @@ export async function inflateBatchWithPool(
   void items;
   return rejectStub("Compression.Workers.inflateBatch");
 }
+
+// The type of what `defineDispose` installs below: `using` disposes of a `WorkerPool`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface WorkerPool extends DisposeMember {}
+
+defineDispose(WorkerPool.prototype, function () {
+  this.terminate();
+});

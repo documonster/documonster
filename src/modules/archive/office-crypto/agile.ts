@@ -26,13 +26,14 @@ import { textDecoder, textEncoder } from "@utils/binary";
 import {
   aesCbcDecryptRaw as aesCbcDecryptRawSync,
   aesCbcEncryptRaw as aesCbcEncryptRawSync,
-  hash as hashSyncMaybe,
-  hashAsync,
+  hash,
   randomBytes
 } from "@utils/crypto";
 import { canonicalHashAlgorithm, compactHashAlgorithm } from "@utils/hash-names";
 import type { CompactHashAlgorithm } from "@utils/hash-names";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils";
+import { createYieldBudget, PACED_SLICE_LENGTH } from "@utils/yield";
+import type { YieldPoint } from "@utils/yield";
 
 /**
  * Why an encrypted package could not be decrypted (or a key derived): the password is wrong; the file uses an
@@ -116,30 +117,12 @@ export interface EncryptOptions {
 /** Whether bytes start with the CFB signature — the container every encrypted Office package is stored in. */
 export { isCfb };
 
-/**
- * Detect whether the platform's `@utils/crypto.hash` supports the requested
- * algorithm synchronously. Node's implementation accepts every OpenSSL
- * digest (SHA-1/256/384/512, MD5); the browser implementation only ships
- * synchronous SHA-256 and MD5 — anything else throws.
- *
- * The detection result is cached per algorithm so we only pay the probe
- * cost once.
- */
-const _syncHashCache = new Map<string, boolean>();
-function canHashSync(algorithm: string): boolean {
-  const cached = _syncHashCache.get(algorithm);
-  if (cached !== undefined) {
-    return cached;
-  }
-  let ok = false;
-  try {
-    hashSyncMaybe(algorithm, new Uint8Array(0));
-    ok = true;
-  } catch {
-    ok = false;
-  }
-  _syncHashCache.set(algorithm, ok);
-  return ok;
+/** What {@link deriveAgileKey} derives a key from. */
+interface KeyDerivationInfo {
+  readonly keySalt: Uint8Array;
+  readonly spinCount: number;
+  readonly hashAlgorithm: string;
+  readonly keyBits: number;
 }
 
 /**
@@ -153,13 +136,26 @@ function canHashSync(algorithm: string): boolean {
  */
 export async function deriveAgileKey(
   password: string,
-  info: {
-    keySalt: Uint8Array;
-    spinCount: number;
-    hashAlgorithm: string;
-    keyBits: number;
-  },
+  info: KeyDerivationInfo,
   blockKey: Uint8Array
+): Promise<Uint8Array> {
+  const owned = ownKeyInfo(info);
+  const key = ownBytes(blockKey);
+  return agileKeyFromSpun(await spinAgilePassword(password, owned), owned, key);
+}
+
+/**
+ * `H_spinCount` of {@link deriveAgileKey}: the part of the derivation every block key shares, so a caller deriving
+ * several keys from one password — the verifier's two and the package key's — spins once rather than once per key.
+ *
+ * The spin is the cost of the derivation, 100,000 digests by default, and ran as one synchronous loop: it blocked the
+ * event loop for the whole of it, three times over per encrypted file read or written. It yields once it has worked for
+ * the budget, as every long loop in this package does.
+ */
+async function spinAgilePassword(
+  password: string,
+  info: { keySalt: Uint8Array; spinCount: number; hashAlgorithm: string },
+  yieldIfDue: YieldPoint = createYieldBudget()
 ): Promise<Uint8Array> {
   const pwdBytes = stringToUtf16LE(password);
   const hashName = mapHashName(info.hashAlgorithm);
@@ -170,26 +166,31 @@ export async function deriveAgileKey(
   const iterAndPrev = new Uint8Array(4 + getHashSizeFor(hashName));
   const iterView = new DataView(iterAndPrev.buffer, 0, 4);
 
-  let h: Uint8Array;
-  if (canHashSync(hashName)) {
-    // Fast path: ~100,000 synchronous digests, no microtask churn.
-    h = hashSyncMaybe(hashName, concat(info.keySalt, pwdBytes));
-    for (let i = 0; i < info.spinCount; i++) {
-      iterView.setUint32(0, i, true);
-      iterAndPrev.set(h, 4);
-      h = hashSyncMaybe(hashName, iterAndPrev);
+  // Synchronous digests — every algorithm the format names has one on every platform (see `@utils/crypto`'s `hash`),
+  // which in a browser is five times faster than awaiting one Web Crypto digest per step. The clock is read once per
+  // batch of them. `yieldIfDue` is the operation's: work done before the spin counts against the same budget.
+  let h = hash(hashName, concat(info.keySalt, pwdBytes));
+  for (let i = 0; i < info.spinCount; i++) {
+    iterView.setUint32(0, i, true);
+    iterAndPrev.set(h, 4);
+    h = hash(hashName, iterAndPrev);
+    if ((i & SPIN_BATCH_MASK) === SPIN_BATCH_MASK) {
+      await yieldIfDue();
     }
-    h = hashSyncMaybe(hashName, concat(h, blockKey));
-  } else {
-    // Browser fallback: Web Crypto SHA-1/384/512 are async-only.
-    h = await hashAsync(hashName, concat(info.keySalt, pwdBytes));
-    for (let i = 0; i < info.spinCount; i++) {
-      iterView.setUint32(0, i, true);
-      iterAndPrev.set(h, 4);
-      h = await hashAsync(hashName, iterAndPrev);
-    }
-    h = await hashAsync(hashName, concat(h, blockKey));
   }
+  return h;
+}
+
+/** Digests the spin loop runs between two looks at the clock, less one: a mask, as the loop counts in powers of two. */
+const SPIN_BATCH_MASK = 1023;
+
+/** The key {@link deriveAgileKey} derives for `blockKey`, from the password's {@link spinAgilePassword}. */
+function agileKeyFromSpun(
+  spun: Uint8Array,
+  info: { hashAlgorithm: string; keyBits: number },
+  blockKey: Uint8Array
+): Uint8Array {
+  const h = hash(mapHashName(info.hashAlgorithm), concat(spun, blockKey));
 
   // Truncate to keySize. The hash size MUST be at least the requested
   // key length — otherwise we'd hand the AES layer a short key buffer
@@ -226,43 +227,45 @@ export const AGILE_BLOCK_KEYS = {
 /**
  * Whether `password` opens a package with this encryption info, checked against its password verifier
  * (MS-OFFCRYPTO §2.3.4.13) without decrypting the package.
+ *
+ * @throws {OfficeCryptoError} `reason: "malformed"` when the verifier is not whole AES blocks: a damaged file is not a
+ * wrong password, and every error used to be answered `false`.
  */
 export async function verifyAgilePassword(
   password: string,
   info: AgileEncryptionInfo
 ): Promise<boolean> {
-  try {
-    const verifierInputKey = await deriveAgileKey(
-      password,
-      info,
-      AGILE_BLOCK_KEYS.verifierHashInput
-    );
-    // MS-OFFCRYPTO §2.3.4.13: these blobs are AES-CBC with the plaintext zero-padded to the block boundary — NOT
-    // PKCS#7 — and the key encryptor's salt as the IV.
-    const verifierInput = aesCbcRawDecrypt(
-      info.encryptedVerifierHashInput,
-      verifierInputKey,
-      info.keySalt
-    );
-    // The plaintext is exactly saltSize (16) bytes; trim the zero padding before hashing.
-    const computedHash = await hashAsync(
-      mapHashName(info.hashAlgorithm),
-      verifierInput.slice(0, info.blockSize)
-    );
-    const verifierValueKey = await deriveAgileKey(
-      password,
-      info,
-      AGILE_BLOCK_KEYS.verifierHashValue
-    );
-    const expectedHash = aesCbcRawDecrypt(
-      info.encryptedVerifierHashValue,
-      verifierValueKey,
-      info.keySalt
-    );
-    return bytesEqual(computedHash.slice(0, info.hashSize), expectedHash.slice(0, info.hashSize));
-  } catch {
-    return false;
-  }
+  const owned = ownInfo(info);
+  return verifySpun(await spinAgilePassword(password, owned), owned);
+}
+
+/**
+ * {@link verifyAgilePassword}, from the password's {@link spinAgilePassword}. A verifier that is not whole AES
+ * blocks is malformed and refused as such, not answered as a wrong password.
+ */
+function verifySpun(spun: Uint8Array, info: AgileEncryptionInfo): boolean {
+  const verifierInputKey = agileKeyFromSpun(spun, info, AGILE_BLOCK_KEYS.verifierHashInput);
+  // MS-OFFCRYPTO §2.3.4.13: these blobs are AES-CBC with the plaintext zero-padded to the block boundary — NOT
+  // PKCS#7 — and the key encryptor's salt as the IV.
+  const verifierInput = aesCbcRawDecrypt(
+    info.encryptedVerifierHashInput,
+    verifierInputKey,
+    info.keySalt,
+    "encryptedVerifierHashInput"
+  );
+  // The plaintext is exactly saltSize (16) bytes; trim the zero padding before hashing.
+  const computedHash = hash(
+    mapHashName(info.hashAlgorithm),
+    verifierInput.slice(0, info.blockSize)
+  );
+  const verifierValueKey = agileKeyFromSpun(spun, info, AGILE_BLOCK_KEYS.verifierHashValue);
+  const expectedHash = aesCbcRawDecrypt(
+    info.encryptedVerifierHashValue,
+    verifierValueKey,
+    info.keySalt,
+    "encryptedVerifierHashValue"
+  );
+  return bytesEqual(computedHash.slice(0, info.hashSize), expectedHash.slice(0, info.hashSize));
 }
 
 /** The parameters the package segments and the data-integrity check use: `keyData`'s, else the key encryptor's. */
@@ -281,13 +284,13 @@ function keyDataOf(info: AgileEncryptionInfo): {
 }
 
 /** `H(salt + blockKey)` truncated to the block size — the IV MS-OFFCRYPTO §2.3.4.12 gives each keyed blob. */
-async function blockIv(
+function blockIv(
   hashName: string,
   salt: Uint8Array,
   blockKey: Uint8Array,
   blockSize: number
-): Promise<Uint8Array> {
-  return (await hashAsync(hashName, concat(salt, blockKey))).slice(0, blockSize);
+): Uint8Array {
+  return hash(hashName, concat(salt, blockKey)).slice(0, blockSize);
 }
 
 /**
@@ -303,37 +306,137 @@ export async function decryptAgilePackage(
   password: string,
   maxDecryptedSize: number = 512 * 1024 * 1024
 ): Promise<Uint8Array> {
-  const keyEncryptionKey = await deriveAgileKey(password, info, AGILE_BLOCK_KEYS.encryptedKey);
-  // Zero-padded AES-CBC per MS-OFFCRYPTO §2.3.4.13 (NOT PKCS#7); the key is exactly keyBits/8 bytes.
-  const packageKey = aesCbcRawDecrypt(info.encryptedKeyValue, keyEncryptionKey, info.keySalt).slice(
-    0,
-    (info.keyData?.keyBits ?? info.keyBits) / 8
+  // A package too large is refused before the password is spun for it.
+  packageSize(encryptedPackage, maxDecryptedSize);
+  const length = encryptedPackage.length;
+  const owned = ownInfo(info);
+  // One budget for the whole decrypt: each phase starting a budget of its own let the work between two yields add up.
+  const yieldIfDue = createYieldBudget();
+  const spun = await spinAgilePassword(password, owned, yieldIfDue);
+  return decryptSpun(
+    await ownPackage(encryptedPackage, length, maxDecryptedSize, yieldIfDue),
+    owned,
+    spun,
+    maxDecryptedSize,
+    yieldIfDue
   );
+}
 
-  if (encryptedPackage.length < 8) {
+function checkUnchanged(encryptedPackage: Uint8Array, length: number): void {
+  if (encryptedPackage.length !== length) {
     throw new OfficeCryptoError(
       "malformed",
-      "EncryptedPackage too small (missing 8-byte size header)"
+      `EncryptedPackage changed size while it was read (${length} bytes, then ${encryptedPackage.length})`
     );
   }
-  // First 8 bytes are the total decrypted size (uint64 LE). It cannot legally exceed the encrypted body, and nothing
-  // is allocated above the caller's bound.
-  const totalSize = Number(
-    new DataView(encryptedPackage.buffer, encryptedPackage.byteOffset, 8).getBigUint64(0, true)
-  );
-  const encryptedBodyLength = encryptedPackage.length - 8;
-  if (!Number.isFinite(totalSize) || totalSize < 0 || totalSize > encryptedBodyLength) {
-    throw new OfficeCryptoError(
-      "malformed",
-      `EncryptedPackage declared size (${totalSize}) is invalid or exceeds the maximum allowed (${maxDecryptedSize})`
+}
+
+/**
+ * The `EncryptedPackage` stream copied into bytes nothing outside this module holds, a slice at a time so a large one
+ * does not block. The integrity check and the decryption must read the same bytes, and the decrypt yields between them:
+ * a caller's buffer written to meanwhile was verified as it was and decrypted as it had become. All of the stream — the
+ * HMAC covers it as stored — so the copy is as long as the input, which the readers hold to their package-size limit.
+ *
+ * `length` is the stream's length when the decrypt began: one that changes size before or while it is copied (a
+ * resizable `ArrayBuffer` shrunk while the password was spun) is refused, where it was read as a package of another
+ * size. A package declaring more than `maxDecryptedSize` is refused before anything is allocated for it.
+ */
+async function ownPackage(
+  encryptedPackage: Uint8Array,
+  length: number,
+  maxDecryptedSize: number,
+  yieldIfDue: YieldPoint
+): Promise<Uint8Array> {
+  checkUnchanged(encryptedPackage, length);
+  packageSize(encryptedPackage, maxDecryptedSize);
+  const owned = new Uint8Array(length);
+  for (let start = 0; start < length; start += PACED_SLICE_LENGTH) {
+    checkUnchanged(encryptedPackage, length);
+    owned.set(
+      encryptedPackage.subarray(start, Math.min(start + PACED_SLICE_LENGTH, length)),
+      start
     );
+    await yieldIfDue();
   }
-  if (totalSize > maxDecryptedSize) {
-    throw new OfficeCryptoError(
-      "limit",
-      `EncryptedPackage declared size (${totalSize}) is invalid or exceeds the maximum allowed (${maxDecryptedSize})`
-    );
-  }
+  return owned;
+}
+
+/**
+ * The fields of `info` an operation reads, copied — for an operation that reads them on either side of a yield: a
+ * caller's object changed in between (its `spinCount`, a salt, the integrity fields) would have the derivation and the
+ * check run with values that were never the file's.
+ *
+ * Only these fields, by name: the info is a structural type, so a caller's object may carry others, which are neither
+ * read nor copied (cloning the whole object refused one holding a function). Each byte array is copied with the
+ * constructor, which copies whatever view it is given — a `Buffer`'s `slice` is a view, and a view of a
+ * `SharedArrayBuffer` keeps sharing its memory under `structuredClone`.
+ */
+function ownInfo(info: AgileEncryptionInfo): AgileEncryptionInfo {
+  return {
+    keySalt: ownBytes(info.keySalt),
+    spinCount: info.spinCount,
+    cipherAlgorithm: info.cipherAlgorithm,
+    cipherChaining: info.cipherChaining,
+    hashAlgorithm: info.hashAlgorithm,
+    keyBits: info.keyBits,
+    hashSize: info.hashSize,
+    encryptedVerifierHashInput: ownBytes(info.encryptedVerifierHashInput),
+    encryptedVerifierHashValue: ownBytes(info.encryptedVerifierHashValue),
+    encryptedKeyValue: ownBytes(info.encryptedKeyValue),
+    blockSize: info.blockSize,
+    ...(info.dataIntegritySalt === undefined
+      ? {}
+      : { dataIntegritySalt: ownBytes(info.dataIntegritySalt) }),
+    ...(info.dataIntegrityHmac === undefined
+      ? {}
+      : { dataIntegrityHmac: ownBytes(info.dataIntegrityHmac) }),
+    ...(info.keyData === undefined
+      ? {}
+      : {
+          keyData: {
+            salt: ownBytes(info.keyData.salt),
+            hashAlgorithm: info.keyData.hashAlgorithm,
+            hashSize: info.keyData.hashSize,
+            blockSize: info.keyData.blockSize,
+            keyBits: info.keyData.keyBits
+          }
+        })
+  };
+}
+
+/** The fields of `info` a key derivation reads, copied — see {@link ownInfo}. */
+function ownKeyInfo(info: KeyDerivationInfo): KeyDerivationInfo {
+  return {
+    keySalt: ownBytes(info.keySalt),
+    spinCount: info.spinCount,
+    hashAlgorithm: info.hashAlgorithm,
+    keyBits: info.keyBits
+  };
+}
+
+/** `bytes` copied into memory nothing else holds — see {@link ownInfo}. */
+function ownBytes(bytes: Uint8Array): Uint8Array {
+  return new Uint8Array(bytes);
+}
+
+/** {@link decryptAgilePackage}, from the password's {@link spinAgilePassword}. */
+async function decryptSpun(
+  encryptedPackage: Uint8Array,
+  info: AgileEncryptionInfo,
+  spun: Uint8Array,
+  maxDecryptedSize: number,
+  yieldIfDue: YieldPoint
+): Promise<Uint8Array> {
+  // `encryptedPackage` is this module's own copy (`ownPackage`).
+  const totalSize = packageSize(encryptedPackage, maxDecryptedSize);
+  const keyEncryptionKey = agileKeyFromSpun(spun, info, AGILE_BLOCK_KEYS.encryptedKey);
+  // Zero-padded AES-CBC per MS-OFFCRYPTO §2.3.4.13 (NOT PKCS#7); the key is exactly keyBits/8 bytes.
+  const packageKey = aesCbcRawDecrypt(
+    info.encryptedKeyValue,
+    keyEncryptionKey,
+    info.keySalt,
+    "encryptedKeyValue"
+  ).slice(0, (info.keyData?.keyBits ?? info.keyBits) / 8);
 
   const keyData = keyDataOf(info);
   if (info.dataIntegritySalt && info.dataIntegrityHmac) {
@@ -347,17 +450,48 @@ export async function decryptAgilePackage(
   const result = new Uint8Array(totalSize);
   const idxBytes = new Uint8Array(4);
   const idxView = new DataView(idxBytes.buffer);
+  // One segment is microseconds of work and the package can be hundreds of megabytes of them.
   for (let i = 0, offset = 0; offset < totalSize; i++) {
     const segStart = i * segmentSize;
     const segData = encData.subarray(segStart, Math.min(segStart + segmentSize, encData.length));
     idxView.setUint32(0, i, true);
-    const segIv = await blockIv(keyData.hashName, keyData.salt, idxBytes, keyData.blockSize);
-    const plain = aesCbcDecryptRawSync(segData, packageKey, ivToBlockSize(segIv));
+    const segIv = blockIv(keyData.hashName, keyData.salt, idxBytes, keyData.blockSize);
+    const plain = aesCbcRawDecrypt(segData, packageKey, segIv, `EncryptedPackage segment ${i}`);
     const copyLen = Math.min(plain.length, totalSize - offset);
     result.set(plain.subarray(0, copyLen), offset);
     offset += copyLen;
+    await yieldIfDue();
   }
   return result;
+}
+
+/**
+ * The decrypted size an `EncryptedPackage` stream declares, checked: the first 8 bytes (uint64 LE) are the size, which
+ * cannot legally exceed the encrypted body, and a size past `maxDecryptedSize` is a `limit` failure.
+ */
+function packageSize(encryptedPackage: Uint8Array, maxDecryptedSize: number): number {
+  if (encryptedPackage.length < 8) {
+    throw new OfficeCryptoError(
+      "malformed",
+      "EncryptedPackage too small (missing 8-byte size header)"
+    );
+  }
+  const totalSize = Number(
+    new DataView(encryptedPackage.buffer, encryptedPackage.byteOffset, 8).getBigUint64(0, true)
+  );
+  if (!Number.isFinite(totalSize) || totalSize < 0 || totalSize > encryptedPackage.length - 8) {
+    throw new OfficeCryptoError(
+      "malformed",
+      `EncryptedPackage declared size (${totalSize}) is invalid or exceeds the maximum allowed (${maxDecryptedSize})`
+    );
+  }
+  if (totalSize > maxDecryptedSize) {
+    throw new OfficeCryptoError(
+      "limit",
+      `EncryptedPackage declared size (${totalSize}) is invalid or exceeds the maximum allowed (${maxDecryptedSize})`
+    );
+  }
+  return totalSize;
 }
 
 /** MS-OFFCRYPTO §2.3.4.14: the HMAC of the whole `EncryptedPackage` stream must match the one the file stores. */
@@ -368,23 +502,31 @@ async function checkDataIntegrity(
   keyData: { salt: Uint8Array; hashName: string; blockSize: number }
 ): Promise<void> {
   const hashSize = info.keyData?.hashSize ?? info.hashSize;
-  const ivKey = await blockIv(
+  const ivKey = blockIv(
     keyData.hashName,
     keyData.salt,
     AGILE_BLOCK_KEYS.dataIntegrityKey,
     keyData.blockSize
   );
-  const ivValue = await blockIv(
+  const ivValue = blockIv(
     keyData.hashName,
     keyData.salt,
     AGILE_BLOCK_KEYS.dataIntegrityValue,
     keyData.blockSize
   );
-  const hmacKey = aesCbcRawDecrypt(info.dataIntegritySalt!, packageKey, ivKey).slice(0, hashSize);
-  const expected = aesCbcRawDecrypt(info.dataIntegrityHmac!, packageKey, ivValue).slice(
-    0,
-    hashSize
-  );
+  const hmacKey = aesCbcRawDecrypt(
+    info.dataIntegritySalt!,
+    packageKey,
+    ivKey,
+    "encryptedHmacKey"
+  ).slice(0, hashSize);
+  const expected = aesCbcRawDecrypt(
+    info.dataIntegrityHmac!,
+    packageKey,
+    ivValue,
+    "encryptedHmacValue"
+  ).slice(0, hashSize);
+  // The key is never empty: its blob is whole AES blocks (`aesCbcRawDecrypt`) and `hashSize` a digest's size.
   const actual = await hmac(keyData.hashName, hmacKey, encryptedPackage);
   if (!bytesEqual(actual.slice(0, hashSize), expected)) {
     throw new OfficeCryptoError(
@@ -423,11 +565,24 @@ function getHashSizeFor(hashName: string): number {
 }
 
 /**
- * Decrypt an AES-CBC blob written with zero padding (no PKCS#7). Used for
- * the encryptedKeyValue / encryptedVerifierHashInput / encryptedVerifierHashValue
- * blobs, per MS-OFFCRYPTO §2.3.4.13. The IV is truncated/extended to 16 bytes.
+ * Decrypt an AES-CBC blob written with zero padding (no PKCS#7): the key and verifier blobs (MS-OFFCRYPTO §2.3.4.13)
+ * and the package's segments (§2.3.4.15). The IV is truncated/extended to 16 bytes.
+ *
+ * A blob that is not whole blocks is malformed — no writer pads to less — and is refused as such, `what` naming it:
+ * handed to the platform it failed with its own error (OpenSSL's `wrong final block length`), not this module's.
  */
-function aesCbcRawDecrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
+function aesCbcRawDecrypt(
+  data: Uint8Array,
+  key: Uint8Array,
+  iv: Uint8Array,
+  what: string
+): Uint8Array {
+  if (data.length === 0 || data.length % 16 !== 0) {
+    throw new OfficeCryptoError(
+      "malformed",
+      `${what} is ${data.length} byte(s), not a whole number of AES blocks`
+    );
+  }
   return aesCbcDecryptRawSync(data, key, ivToBlockSize(iv));
 }
 
@@ -468,36 +623,24 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return result;
 }
 
-/** HMAC block size (in bytes) for the supported hash algorithms. */
-function hmacBlockSize(hashName: string): number {
-  // SHA-1 / SHA-256 use a 512-bit (64-byte) block; SHA-384 / SHA-512 use a
-  // 1024-bit (128-byte) block.
-  return hashName === "SHA-384" || hashName === "SHA-512" ? 128 : 64;
-}
-
 /**
- * Compute HMAC(hashName, key, message) using the generic hash primitive.
- * Implemented here (rather than in @utils/crypto, which only ships
- * hmacSha256) so agile encryption can use SHA-512 etc. for the data
- * integrity HMAC that Word verifies on open.
+ * HMAC(hashName, key, message), by Web Crypto on every platform.
+ *
+ * Native, and computed off the main thread: the message is the whole `EncryptedPackage` stream, and the hand-built
+ * HMAC this replaced hashed it in one synchronous call on Node — a copy of the package and a blocked event loop for as
+ * long as the digest took, which grows with the file. Web Crypto hashes a key longer than the block size down first,
+ * as RFC 2104 has it.
  */
 async function hmac(hashName: string, key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
-  const blockSize = hmacBlockSize(hashName);
-  // Keys longer than the block size are hashed down first.
-  let k = key.length > blockSize ? await hashAsync(hashName, key) : key;
-  if (k.length < blockSize) {
-    const padded = new Uint8Array(blockSize);
-    padded.set(k);
-    k = padded;
-  }
-  const ipad = new Uint8Array(blockSize);
-  const opad = new Uint8Array(blockSize);
-  for (let i = 0; i < blockSize; i++) {
-    ipad[i] = k[i] ^ 0x36;
-    opad[i] = k[i] ^ 0x5c;
-  }
-  const inner = await hashAsync(hashName, concat(ipad, message));
-  return hashAsync(hashName, concat(opad, inner));
+  const subtle = globalThis.crypto.subtle;
+  const cryptoKey = await subtle.importKey(
+    "raw",
+    key as Uint8Array<ArrayBuffer>,
+    { name: "HMAC", hash: hashName },
+    false,
+    ["sign"]
+  );
+  return new Uint8Array(await subtle.sign("HMAC", cryptoKey, message as Uint8Array<ArrayBuffer>));
 }
 
 function stringToUtf16LE(s: string): Uint8Array {
@@ -534,6 +677,23 @@ function infoHashAlgorithm(raw: string): "SHA1" | "SHA256" | "SHA384" | "SHA512"
     );
   }
   return raw;
+}
+
+/**
+ * A `hashSize`, which must be what `algorithm` outputs (MS-OFFCRYPTO §2.3.4.10, §2.3.4.11). It is also how many
+ * bytes of the verifier and of the data-integrity HMAC are compared, so a file free to give less would have the
+ * integrity check compare one byte — a forged package passing it once in 256 tries.
+ */
+function infoHashSize(raw: string | undefined, algorithm: string): number {
+  const expected = getHashSizeFor(mapHashName(algorithm));
+  const value = raw === undefined ? expected : Number(raw);
+  if (value !== expected) {
+    throw new OfficeCryptoError(
+      "malformed",
+      `Invalid hashSize in EncryptionInfo: ${raw} (${algorithm} outputs ${expected} bytes)`
+    );
+  }
+  return value;
 }
 
 function infoKeyBits(raw: string | undefined): 128 | 192 | 256 {
@@ -597,12 +757,14 @@ export function parseAgileEncryptionInfo(xmlStr: string): AgileEncryptionInfo {
   const hmacKey = integrity?.encryptedHmacKey;
   const hmacValue = integrity?.encryptedHmacValue;
   const keyDataSalt = keyDataAttrs.saltValue;
+  const hashAlgorithm = infoHashAlgorithm(pwdAttrs.hashAlgorithm ?? "SHA512");
+  const keyDataHashAlgorithm = infoHashAlgorithm(keyDataAttrs.hashAlgorithm ?? "SHA512");
   return {
     cipherAlgorithm: "AES",
     cipherChaining: "ChainingModeCBC",
     keyBits: infoKeyBits(pwdAttrs.keyBits),
-    hashAlgorithm: infoHashAlgorithm(pwdAttrs.hashAlgorithm ?? "SHA512"),
-    hashSize: infoNumber(pwdAttrs.hashSize, "64", "hashSize", 1, 128),
+    hashAlgorithm,
+    hashSize: infoHashSize(pwdAttrs.hashSize, hashAlgorithm),
     spinCount: infoNumber(pwdAttrs.spinCount, "100000", "spinCount", 0, 10_000_000),
     keySalt: required(pwdAttrs, "saltValue"),
     encryptedVerifierHashInput: required(pwdAttrs, "encryptedVerifierHashInput"),
@@ -619,8 +781,8 @@ export function parseAgileEncryptionInfo(xmlStr: string): AgileEncryptionInfo {
       ? {
           keyData: {
             salt: new Uint8Array(base64ToUint8Array(keyDataSalt)),
-            hashAlgorithm: infoHashAlgorithm(keyDataAttrs.hashAlgorithm ?? "SHA512"),
-            hashSize: infoNumber(keyDataAttrs.hashSize, "64", "hashSize", 1, 128),
+            hashAlgorithm: keyDataHashAlgorithm,
+            hashSize: infoHashSize(keyDataAttrs.hashSize, keyDataHashAlgorithm),
             blockSize: infoNumber(keyDataAttrs.blockSize, "16", "blockSize", 8, 64),
             keyBits: infoKeyBits(keyDataAttrs.keyBits)
           }
@@ -757,9 +919,15 @@ function encryptionName(major: number, minor: number, flags: number): string {
   return "an unknown encryption";
 }
 
-/** The streams of a compound file. */
+/**
+ * The streams of a compound file, as views of `bytes` where they lie in consecutive sectors: they are only read here,
+ * and the package they hold — up to the whole file — is not copied before it is decrypted.
+ */
 function cfbStreams(bytes: Uint8Array, maxStreamSize?: number): CfbEntry[] {
-  return readCfb(bytes, maxStreamSize === undefined ? {} : { maxStreamSize });
+  return readCfb(
+    bytes,
+    maxStreamSize === undefined ? { views: true } : { maxStreamSize, views: true }
+  );
 }
 
 /**
@@ -779,7 +947,8 @@ export function isEncryptedPackage(bytes: Uint8Array): boolean {
 }
 
 /**
- * The Agile encryption parameters and the encrypted package stream of an encrypted package.
+ * The Agile encryption parameters and the encrypted package stream of an encrypted package. The stream may be a view
+ * of `bytes` (see `cfbStreams`): what decrypts it copies it first, so a change to `bytes` cannot reach the result.
  *
  * @throws {CfbError} If the bytes are not a readable compound file.
  * @throws {OfficeCryptoError} If it is not an encrypted package, or not Agile-encrypted.
@@ -836,13 +1005,27 @@ export async function decryptPackage(
   maxDecryptedSize?: number
 ): Promise<Uint8Array> {
   const limit = maxDecryptedSize ?? 512 * 1024 * 1024;
+  // One budget for the whole decrypt, the container read below included — see `decryptAgilePackage`.
+  const yieldIfDue = createYieldBudget();
   // The container's streams are bounded by the input, already in memory; the package's own size is checked against
   // `limit` before it is decrypted, which is what reports a package too large for the read.
+  // `info` is parsed from the file here, so it is this call's own; the package is refused, if too large, before the
+  // password is spun for it.
   const { info, encryptedPackage } = readEncryptedPackage(bytes, Infinity);
-  if (!(await verifyAgilePassword(password, info))) {
+  packageSize(encryptedPackage, limit);
+  const length = encryptedPackage.length;
+  // Spun once for the verifier and the package key alike — see `spinAgilePassword`.
+  const spun = await spinAgilePassword(password, info, yieldIfDue);
+  if (!verifySpun(spun, info)) {
     throw new OfficeCryptoError("password", "Incorrect password");
   }
-  return decryptAgilePackage(encryptedPackage, info, password, limit);
+  return decryptSpun(
+    await ownPackage(encryptedPackage, length, limit, yieldIfDue),
+    info,
+    spun,
+    limit,
+    yieldIfDue
+  );
 }
 
 /**
@@ -880,8 +1063,12 @@ export async function encryptPackage(
   const packageKey = randomBytes(keyBytes);
   const keyInfo = { keySalt, spinCount, hashAlgorithm, keyBits };
 
+  // One budget for the whole encrypt — see `decryptAgilePackage`. Spun once for the three keys below — see
+  // `spinAgilePassword`.
+  const yieldIfDue = createYieldBudget();
+  const spun = await spinAgilePassword(password, keyInfo, yieldIfDue);
   // The package key, under a key derived from the password (zero-padded AES-CBC, MS-OFFCRYPTO §2.3.4.13).
-  const keyEncryptionKey = await deriveAgileKey(password, keyInfo, AGILE_BLOCK_KEYS.encryptedKey);
+  const keyEncryptionKey = agileKeyFromSpun(spun, keyInfo, AGILE_BLOCK_KEYS.encryptedKey);
   const encryptedKeyValue = aesCbcZeroPadEncrypt(
     padToBlock(packageKey, blockSize),
     keyEncryptionKey,
@@ -890,22 +1077,14 @@ export async function encryptPackage(
 
   // The verifier: 16 random bytes and their hash, each under its own derived key.
   const verifierInput = randomBytes(16);
-  const verifierHash = await hashAsync(hashName, verifierInput);
-  const verifierInputKey = await deriveAgileKey(
-    password,
-    keyInfo,
-    AGILE_BLOCK_KEYS.verifierHashInput
-  );
+  const verifierHash = hash(hashName, verifierInput);
+  const verifierInputKey = agileKeyFromSpun(spun, keyInfo, AGILE_BLOCK_KEYS.verifierHashInput);
   const encryptedVerifierHashInput = aesCbcZeroPadEncrypt(
     padToBlock(verifierInput, blockSize),
     verifierInputKey,
     keySalt
   );
-  const verifierValueKey = await deriveAgileKey(
-    password,
-    keyInfo,
-    AGILE_BLOCK_KEYS.verifierHashValue
-  );
+  const verifierValueKey = agileKeyFromSpun(spun, keyInfo, AGILE_BLOCK_KEYS.verifierHashValue);
   const encryptedVerifierHashValue = aesCbcZeroPadEncrypt(
     padToBlock(verifierHash, blockSize),
     verifierValueKey,
@@ -918,20 +1097,16 @@ export async function encryptPackage(
     packageKey,
     keyDataSalt,
     hashName,
-    blockSize
+    blockSize,
+    yieldIfDue
   );
 
   // Data integrity (MS-OFFCRYPTO §2.3.4.14), which Office verifies on open: a random HMAC key, the HMAC of the
   // whole EncryptedPackage stream (size prefix included), each encrypted with the package key and an IV of
   // H(keyData salt + block key).
   const hmacKey = randomBytes(hashSize);
-  const ivHmacKey = await blockIv(
-    hashName,
-    keyDataSalt,
-    AGILE_BLOCK_KEYS.dataIntegrityKey,
-    blockSize
-  );
-  const ivHmacValue = await blockIv(
+  const ivHmacKey = blockIv(hashName, keyDataSalt, AGILE_BLOCK_KEYS.dataIntegrityKey, blockSize);
+  const ivHmacValue = blockIv(
     hashName,
     keyDataSalt,
     AGILE_BLOCK_KEYS.dataIntegrityValue,
@@ -1107,43 +1282,39 @@ async function encryptPackageData(
   packageKey: Uint8Array,
   keySalt: Uint8Array,
   hashName: string,
-  blockSize: number
+  blockSize: number,
+  yieldIfDue: YieldPoint
 ): Promise<Uint8Array> {
   const segmentSize = 4096;
-  const segCount = Math.ceil(data.length / segmentSize);
-  const encSegments: Uint8Array[] = [];
+  // The length the package is encrypted at, read once: the size header and every segment agree on it, and a package
+  // that changes size while it is read — a resizable buffer — is refused, as a decrypt refuses one.
+  const length = data.length;
+  // The size (8 bytes LE uint64), then each segment encrypted into its place: the stream is allocated once, at its
+  // size, where collecting the segments and joining them copied the package again in one call.
+  const result = new Uint8Array(8 + Math.ceil(length / blockSize) * blockSize);
+  new DataView(result.buffer).setBigUint64(0, BigInt(length), true);
   const idxBytes = new Uint8Array(4);
   const idxView = new DataView(idxBytes.buffer);
-
-  for (let i = 0; i < segCount; i++) {
-    const segStart = i * segmentSize;
-    const segEnd = Math.min(segStart + segmentSize, data.length);
-    let segData = data.slice(segStart, segEnd);
-
-    // Pad last segment to multiple of blockSize if needed
+  for (let i = 0, segStart = 0; segStart < length; i++, segStart += segmentSize) {
+    if (data.length !== length) {
+      throw new OfficeCryptoError(
+        "malformed",
+        `the package changed size while it was encrypted (${length} bytes, then ${data.length})`
+      );
+    }
+    let segData = data.subarray(segStart, Math.min(segStart + segmentSize, length));
+    // Pad the last segment to a whole number of blocks.
     if (segData.length % blockSize !== 0) {
       const padded = new Uint8Array(Math.ceil(segData.length / blockSize) * blockSize);
       padded.set(segData);
       segData = padded;
     }
-
     // Segment IV = hash(salt + segment_index_LE) truncated to blockSize
     idxView.setUint32(0, i, true);
-    const segIv = (await hashAsync(hashName, concat(keySalt, idxBytes))).slice(0, blockSize);
-
-    encSegments.push(aesCbcZeroPadEncrypt(segData, packageKey, segIv));
-  }
-
-  // Total size (8 bytes LE uint64) + concatenated encrypted segments
-  const totalEncLen = encSegments.reduce((sum, s) => sum + s.length, 0);
-  const result = new Uint8Array(8 + totalEncLen);
-  const sizeView = new DataView(result.buffer);
-  sizeView.setBigUint64(0, BigInt(data.length), true);
-
-  let offset = 8;
-  for (const seg of encSegments) {
-    result.set(seg, offset);
-    offset += seg.length;
+    const segIv = blockIv(hashName, keySalt, idxBytes, blockSize);
+    result.set(aesCbcZeroPadEncrypt(segData, packageKey, segIv), 8 + segStart);
+    // As in `decryptSpun`: one segment is microseconds, the package can be hundreds of megabytes.
+    await yieldIfDue();
   }
   return result;
 }

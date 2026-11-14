@@ -114,6 +114,21 @@ function appendText(parent: XmlElement, text: string): void {
  */
 function parseXml(xml: string, given?: XmlParseOptions): XmlDocument {
   checkXmlInput("Xml.parse", xml);
+  const builder = createDomBuilder(given);
+  builder.write(xml);
+  return builder.close();
+}
+
+/**
+ * {@link parseXml} fed a piece at a time: `write` each piece of the text in order, then `close` for the document.
+ *
+ * The same tree, built as the text arrives — for a reader that has to give the event loop a turn while it parses a
+ * large part, which one `parseXml` call cannot. A piece may end anywhere, inside a tag or a name included.
+ */
+export function createDomBuilder(given?: XmlParseOptions): {
+  write(text: string): void;
+  close(): XmlDocument;
+} {
   // Read once, so what is checked is what is used — and the parser need not check it again.
   const options = snapshotParseOptions(given);
   checkParseOptions("Xml.parse", options);
@@ -131,8 +146,8 @@ function parseXml(xml: string, given?: XmlParseOptions): XmlDocument {
     maxEntityExpansionLength: options?.maxEntityExpansionLength,
     invalidCharHandling: options?.invalidCharHandling,
     internalEntities: options?.internalEntities,
-    // The whole input is in memory: its DOCTYPE cannot be larger than it, so the bound that keeps a
-    // streamed or serialised prolog small does not apply.
+    // The whole input is in memory — written in pieces at most, by a caller holding it: its DOCTYPE cannot be larger
+    // than it, so the bound that keeps a streamed or serialised prolog small does not apply.
     maxContextBytes: Number.MAX_SAFE_INTEGER
   });
 
@@ -219,9 +234,23 @@ function parseXml(xml: string, given?: XmlParseOptions): XmlDocument {
     }
   });
 
-  parser.write(xml);
-  parser.close();
+  return {
+    write(text: string): void {
+      parser.write(text);
+    },
+    close(): XmlDocument {
+      parser.close();
+      return finishDocument(syntheticRoot, declaration, isFragment);
+    }
+  };
+}
 
+/** The document a {@link createDomBuilder} built, once its text has all been written. */
+function finishDocument(
+  syntheticRoot: XmlElement,
+  declaration: Record<string, string> | undefined,
+  isFragment: boolean
+): XmlDocument {
   // Extract the real root from the synthetic container
   const roots = syntheticRoot.children.filter((n): n is XmlElement => n.type === "element");
 

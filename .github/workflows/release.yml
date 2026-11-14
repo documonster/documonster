@@ -34,7 +34,7 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created != 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -42,7 +42,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -135,7 +135,7 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -143,7 +143,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -186,7 +186,7 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created == 'true' && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -194,7 +194,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"

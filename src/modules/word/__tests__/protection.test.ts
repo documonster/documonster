@@ -40,7 +40,8 @@ describe("Document protection", () => {
       // unprotected (offering "Start Enforcing Protection" instead of
       // prompting for the password). Reproduce the spec hash here with the
       // same salt protectDocument used and compare.
-      const { hashAsync } = await import("@utils/crypto");
+      const digest = async (algorithm: string, data: Uint8Array): Promise<Uint8Array> =>
+        new Uint8Array(await crypto.subtle.digest(algorithm, data.slice()));
       const { stringToUtf16LE, base64ToBytes, bytesToBase64 } =
         await import("../core/internal-utils");
 
@@ -63,7 +64,7 @@ describe("Document protection", () => {
       const init = new Uint8Array(saltBytes.length + pw.length);
       init.set(saltBytes, 0);
       init.set(pw, saltBytes.length);
-      let h = await hashAsync(algo, init);
+      let h = await digest(algo, init);
       for (let i = 0; i < spin; i++) {
         const it = new Uint8Array(4);
         it[0] = i & 0xff;
@@ -73,7 +74,7 @@ describe("Document protection", () => {
         const c = new Uint8Array(h.length + 4);
         c.set(h, 0);
         c.set(it, h.length);
-        h = await hashAsync(algo, c);
+        h = await digest(algo, c);
       }
       expect(dp.hashValue).toBe(bytesToBase64(h));
 

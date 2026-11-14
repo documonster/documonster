@@ -41,6 +41,8 @@ import {
   ArchiveWorkerStreamStartError
 } from "@archive/core/errors";
 import { asPlainBytes } from "@utils/binary";
+import { defineDispose } from "@utils/dispose";
+import type { DisposeMember } from "@utils/dispose";
 
 export { ArchiveWorkerStreamStartError };
 
@@ -152,6 +154,7 @@ export type { WorkerPoolStream };
  *
  * Manages a pool of Web Workers for parallel compression/decompression.
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class WorkerPool {
   private readonly _options: ReturnType<typeof resolvePoolOptions>;
   private readonly _workers: Map<number, PoolWorker> = new Map();
@@ -1264,3 +1267,11 @@ export async function inflateBatchWithPool(
 ): Promise<Uint8Array<ArrayBuffer>[]> {
   return executeBatchByType("inflate", items);
 }
+
+// The type of what `defineDispose` installs below: `using` disposes of a `WorkerPool`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface WorkerPool extends DisposeMember {}
+
+defineDispose(WorkerPool.prototype, function () {
+  this.terminate();
+});

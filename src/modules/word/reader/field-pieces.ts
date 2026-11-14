@@ -21,6 +21,9 @@
  * field state machine.
  */
 
+import { runSteps } from "@utils/yield";
+import type { Steps } from "@utils/yield";
+import { resolveContentChild } from "@word/reader/parse-utils";
 import { isRangeMarkerElement } from "@word/reader/range-markers";
 import type { XmlElement, XmlNode } from "@xml/types";
 
@@ -182,7 +185,9 @@ const TRANSPARENT = new Set([
   "moveTo",
   "moveFrom",
   "smartTag",
-  "customXml"
+  "customXml",
+  "dir",
+  "bdo"
 ]);
 
 /**
@@ -190,34 +195,73 @@ const TRANSPARENT = new Set([
  * state machine reads those runs. A revision's runs are read without it, so a
  * field inside `w:ins`, `w:del` or a move is always read in pieces.
  */
-const WHOLE = new Set(["p", "hyperlink", "smartTag", "customXml"]);
+const WHOLE = new Set(["p", "hyperlink", "smartTag", "customXml", "dir", "bdo"]);
 
 /**
- * Wrappers kept as markup (an inline `w:sdt`, a bidirectional `w:dir` /
- * `w:bdo`): the field characters inside one are written back with it, but are
- * followed, so a field crossing its boundary is read in pieces outside it.
+ * Wrappers kept as markup (an inline `w:sdt`): the field characters inside one
+ * are written back with it, but are followed, so a field crossing its boundary
+ * is read in pieces outside it.
  */
-const OPAQUE = new Set(["sdt", "dir", "bdo"]);
+const OPAQUE = new Set(["sdt"]);
 
 /** Wrapper properties, read with the wrapper. */
 const WRAPPER_PROPERTIES = new Set(["pPr", "smartTagPr", "customXmlPr"]);
 
-/** The state of the first pass of {@link splitFieldPieces} over one paragraph. */
+/** The state of the first pass of {@link splitFieldPieces} over one paragraph, and where in it the walk has got to. */
 interface Scan {
   /** The fields open at the current point, innermost last. */
   readonly stack: FieldRecord[];
   /** Each field character and instruction met outside kept markup, with its field. */
   readonly ownerEls: XmlElement[];
   readonly ownerRecords: FieldRecord[];
+  /**
+   * Each one's run and the wrappers around it, innermost first, short of the paragraph: what the second pass rebuilds
+   * when its field is read in pieces.
+   */
+  readonly ownerChains: XmlElement[][];
   forced: ReadonlySet<XmlElement> | undefined;
+  /**
+   * The elements whose content is being walked, outermost first, with where in each the walk has got to and how it
+   * reads it ({@link WHOLE_FRAME}, {@link KEPT_FRAME}). Parallel arrays, reused from call to call, so walking a
+   * paragraph allocates nothing for it.
+   */
+  readonly frameEls: XmlElement[];
+  readonly frameIndex: number[];
+  readonly frameMode: number[];
 }
 
-const SCAN: Scan = {
-  stack: [],
-  ownerEls: [],
-  ownerRecords: [],
-  forced: undefined
-};
+/** A frame whose content a field lying wholly in is read whole ({@link WHOLE}). */
+const WHOLE_FRAME = 1;
+/** A frame of markup kept as it is, whose runs are followed but not split. */
+const KEPT_FRAME = 2;
+
+function newScan(): Scan {
+  return {
+    stack: [],
+    ownerEls: [],
+    ownerRecords: [],
+    ownerChains: [],
+    forced: undefined,
+    frameEls: [],
+    frameIndex: [],
+    frameMode: []
+  };
+}
+
+function pushFrame(scan: Scan, el: XmlElement, mode: number): void {
+  scan.frameEls.push(el);
+  scan.frameIndex.push(0);
+  scan.frameMode.push(mode);
+}
+
+/**
+ * The scan a read that does not yield uses, every time: nearly every paragraph read comes through here, and a call
+ * that runs to its end in one go cannot meet another. A read in steps — suspended between them — has its own.
+ */
+const SCAN: Scan = newScan();
+
+/** How many elements {@link splitFieldPiecesSteps} visits in one step, in each pass. */
+const PIECE_STEP = 2048;
 
 /** Content met inside the open fields: text-only result content leaves them whole. */
 function holdContent(scan: Scan, textOnly: boolean): void {
@@ -302,6 +346,11 @@ function scanRun(
     if (!kept) {
       scan.ownerEls.push(rc);
       scan.ownerRecords.push(record);
+      const chain = [run];
+      for (let depth = scan.frameEls.length - 1; depth > 0; depth--) {
+        chain.push(scan.frameEls[depth]!);
+      }
+      scan.ownerChains.push(chain);
     }
     if (!first) {
       first = record;
@@ -321,28 +370,47 @@ function scanRun(
   }
 }
 
-/** Follow the runs inside markup kept as it is. */
-function scanKept(scan: Scan, el: XmlElement): void {
-  for (const c of el.children) {
-    if (c.type !== "element") {
+/**
+ * The first pass over the content of the paragraph `scan` was started on ({@link startScan}), as the reader reads
+ * it — an `mc:AlternateContent` is the element it resolves to (`resolveContentChild`) — depth first: the content of
+ * a wrapper read in place ({@link TRANSPARENT}) is scanned as paragraph content, the runs of markup kept as it is
+ * ({@link OPAQUE}) are followed. Visits at most `limit` elements and returns whether the walk is done, so a read in
+ * steps can resume it; a plain function, not a generator, as every paragraph read runs it.
+ */
+function scanSome(scan: Scan, limit: number): boolean {
+  const { frameEls, frameIndex, frameMode } = scan;
+  let visited = 0;
+  while (frameEls.length > 0) {
+    const top = frameEls.length - 1;
+    const el = frameEls[top]!;
+    const index = frameIndex[top]!;
+    if (index >= el.children.length) {
+      frameEls.pop();
+      frameIndex.pop();
+      frameMode.pop();
       continue;
     }
-    const name = localName(c);
-    if (name === "r") {
-      scanRun(scan, c, el, false, true);
-    } else if (name === "sdtContent" || OPAQUE.has(name) || TRANSPARENT.has(name)) {
-      scanKept(scan, c);
+    if (visited++ === limit) {
+      return false;
     }
-  }
-}
-
-function scanContainer(scan: Scan, container: XmlElement, whole: boolean): void {
-  for (const child of container.children) {
-    if (child.type !== "element") {
+    frameIndex[top] = index + 1;
+    const node = el.children[index]!;
+    const child = node.type === "element" ? resolveContentChild(node) : undefined;
+    if (child === undefined) {
+      continue;
+    }
+    const mode = frameMode[top]!;
+    if ((mode & KEPT_FRAME) !== 0) {
+      const name = localName(child);
+      if (name === "r") {
+        scanRun(scan, child, el, false, true);
+      } else if (name === "sdtContent" || OPAQUE.has(name) || TRANSPARENT.has(name)) {
+        pushFrame(scan, child, KEPT_FRAME);
+      }
       continue;
     }
     if (child.name === "w:r" || hasLocal(child.name, "r")) {
-      scanRun(scan, child, container, whole, false);
+      scanRun(scan, child, el, (mode & WHOLE_FRAME) !== 0, false);
       continue;
     }
     if (child.name === "w:pPr") {
@@ -356,11 +424,105 @@ function scanContainer(scan: Scan, container: XmlElement, whole: boolean): void 
       holdContent(scan, false);
     }
     if (TRANSPARENT.has(name)) {
-      scanContainer(scan, child, WHOLE.has(name));
+      pushFrame(scan, child, WHOLE.has(name) ? WHOLE_FRAME : 0);
     } else if (OPAQUE.has(name)) {
-      scanKept(scan, child);
+      pushFrame(scan, child, KEPT_FRAME);
     }
   }
+  return true;
+}
+
+function clear(list: unknown[]): void {
+  if (list.length > 0) {
+    list.length = 0;
+  }
+}
+
+/** `scan` reset to walk `paragraph`, with the fields read in pieces still `open` from the paragraphs before. */
+function startScan(
+  scan: Scan,
+  paragraph: XmlElement,
+  open: readonly OpenFieldPiece[],
+  forced: ReadonlySet<XmlElement> | undefined
+): Scan {
+  // Emptied only when not empty: setting an array's length is a call into the engine, and nearly every paragraph leaves
+  // these empty — the walk pops every frame, and most paragraphs hold no field.
+  clear(scan.stack);
+  clear(scan.ownerEls);
+  clear(scan.ownerRecords);
+  clear(scan.ownerChains);
+  clear(scan.frameEls);
+  clear(scan.frameIndex);
+  clear(scan.frameMode);
+  scan.forced = forced;
+  for (const state of open) {
+    const record = state as FieldRecord;
+    record.pieces = true;
+    record.separated = true;
+    record.container = null;
+    scan.stack.push(record);
+  }
+  pushFrame(scan, paragraph, WHOLE_FRAME);
+  return scan;
+}
+
+/** What the second pass needs: the field each field character belongs to, and the elements holding a piece's. */
+interface Pieces {
+  readonly owner: ReadonlyMap<XmlElement, FieldRecord>;
+  /** The runs and the wrappers read in place that hold a field character of a field read in pieces. */
+  readonly holding: ReadonlySet<XmlElement>;
+}
+
+/**
+ * The end of the first pass: `open` updated to the fields still open after the paragraph, and the {@link Pieces} —
+ * or `undefined` when the paragraph holds no piece, and is read as it is. The scan's lists are emptied, so the shared
+ * scan holds nothing of the paragraph once it is read.
+ */
+function finishScan(scan: Scan, open: OpenFieldPiece[]): Pieces | undefined {
+  const stack = scan.stack;
+  for (const record of stack) {
+    record.pieces = true;
+  }
+  if (open.length > 0 || stack.length > 0) {
+    open.length = 0;
+    for (const record of stack) {
+      open.push(record);
+    }
+  }
+  scan.forced = undefined;
+  let anyPieces = false;
+  for (const record of scan.ownerRecords) {
+    if (record.pieces) {
+      anyPieces = true;
+      break;
+    }
+  }
+  if (!anyPieces) {
+    clear(stack);
+    clear(scan.ownerEls);
+    clear(scan.ownerRecords);
+    clear(scan.ownerChains);
+    return undefined;
+  }
+  const owner = new Map<XmlElement, FieldRecord>();
+  const holding = new Set<XmlElement>();
+  scan.ownerEls.forEach((el, i) => {
+    const record = scan.ownerRecords[i]!;
+    owner.set(el, record);
+    if (record.pieces) {
+      for (const holder of scan.ownerChains[i]!) {
+        if (holding.has(holder)) {
+          break;
+        }
+        holding.add(holder);
+      }
+    }
+  });
+  clear(stack);
+  clear(scan.ownerEls);
+  clear(scan.ownerRecords);
+  clear(scan.ownerChains);
+  return { owner, holding };
 }
 
 /**
@@ -375,49 +537,35 @@ export function splitFieldPieces(
   open: OpenFieldPiece[],
   forced?: ReadonlySet<XmlElement>
 ): XmlElement {
-  // Pass 1: which fields are read in pieces. A field is when it spans a
-  // paragraph or wrapper boundary, lies in a revision, nests another field,
-  // shares a run with content, or holds content its whole reading would
-  // drop — anything in its instruction, or anything but text in its result.
-  // One scan state serves every paragraph (the pass does not re-enter):
-  // nearly every paragraph read comes through here.
-  const scan = SCAN;
-  scan.stack.length = 0;
-  scan.ownerEls.length = 0;
-  scan.ownerRecords.length = 0;
-  scan.forced = forced;
-  for (const state of open) {
-    const record = state as FieldRecord;
-    record.pieces = true;
-    record.separated = true;
-    record.container = null;
-    scan.stack.push(record);
-  }
-  scanContainer(scan, paragraph, true);
-  const stack = scan.stack;
-  for (const record of stack) {
-    record.pieces = true;
-  }
-  if (open.length > 0 || stack.length > 0) {
-    open.length = 0;
-    for (const record of stack) {
-      open.push(record);
-    }
-  }
-  let anyPieces = false;
-  for (const record of scan.ownerRecords) {
-    if (record.pieces) {
-      anyPieces = true;
-      break;
-    }
-  }
-  scan.forced = undefined;
-  if (!anyPieces) {
-    return paragraph;
-  }
-  const owner = new Map<XmlElement, FieldRecord>();
-  scan.ownerEls.forEach((el, i) => owner.set(el, scan.ownerRecords[i]!));
+  const scan = startScan(SCAN, paragraph, open, forced);
+  scanSome(scan, Infinity);
+  const pieces = finishScan(scan, open);
+  return pieces === undefined ? paragraph : runSteps(rebuildSteps(paragraph, pieces));
+}
 
+/**
+ * {@link splitFieldPieces} in steps of {@link PIECE_STEP} elements in each pass, for a paragraph read in steps: one
+ * paragraph can hold a hundred thousand runs.
+ */
+export function* splitFieldPiecesSteps(
+  paragraph: XmlElement,
+  open: OpenFieldPiece[],
+  forced?: ReadonlySet<XmlElement>
+): Steps<XmlElement> {
+  const scan = startScan(newScan(), paragraph, open, forced);
+  while (!scanSome(scan, PIECE_STEP)) {
+    yield;
+  }
+  const pieces = finishScan(scan, open);
+  return pieces === undefined ? paragraph : yield* rebuildSteps(paragraph, pieces);
+}
+
+/**
+ * The second pass: `paragraph` with the field characters of the fields read in pieces — `owner` says which field each
+ * belongs to — replaced by marker runs, in steps of {@link PIECE_STEP} elements. Runs only for a paragraph that holds a
+ * piece.
+ */
+function* rebuildSteps(paragraph: XmlElement, { owner, holding }: Pieces): Steps<XmlElement> {
   // Pass 2: replace the pieces' field characters with marker runs. An
   // instruction directly after its begin is written with the begin; one
   // directly before the field's next character, with that character; any
@@ -450,13 +598,6 @@ export function splitFieldPieces(
     deferred = undefined;
   };
   /** Whether `el` — a run, or a wrapper read in place — holds a piece's character. */
-  const holdsPiece = (el: XmlElement): boolean =>
-    el.children.some(
-      c =>
-        c.type === "element" &&
-        (owner.get(c)?.pieces === true ||
-          ((localName(c) === "r" || TRANSPARENT.has(localName(c))) && holdsPiece(c)))
-    );
   const splitRun = (child: XmlElement, out: XmlNode[]): void => {
     const rPr = child.children.find(
       (rc): rc is XmlElement => rc.type === "element" && localName(rc) === "rPr"
@@ -512,37 +653,56 @@ export function splitFieldPieces(
     }
     flush();
   };
-  const rebuild = (container: XmlElement): XmlNode[] => {
-    const out: XmlNode[] = [];
-    for (const child of container.children) {
-      if (child.type !== "element") {
-        out.push(child);
-        continue;
-      }
-      if (localName(child) === "r" && holdsPiece(child)) {
-        splitRun(child, out);
-        continue;
-      }
-      if (TRANSPARENT.has(localName(child)) && holdsPiece(child)) {
+  // Depth first, as the first pass went: a wrapper holding a piece is copied with its content rebuilt, in place.
+  const top: XmlNode[] = [];
+  const frames: { readonly el: XmlElement; index: number; readonly out: XmlNode[] }[] = [
+    { el: paragraph, index: 0, out: top }
+  ];
+  let visited = 0;
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1]!;
+    const { el: container, out } = frame;
+    if (frame.index >= container.children.length) {
+      if (deferred?.out === out) {
         settle();
-        lastBegin = undefined;
-        out.push({ ...child, children: rebuild(child) });
-      } else {
-        // Markup dropped or kept as an anchor does not part instruction text
-        // from its field's next piece.
-        if (!IGNORED.has(localName(child)) && !isRangeMarkerElement(child)) {
-          settle();
-        }
-        out.push(child);
       }
+      frames.pop();
+      // The wrapper's content is rebuilt: what follows it in its container is not its field's next piece.
       lastBegin = undefined;
+      continue;
     }
-    if (deferred?.out === out) {
+    const node = container.children[frame.index++]!;
+    if (++visited % PIECE_STEP === 0) {
+      yield;
+    }
+    // An `mc:AlternateContent` holding a piece is replaced by the element it resolves to, split: that is the element
+    // the reader would read in its place.
+    const child = node.type === "element" ? resolveContentChild(node) : undefined;
+    if (child === undefined) {
+      out.push(node);
+      continue;
+    }
+    if (localName(child) === "r" && holding.has(child)) {
+      splitRun(child, out);
+      continue;
+    }
+    if (TRANSPARENT.has(localName(child)) && holding.has(child)) {
+      settle();
+      lastBegin = undefined;
+      const copy: XmlElement = { ...child, children: [] };
+      out.push(copy);
+      frames.push({ el: child, index: 0, out: copy.children });
+      continue;
+    }
+    // Markup dropped or kept as an anchor does not part instruction text
+    // from its field's next piece.
+    if (!IGNORED.has(localName(child)) && !isRangeMarkerElement(child)) {
       settle();
     }
-    return out;
-  };
-  return { ...paragraph, children: rebuild(paragraph) };
+    out.push(node);
+    lastBegin = undefined;
+  }
+  return { ...paragraph, children: top };
 }
 
 function element(

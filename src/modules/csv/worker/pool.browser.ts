@@ -59,6 +59,8 @@ import type {
   CsvParseResult
 } from "@csv/worker/types";
 import { getWorkerBlobUrl, releaseWorkerBlobUrl } from "@csv/worker/worker-script.bundle";
+import { defineAsyncDispose, defineDispose } from "@utils/dispose";
+import type { DisposeMember, AsyncDisposeMember } from "@utils/dispose";
 
 // =============================================================================
 // Constants
@@ -113,6 +115,7 @@ interface PoolWorker {
 // CsvWorkerPool Class (Internal)
 // =============================================================================
 
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 class CsvWorkerPool {
   private readonly _options: typeof DEFAULT_OPTIONS;
   private readonly _workers: Map<number, PoolWorker> = new Map();
@@ -651,6 +654,7 @@ let sessionIdCounter = 0;
  * session.dispose();
  * ```
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class CsvWorkerSession {
   private readonly _pool: CsvWorkerPool;
   private readonly _sessionId: string;
@@ -869,3 +873,19 @@ export type {
   AggregateResult,
   QueryResult
 } from "@csv/worker/types";
+
+// The type of what `defineDispose` installs below: `using` disposes of a `CsvWorkerPool`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+interface CsvWorkerPool extends DisposeMember {}
+
+defineDispose(CsvWorkerPool.prototype, function () {
+  this.terminate();
+});
+
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `CsvWorkerSession`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface CsvWorkerSession extends AsyncDisposeMember {}
+
+defineAsyncDispose(CsvWorkerSession.prototype, function () {
+  return this.dispose();
+});

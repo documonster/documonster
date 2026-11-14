@@ -43,6 +43,7 @@ import {
   encodeWideString,
   iterateInterpretableRecords,
   readWideString,
+  type BiffRecord,
   XlsbReader
 } from "@excel/xlsb/binary";
 import { encodeBorder, readBorder } from "@excel/xlsb/border";
@@ -168,6 +169,21 @@ export function builtinNumberFormat(id: number): string | undefined {
  * tracked rather than every `BrtXF` being collected.
  */
 export function readStyles(bytes: Uint8Array, part: string): StyleTable {
+  const reader = createStylesReader(part);
+  for (const record of iterateInterpretableRecords(bytes, part)) {
+    reader.add(record);
+  }
+  return reader.finish();
+}
+
+/**
+ * {@link readStyles} one record at a time, for a part read in pieces: `add` takes the part's interpretable records in
+ * order — what `iterateInterpretableRecords` yields — and `finish` returns the table once they are all in.
+ */
+export function createStylesReader(part: string): {
+  add(record: Pick<BiffRecord, "id" | "payload">): void;
+  finish(): StyleTable;
+} {
   const customFormats = new Map<number, string>();
   /** A format identifier as a format string: the part's own `BrtFmt`, else the reserved code. */
   const formatById = (id: number): string | undefined =>
@@ -198,7 +214,7 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
   const dxfUnread: string[] = [];
   let inCellXfs = false;
 
-  for (const record of iterateInterpretableRecords(bytes, part)) {
+  function add(record: Pick<BiffRecord, "id" | "payload">): void {
     const name = recordSpec(record.id)?.name;
     switch (name) {
       case "BrtFmt": {
@@ -315,39 +331,43 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
     }
   }
 
-  return {
-    numberFormats,
-    dxfs,
-    fonts,
-    fills,
-    borders,
-    // Resolved here rather than in the loop: a `BrtStyle` may precede the `BrtXF` it points at, and the
-    // whole style-XF collection is known only once the part has been walked.
-    namedStyles: namedStyles.map(entry => {
-      const xf = styleXfs[entry.ixf] ?? {};
-      return {
-        name: entry.name,
-        ...(entry.builtinId === undefined || entry.builtinId === 0
-          ? {}
-          : { builtinId: entry.builtinId }),
-        ...(entry.hidden === true ? { hidden: true } : {}),
-        ...(xf.numberFormat === undefined || xf.numberFormat === "General"
-          ? {}
-          : { numFmt: xf.numberFormat }),
-        ...(xf.font === undefined ? {} : { font: xf.font }),
-        ...(xf.fill === undefined ? {} : { fill: xf.fill }),
-        ...(xf.border === undefined ? {} : { border: xf.border }),
-        ...(xf.alignment === undefined ? {} : { alignment: xf.alignment }),
-        ...(xf.protection === undefined ? {} : { protection: xf.protection })
-      };
-    }),
-    alignments,
-    protections,
-    unmodelledFontFlags,
-    dxfUnread,
-    fontTable,
-    ...(fontTable[0] === undefined ? {} : { defaultFont: fontTable[0] })
-  };
+  function finish(): StyleTable {
+    return {
+      numberFormats,
+      dxfs,
+      fonts,
+      fills,
+      borders,
+      // Resolved here rather than in the loop: a `BrtStyle` may precede the `BrtXF` it points at, and the
+      // whole style-XF collection is known only once the part has been walked.
+      namedStyles: namedStyles.map(entry => {
+        const xf = styleXfs[entry.ixf] ?? {};
+        return {
+          name: entry.name,
+          ...(entry.builtinId === undefined || entry.builtinId === 0
+            ? {}
+            : { builtinId: entry.builtinId }),
+          ...(entry.hidden === true ? { hidden: true } : {}),
+          ...(xf.numberFormat === undefined || xf.numberFormat === "General"
+            ? {}
+            : { numFmt: xf.numberFormat }),
+          ...(xf.font === undefined ? {} : { font: xf.font }),
+          ...(xf.fill === undefined ? {} : { fill: xf.fill }),
+          ...(xf.border === undefined ? {} : { border: xf.border }),
+          ...(xf.alignment === undefined ? {} : { alignment: xf.alignment }),
+          ...(xf.protection === undefined ? {} : { protection: xf.protection })
+        };
+      }),
+      alignments,
+      protections,
+      unmodelledFontFlags,
+      dxfUnread,
+      fontTable,
+      ...(fontTable[0] === undefined ? {} : { defaultFont: fontTable[0] })
+    };
+  }
+
+  return { add, finish };
 }
 
 /**

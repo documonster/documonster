@@ -586,6 +586,79 @@ export function sha384(input: Uint8Array): Uint8Array {
   return sha512Family(input, SHA384_IV, 48);
 }
 
+/**
+ * SHA-1 (FIPS 180-4 §6.1), for `hash` — which has to answer synchronously for every algorithm an Office encryption
+ * header may name, and older Agile-encrypted files name SHA-1. Not exported: nothing should choose it for new work.
+ */
+function sha1(input: Uint8Array): Uint8Array {
+  const msgLen = input.length;
+  const paddedLen = Math.ceil((msgLen + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(input);
+  padded[msgLen] = 0x80;
+  const view = new DataView(padded.buffer, padded.byteOffset, padded.byteLength);
+  const bitLen = msgLen * 8;
+  view.setUint32(paddedLen - 8, Math.floor(bitLen / 0x100000000), false);
+  view.setUint32(paddedLen - 4, bitLen >>> 0, false);
+
+  let h0 = 0x67452301;
+  let h1 = 0xefcdab89;
+  let h2 = 0x98badcfe;
+  let h3 = 0x10325476;
+  let h4 = 0xc3d2e1f0;
+  const w = new Uint32Array(80);
+  for (let offset = 0; offset < paddedLen; offset += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = view.getUint32(offset + i * 4, false);
+    }
+    for (let i = 16; i < 80; i++) {
+      const x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+      w[i] = (x << 1) | (x >>> 31);
+    }
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    for (let i = 0; i < 80; i++) {
+      let f: number;
+      let k: number;
+      if (i < 20) {
+        f = (b & c) | (~b & d);
+        k = 0x5a827999;
+      } else if (i < 40) {
+        f = b ^ c ^ d;
+        k = 0x6ed9eba1;
+      } else if (i < 60) {
+        f = (b & c) | (b & d) | (c & d);
+        k = 0x8f1bbcdc;
+      } else {
+        f = b ^ c ^ d;
+        k = 0xca62c1d6;
+      }
+      const temp = (((a << 5) | (a >>> 27)) + f + e + k + w[i]) >>> 0;
+      e = d;
+      d = c;
+      c = (b << 30) | (b >>> 2);
+      b = a;
+      a = temp;
+    }
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
+  }
+  const out = new Uint8Array(20);
+  const outView = new DataView(out.buffer);
+  outView.setUint32(0, h0, false);
+  outView.setUint32(4, h1, false);
+  outView.setUint32(8, h2, false);
+  outView.setUint32(12, h3, false);
+  outView.setUint32(16, h4, false);
+  return out;
+}
+
 export function sha256(input: Uint8Array): Uint8Array {
   const msgLen = input.length;
   const paddedLen = Math.ceil((msgLen + 9) / 64) * 64;
@@ -799,66 +872,38 @@ export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
 export { randomBytes } from "./random-bytes";
 
 // =============================================================================
-// Generic hash (async in browser — Web Crypto API)
+// Generic hash
 // =============================================================================
 
 /**
- * Compute a hash digest using Web Crypto API.
+ * Compute a hash digest synchronously (pure JS — SHA-1, SHA-256, SHA-384, SHA-512 and MD5), as Node's `hash` does.
  *
- * NOTE: In the browser, this is async. The Node.js version is sync.
- * For callers that need sync hashing, use `sha256()` or `md5()` directly.
- *
- * @param algorithm - Hash algorithm name (e.g., "SHA-256", "SHA-512", "SHA-1").
+ * @param algorithm - "SHA-1", "SHA-256", "SHA-384", "SHA-512" or "MD5" (case-insensitive, hyphens optional)
  * @param data - Data to hash
  * @returns The digest bytes
- */
-export async function hashAsync(algorithm: string, data: Uint8Array): Promise<Uint8Array> {
-  const buf = await globalThis.crypto.subtle.digest(
-    normalizeAlgorithmForWebCrypto(algorithm),
-    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
-  );
-  return new Uint8Array(buf);
-}
-
-/**
- * Normalize a hash algorithm name to the format Web Crypto API expects.
- * Accepts: "sha256", "SHA-256", "sha-256", "SHA256" → "SHA-256"
- */
-function normalizeAlgorithmForWebCrypto(algorithm: string): string {
-  const lower = algorithm.toLowerCase().replace(/-/g, "");
-  switch (lower) {
-    case "sha1":
-      return "SHA-1";
-    case "sha256":
-      return "SHA-256";
-    case "sha384":
-      return "SHA-384";
-    case "sha512":
-      return "SHA-512";
-    default:
-      // Pass through for any other algorithm — let Web Crypto validate
-      return algorithm;
-  }
-}
-
-/**
- * Compute a hash digest synchronously (pure JS — SHA-256 and MD5 only).
- *
- * @param algorithm - "SHA-256" or "MD5" (case-insensitive, hyphens optional)
- * @param data - Data to hash
- * @returns The digest bytes
- * @throws If algorithm is not SHA-256 or MD5
+ * @throws If algorithm is none of those
  */
 export function hash(algorithm: string, data: Uint8Array): Uint8Array {
   const algo = algorithm.toLowerCase().replace(/-/g, "");
   if (algo === "sha256") {
     return sha256(data);
   }
+  if (algo === "sha1") {
+    return sha1(data);
+  }
+  // An iterated derivation — Office's 100,000-digest password spin — is five times faster through these than through
+  // one awaited `crypto.subtle.digest` per step, and can yield on its own schedule rather than once per digest.
+  if (algo === "sha512") {
+    return sha512(data);
+  }
+  if (algo === "sha384") {
+    return sha384(data);
+  }
   if (algo === "md5") {
     return md5(data);
   }
   throw new Error(
-    `hash: unsupported algorithm "${algorithm}" in browser sync mode. Use hashAsync() for other algorithms.`
+    `hash: unsupported algorithm "${algorithm}": a browser has SHA-1, SHA-256, SHA-384, SHA-512 and MD5`
   );
 }
 

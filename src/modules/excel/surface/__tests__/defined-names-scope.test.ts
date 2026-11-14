@@ -79,3 +79,23 @@ describe("DefinedNames.add / addFormula", () => {
     expect(DefinedNames.list(dn)).toEqual([]);
   });
 });
+
+describe("adding many names", () => {
+  // `add` reports the name it added by looking it up, and the lookup built every name's entry to find one: adding
+  // names was quadratic, 39 seconds for 4,000.
+  it("takes time linear in their number", () => {
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "S");
+    const names = Workbook.getDefinedNames(wb);
+    const started = performance.now();
+    for (let i = 0; i < 20_000; i++) {
+      DefinedNames.add(names, `S!$A$${i + 1}`, `name_${i}`);
+    }
+    // Measured ~110 ms.
+    expect(performance.now() - started).toBeLessThan(3000);
+    expect(DefinedNames.get(names, "NAME_19999")).toEqual({
+      name: "name_19999",
+      ranges: ["S!$A$20000"]
+    });
+  });
+});

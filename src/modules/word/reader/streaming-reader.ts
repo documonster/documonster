@@ -14,7 +14,7 @@
  *     close of each body-level element (`<w:p>`, `<w:tbl>`, `<w:sdt>`, …) it
  *     materializes only that single subtree into a small DOM fragment, parses
  *     it into one (or a few) `BodyContent` entries via the shared
- *     {@link parseBodyChild}, yields, then discards it. Peak per-element memory
+ *     {@link bodyChildSteps}, yields, then discards it. Peak per-element memory
  *     is O(largest_single_body_element).
  *   - The raw `document.xml` is *also* never fully resident: it is inflated
  *     incrementally (≈16 KiB chunks) by the unzip layer and fed to the SAX
@@ -47,8 +47,10 @@ import { createZip } from "@archive/create-archive";
 import { unzipZip } from "@archive/read-archive";
 import type { SchemaMatches } from "@utils/schema";
 import { createXmlPartLeadTrimmer } from "@utils/xml-part";
+import { createYieldBudget, paceChunks, runStepsPaced } from "@utils/yield";
+import type { YieldPoint } from "@utils/yield";
 import { RelType } from "@word/constants";
-import { isFlatOpc, parseFlatOpc } from "@word/convert/flat-opc";
+import { isFlatOpc, parseFlatOpcPaced } from "@word/convert/flat-opc";
 import { checkBytes } from "@word/core/argument-checks";
 import { utf8Decoder } from "@word/core/internal-utils";
 import { getPartRelsPath } from "@word/core/opc-paths";
@@ -62,13 +64,13 @@ import {
 } from "@word/errors";
 import {
   checkReadOptions,
-  parseBodyChild,
+  bodyChildSteps,
   type ReadDocxOptions,
   watermarkHeadersToDrop,
   withoutHeaderReferences
 } from "@word/reader/docx-reader";
 import { WORD_NAMESPACES } from "@word/reader/namespaces";
-import { parseNumberingXml } from "@word/reader/numbering-parser";
+import { numberingOfPart } from "@word/reader/numbering-parser";
 import { createPartBudget, readOptionsShape } from "@word/reader/package-limits";
 import { parseSectionProperties } from "@word/reader/paragraph-section-parsers";
 import {
@@ -78,13 +80,18 @@ import {
   resolveRelTarget,
   stripWPrefix
 } from "@word/reader/parse-utils";
-import { asPartLimitError, parseContentPartXml, unwrapCustomXml } from "@word/reader/part-xml";
+import {
+  asPartLimitError,
+  parseContentPartXmlPaced,
+  parsePartXmlPaced,
+  unwrapCustomXml
+} from "@word/reader/part-xml";
 import { bindSubtreeNamespaces, foreignDeclarations } from "@word/reader/preserved-xml";
 import { takeRangeMarker } from "@word/reader/range-markers";
 import type { ParsedRelationship } from "@word/reader/reader-context";
-import { createReaderContext, parseRelationships } from "@word/reader/reader-context";
-import { parseSettingsXml } from "@word/reader/settings-parser";
-import { parseStyles } from "@word/reader/styles-parser";
+import { createReaderContext, relationshipsOfPart } from "@word/reader/reader-context";
+import { settingsOfPart } from "@word/reader/settings-parser";
+import { stylesOfPart } from "@word/reader/styles-parser";
 import { findWatermark } from "@word/reader/watermark-parser";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
 import type { DocxSecurityPolicy } from "@word/security/policy";
@@ -99,7 +106,7 @@ import type {
 } from "@word/types";
 import { createPrefixNormalizer } from "@xml/namespace-prefixes";
 import { SaxParser } from "@xml/sax";
-import type { XmlElement, XmlNode, XmlSaxTag } from "@xml/types";
+import type { XmlDocument, XmlElement, XmlNode, XmlSaxTag } from "@xml/types";
 import { utf8Length } from "@xml/utf8-decoder";
 
 // =============================================================================
@@ -299,6 +306,10 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
         "compressed input larger than maxPackageSize"
       );
     }
+    // Every part is parsed a piece at a time and handed out through promises alone, so without this the event loop
+    // ran only when something happened to wait: a stored `document.xml` was read whole in one task, and a Flat OPC
+    // document or a large style part was parsed in one call. One budget for the whole read — see `paceChunks`.
+    const yieldPoint = createYieldBudget();
     // An encrypted package is decrypted first, as `Document.read` does: the source
     // is already whole in memory, so this costs one copy, and the decrypted
     // package then streams like any other.
@@ -311,7 +322,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     // `Document.read` reads it: as the ZIP of its parts.
     if (isFlatOpc(this._source)) {
       const archive = createZip({ level: 0 });
-      for (const [path, data] of parseFlatOpc(this._source)) {
+      for (const [path, data] of await parseFlatOpcPaced(this._source, yieldPoint)) {
         archive.add(path, data);
       }
       this._source = await archive.toBuffer();
@@ -319,11 +330,13 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
 
     // ---- Phase 1: collect small metadata parts (rels, styles, numbering) ----
     const { documentPartPath, relMap, watermarkHeaders, evenAndOddHeaders } =
-      await this._collectMetadata();
+      await this._collectMetadata(yieldPoint);
 
     // ---- Phase 2: stream document.xml's body element-by-element ----
     const ctx = createReaderContext(this._policy);
     ctx.relMap = relMap;
+    // The body is read through `runStepsPaced` (`_emit`), so its steps may yield.
+    ctx.paced = true;
 
     const documentEntryFound = { value: false };
     const maxElementBytes = this._options.maxElementBytes ?? this._policy.maxPartSize;
@@ -335,7 +348,11 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     if (watermarkHeaders.size > 0) {
       for await (const entry of this._unzip().entries()) {
         if (normalizePath(entry.path) === documentPartPath) {
-          const sections = await scanSections(entry.stream(), this._policy, maxElementBytes);
+          const sections = await scanSections(
+            paceChunks(entry.stream(), yieldPoint),
+            this._policy,
+            maxElementBytes
+          );
           this._droppedHeaders = watermarkHeadersToDrop(
             sections,
             evenAndOddHeaders,
@@ -354,7 +371,13 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
         continue;
       }
       documentEntryFound.value = true;
-      yield* this._streamBody(path, entry.stream(), ctx, maxElementBytes);
+      yield* this._streamBody(
+        path,
+        paceChunks(entry.stream(), yieldPoint),
+        ctx,
+        maxElementBytes,
+        yieldPoint
+      );
       break;
     }
 
@@ -383,7 +406,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
    * inflates to, and one this reader never inflates — media, the body before it streams — what its
    * entry declares, so a package `Document.read` refuses is refused here too.
    */
-  private async _collectMetadata(): Promise<{
+  private async _collectMetadata(yieldPoint: YieldPoint): Promise<{
     documentPartPath: string;
     relMap: Map<string, ParsedRelationship>;
     /** The header parts that draw a watermark, parsed. */
@@ -427,11 +450,14 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
 
     // Discover the document part path via package rels (supports Strict).
     const depth = this._policy.maxXmlDepth;
+    /** A part parsed a slice at a time, as the body is — see `parsePartXmlPaced`. */
+    const parsePart = (xml: string): Promise<XmlDocument> =>
+      parsePartXmlPaced(xml, depth, yieldPoint);
     // Best effort for a damaged auxiliary part, as `Document.read` reads it — but a resource limit is
     // a verdict on the package, not a damaged part.
-    const tryParse = <T>(parse: () => T): T | undefined => {
+    const tryParse = async <T>(parse: () => Promise<T>): Promise<T | undefined> => {
       try {
-        return parse();
+        return await parse();
       } catch (error) {
         if (error instanceof DocxLimitExceededError) {
           throw error;
@@ -442,7 +468,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     let documentPartPath = "word/document.xml";
     const pkgRelsXml = getText("_rels/.rels");
     if (pkgRelsXml) {
-      for (const rel of parseRelationships(pkgRelsXml, depth)) {
+      for (const rel of relationshipsOfPart(await parsePart(pkgRelsXml))) {
         if (rel.type === RelType.OfficeDocument) {
           documentPartPath = rel.target.replace(/^\//, "");
           break;
@@ -458,7 +484,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     }
 
     const docRelsXml = getText(getPartRelsPath(documentPartPath));
-    const docRels = docRelsXml ? parseRelationships(docRelsXml, depth) : [];
+    const docRels = docRelsXml ? relationshipsOfPart(await parsePart(docRelsXml)) : [];
     const relMap = new Map(docRels.map(r => [r.id, r]));
 
     // Parse styles (resolve via relationship, fallback to hardcoded path).
@@ -469,7 +495,9 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     let docDefaults: DocDefaults | undefined;
     if (stylesXml) {
       // Non-fatal: a broken styles part should not abort body streaming.
-      const parsed = tryParse(() => parseStyles(stylesXml, depth));
+      const parsed = await tryParse(async () =>
+        runStepsPaced(stylesOfPart(await parsePart(stylesXml)), yieldPoint)
+      );
       styles = parsed?.styles ?? [];
       docDefaults = parsed?.docDefaults;
     }
@@ -480,7 +508,12 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     const numberingXml = getText(numberingPath);
     let numberingInstances: NumberingInstance[] = [];
     if (numberingXml) {
-      numberingInstances = tryParse(() => parseNumberingXml(numberingXml, depth))?.instances ?? [];
+      numberingInstances =
+        (
+          await tryParse(async () =>
+            runStepsPaced(numberingOfPart(await parsePart(numberingXml)), yieldPoint)
+          )
+        )?.instances ?? [];
     }
 
     this._metadata = {
@@ -501,7 +534,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
         continue;
       }
       // A malformed header is skipped, as `readDocx` skips it.
-      const root = tryParse(() => parseContentPartXml(xml, depth).root);
+      const root = (await tryParse(() => parseContentPartXmlPaced(xml, depth, yieldPoint)))?.root;
       if (root !== undefined && findWatermark(root)) {
         watermarkHeaders.set(rel.id, { root });
       }
@@ -513,7 +546,8 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     if (settingsXml && watermarkHeaders.size > 0) {
       // Non-fatal, as in `readDocx`.
       evenAndOddHeaders =
-        tryParse(() => parseSettingsXml(settingsXml, depth))?.evenAndOddHeaders === true;
+        (await tryParse(async () => settingsOfPart(await parsePart(settingsXml))))
+          ?.evenAndOddHeaders === true;
     }
 
     return { documentPartPath, relMap, watermarkHeaders, evenAndOddHeaders };
@@ -527,7 +561,8 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     documentPartPath: string,
     chunks: AsyncIterable<Uint8Array>,
     ctx: ReturnType<typeof createReaderContext>,
-    maxElementBytes: number
+    maxElementBytes: number,
+    yieldPoint: YieldPoint
   ): AsyncGenerator<BodyContent> {
     const builder = new BodySubtreeBuilder(maxElementBytes);
     const part = new StreamedPart(this._policy);
@@ -556,7 +591,7 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
       }
 
       for (const el of builder.drain()) {
-        yield* this._emit(el, ctx, builder);
+        yield* this._emit(el, ctx, builder, yieldPoint);
       }
     }
     part.close();
@@ -574,15 +609,16 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     }
 
     for (const el of builder.drain()) {
-      yield* this._emit(el, ctx, builder);
+      yield* this._emit(el, ctx, builder, yieldPoint);
     }
   }
 
-  private *_emit(
+  private async *_emit(
     el: XmlElement,
     ctx: ReturnType<typeof createReaderContext>,
-    builder: BodySubtreeBuilder
-  ): Generator<BodyContent> {
+    builder: BodySubtreeBuilder,
+    yieldPoint: YieldPoint
+  ): AsyncGenerator<BodyContent> {
     if (builder.needsBinding(el)) {
       bindSubtreeNamespaces(el, builder.outerNamespaces);
     }
@@ -597,7 +633,9 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
     if (builder.holdsCustomXml(el)) {
       unwrapCustomXml(el);
     }
-    for (const parsed of parseBodyChild(el, ctx)) {
+    // A body element is read in steps — a table a row at a time — so one large table does not hold the event loop for
+    // as long as it takes to read: the element is the unit the reader hands out, not the unit of work.
+    for (const parsed of await runStepsPaced(bodyChildSteps(el, ctx), yieldPoint)) {
       const markers = this._pendingMarkers;
       if (markers.length > 0) {
         this._pendingMarkers = [];

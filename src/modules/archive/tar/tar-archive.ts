@@ -56,6 +56,8 @@ import type { TarParseOptions } from "@archive/tar/tar-parser";
 import { entrySizeLimit, parseTar, readTarStream } from "@archive/tar/tar-parser";
 import { isWritableStream } from "@stream/core/type-guards";
 import { concatUint8Arrays, textEncoder, asPlainBytes, plainChunks } from "@utils/binary";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 
@@ -684,6 +686,7 @@ export function createTarReaderEntry(info: TarEntryInfo, data: Uint8Array): TarR
  * Bytes, a string or a `Blob` are read again by every call and are unaffected, and
  * `Archive.openTarGz` keeps the decompressed archive, so its calls work in any order.
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class TarReader {
   private readonly _source: ArchiveSource | ArchiveBytes;
   private readonly _options: TarReaderOptions;
@@ -1105,3 +1108,11 @@ export function tarSync(
   addEntries(archive, entries, "Archive.packTarSync");
   return archive.toBufferSync();
 }
+
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `TarReader`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface TarReader extends AsyncDisposeMember {}
+
+defineAsyncDispose(TarReader.prototype, function () {
+  return this.close();
+});

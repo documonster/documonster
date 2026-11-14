@@ -11,7 +11,7 @@ import { parsePartXml } from "@word/reader/part-xml";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 import type { FormField, RangeMarker, RunProperties } from "@word/types";
-import type { XmlElement } from "@xml/types";
+import type { XmlDocument, XmlElement } from "@xml/types";
 
 /**
  * A parsed OPC relationship entry (from a .rels part).
@@ -89,6 +89,12 @@ export interface ReaderContext {
    * Defaults to `DEFAULT_SECURITY_POLICY` when not set.
    */
   securityPolicy: Required<DocxSecurityPolicy>;
+  /**
+   * Set while the content is read as steps a caller runs paced (`runStepsPaced`, the streaming reader): the steps then
+   * yield between blocks, and a paragraph larger than a step is read in steps. Unset, a read runs the same code through
+   * `runSteps` and does neither — the generators and the size checks pacing needs cost a read that never yields 5–15%.
+   */
+  paced?: boolean;
 }
 
 /**
@@ -129,7 +135,11 @@ export function createReaderContext(securityPolicy?: Required<DocxSecurityPolicy
  * via `STRICT_TO_TRANSITIONAL_REL`.
  */
 export function parseRelationships(xmlStr: string, maxDepth?: number): ParsedRelationship[] {
-  const doc = parsePartXml(xmlStr, maxDepth);
+  return relationshipsOfPart(parsePartXml(xmlStr, maxDepth));
+}
+
+/** The relationships of a parsed `.rels` part — what {@link parseRelationships} reads once it has parsed one. */
+export function relationshipsOfPart(doc: XmlDocument): ParsedRelationship[] {
   const rels: ParsedRelationship[] = [];
 
   for (const child of doc.root.children) {

@@ -37,6 +37,9 @@ export { isEncryptedDocx as isEncrypted, encryptDocx as encrypt } from "@word/se
 /**
  * Whether `password` opens the encrypted DOCX `buffer`, checked against its
  * password verifier without decrypting the package.
+ *
+ * @throws {DocxParseError} when `buffer` is not a readable encrypted package.
+ * @throws {DocxDecryptionError} `reason: "malformed"` when its verifier is damaged — not answered as a wrong password.
  */
 export function verifyPassword(
   buffer: Uint8Array | ArrayBuffer | ArrayBufferView,

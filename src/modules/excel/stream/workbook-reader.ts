@@ -185,7 +185,10 @@ class WorkbookReader extends WorkbookReaderBase<
         throw containerReadError(error);
       }
       const fileStream = createReadStream(ws.path);
-      const part = handOut(iterateStream<Uint8Array>(fileStream), `worksheet ${ws.sheetNo}`);
+      const part = handOut(
+        this._readPart(iterateStream<Uint8Array>(fileStream)),
+        `worksheet ${ws.sheetNo}`
+      );
       try {
         yield* ws.isXlsb
           ? this._parseXlsbWorksheet(part.chunks, ws.sheetNo)

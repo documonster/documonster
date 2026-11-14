@@ -27,7 +27,7 @@ import type {
   NoteSeparatorType,
   ProtectionType
 } from "@word/types";
-import type { XmlElement } from "@xml/types";
+import type { XmlDocument, XmlElement } from "@xml/types";
 
 /**
  * Parse `word/settings.xml`. `noteTypes` maps each footnote/endnote id to its
@@ -42,7 +42,17 @@ export function parseSettingsXml(
     readonly endnote?: ReadonlyMap<number, string>;
   }
 ): DocumentSettings {
-  const doc = parsePartXml(xmlStr, maxDepth);
+  return settingsOfPart(parsePartXml(xmlStr, maxDepth), noteTypes);
+}
+
+/** The settings of a parsed `word/settings.xml` — what {@link parseSettingsXml} reads once it has parsed one. */
+export function settingsOfPart(
+  doc: XmlDocument,
+  noteTypes?: {
+    readonly footnote?: ReadonlyMap<number, string>;
+    readonly endnote?: ReadonlyMap<number, string>;
+  }
+): DocumentSettings {
   const root = doc.root;
   const settings: Mutable<DocumentSettings> = {};
   /** An on/off (`ST_OnOff`) setting element, when present: `w:val` false, 0 or off is false. */

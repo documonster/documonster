@@ -29,6 +29,8 @@
  */
 import { escapeRegExp } from "@utils/regexp";
 import { xmlEncode, xmlEncodeAttr } from "@utils/xml-encode";
+import { runSteps } from "@utils/yield";
+import type { Steps } from "@utils/yield";
 import { SaxParser } from "@xml/sax";
 import type { ParseOpenTag, XmlParseOptions } from "@xml/types";
 
@@ -1271,6 +1273,22 @@ export function normalizeElementPrefixes(
   vocab: PrefixVocabulary,
   root: NormalizableElement
 ): ReadonlyMap<NormalizableElement, ParseOpenTag> {
+  return runSteps(normalizeElementPrefixesSteps(vocab, root));
+}
+
+/** How many elements {@link normalizeElementPrefixesSteps} renames in one step. */
+const NORMALIZE_STEP = 1024;
+
+/**
+ * {@link normalizeElementPrefixes} in steps of {@link NORMALIZE_STEP} elements, for a reader that gives the event
+ * loop a turn while it reads a large part (`runStepsPaced`): the walk is over the whole tree, as long as the parse
+ * it follows.
+ */
+export function* normalizeElementPrefixesSteps(
+  vocab: PrefixVocabulary,
+  root: NormalizableElement
+): Steps<ReadonlyMap<NormalizableElement, ParseOpenTag>> {
+  let opened = 0;
   const normalizer = createPrefixNormalizer(vocab);
   const texts = new Map<NormalizableElement, ParseOpenTag>();
   const open = (element: NormalizableElement): void => {
@@ -1296,6 +1314,9 @@ export function normalizeElementPrefixes(
       if (child.type === "element") {
         open(child as NormalizableElement);
         stack.push({ element: child as NormalizableElement, next: 0 });
+        if (++opened % NORMALIZE_STEP === 0) {
+          yield;
+        }
       }
       continue;
     }

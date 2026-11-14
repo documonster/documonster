@@ -71,6 +71,8 @@ import type {
   WriteCallback
 } from "@stream/types";
 import { createStreamDecoder } from "@utils/binary";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 
 // =============================================================================
 // Readable
@@ -94,13 +96,11 @@ type ReadableSourceLike<T> = Iterable<T> | AsyncIterable<T> | ReadableStream<T>;
  * Type parameters default to `any`, as Node's own (non-generic) classes do, so
  * code written for both builds type-checks the same; pass them to opt in.
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class Readable<T = any> extends Stream {
   _readableState: ReadableState;
 
   _construct?(callback: (error?: Error | null) => void): void;
-
-  /** Installed below where the runtime has `Symbol.asyncDispose`, for `await using`. */
-  declare [Symbol.asyncDispose]: () => Promise<void>;
 
   constructor(options?: ReadableOptions<T>) {
     super();
@@ -587,22 +587,20 @@ export class Readable<T = any> extends Stream {
 Readable.prototype.addListener = Readable.prototype.on;
 Readable.prototype.off = Readable.prototype.removeListener;
 
-if (typeof Symbol.asyncDispose === "symbol") {
-  Object.defineProperty(Readable.prototype, Symbol.asyncDispose, {
-    configurable: true,
-    writable: true,
-    value: async function (this: Readable<unknown>): Promise<void> {
-      let error: Error | null = null;
-      if (!this.destroyed) {
-        error = this.readableEnded ? null : createAbortError();
-        this.destroy(error);
-      }
-      await new Promise<void>((resolve, reject) => {
-        eos(this, err => (err && err !== error ? reject(err) : resolve()));
-      });
-    }
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `Readable`.
+// oxlint-disable-next-line no-unused-vars, typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface Readable<T = any> extends AsyncDisposeMember {}
+
+defineAsyncDispose(Readable.prototype, async function (this: Readable<unknown>): Promise<void> {
+  let error: Error | null = null;
+  if (!this.destroyed) {
+    error = this.readableEnded ? null : createAbortError();
+    this.destroy(error);
+  }
+  await new Promise<void>((resolve, reject) => {
+    eos(this, err => (err && err !== error ? reject(err) : resolve()));
   });
-}
+});
 
 function wrapLegacy(legacy: unknown): Readable {
   return Readable.wrap(legacy, { objectMode: true });

@@ -2474,12 +2474,9 @@ interface TableEntry {
 }
 
 /**
- * Lookup tables for a context, built once and cached on it.
- *
- * Keyed by identity, so a caller that mutates a context between calls gets a fresh one by handing over a fresh
- * object — which is what `writeXlsbPackage` does.
+ * Lookup tables for a context's names, sheets, tables and `BrtExternSheet` entries — see {@link lookupsOf}.
  */
-interface ContextIndex {
+interface ContextLookups {
   /** `definedNameListKey` → every defined name of that key, with its position and scope. */
   readonly names: Map<string, { readonly index: number; readonly scope: number | undefined }[]>;
   /** `sheetNameKey` → position. */
@@ -2487,6 +2484,14 @@ interface ContextIndex {
   /** `excelNameKey` → table. */
   readonly tables: Map<string, TableEntry>;
   readonly externBySheet: Map<number, number>;
+}
+
+/**
+ * A context's {@link ContextLookups}, and what was encoded through it. Cached on the context, so a caller that
+ * mutates a context between calls gets a fresh one by handing over a fresh object — which is what `writeXlsbPackage`
+ * does.
+ */
+interface ContextIndex extends ContextLookups {
   /**
    * Whether anything encoded through this context resolved an `ixti` against the identity mapping a context with
    * no table implies. With a table, the table itself is marked — see {@link markUsed}.
@@ -2732,6 +2737,54 @@ function indexOf(context: PtgContext): ContextIndex {
   if (cached !== undefined) {
     return cached;
   }
+  const built: ContextIndex = { ...lookupsOf(context), usedExternSheet: false };
+  CONTEXT_INDEX.set(context, built);
+  return built;
+}
+
+/**
+ * Lookups built from the lists they index, nested by each list in turn — the defined names, their scopes, the sheet
+ * names, the tables, the `BrtExternSheet` table — with {@link NO_LIST} standing for an absent one.
+ */
+const LOOKUPS = new WeakMap<object, unknown>();
+const NO_LIST = {};
+
+/**
+ * The {@link ContextLookups} of `context`, built once for the lists it holds. Every context derived from another —
+ * `{ ...context, role: "name" }` for each defined name, `{ ...context, origin }` for each cell — shares its lists, and
+ * building them per context indexed every defined name once per name: writing 4,000 names took 7.7 seconds.
+ *
+ * The `BrtExternSheet` table is mutable — {@link internExternSheet} appends to it — but only spans and the
+ * workbook-level entry, which `externBySheet` does not hold, so its lookups stay true as it grows.
+ */
+function lookupsOf(context: PtgContext): ContextLookups {
+  const keys: object[] = [
+    context.definedNames ?? NO_LIST,
+    context.definedNameScopes ?? NO_LIST,
+    context.sheetNames ?? NO_LIST,
+    context.tables ?? NO_LIST,
+    context.externSheets ?? NO_LIST
+  ];
+  let level = LOOKUPS;
+  for (const key of keys.slice(0, -1)) {
+    let next = level.get(key) as WeakMap<object, unknown> | undefined;
+    if (next === undefined) {
+      next = new WeakMap();
+      level.set(key, next);
+    }
+    level = next;
+  }
+  const last = keys[keys.length - 1]!;
+  const cached = level.get(last) as ContextLookups | undefined;
+  if (cached !== undefined) {
+    return cached;
+  }
+  const built = buildLookups(context);
+  level.set(last, built);
+  return built;
+}
+
+function buildLookups(context: PtgContext): ContextLookups {
   // **Keyed by the rules Excel compares by** (`@utils/name-key`): `MyRange` and `myrange` are one defined name, and
   // `Straße` and `STRASSE` one, while `ı` and `I` are two — which `toUpperCase` made one, writing every `I` as `ı`.
   // A sheet, and a `LET` / `LAMBDA` parameter, is compared by its own, narrower rule.
@@ -2766,9 +2819,7 @@ function indexOf(context: PtgContext): ContextIndex {
       externBySheet.set(entry.first, index);
     }
   });
-  const built: ContextIndex = { names, sheets, tables, externBySheet, usedExternSheet: false };
-  CONTEXT_INDEX.set(context, built);
-  return built;
+  return { names, sheets, tables, externBySheet };
 }
 
 /**

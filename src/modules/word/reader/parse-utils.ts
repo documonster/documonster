@@ -6,6 +6,7 @@
  * orchestration of the higher-level parsers.
  */
 
+import type { Steps } from "@utils/yield";
 import { NS_W, STRICT_TO_TRANSITIONAL_NS } from "@word/constants";
 import { resolvePartPath } from "@word/core/opc-paths";
 import type { ParsedRelationship } from "@word/reader/reader-context";
@@ -64,6 +65,20 @@ export function localName(name: string): string {
  */
 export function stripWPrefix(name: string): string {
   return name.charCodeAt(0) === 0x77 && name.charCodeAt(1) === 0x3a ? name.slice(2) : name;
+}
+
+/**
+ * The element a paragraph-content child stands for: itself, or — for `mc:AlternateContent` — the first element of its
+ * `mc:Choice`, else of its `mc:Fallback`; `undefined` when it holds neither. The reader reads a paragraph's content
+ * through it, and so does the field scan (`splitFieldPieces`): a field character the reader meets must be one the scan
+ * met, or the field is neither read in pieces nor ever finished.
+ */
+export function resolveContentChild(child: XmlElement): XmlElement | undefined {
+  if (child.name !== "mc:AlternateContent") {
+    return child;
+  }
+  const chosen = findChild(child, "mc:Choice") ?? findChild(child, "mc:Fallback");
+  return chosen?.children.find((c): c is XmlElement => c.type === "element");
 }
 
 /**
@@ -167,14 +182,10 @@ export function boolToggle(parent: XmlElement, name: string): boolean | undefine
 
 /** Serialize an XmlElement back to an XML string (used for opaque preservation). */
 export function serializeElement(el: XmlElement): string {
-  let s = `<${el.name}`;
-  for (const [k, v] of Object.entries(el.attributes)) {
-    s += ` ${k}="${xmlEncodeAttr(v)}"`;
-  }
   if (el.children.length === 0) {
-    return s + "/>";
+    return startTag(el) + "/>";
   }
-  s += ">";
+  let s = startTag(el) + ">";
   for (const child of el.children) {
     if (child.type === "element") {
       s += serializeElement(child);
@@ -184,6 +195,64 @@ export function serializeElement(el: XmlElement): string {
   }
   s += `</${el.name}>`;
   return s;
+}
+
+/** How many elements {@link serializeElementSteps} serialises in one step. */
+const SERIALIZE_STEP = 2048;
+
+/**
+ * {@link serializeElement} in steps of about {@link SERIALIZE_STEP} elements, for an element kept as markup however
+ * large it is (an inline content control around a whole paragraph's runs). A subtree no larger than a step is
+ * serialised by `serializeElement` itself.
+ */
+export function* serializeElementSteps(el: XmlElement): Steps<string> {
+  if (!hasMoreElements(el, SERIALIZE_STEP)) {
+    return serializeElement(el);
+  }
+  // Each step's pieces are joined as the step ends, and the steps' at the end: joining a hundred thousand pieces in
+  // one call was a step of its own, as long as the rest together.
+  const chunks: string[] = [];
+  let parts: string[] = [startTag(el) + ">"];
+  for (const child of el.children) {
+    if (child.type === "element") {
+      parts.push(yield* serializeElementSteps(child));
+      if (parts.length >= SERIALIZE_STEP) {
+        chunks.push(parts.join(""));
+        parts = [];
+        yield;
+      }
+    } else if (child.type === "text") {
+      parts.push(xmlEncode(child.value));
+    }
+  }
+  parts.push(`</${el.name}>`);
+  chunks.push(parts.join(""));
+  return chunks.join("");
+}
+
+function startTag(el: XmlElement): string {
+  let s = `<${el.name}`;
+  for (const [k, v] of Object.entries(el.attributes)) {
+    s += ` ${k}="${xmlEncodeAttr(v)}"`;
+  }
+  return s;
+}
+
+/** Whether the subtree of `el` holds more than `limit` elements, counting no further than that. */
+function hasMoreElements(el: XmlElement, limit: number): boolean {
+  let count = 0;
+  const pending: XmlElement[] = [el];
+  while (pending.length > 0) {
+    for (const child of pending.pop()!.children) {
+      if (child.type === "element") {
+        if (++count > limit) {
+          return true;
+        }
+        pending.push(child);
+      }
+    }
+  }
+  return false;
 }
 
 /** Extract all `r:xxx` attribute values (relationship IDs) from an element tree. */

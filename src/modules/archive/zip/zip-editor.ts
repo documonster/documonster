@@ -38,6 +38,8 @@ import { ZipEditView } from "@archive/zip/zip-edit-view";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
 import { createZipOperation } from "@archive/zip/zip-output-pipeline";
 import { asPlainBytes } from "@utils/binary";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -242,6 +244,7 @@ function buildPreservedRawEntry(
  * ## Rename Semantics
  * `rename(from, to)` will **overwrite** `to` if it already exists (like `mv -f`).
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class ZipEditor {
   private readonly _remote: RemoteZipReader;
   private readonly _reader: RandomAccessReader;
@@ -1039,3 +1042,11 @@ export async function editZip(
 export async function editZipUrl(url: string, options: ZipEditUrlOptions = {}): Promise<ZipEditor> {
   return ZipEditor.openUrl(url, options);
 }
+
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `ZipEditor`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface ZipEditor extends AsyncDisposeMember {}
+
+defineAsyncDispose(ZipEditor.prototype, function () {
+  return this.close();
+});

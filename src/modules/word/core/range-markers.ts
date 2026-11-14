@@ -4,6 +4,7 @@
  * {@link RangeMarker}.
  */
 
+import { appendAll } from "@utils/array";
 import { RANGE_MARKER_TYPES, isRangeMarker, isSpanMarker } from "@word/core/text-utils";
 import type { SpanMarker } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
@@ -189,7 +190,9 @@ export function foldRangeMarkers<T extends object>(
     out.push(block);
   }
   if (pending.length > 0 && !hostAtEnd(pending)) {
-    unhosted?.push(...pending);
+    if (unhosted) {
+      appendAll(unhosted, pending);
+    }
   }
   return out;
 }
@@ -232,7 +235,7 @@ export function foldTableRangeMarkers(table: Table): Table {
     row.cells.forEach((cell, c) => {
       take(cell.rangeMarkersBefore);
       if (cell.properties?.verticalMerge !== "continue") {
-        leading[r]![c]!.push(...pending);
+        appendAll(leading[r]![c]!, pending);
         pending = [];
         last = { r, c };
       }
@@ -241,7 +244,7 @@ export function foldTableRangeMarkers(table: Table): Table {
   });
   take(table.rangeMarkersAfter);
   if (last) {
-    trailing[last.r]![last.c]!.push(...pending);
+    appendAll(trailing[last.r]![last.c]!, pending);
   }
   const { rangeMarkersAfter: _after, ...rest } = table;
   return {
@@ -292,12 +295,15 @@ export function spellOutRangeMarkers<T extends BlockRangeMarkers>(
   for (const block of blocks) {
     if (block.rangeMarkersBefore && block.rangeMarkersBefore.length > 0) {
       const { rangeMarkersBefore, ...rest } = block;
-      out.push(...rangeMarkersBefore, rest as T);
+      appendAll(out, rangeMarkersBefore);
+      out.push(rest as T);
     } else {
       out.push(block);
     }
   }
-  out.push(...(after ?? []));
+  if (after) {
+    appendAll(out, after);
+  }
   return out;
 }
 
@@ -724,7 +730,7 @@ export function keepClonedRangeMarkers<T>(
         if (removed) {
           out ??= children.slice(0, i);
           if (child.rangeMarkersBefore) {
-            pending.push(...child.rangeMarkersBefore);
+            appendAll(pending, child.rangeMarkersBefore);
           }
           continue;
         }

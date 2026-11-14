@@ -7,6 +7,8 @@
  * @module
  */
 
+import { ASYNC_DISPOSE } from "./dispose";
+
 // Re-export glob utilities from shared module (these work in browser)
 export {
   globToRegex,
@@ -64,7 +66,7 @@ function notAvailable<T>(): AsyncGenerator<T> {
     [Symbol.asyncIterator]() {
       return this;
     },
-    [Symbol.asyncDispose]() {
+    [ASYNC_DISPOSE]() {
       return Promise.resolve();
     }
   };

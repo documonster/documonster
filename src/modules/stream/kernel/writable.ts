@@ -38,6 +38,8 @@ import {
 } from "@stream/kernel/state";
 import { writableFromWeb, writableToWeb } from "@stream/kernel/web-adapters";
 import type { WritableStreamOptions, WriteCallback } from "@stream/types";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 
 export interface WritableOptions<T = any> extends WritableStreamOptions, StateOptions {
   signal?: AbortSignal;
@@ -84,6 +86,7 @@ export interface WritableSide<T> {
 
 const nop = (): void => {};
 
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class Writable<T = any> extends Stream implements WritableSide<T> {
   static override [Symbol.hasInstance](instance: unknown): boolean {
     if (Function.prototype[Symbol.hasInstance].call(this, instance)) {
@@ -104,9 +107,6 @@ export class Writable<T = any> extends Stream implements WritableSide<T> {
   _writev?(chunks: Array<{ chunk: T; encoding: string }>, callback: WriteCallback): void;
   _final?(callback: WriteCallback): void;
   _construct?(callback: WriteCallback): void;
-
-  /** Installed below where the runtime has `Symbol.asyncDispose`, for `await using`. */
-  declare [Symbol.asyncDispose]: () => Promise<void>;
 
   constructor(options?: WritableOptions<T>) {
     super();
@@ -325,20 +325,18 @@ export class Writable<T = any> extends Stream implements WritableSide<T> {
 // the optional method a subclass defines.
 (Writable.prototype as { _writev: unknown })._writev = null;
 
-if (typeof Symbol.asyncDispose === "symbol") {
-  Object.defineProperty(Writable.prototype, Symbol.asyncDispose, {
-    configurable: true,
-    writable: true,
-    value: async function (this: Writable<unknown>): Promise<void> {
-      if (!this.destroyed) {
-        this.destroy(this.writableFinished ? null : createAbortError());
-      }
-      await new Promise<void>((resolve, reject) => {
-        eos(this, err => (err && err.name !== "AbortError" ? reject(err) : resolve()));
-      });
-    }
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `Writable`.
+// oxlint-disable-next-line no-unused-vars, typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface Writable<T = any> extends AsyncDisposeMember {}
+
+defineAsyncDispose(Writable.prototype, async function (this: Writable<unknown>): Promise<void> {
+  if (!this.destroyed) {
+    this.destroy(this.writableFinished ? null : createAbortError());
+  }
+  await new Promise<void>((resolve, reject) => {
+    eos(this, err => (err && err.name !== "AbortError" ? reject(err) : resolve()));
   });
-}
+});
 
 // =============================================================================
 // Construction

@@ -14,6 +14,8 @@
  */
 
 import { xmlEncodeAttr } from "@utils/xml-encode";
+import { paceChunks, runSteps, runStepsPaced } from "@utils/yield";
+import type { Steps, YieldPoint } from "@utils/yield";
 import { NS_CONTENT_TYPES, NS_PKG } from "@word/constants";
 import { checkBytes, invalidArgument } from "@word/core/argument-checks";
 import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
@@ -55,6 +57,83 @@ export function parseFlatOpc(
 ): Map<string, Uint8Array> {
   const given = checkTextOrBytes(xmlContent, "xmlContent", "Convert.flatOpcToParts");
   const bytes = typeof given === "string" ? utf8Encoder.encode(given) : given;
+  const read = startFlatOpcRead(bytes, work =>
+    typeof work === "function" ? work() : runSteps(work)
+  );
+  try {
+    read.parser.write(read.body).close();
+  } catch (error) {
+    throw flatOpcError(error);
+  }
+  return read.parts();
+}
+
+/**
+ * {@link parseFlatOpc} a slice of the input at a time, asking `yieldPoint` (a `createYieldBudget`) between the slices —
+ * for the streaming reader, which must give the event loop a turn while it reads a Flat OPC document: the whole
+ * package is one XML file, and parsing it in one call blocked for as long as it took.
+ */
+export async function parseFlatOpcPaced(
+  bytes: Uint8Array,
+  yieldPoint: YieldPoint
+): Promise<Map<string, Uint8Array>> {
+  // A part's content is finished — its XML made to stand alone, its base64 decoded — between slices rather than in the
+  // event that ends it: one large part is one event, and finishing it in there held the event loop for as long as the
+  // part took. What is queued lies before where the parser has got to, so when the parser fails, the queue is finished
+  // first: a failure in it comes first in the document, and is the one a read that finishes each part at once reports.
+  const queued: FinishWork[] = [];
+  const read = startFlatOpcRead(bytes, work => queued.push(work));
+  const finishQueued = async (): Promise<void> => {
+    for (const work of queued.splice(0)) {
+      if (typeof work === "function") {
+        work();
+      } else {
+        await runStepsPaced(work, yieldPoint);
+      }
+    }
+  };
+  try {
+    // The body written as the whole read writes it, an empty one included: the parser's error then names the byte.
+    for await (const slice of paceChunks([read.body], yieldPoint)) {
+      await whenParsed(() => read.parser.write(slice), finishQueued);
+    }
+    if (read.body.length === 0) {
+      read.parser.write(read.body);
+    }
+    await whenParsed(() => read.parser.close(), finishQueued);
+  } catch (error) {
+    throw flatOpcError(error);
+  }
+  return read.parts();
+}
+
+/** `parse`, then `finishQueued` — which, when `parse` fails, runs before its failure is thrown and may replace it. */
+async function whenParsed(parse: () => void, finishQueued: () => Promise<void>): Promise<void> {
+  try {
+    parse();
+  } catch (error) {
+    await finishQueued();
+    throw error;
+  }
+  await finishQueued();
+}
+
+/** Work finishing a part: its content's steps, or recording it once they have run. */
+type FinishWork = Steps<void> | (() => void);
+
+/**
+ * A Flat OPC read: the parser, the input to give it from its first `<`, and the parts its events make. `finish` is
+ * given the work of finishing each part's content, and of recording each part, in document order, to run now or
+ * later — in that order, before `parts` is asked for.
+ */
+function startFlatOpcRead(
+  bytes: Uint8Array,
+  finish: (work: FinishWork) => void
+): {
+  readonly parser: SaxParser;
+  readonly body: Uint8Array;
+  parts(): Map<string, Uint8Array>;
+} {
   // Text pasted or saved by an editor often begins with a byte order mark or white space before the
   // XML declaration, where XML allows neither: a Flat OPC file is read from its first `<`.
   let lead = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
@@ -62,30 +141,35 @@ export function parseFlatOpc(
     lead++;
   }
 
-  const reader = new FlatOpcReader(bytes);
+  const reader = new FlatOpcReader(bytes, finish);
   // With namespaces: a package element is one in the package namespace, whatever its prefix.
   const parser = new SaxParser({ position: false, xmlns: true, byteOffset: lead });
   parser.on("opentag", tag => reader.open(parser, tag));
   parser.on("closetag", tag => reader.close(parser, tag));
   parser.on("text", text => reader.text(parser, text, false));
   parser.on("cdata", text => reader.text(parser, text, true));
-  try {
-    parser.write(bytes.subarray(lead)).close();
-  } catch (error) {
-    if (error instanceof XmlParseError) {
-      throw new DocxParseError(`Flat OPC: not well-formed XML: ${error.message}`, {
-        cause: error
-      });
+  return {
+    parser,
+    body: bytes.subarray(lead),
+    parts() {
+      const { parts, contentTypes } = reader;
+      // Ensure [Content_Types].xml exists
+      if (!parts.has("[Content_Types].xml")) {
+        parts.set("[Content_Types].xml", buildContentTypesXml(contentTypes));
+      }
+      return parts;
     }
-    throw error;
-  }
+  };
+}
 
-  const { parts, contentTypes } = reader;
-  // Ensure [Content_Types].xml exists
-  if (!parts.has("[Content_Types].xml")) {
-    parts.set("[Content_Types].xml", buildContentTypesXml(contentTypes));
+/** What a Flat OPC read threw, as it reports it: malformed XML is the reader's `DocxParseError`. */
+function flatOpcError(error: unknown): unknown {
+  if (error instanceof XmlParseError) {
+    return new DocxParseError(`Flat OPC: not well-formed XML: ${error.message}`, {
+      cause: error
+    });
   }
-  return parts;
+  return error;
 }
 
 function isSpaceByte(byte: number): boolean {
@@ -96,7 +180,8 @@ function isSpaceByte(byte: number): boolean {
 interface OpenPart {
   readonly path: string;
   readonly contentType: string;
-  data?: Uint8Array;
+  /** Whether its `xmlData` or `binaryData` has ended: what follows is outside it. */
+  ended?: boolean;
   /** `xmlData`: where its content begins in the input, and the namespaces in force there. */
   xml?: {
     readonly from: number;
@@ -106,6 +191,8 @@ interface OpenPart {
   };
   /** `binaryData`: its base64 text so far. */
   base64?: string;
+  /** Its content, once finished. */
+  data?: Uint8Array;
 }
 
 /**
@@ -122,7 +209,10 @@ class FlatOpcReader {
   /** Whether the document's DOCTYPE declares entities or attribute lists. */
   private doctype = false;
 
-  constructor(private readonly bytes: Uint8Array) {}
+  constructor(
+    private readonly bytes: Uint8Array,
+    private readonly finish: (work: FinishWork) => void
+  ) {}
 
   open(parser: SaxParser, tag: XmlSaxTag): void {
     const outer = this.scopes[this.scopes.length - 1]!;
@@ -139,7 +229,7 @@ class FlatOpcReader {
       this.scopes.push(scope);
     }
     const part = this.part;
-    if (part?.xml !== undefined && part.data === undefined) {
+    if (part?.xml !== undefined && part.ended !== true) {
       // Inside a part's XML: only its root is looked at, to declare on it what it inherits.
       if (depth === 3) {
         if (part.xml.root !== undefined) {
@@ -152,7 +242,7 @@ class FlatOpcReader {
       }
       return;
     }
-    if (part?.base64 !== undefined && part.data === undefined) {
+    if (part?.base64 !== undefined && part.ended !== true) {
       throw new DocxParseError(
         `Flat OPC: the binaryData of part "${part.path}" contains an element <${tag.name}>`
       );
@@ -177,7 +267,7 @@ class FlatOpcReader {
       if (!xmlData && !isPackageElement(tag, "binaryData")) {
         return;
       }
-      if (part.xml !== undefined || part.base64 !== undefined) {
+      if (part.xml !== undefined || part.base64 !== undefined || part.ended === true) {
         throw new DocxParseError(
           `Flat OPC: part "${part.path}" has more than one xmlData or binaryData element`
         );
@@ -211,25 +301,19 @@ class FlatOpcReader {
     if (part === undefined || tag.isSelfClosing) {
       return;
     }
-    if (depth === 2 && part.xml !== undefined && part.data === undefined) {
+    if (depth === 2 && part.xml !== undefined && part.ended !== true) {
       this.endXmlData(part, parser.startByte!);
-    } else if (depth === 2 && part.base64 !== undefined && part.data === undefined) {
+    } else if (depth === 2 && part.base64 !== undefined && part.ended !== true) {
       this.endBinaryData(part);
     } else if (depth === 1) {
-      if (part.path !== "" && part.data !== undefined) {
-        this.parts.set(part.path, part.data);
-      }
-      // Collect content type info for [Content_Types].xml reconstruction
-      if (part.path !== "" && part.contentType && part.path !== "[Content_Types].xml") {
-        this.contentTypes.set(part.path, part.contentType);
-      }
+      this.finish(() => this.recordPart(part));
       this.part = undefined;
     }
   }
 
   text(parser: SaxParser, text: string, cdata: boolean): void {
     const part = this.part;
-    if (part === undefined || part.data !== undefined) {
+    if (part === undefined || part.ended === true) {
       return;
     }
     if (part.base64 !== undefined) {
@@ -241,46 +325,181 @@ class FlatOpcReader {
     }
   }
 
-  /** The part's XML: its content as the input holds it, from `from` to `to`, made to stand alone. */
+  /** The end of a part's `xmlData`, at `to` in the input: checked to have had a root, and its content queued. */
   private endXmlData(part: OpenPart, to: number): void {
-    const xml = part.xml!;
-    const content = this.bytes.subarray(xml.from, to);
-    const declaration = utf8Encoder.encode(
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-    );
-    const root = xml.root;
+    const { from, scope, root, rootStart } = part.xml!;
     if (root === undefined) {
       throw new DocxParseError(`Flat OPC: the xmlData of part "${part.path}" has no root element`);
     }
-    let declarations = "";
-    const own = root.ns ?? {};
-    const text = utf8Decoder.decode(content);
-    for (const [prefix, uri] of xml.scope) {
-      // A binding the root makes itself, or one nothing in the part could use, is not repeated.
-      if (Object.hasOwn(own, prefix) || prefix === "xml") {
-        continue;
-      }
-      if (prefix === "" ? uri !== "" : text.includes(`${prefix}:`)) {
-        declarations += ` ${prefix === "" ? "xmlns" : `xmlns:${prefix}`}="${xmlEncodeAttr(uri)}"`;
-      }
-    }
-    if (declarations === "") {
-      part.data = concatBytes(declaration, trimLeadingSpace(content));
-      return;
-    }
-    // After the root's name: `<name` is its start tag's first bytes.
-    const at = utf8Encoder.encode(root.name).length + 1 + (xml.rootStart! - xml.from);
-    part.data = concatBytes(
-      declaration,
-      trimLeadingSpace(content.subarray(0, at)),
-      utf8Encoder.encode(declarations),
-      content.subarray(at)
+    part.ended = true;
+    this.finish(
+      contentSteps(
+        part,
+        standaloneXml(this.bytes, { from, to, scope, root, rootStart: rootStart! })
+      )
     );
   }
 
+  /** The end of a part's `binaryData`: its text queued to be decoded. */
   private endBinaryData(part: OpenPart): void {
-    part.data = base64Decode(part.base64!.replace(/\s+/g, ""), part.path);
+    const text = part.base64!;
+    part.base64 = undefined;
+    part.ended = true;
+    this.finish(contentSteps(part, base64DecodeSteps(text, part.path)));
   }
+
+  /** A part recorded, once its content is finished: its bytes, then its content type for `[Content_Types].xml`. */
+  private recordPart(part: OpenPart): void {
+    if (part.path !== "" && part.data !== undefined) {
+      this.parts.set(part.path, part.data);
+    }
+    // Collect content type info for [Content_Types].xml reconstruction
+    if (part.path !== "" && part.contentType && part.path !== "[Content_Types].xml") {
+      this.contentTypes.set(part.path, part.contentType);
+    }
+  }
+}
+
+/** `steps`, its result kept as the content of `part`. */
+function* contentSteps(part: OpenPart, steps: Steps<Uint8Array>): Steps<void> {
+  part.data = yield* steps;
+}
+
+/** How many bytes of a part's XML {@link standaloneXml} takes in one step. */
+const PART_STEP = 1 << 20;
+
+/**
+ * How many characters of a part's base64 {@link base64DecodeSteps} takes in one step: a mebibyte of it took 4–30 ms to
+ * check and decode where the platform has no native decoder.
+ */
+const BASE64_STEP = 256 * 1024;
+
+/**
+ * A part's XML: its content as the input holds it, made to stand alone — given the namespace declarations it uses from
+ * the elements around it — in steps of {@link PART_STEP}.
+ */
+function* standaloneXml(
+  bytes: Uint8Array,
+  xml: {
+    readonly from: number;
+    readonly to: number;
+    readonly scope: ReadonlyMap<string, string>;
+    readonly root: XmlSaxTag;
+    readonly rootStart: number;
+  }
+): Steps<Uint8Array> {
+  const content = bytes.subarray(xml.from, xml.to);
+  const declaration = utf8Encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+  );
+  const own = xml.root.ns ?? {};
+  // A binding the root makes itself, or one nothing in the part could use, is not repeated: a prefix is declared when
+  // `prefix:` appears in the part's text, which is searched once for all of them.
+  const inherited = [...xml.scope].filter(
+    ([prefix]) => !Object.hasOwn(own, prefix) && prefix !== "xml"
+  );
+  const sought = new Set(inherited.map(([prefix]) => prefix).filter(prefix => prefix !== ""));
+  const found = sought.size === 0 ? sought : yield* prefixesUsed(content, sought);
+  let declarations = "";
+  for (const [prefix, uri] of inherited) {
+    if (prefix === "" ? uri !== "" : found.has(prefix)) {
+      declarations += ` ${prefix === "" ? "xmlns" : `xmlns:${prefix}`}="${xmlEncodeAttr(uri)}"`;
+    }
+  }
+  if (declarations === "") {
+    return yield* concatSteps([declaration, trimLeadingSpace(content)]);
+  }
+  // After the root's name: `<name` is its start tag's first bytes.
+  const at = utf8Encoder.encode(xml.root.name).length + 1 + (xml.rootStart - xml.from);
+  return yield* concatSteps([
+    declaration,
+    trimLeadingSpace(content.subarray(0, at)),
+    utf8Encoder.encode(declarations),
+    content.subarray(at)
+  ]);
+}
+
+/**
+ * Which of `prefixes` appear as `prefix:` in `content`'s text, read in steps of {@link PART_STEP} bytes. The text
+ * between steps overlaps by the longest prefix, so a name cut by a step boundary is still found.
+ */
+function* prefixesUsed(content: Uint8Array, prefixes: ReadonlySet<string>): Steps<Set<string>> {
+  const found = new Set<string>();
+  const decoder = new TextDecoder("utf-8");
+  let longest = 0;
+  for (const prefix of prefixes) {
+    longest = Math.max(longest, prefix.length + 1);
+  }
+  let tail = "";
+  for (let start = 0; start < content.length && found.size < prefixes.size; start += PART_STEP) {
+    const end = Math.min(start + PART_STEP, content.length);
+    const text =
+      tail + decoder.decode(content.subarray(start, end), { stream: end < content.length });
+    for (const prefix of prefixes) {
+      if (!found.has(prefix) && text.includes(`${prefix}:`)) {
+        found.add(prefix);
+      }
+    }
+    tail = text.slice(-longest);
+    yield;
+  }
+  return found;
+}
+
+/** `parts` joined, copied in steps of {@link PART_STEP} bytes. */
+function* concatSteps(parts: readonly Uint8Array[]): Steps<Uint8Array> {
+  let length = 0;
+  for (const part of parts) {
+    length += part.length;
+  }
+  const out = new Uint8Array(length);
+  let at = 0;
+  for (const part of parts) {
+    for (let start = 0; start < part.length; start += PART_STEP) {
+      const piece = part.subarray(start, Math.min(start + PART_STEP, part.length));
+      out.set(piece, at);
+      at += piece.length;
+      yield;
+    }
+  }
+  return out;
+}
+
+/**
+ * A part's `binaryData` decoded, in steps of {@link BASE64_STEP} characters: XML white space anywhere is skipped,
+ * and the text must otherwise be base64 — four characters at a time, `=` padding only at its very end. Each step's
+ * whole groups are decoded on their own and the pieces joined at the end, each piece and the result allocated at
+ * their size.
+ */
+function* base64DecodeSteps(text: string, path: string): Steps<Uint8Array> {
+  const pieces: Uint8Array[] = [];
+  let carry = "";
+  let padded = false;
+  for (let start = 0; start < text.length; start += BASE64_STEP) {
+    const piece = carry + text.slice(start, start + BASE64_STEP).replace(XML_SPACE, "");
+    if (padded && piece.length > 0) {
+      // Padding ended the data; anything after it is not base64.
+      throw notBase64(path);
+    }
+    const usable = piece.length - (piece.length % 4);
+    if (usable > 0) {
+      pieces.push(base64Decode(piece.slice(0, usable), path));
+      padded = piece.charCodeAt(usable - 1) === 0x3d;
+    }
+    carry = piece.slice(usable);
+    yield;
+  }
+  if (carry.length > 0) {
+    throw notBase64(path);
+  }
+  return pieces.length === 1 ? pieces[0]! : yield* concatSteps(pieces);
+}
+
+/** XML's white space: the characters base64 text in a document may be broken with. */
+const XML_SPACE = /[ \t\r\n]+/g;
+
+function notBase64(path: string): DocxParseError {
+  return new DocxParseError(`Flat OPC: the binaryData of part "${path}" is not base64`);
 }
 
 /** Whether `tag` is the package element `local`: in the package namespace, or — as some writers leave it — in none. */
@@ -313,20 +532,6 @@ function trimLeadingSpace(bytes: Uint8Array): Uint8Array {
     i++;
   }
   return bytes.subarray(i);
-}
-
-function concatBytes(...parts: Uint8Array[]): Uint8Array {
-  let length = 0;
-  for (const part of parts) {
-    length += part.length;
-  }
-  const out = new Uint8Array(length);
-  let at = 0;
-  for (const part of parts) {
-    out.set(part, at);
-    at += part.length;
-  }
-  return out;
 }
 
 /**
@@ -590,12 +795,23 @@ function writePartElement(
   xml.closeNode(); // </pkg:part>
 }
 
+/**
+ * `b64` — whole groups of four, white space removed — decoded. Refused as this module's error, whichever decoder the
+ * platform offers: the native one (`Uint8Array.fromBase64`, ES2026) checks the text itself, the others are checked
+ * here first.
+ */
 function base64Decode(b64: string, path: string): Uint8Array {
-  // Checked here, so the native and the manual decoder refuse the same text, as this module's error.
-  if (b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
-    throw new DocxParseError(`Flat OPC: the binaryData of part "${path}" is not base64`);
+  const native = (Uint8Array as NativeBase64).fromBase64;
+  if (typeof native === "function") {
+    try {
+      return native.call(Uint8Array, b64);
+    } catch {
+      throw notBase64(path);
+    }
   }
-  // Use atob in browser, Buffer in Node
+  if (b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
+    throw notBase64(path);
+  }
   if (typeof globalThis.atob === "function") {
     const binary = globalThis.atob(b64);
     const bytes = new Uint8Array(binary.length);
@@ -604,8 +820,12 @@ function base64Decode(b64: string, path: string): Uint8Array {
     }
     return bytes;
   }
-  // Fallback manual decode
   return manualBase64Decode(b64);
+}
+
+/** `Uint8Array.fromBase64`, where the platform has it. */
+interface NativeBase64 {
+  readonly fromBase64?: (this: typeof Uint8Array, text: string) => Uint8Array;
 }
 
 function base64Encode(data: Uint8Array): string {

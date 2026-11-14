@@ -71,13 +71,175 @@ export function excelToDate(v: number, date1904?: boolean): Date {
 }
 
 /**
- * Parse an OOXML date string into a Date object.
- * OOXML dates like "2024-01-15T00:00:00" lack a timezone suffix,
- * which some JS engines parse as local time. Appending "Z" forces UTC.
+ * Parse an OOXML date string into a `Date` carrying the calendar value in its UTC fields, as
+ * {@link excelToDate} does — the same value whatever zone the reader runs in.
+ *
+ * An OOXML datetime (`2024-01-15T00:00:00`, or with a space for the `T`) carries no timezone, and
+ * is read as UTC, as is an ISO date (`2024-01-15`, `2024-01`, `2024`). Text naming its zone
+ * (`…Z`, `…+02:00`, `… GMT+0200`) names an instant, which is kept. ISO text is read here and its
+ * fields checked — a day past the month's end or a 60th second is invalid — because engines
+ * disagree on it: V8 accepted `2024-02-09Z` and rolled `2024-02-30` into March, Safari read the
+ * one as invalid and a 60th second as the next minute.
+ *
+ * Any other text the engine reads (`1/15/2020`, `Jan 15 2020 10:30 PM`) is its calendar value:
+ * the engine reads its date, and its time of day is read here. Read by the engine, a time is
+ * local, and one inside a daylight-saving gap is moved past it — `00:30` on a day that skips its
+ * midnight reads as `01:30` — which nothing can undo afterwards, as both name one instant. Text
+ * holding a time this cannot read (`1:2`), or two, is invalid rather than read as midnight, and
+ * so is a bare number, which engines read as different years.
  */
 export function parseOoxmlDate(raw: string): Date {
-  return new Date(raw.endsWith("Z") ? raw : raw + "Z");
+  const text = raw.trim();
+  if (ISO_LIKE.test(text)) {
+    return isoDate(text);
+  }
+  if (ZONE.test(text)) {
+    // Text naming its zone names an instant, which is what the engine reads.
+    return new Date(text);
+  }
+  const time = TIME_OF_DAY.exec(text);
+  // The text without its time — `1/15/2020, 10:30 AM` leaves `1/15/2020` — is what the engine reads the date from.
+  const rest =
+    time === null
+      ? text
+      : (
+          text.slice(0, time.index + time[1]!.length) +
+          " " +
+          text.slice(time.index + time[0].length)
+        )
+          .replace(TRAILING_CONNECTIVE, "")
+          .trim();
+  // A time left over is one this cannot read, or a second one: the engine would read it, or drop it, its own way.
+  if (/\d:\d/.test(rest) || /^\d*$/.test(rest)) {
+    return new Date(NaN);
+  }
+  const date = calendarDate(rest);
+  if (date === undefined) {
+    return new Date(NaN);
+  }
+  if (time === null) {
+    return utcDate(date.year, date.month, date.day, 0, 0, 0, 0);
+  }
+  let hours = Number(time[2]);
+  const meridiem = time[6]?.toUpperCase();
+  if (meridiem !== undefined) {
+    if (hours < 1 || hours > 12) {
+      return new Date(NaN);
+    }
+    hours = (hours % 12) + (meridiem === "PM" ? 12 : 0);
+  }
+  const minutes = Number(time[3]);
+  const seconds = time[4] === undefined ? 0 : Number(time[4]);
+  if (hours > 23 || minutes > 59 || seconds > 59) {
+    return new Date(NaN);
+  }
+  return utcDate(date.year, date.month, date.day, hours, minutes, seconds, milliseconds(time[5]));
 }
+
+/**
+ * ISO 8601 text, read strictly: a year (`2024`, or six digits with a sign), its month and day, then a time — after
+ * `T`, `t` or a space — to the second with any fraction, and a zone, `Z` or an offset. A zone needs a time, but for
+ * `Z` after a date, which is UTC as the date is.
+ */
+const ISO =
+  /^([+-]\d{6}|\d{4})(?:-(\d{2})(?:-(\d{2})(?:(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?)?([Zz]|[+-]\d{2}(?::?\d{2})?)?)?)?)?$/;
+
+/** Text that is ISO 8601 or meant to be: a year, then a month. Read by {@link isoDate}, never by the engine. */
+const ISO_LIKE = /^[+-]?\d{4,6}(?:-\d{2}|$)/;
+
+/** {@link ISO} text as the instant it names, a time without a zone in UTC; invalid where a field is out of range. */
+function isoDate(text: string): Date {
+  const m = ISO.exec(text);
+  if (
+    m === null ||
+    m[1] === "-000000" ||
+    (m[8] !== undefined && m[4] === undefined && !/^z$/i.test(m[8]))
+  ) {
+    return new Date(NaN);
+  }
+  const year = Number(m[1]);
+  const month = m[2] === undefined ? 1 : Number(m[2]);
+  const day = m[3] === undefined ? 1 : Number(m[3]);
+  const hours = m[4] === undefined ? 0 : Number(m[4]);
+  const minutes = m[5] === undefined ? 0 : Number(m[5]);
+  const seconds = m[6] === undefined ? 0 : Number(m[6]);
+  const ms = milliseconds(m[7]);
+  const endOfDay = hours === 24 && minutes === 0 && seconds === 0 && ms === 0;
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month - 1) ||
+    (hours > 23 && !endOfDay) ||
+    minutes > 59 ||
+    seconds > 59
+  ) {
+    return new Date(NaN);
+  }
+  const utc = utcDate(year, month - 1, day, hours, minutes, seconds, ms);
+  const zone =
+    m[8] === undefined || /^z$/i.test(m[8]) ? undefined : /^([+-])(\d{2}):?(\d{2})?$/.exec(m[8]);
+  if (zone == null) {
+    return utc;
+  }
+  const offsetHours = Number(zone[2]);
+  const offsetMinutes = zone[3] === undefined ? 0 : Number(zone[3]);
+  if (offsetHours > 23 || offsetMinutes > 59) {
+    return new Date(NaN);
+  }
+  const offset = (zone[1] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutes) * 60_000;
+  return new Date(utc.getTime() - offset);
+}
+
+/** The milliseconds of a fraction of a second's digits (`5` is 500), truncated as engines truncate them. */
+function milliseconds(fraction: string | undefined): number {
+  return fraction === undefined ? 0 : Number(fraction.slice(0, 3).padEnd(3, "0"));
+}
+
+function daysInMonth(year: number, month: number): number {
+  return utcDate(year, month + 1, 0, 0, 0, 0, 0).getUTCDate();
+}
+
+/** `Date.UTC` for any year: it reads a year from 0 to 99 as 1900 to 1999. */
+function utcDate(
+  year: number,
+  month: number,
+  day: number,
+  hours: number,
+  minutes: number,
+  seconds: number,
+  ms: number
+): Date {
+  const date = new Date(Date.UTC(2000, month, day, hours, minutes, seconds, ms));
+  date.setUTCFullYear(date.getUTCFullYear() - 2000 + year);
+  return date;
+}
+
+/**
+ * The calendar date the engine reads `text` as, which names no time of day: its local date — a date that skips its
+ * midnight reads as 01:00, on the same date. `undefined` for text it cannot read.
+ */
+function calendarDate(text: string): { year: number; month: number; day: number } | undefined {
+  const read = new Date(text);
+  if (Number.isNaN(read.getTime())) {
+    return undefined;
+  }
+  return { year: read.getFullYear(), month: read.getMonth(), day: read.getDate() };
+}
+
+/**
+ * A time of day in date text: `10:30`, `10:30:15`, `10:30:15.250`, with or without `AM` / `PM` — not inside a longer
+ * run of digits, colons and points. What precedes it is the first group, as Safari 15.4 has no lookbehind.
+ */
+const TIME_OF_DAY =
+  /(^|[^\d:.])(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?![\d:])(?:\s*([AaPp][Mm])(?![A-Za-z]))?/;
+
+/** What joined a time to its date — `, ` or ` at ` — left at the end once the time is taken out. */
+const TRAILING_CONNECTIVE = /(?:[\s,]+|\s+at)+$/i;
+
+/** A zone in date text: `Z`, `GMT`, `UTC`, an offset (`+0200`, `-05:00`), or a named zone (`EST`, `(CEST)`). */
+const ZONE =
+  /\b(?:Z|GMT|UTC|UT)\b|[+-]\d{2}:?\d{2}(?!\d)|\([^)]*\)\s*$|\d(?:\s*[AP]M)?\s+[A-Z]{3,4}\s*$/;
 
 // =============================================================================
 // OOXML escape utilities (ST_Xstring, ISO/IEC 29500 clause 22.4.2.4)

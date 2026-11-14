@@ -1,7 +1,22 @@
+import process from "node:process";
+
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 import { preferBrowserFilesPlugin } from "./src/utils/browser.js";
+
+/**
+ * The engine the suite runs in: Chromium unless `BROWSER_ENGINE` names Firefox or WebKit. Chromium alone let two Safari
+ * defects through — a date parse that relied on V8 reading `2024-02-09Z`, and a password hash that awaited a Web Crypto
+ * digest per round, four seconds in Safari — so CI runs the other two engines as well.
+ */
+function browserEngine(): "chromium" | "firefox" | "webkit" {
+  const engine = process.env.BROWSER_ENGINE ?? "chromium";
+  if (engine !== "chromium" && engine !== "firefox" && engine !== "webkit") {
+    throw new Error(`BROWSER_ENGINE must be chromium, firefox or webkit, got ${engine}`);
+  }
+  return engine;
+}
 
 export default defineConfig({
   plugins: [preferBrowserFilesPlugin()],
@@ -31,11 +46,7 @@ export default defineConfig({
       headless: true,
       // The tests render nothing, so a failure screenshot is a blank page.
       screenshotFailures: false,
-      instances: [
-        {
-          browser: "chromium"
-        }
-      ]
+      instances: [{ browser: browserEngine() }]
     },
     // NOTE: `.oxlintrc.json` mirrors the `include`/`exclude` below in an override
     // that bans `process`, `Buffer`, `__dirname`/`__filename` and `node:` imports

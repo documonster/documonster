@@ -173,6 +173,8 @@ import {
   throwIfAborted
 } from "@archive/core/errors";
 import { asPlainBytes } from "@utils/binary";
+import { defineAsyncDispose } from "@utils/dispose";
+import type { AsyncDisposeMember } from "@utils/dispose";
 
 const remoteZipReaderOptionsSchema = s.object(
   {
@@ -226,6 +228,7 @@ function checkReaderLimits(where: string, options: RemoteZipReaderOptions): void
  * await reader.close();
  * ```
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class RemoteZipReader {
   private readonly reader: RandomAccessReader;
   private readonly options: RemoteZipReaderOptions;
@@ -1286,3 +1289,11 @@ export class RemoteZipReader {
 
 /** @deprecated Use {@link RemoteZipExtractOptions}. Removed in 1.0. */
 export type ExtractOptions = RemoteZipExtractOptions;
+
+// The type of what `defineAsyncDispose` installs below: `await using` disposes of a `RemoteZipReader`.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/no-unsafe-declaration-merging
+export interface RemoteZipReader extends AsyncDisposeMember {}
+
+defineAsyncDispose(RemoteZipReader.prototype, function () {
+  return this.close();
+});

@@ -6,6 +6,8 @@
  * (`styles-writer.ts` and `numbering-writer.ts` are already separate).
  */
 
+import { runSteps } from "@utils/yield";
+import type { Steps } from "@utils/yield";
 import type { Mutable } from "@word/core/internal-utils";
 import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
 import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
@@ -26,16 +28,24 @@ import type {
   TableRowProperties,
   TableStyleConditionalFormat
 } from "@word/types";
+import type { XmlDocument } from "@xml/types";
 
-export function parseStyles(
-  xmlStr: string,
-  maxDepth?: number
-): {
+/** What `word/styles.xml` holds — see {@link parseStyles}. */
+export interface ParsedStyles {
   docDefaults?: DocDefaults;
   styles: StyleDef[];
   preservedXml?: PreservedXml;
-} {
-  const doc = parsePartXml(xmlStr, maxDepth);
+}
+
+export function parseStyles(xmlStr: string, maxDepth?: number): ParsedStyles {
+  return runSteps(stylesOfPart(parsePartXml(xmlStr, maxDepth)));
+}
+
+/**
+ * The styles of a parsed `word/styles.xml`, a style per step — so the streaming reader can give the event loop a turn
+ * while it reads a large style part (`runStepsPaced`), with the code {@link parseStyles} runs.
+ */
+export function* stylesOfPart(doc: XmlDocument): Steps<ParsedStyles> {
   const root = doc.root;
   const rootScope = namespacesInScope({}, root);
   let docDefaults: DocDefaults | undefined;
@@ -195,6 +205,7 @@ export function parseStyles(
     }
 
     styles.push(s);
+    yield;
   }
 
   const preservedXml = preservedRootXml(root, child => {

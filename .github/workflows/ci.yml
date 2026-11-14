@@ -57,13 +57,13 @@ jobs:
           git config --global core.symlinks true
         if: runner.os == 'Windows'
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: "pnpm"
@@ -119,6 +119,61 @@ jobs:
           CI: true
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
 
+  browser-engines:
+    # **The browser suite in Firefox and WebKit.** The `test` matrix runs it in Chromium only, and that let two Safari
+    # defects ship: a date parse that relied on V8 reading `2024-02-09Z` (Safari reads it as an invalid date), and a
+    # sheet-password hash that awaited one Web Crypto digest per round — four seconds in Safari, a third of one in
+    # Chromium. One OS is enough: what differs is the engine. Linux, because Playwright's WebKit there is the same
+    # engine as Safari's and its system libraries install with `install-deps`.
+    needs: should-run
+    timeout-minutes: 30
+    name: Browser tests in ${{ matrix.engine }}
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [firefox, webkit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Playwright version
+        id: playwright
+        shell: bash
+        run: echo "version=$(pnpm exec playwright --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.engine }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright browsers
+        shell: bash
+        run: |
+          pnpm exec playwright install ${{ matrix.engine }}
+          pnpm exec playwright install-deps ${{ matrix.engine }}
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+
+      - name: Browser tests
+        run: pnpm test:browser
+        env:
+          CI: true
+          BROWSER_ENGINE: ${{ matrix.engine }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+
   timezone:
     # **The whole suite outside UTC.**
     #
@@ -146,13 +201,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -185,13 +240,13 @@ jobs:
           git config --global core.symlinks true
         if: runner.os == 'Windows'
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -230,13 +285,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -256,13 +311,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -313,13 +368,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26 to build
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -333,7 +388,7 @@ jobs:
           npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
 
       - name: Use Node.js 22.13.0 — the engines.node floor
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22.13.0
 
@@ -375,13 +430,13 @@ jobs:
           git config --global core.symlinks true
         if: runner.os == 'Windows'
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -413,13 +468,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -451,13 +506,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -514,13 +569,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
       - name: Use Node.js 26
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: "pnpm"
@@ -589,7 +644,7 @@ jobs:
       security-events: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
