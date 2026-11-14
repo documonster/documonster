@@ -22,6 +22,7 @@ import type { Stats } from "node:fs";
 
 import { OPTIONS, checkArchiveArgument, dateSchema } from "@archive/core/arguments";
 import { ArchiveArgumentError } from "@archive/core/errors";
+import { isUint8Array } from "@utils/binary";
 import type { FileEntry, GlobOptions, TraverseOptions } from "@utils/fs";
 import {
   copyFile as copyFileImpl,
@@ -119,12 +120,7 @@ function checkGlobOptions(where: string, options: unknown): void {
 }
 
 function checkData(where: string, value: unknown): void {
-  checkArchiveArgument(
-    s.custom(v => v instanceof Uint8Array, "a Uint8Array"),
-    value,
-    where,
-    "data"
-  );
+  checkArchiveArgument(s.custom(isUint8Array, "a Uint8Array"), value, where, "data");
 }
 
 function checkContent(where: string, value: unknown): void {

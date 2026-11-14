@@ -218,6 +218,19 @@ export async function streamToUint8Array(
   return out.read(out.length);
 }
 
+/**
+ * `data` as a chunk a native `CompressionStream` / `DecompressionStream` accepts. WebKit refuses a
+ * view whose buffer belongs to another realm — bytes made in an iframe or a test DOM — with
+ * "Invalid type should be ArrayBuffer", where Chromium and Firefox take it, so such a view is
+ * copied into this realm; a `SharedArrayBuffer` is not a `BufferSource` either. A view over this
+ * realm's `ArrayBuffer` is passed as it is.
+ */
+export function toNativeStreamChunk(data: Uint8Array): Uint8Array<ArrayBuffer> {
+  return data.buffer instanceof ArrayBuffer
+    ? (data as Uint8Array<ArrayBuffer>)
+    : new Uint8Array(data);
+}
+
 export async function transformWithStream(
   data: Uint8Array,
   stream: CompressionStream | DecompressionStream,
@@ -255,7 +268,7 @@ export async function transformWithStream(
   try {
     let writeError: { error: unknown } | undefined;
     try {
-      await writer.write(data as BufferSource);
+      await writer.write(toNativeStreamChunk(data));
       await writer.close();
     } catch (error) {
       writeError = { error };

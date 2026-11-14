@@ -6,7 +6,10 @@
  * Uses the browser Duplex stream implementation for compatibility.
  */
 
-import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import {
+  hasDeflateRawDecompressionStream,
+  toNativeStreamChunk
+} from "@archive/compression/compress.base";
 import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
 import { ByteQueue } from "@archive/core/byte-queue";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
@@ -135,7 +138,7 @@ class BrowserInflateRaw extends Duplex {
     this._pendingWrites++;
 
     this.writer
-      .write(chunk)
+      .write(toNativeStreamChunk(chunk))
       .then(() => {
         this._pendingWrites--;
         if (this._pendingWrites === 0 && this._resolveWriteFinished) {

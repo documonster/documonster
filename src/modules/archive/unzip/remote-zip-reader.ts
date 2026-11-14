@@ -172,14 +172,14 @@ import {
   ZipEocdNotFoundError,
   throwIfAborted
 } from "@archive/core/errors";
-import { asPlainBytes } from "@utils/binary";
+import { asPlainBytes, isUint8Array } from "@utils/binary";
 import { defineAsyncDispose } from "@utils/dispose";
 import type { AsyncDisposeMember } from "@utils/dispose";
 
 const remoteZipReaderOptionsSchema = s.object(
   {
     password: s
-      .union([s.string(), s.custom<Uint8Array>(v => v instanceof Uint8Array, "a Uint8Array")], {
+      .union([s.string(), s.custom<Uint8Array>(isUint8Array, "a Uint8Array")], {
         expected: "a string or a Uint8Array"
       })
       .optional(),

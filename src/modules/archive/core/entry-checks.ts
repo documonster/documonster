@@ -16,12 +16,14 @@ import { ArchiveArgumentError } from "@archive/core/errors";
 import { resolveZipStringCodec } from "@archive/core/text";
 import { isArchiveSource } from "@archive/io/archive-source";
 import { zipModTimeProblem } from "@archive/zip-spec/timestamps";
+import { isUint8Array } from "@utils/binary";
 import { describeValue as describe } from "@utils/describe-value";
 import { s } from "@utils/schema";
 
 const nonEmptyString = s.string({ nonEmpty: true });
 
-const uint8ArraySchema = s.custom<Uint8Array>(v => v instanceof Uint8Array, "a Uint8Array");
+/** A `Uint8Array` from any realm: one made in a worker, an iframe or a test DOM fails `instanceof`. */
+const uint8ArraySchema = s.custom<Uint8Array>(isUint8Array, "a Uint8Array");
 
 export const archiveSourceSchema = s.custom(
   isArchiveSource,

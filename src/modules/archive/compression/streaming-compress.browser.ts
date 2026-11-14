@@ -16,7 +16,8 @@ import {
   hasGzipCompressionStream,
   hasGzipDecompressionStream,
   hasDeflateCompressionStream,
-  hasDeflateDecompressionStream
+  hasDeflateDecompressionStream,
+  toNativeStreamChunk
 } from "@archive/compression/compress.base";
 import { gzipSync, gunzipSync, zlibSync, unzlibSync } from "@archive/compression/compress.browser";
 import {
@@ -228,7 +229,7 @@ function createNativeWebStreamCodec(format: WebStreamFormat, isCompress: boolean
   })();
 
   codec.setBackend({
-    write: chunk => writer.write(chunk),
+    write: chunk => writer.write(toNativeStreamChunk(chunk)),
     close: async () => {
       await writer.close();
       await readLoop;
