@@ -84,7 +84,7 @@ src/
 │   ├── draw/           # Shared drawing engine: display-list IR, one walker, SVG surface
 │   ├── mermaid/        # Mermaid text → DrawList (21 diagram types)
 │   └── stream/         # Cross-platform streaming primitives; core/ shared primitives
-├── utils/              # Shared: errors, datetime, fs, binary, crypto
+├── utils/              # Shared: errors, datetime, fs, binary, crypto; index.ts publishes documonster/utils
 └── test/               # Test utilities and fixtures
 
 packages/               # Workspace satellites — MAY have runtime dependencies
@@ -621,7 +621,7 @@ Three invariants keep it honest, and each fails loudly rather than degrade:
 straight from a URL, because `#platform/*` is a bare specifier and a browser needs an import
 map to resolve one. Bundlers resolve it (verified against esbuild, rolldown and rspack), and
 the no-bundler case is what `dist/iife` is for. Deep paths were never part of the contract —
-`exports` has only ever published the 19 subpaths.
+`exports` has only ever published its subpaths.
 
 **A second consumer is affected, and it is worth naming rather than discovering:** Jest
 cannot resolve `imports` (`#`) specifiers under its experimental ESM mode. Measured on
@@ -903,11 +903,15 @@ name in the next. A new export that breaks a rule here needs a reason written be
 - **Constants**: an enum-like name → code table is PascalCase (`ValueType`, `PaperSize`,
   `Pdf.PageSizes`, `Archive.TarType`); any other constant is SCREAMING_CASE
   (`TAR_BLOCK_SIZE`, `Xml.DEFAULT_DECLARATION`, `Styles.DEFAULT`).
-- **A namespace holds its module's own things.** Generic helpers the platform already
-  provides (byte/base64/UTF-8 conversion, `signal.throwIfAborted()`) are not
-  re-published from whichever module first used them; that is how `Archive` came to carry
-  `base64ToUint8Array` and `concatUint8Arrays`, now deprecated in favour of the native
-  APIs. An error guard sits flat beside its class (`isAbortError` beside `AbortError`).
+- **A namespace holds its module's own things.** Generic helpers are not re-published from
+  whichever module first used them; that is how `Archive` came to carry
+  `base64ToUint8Array` and `concatUint8Arrays`, now deprecated. Byte conversions live in
+  `documonster/utils` (`Bytes`), because the platforms offer them unevenly: base64 is ES2026
+  and absent from Node 22 and 24 (hex too), the decoders that stand in for it disagree about malformed
+  text, `Uint8Array` has no concatenation, and `getRandomValues` refuses more than 64 KB a call.
+  Text encoding sits beside them so the set is complete, with this package's errors. Anything
+  else the platform offers everywhere with one behaviour (`signal.throwIfAborted()`) is not
+  wrapped. An error guard sits flat beside its class (`isAbortError` beside `AbortError`).
   A helper that only _looks_ like a platform one stays when it does something the platform
   does not, and says so beside it: `Archive.throwIfAborted` always throws this package's
   `AbortError` class (the signal's reason becomes its `cause`), where

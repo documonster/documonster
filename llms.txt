@@ -4,7 +4,7 @@
 > Mermaid diagrams. ESM-only, Node.js >= 22.13, Bun and modern browsers. Every module is its own subpath:
 > `documonster/excel`, `documonster/word`, `documonster/pdf`, `documonster/csv`, `documonster/xml`,
 > `documonster/archive`, `documonster/markdown`, `documonster/mermaid`, `documonster/draw`, `documonster/formula`,
-> `documonster/stream`, `documonster/chart`; and the bridges `documonster/excel/csv`, `documonster/excel/markdown`,
+> `documonster/stream`, `documonster/chart`, `documonster/utils`; and the bridges `documonster/excel/csv`, `documonster/excel/markdown`,
 > `documonster/excel/formula`, `documonster/word/html`, `documonster/word/markdown`, `documonster/word/excel`,
 > `documonster/word/crypto`.
 

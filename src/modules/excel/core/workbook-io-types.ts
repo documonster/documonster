@@ -32,6 +32,7 @@ import type {
   XlsxZipReadLimits,
   ZipWriterOptions
 } from "@excel/xlsx/types";
+import { isBase64 } from "@utils/base64";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 export type { WorkbookCreateOptions } from "@excel/core/workbook-create-options";
@@ -412,6 +413,12 @@ export function checkReadData(where: string, data: unknown, base64: unknown): vo
     return;
   }
   if (typeof data === "string" && base64 === true) {
+    if (!isBase64(data, "either")) {
+      throw new ExcelArgumentError(
+        "data",
+        `${where}: data is a string read with { base64: true }, but it is not base64`
+      );
+    }
     return;
   }
   const got =

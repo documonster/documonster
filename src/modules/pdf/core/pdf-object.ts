@@ -9,6 +9,7 @@
  */
 
 import { textEncoder } from "@utils/binary";
+import { encodeHex } from "@utils/hex";
 
 // =============================================================================
 // PDF Object Serialization
@@ -36,11 +37,7 @@ export function pdfString(value: string): string {
  * Format a PDF hex string from raw bytes.
  */
 export function pdfHexString(bytes: Uint8Array): string {
-  let hex = "<";
-  for (let i = 0; i < bytes.length; i++) {
-    hex += bytes[i].toString(16).padStart(2, "0");
-  }
-  return hex + ">";
+  return `<${encodeHex(bytes)}>`;
 }
 
 /** Whether a byte has to be written as `#xx` in a name (ISO 32000-1 §7.3.5). */

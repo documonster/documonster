@@ -1,5 +1,19 @@
-import { compress, decompress, decompressSync } from "@archive/compression/compress";
+import {
+  compress,
+  decompress,
+  decompressAuto,
+  decompressSync,
+  gunzip,
+  gunzipSync,
+  gzip,
+  gzipSync,
+  unzlib,
+  unzlibSync,
+  zlib,
+  zlibSync
+} from "@archive/compression/compress";
 import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import { ArchiveError, ArchiveLimitExceededError } from "@archive/core/errors";
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
@@ -164,4 +178,80 @@ describe("decompress fallback does not leak unhandled rejections", () => {
       restore();
     }
   }, 60_000);
+});
+
+/**
+ * gzip and zlib run on the same native zlib as raw DEFLATE, so they can be rejected the same
+ * way, and recover the same way: the pure-JS codec decides.
+ */
+describe("gzip and zlib recover from a failing native stream", () => {
+  function installFailingStreams(): () => void {
+    const cs = globalThis.CompressionStream;
+    const ds = globalThis.DecompressionStream;
+    class Failing {
+      readable: ReadableStream<Uint8Array>;
+      writable: WritableStream<Uint8Array>;
+      constructor(_format: string) {
+        const transform = new TransformStream<Uint8Array, Uint8Array>({
+          transform() {
+            throw new TypeError("The compressed data was not valid: invalid code lengths set.");
+          }
+        });
+        this.readable = transform.readable;
+        this.writable = transform.writable;
+      }
+    }
+    (globalThis as unknown as { CompressionStream: unknown }).CompressionStream = Failing;
+    (globalThis as unknown as { DecompressionStream: unknown }).DecompressionStream = Failing;
+    return () => {
+      globalThis.CompressionStream = cs;
+      globalThis.DecompressionStream = ds;
+    };
+  }
+
+  const body = randomText(200_000);
+
+  it("gunzip and unzlib decode valid data", async () => {
+    const gz = gzipSync(body);
+    const zl = zlibSync(body);
+    const restore = installFailingStreams();
+    try {
+      expect(bytesEqual(await gunzip(gz), body)).toBe(true);
+      expect(bytesEqual(await unzlib(zl), body)).toBe(true);
+      expect(bytesEqual(await decompressAuto(gz), body)).toBe(true);
+      expect(bytesEqual(await decompressAuto(zl), body)).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("gzip and zlib produce valid data", async () => {
+    const restore = installFailingStreams();
+    let gz: Uint8Array;
+    let zl: Uint8Array;
+    try {
+      gz = await gzip(body);
+      zl = await zlib(body);
+    } finally {
+      restore();
+    }
+    expect(bytesEqual(gunzipSync(gz), body)).toBe(true);
+    expect(bytesEqual(unzlibSync(zl), body)).toBe(true);
+  });
+
+  it("still reports corrupt data, as the archive's own error", async () => {
+    const gz = gzipSync(body);
+    gz[gz.length - 5] ^= 0xff; // the CRC-32
+    const restore = installFailingStreams();
+    try {
+      await expect(gunzip(gz)).rejects.toThrow(ArchiveError);
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not retry past the output limit", async () => {
+    const gz = gzipSync(body);
+    await expect(gunzip(gz, { maxOutputLength: 1000 })).rejects.toThrow(ArchiveLimitExceededError);
+  });
 });

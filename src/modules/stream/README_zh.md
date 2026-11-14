@@ -1106,6 +1106,7 @@ console.log(messages); // ["Hello", "World"]
 
 ```typescript
 import { createReadStream, createWriteStream } from "fs";
+
 import { pipeline, Streams } from "documonster/stream";
 
 // Transform file content to uppercase

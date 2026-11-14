@@ -113,6 +113,7 @@ const REPO_ENTRIES: Record<string, { file: string; platform: "node" | "browser" 
   "documonster/formula": { file: "src/modules/formula/index.ts", platform: "both" },
   "documonster/csv": { file: "src/modules/csv/index.ts", platform: "both" },
   "documonster/markdown": { file: "src/modules/markdown/index.ts", platform: "both" },
+  "documonster/utils": { file: "src/utils/index.ts", platform: "both" },
   "documonster/xml": { file: "src/modules/xml/index.ts", platform: "both" },
   "documonster/archive": { file: "src/modules/archive/index.ts", platform: "node" },
   "documonster/archive (browser)": {

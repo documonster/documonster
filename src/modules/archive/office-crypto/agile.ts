@@ -22,6 +22,7 @@
 import { CfbError, isCfb, readCfb, writeCfb } from "@archive/cfb/cfb";
 import type { CfbEntry } from "@archive/cfb/cfb";
 import { ArchiveError } from "@archive/core/errors";
+import { decodeBase64 } from "@utils/base64";
 import { textDecoder, textEncoder } from "@utils/binary";
 import {
   aesCbcDecryptRaw as aesCbcDecryptRawSync,
@@ -31,7 +32,7 @@ import {
 } from "@utils/crypto";
 import { canonicalHashAlgorithm, compactHashAlgorithm } from "@utils/hash-names";
 import type { CompactHashAlgorithm } from "@utils/hash-names";
-import { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils";
+import { uint8ArrayToBase64 } from "@utils/utils";
 import { createYieldBudget, PACED_SLICE_LENGTH } from "@utils/yield";
 import type { YieldPoint } from "@utils/yield";
 
@@ -743,6 +744,18 @@ export function parseAgileEncryptionInfo(xmlStr: string): AgileEncryptionInfo {
       "Invalid EncryptionInfo XML - missing keyData or encryptedKey"
     );
   }
+  // A value that is not base64 is a damaged file, reported as one — not decoded to whatever a
+  // lenient decoder makes of it, nor left to the decoder's own error.
+  const decodeField = (value: string, name: string): Uint8Array => {
+    const bytes = decodeBase64(value, "either");
+    if (bytes === undefined) {
+      throw new OfficeCryptoError(
+        "malformed",
+        `Invalid EncryptionInfo XML - ${name} is not base64`
+      );
+    }
+    return bytes;
+  };
   const required = (attrs: Record<string, string>, name: string): Uint8Array => {
     const v = attrs[name];
     if (v === undefined || v === "") {
@@ -751,7 +764,7 @@ export function parseAgileEncryptionInfo(xmlStr: string): AgileEncryptionInfo {
         `Invalid EncryptionInfo XML - missing or empty required field: ${name}`
       );
     }
-    return new Uint8Array(base64ToUint8Array(v));
+    return decodeField(v, name);
   };
   const integrity = extractSelfClosingTagAttrs(xmlStr, "dataIntegrity");
   const hmacKey = integrity?.encryptedHmacKey;
@@ -773,14 +786,14 @@ export function parseAgileEncryptionInfo(xmlStr: string): AgileEncryptionInfo {
     blockSize: infoNumber(pwdAttrs.blockSize, "16", "blockSize", 8, 64),
     ...(hmacKey && hmacValue
       ? {
-          dataIntegritySalt: new Uint8Array(base64ToUint8Array(hmacKey)),
-          dataIntegrityHmac: new Uint8Array(base64ToUint8Array(hmacValue))
+          dataIntegritySalt: decodeField(hmacKey, "encryptedHmacKey"),
+          dataIntegrityHmac: decodeField(hmacValue, "encryptedHmacValue")
         }
       : {}),
     ...(keyDataSalt
       ? {
           keyData: {
-            salt: new Uint8Array(base64ToUint8Array(keyDataSalt)),
+            salt: decodeField(keyDataSalt, "saltValue"),
             hashAlgorithm: keyDataHashAlgorithm,
             hashSize: infoHashSize(keyDataAttrs.hashSize, keyDataHashAlgorithm),
             blockSize: infoNumber(keyDataAttrs.blockSize, "16", "blockSize", 8, 64),

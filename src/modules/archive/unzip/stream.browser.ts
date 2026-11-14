@@ -10,7 +10,7 @@ import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.
 import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
 import { ByteQueue } from "@archive/core/byte-queue";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { toError, toInflateError } from "@archive/core/errors";
+import { ArchiveError, toError, toInflateError } from "@archive/core/errors";
 import type {
   CrxHeader,
   EntryProps,
@@ -378,6 +378,16 @@ onmessage = async (ev) => {
   return _inflateWorkerUrl;
 }
 
+/**
+ * Inflates on a worker.
+ *
+ * A worker that fails to load — its script refused by a Content Security Policy, or a
+ * `workerInflateUrl` that does not boot — reports it with an `error` event on the `Worker`, after
+ * the first chunks have been posted to it. Until the worker has answered once, chunks are therefore
+ * posted as copies and kept here, and their writes are not acknowledged; a failure in that window
+ * hands the kept chunks, in order, to an inflater on this thread, which finishes the entry. Once the
+ * worker has answered it is known to run, and chunks are transferred to it as before.
+ */
 class WorkerInflateRaw extends Duplex {
   private readonly worker: Worker;
   private _nextId = 1;
@@ -385,6 +395,12 @@ class WorkerInflateRaw extends Duplex {
   private _workerClosed = false;
   private _junkError = false;
   private _terminated = false;
+  /** Whether the worker has answered, and so is known to run. */
+  private _alive = false;
+  /** Chunks posted before the worker answered, by write id, for a move to this thread. */
+  private _unconfirmed: Array<{ id: number; chunk: Uint8Array }> = [];
+  /** The inflater on this thread that took over from a worker that did not start. */
+  private _fallback: Duplex | null = null;
 
   constructor(workerUrl?: string) {
     super({
@@ -405,6 +421,10 @@ class WorkerInflateRaw extends Duplex {
       const msg = ev.data as InflateWorkerMessage | null | undefined;
       if (!msg || typeof msg.t !== "string") {
         return;
+      }
+      if (!this._alive) {
+        this._alive = true;
+        this._unconfirmed = [];
       }
 
       if (msg.t === "data") {
@@ -456,11 +476,39 @@ class WorkerInflateRaw extends Duplex {
     };
 
     this.worker.onerror = (e: ErrorEvent) => {
-      const err = new Error(e.message ?? "Worker error");
+      if (this._terminated) {
+        return;
+      }
+      if (!this._alive) {
+        this._moveToMainThread();
+        return;
+      }
+      const err = new ArchiveError(e.message || "Worker error");
       this._settlePendingAcks(err);
       this.emit("error", err);
       this._terminateWorker();
     };
+  }
+
+  /** Hand everything posted so far, and everything still to come, to an inflater on this thread. */
+  private _moveToMainThread(): void {
+    this._terminateWorker();
+    const fallback = createInflateRaw();
+    this._fallback = fallback;
+    fallback.on("data", (chunk: Uint8Array) => this.push(chunk));
+    fallback.on("end", () => this.push(null));
+    fallback.on("error", (err: Error) => this.emit("error", err));
+
+    const acks = this._pendingAcks;
+    this._pendingAcks = new Map();
+    for (const { id, chunk } of this._unconfirmed) {
+      const callback = acks.get(id);
+      fallback.write(chunk, (err?: Error | null) => callback?.(err));
+    }
+    this._unconfirmed = [];
+    if (this._workerClosed) {
+      fallback.end();
+    }
   }
 
   private _settlePendingAcks(err?: Error): void {
@@ -487,6 +535,10 @@ class WorkerInflateRaw extends Duplex {
   }
 
   private _doWrite(chunk: Uint8Array, callback: (error?: Error | null) => void): void {
+    if (this._fallback) {
+      this._fallback.write(chunk, (err?: Error | null) => callback(err));
+      return;
+    }
     if (this._workerClosed || this._junkError) {
       callback();
       return;
@@ -494,6 +546,13 @@ class WorkerInflateRaw extends Duplex {
 
     const id = this._nextId++;
     this._pendingAcks.set(id, callback);
+
+    if (!this._alive) {
+      // A copy, so the chunk is still here if the worker turns out not to run
+      this._unconfirmed.push({ id, chunk });
+      this.worker.postMessage({ t: "write", id, chunk });
+      return;
+    }
 
     // Transfer the underlying ArrayBuffer to reduce copies.
     // If chunk is a view into a larger buffer, slice to avoid transferring unrelated bytes.
@@ -506,6 +565,11 @@ class WorkerInflateRaw extends Duplex {
   }
 
   private _doClose(callback: (error?: Error | null) => void): void {
+    if (this._fallback) {
+      this._fallback.end();
+      callback();
+      return;
+    }
     if (this._workerClosed) {
       callback();
       return;
@@ -527,6 +591,7 @@ class WorkerInflateRaw extends Duplex {
     }
 
     this._terminateWorker();
+    this._fallback?.destroy();
 
     return super.destroy(error ?? undefined);
   }

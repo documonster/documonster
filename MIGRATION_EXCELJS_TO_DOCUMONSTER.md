@@ -411,6 +411,7 @@ Note that `bytes.slice()` copies, as it does for every `Uint8Array`; `subarray` 
 
 ```ts
 import { PassThrough } from "node:stream";
+
 import { Workbook } from "documonster/excel";
 
 declare function upload(body: PassThrough): Promise<void>; // your consumer
@@ -1050,6 +1051,7 @@ Streaming straight into an HTTP response (or any Node writable, or a Web `Writab
 
 ```ts
 import { createServer } from "node:http";
+
 import { Stream, Workbook } from "documonster/excel";
 
 createServer(async (_req, res) => {

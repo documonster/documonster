@@ -212,6 +212,20 @@ describe("Archive.ZipEditPlan checks the operations it is built from", () => {
     expect((caught(call) as ArchiveArgumentError).field).toBe(field);
   });
 
+  it("deserialize refuses set data that is not base64, on every platform", () => {
+    // Node's decoder skipped the characters it did not know, a browser's threw a DOMException
+    expectArgumentError(
+      caught(() =>
+        Archive.ZipEditPlan.deserialize({
+          version: 1,
+          ops: [{ type: "set", name: "a.txt", data: "aGk!!" }]
+        })
+      ),
+      "data.ops[0].data",
+      "Archive.ZipEditPlan.deserialize"
+    );
+  });
+
   it("deserialize names data.ops in the caller's words", () => {
     expectArgumentError(
       caught(() => Archive.ZipEditPlan.deserialize({ version: 2, ops: [] } as never)),

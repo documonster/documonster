@@ -10,7 +10,10 @@ import {
   createInflateStream,
   hasWorkerSupport
 } from "@archive/compression/streaming-compress.browser";
-import { WorkerPool } from "@archive/compression/worker-pool/index.browser";
+import {
+  WorkerPool,
+  terminateDefaultWorkerPool
+} from "@archive/compression/worker-pool/index.browser";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, expect, it } from "vitest";
 
@@ -100,4 +103,37 @@ describe("worker stream start fallback", () => {
       pool.terminate();
     }
   });
+
+  // A CSP refusal throws from `new Worker` in some browsers, before any session exists
+  for (const [name, make] of Object.entries({
+    deflate: () => createDeflateStream({ useWorker: true }),
+    inflate: () => createInflateStream({ useWorker: true })
+  })) {
+    it(`${name} completes on the main thread when the Worker constructor throws`, async () => {
+      if (!hasWorkerSupport()) {
+        return;
+      }
+      const OriginalWorker = globalThis.Worker;
+      (globalThis as { Worker: unknown }).Worker = function RefusedWorker(): never {
+        throw new DOMException("refused by the Content Security Policy", "SecurityError");
+      };
+      const unhandled: unknown[] = [];
+      const onRejection = (event: PromiseRejectionEvent): void => {
+        unhandled.push(event.reason);
+        event.preventDefault();
+      };
+      globalThis.addEventListener("unhandledrejection", onRejection);
+      try {
+        const input = name === "deflate" ? original : deflateRawCompressed(original, 6);
+        const output = await run(make(), input);
+        expect(name === "deflate" ? inflateRawSync(output) : output).toEqual(original);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        expect(unhandled).toEqual([]);
+      } finally {
+        globalThis.removeEventListener("unhandledrejection", onRejection);
+        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+        terminateDefaultWorkerPool();
+      }
+    });
+  }
 });

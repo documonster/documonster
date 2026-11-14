@@ -9,6 +9,7 @@ import { ArchiveArgumentError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { resolveArchiveSourceToBuffer } from "@archive/io/archive-source";
 import type { ZipEntryOptions } from "@archive/zip";
+import { decodeBase64, encodeBase64 } from "@utils/base64";
 import { describeValue } from "@utils/describe-value";
 import { s } from "@utils/schema";
 
@@ -242,7 +243,7 @@ export class ZipEditPlan {
       if (op.type === "set") {
         // Resolve source to buffer and encode as base64
         const buffer = await resolveArchiveSourceToBuffer(op.source, { signal });
-        const base64 = uint8ArrayToBase64(buffer);
+        const base64 = encodeBase64(buffer);
         ops.push({
           type: "set",
           name: op.name,
@@ -315,8 +316,13 @@ export class ZipEditPlan {
       }
       if (op.type === "set") {
         checkString("Archive.ZipEditPlan.deserialize", `data.ops[${index}].data`, op.data);
-        // Decode base64 back to Uint8Array
-        const buffer = base64ToUint8Array(op.data);
+        const buffer = decodeBase64(op.data);
+        if (buffer === undefined) {
+          throw new ArchiveArgumentError(
+            `data.ops[${index}].data`,
+            `Archive.ZipEditPlan.deserialize: data.ops[${index}].data is not base64`
+          );
+        }
         return {
           type: "set" as const,
           name: op.name,
@@ -360,40 +366,4 @@ export class ZipEditPlan {
   static fromJSON(json: string): ZipEditPlan {
     return ZipEditPlan.fromJson(json);
   }
-}
-
-/**
- * Convert Uint8Array to base64 string
- */
-function uint8ArrayToBase64(bytes: Uint8Array): string {
-  // Use btoa in browser, Buffer in Node.js
-  if (typeof Buffer !== "undefined") {
-    if (Buffer.isBuffer(bytes)) {
-      return bytes.toString("base64");
-    }
-    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
-  }
-  // Browser fallback using btoa
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * Convert base64 string to Uint8Array
- */
-function base64ToUint8Array(base64: string): Uint8Array {
-  // Use Buffer in Node.js, atob in browser
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(base64, "base64");
-  }
-  // Browser fallback using atob
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
 }

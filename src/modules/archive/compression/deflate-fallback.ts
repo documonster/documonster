@@ -205,6 +205,11 @@ class BitReader {
     return node.symbol;
   }
 
+  /** Bytes read so far, a partly used last byte included. */
+  get consumed(): number {
+    return this.pos;
+  }
+
   /**
    * Align to byte boundary
    */
@@ -240,6 +245,20 @@ class BitReader {
  * @returns Decompressed data
  */
 export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Array {
+  return inflateRawPrefix(data, maxOutputLength).output;
+}
+
+/**
+ * Decompress the DEFLATE stream at the start of `data`, and say where it ended.
+ *
+ * A stream is self-terminating — its final block says so — and whatever follows is not part of it:
+ * a gzip or zlib trailer, the next gzip member, padding. `consumed` counts the byte the final block
+ * ends in, as a container counts it.
+ */
+export function inflateRawPrefix(
+  data: Uint8Array,
+  maxOutputLength?: number
+): { output: Uint8Array; consumed: number } {
   const reader = new BitReader(data);
   // Output accumulator. DEFLATE has no length prefix, so we grow a typed array
   // geometrically instead of pushing into a `number[]` (which boxes every byte
@@ -397,7 +416,7 @@ export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Arr
 
   // Return an exactly-sized copy so callers never observe the over-allocated
   // tail and the growth buffer can be garbage-collected.
-  return output.slice(0, outLen);
+  return { output: output.slice(0, outLen), consumed: reader.consumed };
 }
 
 // ============================================================================

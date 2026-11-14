@@ -42,7 +42,8 @@ export const IIFE_BUNDLES: readonly IifeBundle[] = [
   { global: "Archive", file: "archive", input: "./src/modules/archive/index.browser.ts" },
   { global: "Stream", file: "stream", input: "./src/modules/stream/index.browser.ts" },
   { global: "Draw", file: "draw", input: "./src/modules/draw/index.ts" },
-  { global: "Mermaid", file: "mermaid", input: "./src/modules/mermaid/index.ts" }
+  { global: "Mermaid", file: "mermaid", input: "./src/modules/mermaid/index.ts" },
+  { global: "Utils", file: "utils", input: "./src/utils/index.ts" }
 ];
 
 /**

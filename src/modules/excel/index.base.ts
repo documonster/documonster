@@ -48,6 +48,7 @@ export * as Anchor from "@excel/surface/anchor";
 export * as Watermark from "@excel/surface/watermark";
 export * as HeaderFooterImage from "@excel/surface/header-footer-image";
 export * as Format from "@excel/surface/format";
+export * as DateSerial from "@excel/surface/date-serial";
 export * as ConditionalFormatting from "@excel/surface/conditional-formatting";
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ export type {
  * collapses, rather than an error in a declaration file they did not write.
  */
 export type { ExcelDateTimeParts } from "@utils/excel-serial";
+export type { ExcelDateSerialOptions } from "@excel/surface/date-serial";
 export type {
   PlainDate,
   PlainDateTime,

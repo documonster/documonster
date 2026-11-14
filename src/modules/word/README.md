@@ -705,8 +705,8 @@ borders), column widths, rich-text runs, and an optional title page.
 Hidden sheets are skipped; rows/columns can be capped.
 
 ```typescript
-import { WordExcel } from "documonster/word/excel";
 import { Document } from "documonster/word";
+import { WordExcel } from "documonster/word/excel";
 
 // Workbook → DocxDocument (all visible sheets, formatting preserved)
 const doc = WordExcel.toDocx(workbook);
@@ -752,8 +752,8 @@ inline images, headers/footers, and floats all render identically to the
 SVG path.
 
 ```typescript
-import { Document } from "documonster/word";
 import { Pdf } from "documonster/pdf";
+import { Document } from "documonster/word";
 
 const doc = await Document.read(docxBytes);
 const pdfBytes = await Pdf.fromDocx(doc);

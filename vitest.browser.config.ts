@@ -26,6 +26,28 @@ export default defineConfig({
   define: {
     global: "globalThis"
   },
+  // Pre-bundle only what Vite is told to, once, when the server starts — never by scanning the
+  // test files while a page is already loading them.
+  //
+  // With discovery on, a cold cache (the first shard of every CI run) has Vite crawl all ~730 test
+  // files for imports, about 1.5 s, while the browser has already opened the page; the tester
+  // iframes are created the moment the bundling finishes. Since Vitest 5.1 pre-bundles its own
+  // runtime there, Firefox's content process dies with SIGSEGV at that moment in about four cold
+  // starts out of ten ("The firefox page crashed while running tests"), and the shard runs
+  // nothing. Measured in the Playwright image: Vitest 5.0.2 never did, on either Firefox build;
+  // a warm cache never does; and with no discovery the bundle is written before any page loads,
+  // and 50 cold starts in a row ran clean.
+  //
+  // Discovery has nothing to find anyway — the tests import this repository's own source and
+  // Vitest, and the scan reported no dependencies. `include` must not be empty: Vite reads
+  // `noDiscovery` with an empty `include` as "optimizer disabled" when it builds its resolver,
+  // before Vitest adds its runtime, and Vitest is then served unbundled (`expect-type` fails to
+  // import). A test that does import a new package gets it unbundled, and fails loudly if that
+  // package is CommonJS — the cue to add it here.
+  optimizeDeps: {
+    noDiscovery: true,
+    include: ["vitest"]
+  },
   test: {
     globals: true,
     testTimeout: 30000,

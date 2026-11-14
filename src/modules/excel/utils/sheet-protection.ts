@@ -1,4 +1,5 @@
 import { Encryptor } from "@excel/utils/encryptor";
+import { decodeBase64, isBase64 } from "@utils/base64";
 import { isRecordArgument } from "@utils/object";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils";
 
@@ -86,6 +87,11 @@ export async function verifySheetPassword(
   if (!protection?.hashValue || !protection.saltValue || !protection.algorithmName) {
     return false;
   }
+  // A stored hash or salt that is not base64 — a damaged file — matches no password
+  const expected = decodeBase64(protection.hashValue, "either");
+  if (expected === undefined || !isBase64(protection.saltValue, "either")) {
+    return false;
+  }
   const candidateHash = await Encryptor.convertPasswordToHash(
     password,
     protection.algorithmName,
@@ -93,7 +99,6 @@ export async function verifySheetPassword(
     protection.spinCount ?? 100000
   );
   const candidate = base64ToUint8Array(candidateHash);
-  const expected = base64ToUint8Array(protection.hashValue);
   // Portable constant-work comparison: always inspect every byte of the
   // longest input instead of returning at the first mismatch. JavaScript
   // engines cannot promise strict CPU-level constant time, but this avoids the

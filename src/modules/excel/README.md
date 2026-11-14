@@ -396,8 +396,9 @@ ConditionalFormatting.add(worksheet, {
 ### Images
 
 ```typescript
-import { Image } from "documonster/excel";
 import { readFileSync } from "fs";
+
+import { Image } from "documonster/excel";
 
 const imageId = Image.add(workbook, {
   buffer: readFileSync("logo.png"),
@@ -1451,8 +1452,9 @@ To put the CSV onto a workbook you already have, use `ExcelCsv.addWorksheet(work
 adds a worksheet and returns it.
 
 ```typescript
-import { ExcelCsv } from "documonster/excel/csv";
 import fs from "fs";
+
+import { ExcelCsv } from "documonster/excel/csv";
 
 // Node.js: read/write CSV files
 const workbook = await ExcelCsv.readFile("data.csv");
@@ -2953,6 +2955,22 @@ _input_ type grew, so no existing code and no exhaustive `switch` is affected.
 > `Date` names that day, so `Cell.setDateParts` refuses 1900-02-29 rather than
 > silently storing March 1. Serials from 61 onward are unaffected.
 
+A serial that is not in a cell — a number from a CSV export, a formula result, a
+streaming reader's raw value — converts the same way, with `DateSerial`:
+
+```typescript
+import { DateSerial } from "documonster/excel";
+
+DateSerial.toParts(45306); // { year: 2024, month: 1, day: 15, hour: 0, ... }
+DateSerial.fromParts({ year: 2024, month: 1, day: 15 }); // 45306
+DateSerial.fromParts({ hour: 6 }); // 0.25
+DateSerial.toParts(60); // { year: 1900, month: 2, day: 29, ... } — Excel's phantom day, which a serial can name
+DateSerial.fromParts({ year: 2024, month: 1, day: 15 }, { date1904: true }); // 43844
+```
+
+The range is Excel's — serial 0 to the last millisecond of 9999-12-31. A number outside it is
+not a date to Excel (it shows `####`), so `DateSerial` refuses it rather than extrapolating.
+
 > **Availability.** `Temporal` needs Node 26+, Chrome 144+, Firefox 139+, Bun
 > 1.4+ or Deno 2.7+, and this package adds no polyfill. `Cell.getDateParts` and
 > `Cell.setDateParts` work everywhere and are the primitive — `Temporal.PlainDate.from(parts)`
@@ -3225,10 +3243,8 @@ import {
   ExcelTableError,
   Workbook
 } from "documonster/excel";
-
 // PDF export + PDF errors — from documonster/pdf
 import { Pdf, PdfError, isPdfError } from "documonster/pdf";
-
 // XML helpers + XML errors — from documonster/xml
 import { Xml, XmlError, isXmlError } from "documonster/xml";
 

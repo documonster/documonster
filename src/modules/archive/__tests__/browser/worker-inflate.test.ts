@@ -141,4 +141,45 @@ onmessage = async (ev) => {
       URL.revokeObjectURL(url);
     }
   }, 20_000);
+
+  // A worker refused by a Content Security Policy, or a `workerInflateUrl` that does not boot,
+  // reports it only after the first chunk was posted; the entry completes on this thread.
+  it("completes entries on this thread when the inflate worker fails to load", async () => {
+    if (typeof Worker === "undefined" || !hasDeflateRawDecompressionStream()) {
+      return;
+    }
+    const url = URL.createObjectURL(
+      new Blob(["throw new Error('boot failure');"], { type: "text/javascript" })
+    );
+    try {
+      // Several entries, each large enough to arrive in more than one chunk
+      const files = ["a", "b", "c"].map(name => ({
+        name: `${name}.txt`,
+        content: `${name} — worker load failure. `.repeat(20_000)
+      }));
+      const parse = createParse({ useWorkerInflate: true, workerInflateUrl: url });
+      const results = new Map<string, string>();
+      await new Promise<void>((resolve, reject) => {
+        const pending: Promise<void>[] = [];
+        parse.on("entry", (entry: ZipEntry) => {
+          pending.push(
+            entry.buffer().then(buf => {
+              results.set(entry.path, new TextDecoder().decode(buf));
+            })
+          );
+        });
+        parse.on("close", () => Promise.all(pending).then(() => resolve(), reject));
+        parse.on("error", reject);
+        const zipData = createTestZip(files);
+        // In pieces, so the parser writes to the inflater while the worker is still loading
+        for (let i = 0; i < zipData.length; i += 16_384) {
+          parse.write(zipData.subarray(i, i + 16_384));
+        }
+        parse.end();
+      });
+      expect(results).toEqual(new Map(files.map(f => [f.name, f.content])));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }, 20_000);
 });

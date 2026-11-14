@@ -11,6 +11,7 @@ import {
 import { checkArchiveArgument } from "@archive/core/arguments";
 import { checkBytes, checkString, checkUint } from "@archive/core/entry-checks";
 import { ArchiveArgumentError } from "@archive/core/errors";
+import { decodeBase64 } from "@utils/base64";
 import {
   concatUint8Arrays as concatImpl,
   stringToUint8Array as stringToUint8ArrayImpl,
@@ -18,10 +19,7 @@ import {
   asPlainBytes
 } from "@utils/binary";
 import { s } from "@utils/schema";
-import {
-  base64ToUint8Array as base64ToUint8ArrayImpl,
-  uint8ArrayToBase64 as uint8ArrayToBase64Impl
-} from "@utils/utils.base";
+import { uint8ArrayToBase64 as uint8ArrayToBase64Impl } from "@utils/utils.base";
 
 const CRC_MAX = 0xffffffff;
 
@@ -47,9 +45,6 @@ export function crc32Finalize(crc: number): number {
   return crc32FinalizeImpl(crc);
 }
 
-/** Standard base64 (RFC 4648 §4), padding optional; whitespace is ignored. */
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-
 /**
  * Decode standard base64. Whitespace is ignored and padding is optional; anything else
  * outside the alphabet — including the URL-safe `-` and `_` — is refused, so the result is
@@ -57,14 +52,14 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
  */
 export function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   checkString("Archive.base64ToUint8Array", "base64", base64);
-  const compact = base64.replace(/[\t\n\f\r ]+/g, "");
-  if (!BASE64.test(compact) || compact.replace(/=+$/, "").length % 4 === 1) {
+  const bytes = decodeBase64(base64);
+  if (bytes === undefined) {
     throw new ArchiveArgumentError(
       "base64",
       "Archive.base64ToUint8Array: base64 is not valid base64"
     );
   }
-  return asPlainBytes(base64ToUint8ArrayImpl(compact));
+  return bytes;
 }
 
 /** Encode `bytes` as standard base64, padded. */

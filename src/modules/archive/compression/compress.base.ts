@@ -38,10 +38,15 @@ export interface CompressOptions {
   thresholdBytes?: number;
 
   /**
-   * Use Web Workers for compression/decompression (browser only).
+   * Use Web Workers for compression/decompression (browser only), so a large call does not hold
+   * the page's thread.
    * - true: Always use worker
    * - false: Never use worker
-   * - undefined: Auto-detect based on data size (use worker when >= autoWorkerThreshold)
+   * - undefined: use a worker when the input is at least `autoWorkerThreshold` bytes
+   *
+   * The worker codes with the platform's native deflate-raw streams, so where those are missing
+   * every call stays on this thread. A worker that cannot start — a Content Security Policy that
+   * refuses it, for one — ran nothing, and the call completes on this thread instead.
    *
    * Note: This option is ignored in Node.js (which uses native zlib thread pool).
    */
@@ -49,7 +54,8 @@ export interface CompressOptions {
 
   /**
    * Threshold (in bytes) for auto-worker decision (browser only).
-   * When useWorker is undefined, data >= this threshold will use workers.
+   * When useWorker is undefined, data >= this threshold will use workers: `0` sends every call
+   * to one, `Infinity` none.
    *
    * Default: 1MB.
    */

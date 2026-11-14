@@ -94,8 +94,9 @@ import { Pdf } from "documonster/pdf";
 ### Read a PDF
 
 ```typescript
-import { Pdf } from "documonster/pdf";
 import { readFileSync } from "fs";
+
+import { Pdf } from "documonster/pdf";
 
 const bytes = readFileSync("document.pdf");
 const result = await Pdf.extract(bytes);
@@ -1162,6 +1163,7 @@ Standard Type1 fonts (Helvetica, Times, Courier) cover a limited character set. 
 
 ```typescript
 import { readFileSync } from "node:fs";
+
 import type { PdfFontConfig, PdfFontSource } from "documonster/pdf";
 
 const notoCjk: PdfFontSource = {

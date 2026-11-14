@@ -38,6 +38,7 @@ import * as mermaid from "@mermaid/index";
 import * as pdf from "@pdf/index";
 import * as stream from "@stream/index";
 import { BaseError } from "@utils/errors";
+import * as utils from "@utils/index";
 import * as wordCrypto from "@word/crypto";
 import * as wordExcel from "@word/excel";
 import * as wordHtml from "@word/html";
@@ -81,6 +82,7 @@ const ENTRIES: Record<
   "documonster/mermaid": { entry: mermaid, owns: mermaid.isMermaidError },
   "documonster/csv": { entry: csv, owns: csv.isCsvError },
   "documonster/markdown": { entry: markdown, owns: markdown.isMarkdownError },
+  "documonster/utils": { entry: utils, owns: utils.isUtilsError },
   "documonster/xml": { entry: xml, owns: xml.isXmlError },
   "documonster/formula": { entry: formula, owns: formula.isFormulaError },
   "documonster/archive": { entry: archive, owns: e => archive.isArchiveError(e) || isAbort(e) },

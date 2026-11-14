@@ -94,8 +94,9 @@ import { Pdf } from "documonster/pdf";
 ### 读取 PDF
 
 ```typescript
-import { Pdf } from "documonster/pdf";
 import { readFileSync } from "fs";
+
+import { Pdf } from "documonster/pdf";
 
 const bytes = readFileSync("document.pdf");
 const result = await Pdf.extract(bytes);
@@ -1099,6 +1100,7 @@ const result = await Pdf.extract(encryptedBytes, { password: "secret" });
 
 ```typescript
 import { readFileSync } from "node:fs";
+
 import type { PdfFontConfig, PdfFontSource } from "documonster/pdf";
 
 const notoCjk: PdfFontSource = {

@@ -196,27 +196,28 @@ export const createAbortError = createAbortErrorImpl;
 /** @deprecated Use the flat `isAbortError` export. Removed in 1.0. */
 export const isAbortError = isAbortErrorImpl;
 /**
- * @deprecated Not an archive operation. Decode natively: `Uint8Array.fromBase64(s)` where the
- * runtime has it (not Node 22), `Buffer.from(s, "base64")` on Node, or
- * `Uint8Array.from(atob(s), c => c.charCodeAt(0))` in a browser. Removed in 1.0.
+ * @deprecated Not an archive operation. Use `Bytes.fromBase64` from `documonster/utils`, which
+ * reads base64 the same way on every platform. Removed in 1.0.
  */
 export const base64ToUint8Array = base64ToUint8ArrayImpl;
 /**
- * @deprecated Not an archive operation. Encode natively: `bytes.toBase64()` where the runtime
- * has it (not Node 22), `Buffer.from(bytes).toString("base64")` on Node, or
- * `btoa(Array.from(bytes, b => String.fromCharCode(b)).join(""))` in a browser. Removed in 1.0.
+ * @deprecated Not an archive operation. Use `Bytes.toBase64` from `documonster/utils`. Removed
+ * in 1.0.
  */
 export const uint8ArrayToBase64 = uint8ArrayToBase64Impl;
 /**
- * @deprecated Not an archive operation. Natively: `const out = new Uint8Array(total)`, then
- * `out.set(part, offset)` for each part (or `Buffer.concat(parts)` on Node). Removed in 1.0.
+ * @deprecated Not an archive operation. Use `Bytes.concat` from `documonster/utils`. Removed in
+ * 1.0.
  */
 export const concatUint8Arrays = concatUint8ArraysImpl;
-/** @deprecated Not an archive operation. Use `new TextEncoder().encode(str)`. Removed in 1.0. */
+/**
+ * @deprecated Not an archive operation. Use `Bytes.fromText` from `documonster/utils`. Removed
+ * in 1.0.
+ */
 export const stringToUint8Array = stringToUint8ArrayImpl;
 /**
- * @deprecated Not an archive operation. Use `new TextDecoder(encoding).decode(bytes)`.
- * Removed in 1.0.
+ * @deprecated Not an archive operation. Use `Bytes.toText(bytes, { encoding })` from
+ * `documonster/utils`. Removed in 1.0.
  */
 export const uint8ArrayToString = uint8ArrayToStringImpl;
 /** @deprecated Use {@link Crypto.ZIP_CRYPTO_HEADER_SIZE}. Removed in 1.0. */
@@ -257,8 +258,8 @@ export const aesEncryptedSize = aesEncryptedSizeImpl;
 /** @deprecated Use {@link Crypto.createAesExtraField}. Removed in 1.0. */
 export const buildAesExtraField = buildAesExtraFieldImpl;
 /**
- * @deprecated Not an archive operation. Use the platform's generator:
- * `crypto.getRandomValues(new Uint8Array(length))` (at most 65,536 bytes per call). Removed in 1.0.
+ * @deprecated Not an archive operation. Use `Bytes.random` from `documonster/utils`. Removed in
+ * 1.0.
  */
 export const randomBytes = randomBytesImpl;
 /**

@@ -570,7 +570,7 @@ import { Xml } from "documonster/xml";
   选项能改变这一点：不打开文件，也不发网络请求。
 - **内部实体需显式开启** — 默认情况下只检查 DOCTYPE 内部子集是否良构（注释、处理指令、字面量和声明，因此其中
   的 `]`、`>` 或引号不会结束子集），但不读取，引用其中声明的实体会报告 `undefined entity: e (entities declared
-in a DOCTYPE internal subset are not supported)`。设 `internalEntities: true`（`Xml.readRecords` /
+  in a DOCTYPE internal subset are not supported)`。设 `internalEntities: true`（`Xml.readRecords` /
   `Xml.readRoot` 总是开启）时，其通用实体按 XML 1.0 §4.4 展开；替换文本含标记（`<`）或 `]]>`、或递归的实体会被拒绝，
   每一次嵌套展开都会在构建文本之前计入 `maxEntityExpansions`，展开文本的长度计入 `maxEntityExpansionLength`，所以实体展开出的文本受 `maxEntityExpansionLength`（UTF-16 码元）约束，而不是输入要多少就给多少。这是对展开的限制，并非对解析器全部内存的限制：正在读取的文本、缓存以及写入目标缓冲的内容都不计入其中。五个预定义实体和字符引用始终可用；调用方可通过
   解析器的 `ENTITIES` 映射添加其他实体——只认它自身的字符串值，且引用必须是 XML Name，因此 `&constructor;` 是未定义实体，而不是

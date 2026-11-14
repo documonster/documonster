@@ -486,6 +486,7 @@ const scenarios: Scenario[] = [
   // Measured legitimate lower-layer reach is encoded per-namespace below.
   // ===========================================================================
   ns("excel", "Address", []),
+  ns("excel", "DateSerial", []),
   ns("excel", "Anchor", []),
   ns("excel", "Cell", []),
   chartNs(), // xml/encode + the draw engine; DEFLATE+CRC32 for Chart.toPng
@@ -555,6 +556,7 @@ const scenarios: Scenario[] = [
   ns("csv", "Csv", ["modules/stream/"]), // streaming CSV
   ns("xml", "Xml", []),
   ns("markdown", "Markdown", []),
+  ns("utils", "Bytes", []),
   ns("formula", "Formula", []),
   {
     // No `excludeBundlers`: `/formula` no longer references the engine at all,
@@ -751,6 +753,7 @@ const scenarios: Scenario[] = [
   // Browser platform — ALL namespaces re-verified on the browser entries.
   // ===========================================================================
   ns("excel", "Address", [], "browser"),
+  ns("excel", "DateSerial", [], "browser"),
   ns("excel", "Anchor", [], "browser"),
   ns("excel", "Cell", [], "browser"),
   chartNs("browser"),
@@ -805,6 +808,7 @@ const scenarios: Scenario[] = [
   ns("csv", "Csv", ["modules/stream/"], "browser"),
   ns("xml", "Xml", [], "browser"),
   ns("markdown", "Markdown", [], "browser"),
+  ns("utils", "Bytes", [], "browser"),
   ns("formula", "Formula", [], "browser"),
   {
     name: "browser /formula: syntax namespace has no calculation engine",

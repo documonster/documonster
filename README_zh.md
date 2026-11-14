@@ -96,6 +96,12 @@ ZIP 和 TAR 归档创建、读取、编辑、流式处理、加密和压缩工�
 - [文档](src/modules/mermaid/README.md) | [中文](src/modules/mermaid/README_zh.md)
 - [示例](src/modules/mermaid/examples/)
 
+### Utils — 跨平台的字节与文本
+
+base64、hex、拼接、随机字节和文本编码,在所有平台上行为一致:base64 属于 ES2026,Node 22 和 24 都没有,而替代它的解码器对不合法文本的处理各不相同。平台有原生实现时直接用原生的。
+
+- [文档](src/utils/README.md) | [中文](src/utils/README_zh.md)
+
 ## MCP 服务器 — 面向 AI 客户端的 Documonster
 
 `@documonster/mcp` 通过 Model Context Protocol 暴露本工具包,让 Claude Desktop、Claude Code、Cursor 等 MCP 客户端能够真正读写电子表格、文档、PDF、表单和归档,而不是靠猜。它作为独立的包发布,因此 MCP SDK 不会进入 `documonster`,零依赖承诺保持不变。
@@ -182,10 +188,10 @@ Document.addParagraph(wdoc, "由 Documonster 生成。");
 const docxBytes = await Document.toBuffer(wdoc);
 const parsedDocx = await Document.read(docxBytes); // 往返读取
 
+import { Cell } from "documonster/excel";
 // Formula — 可选的公式引擎(默认不打进主 bundle)
 // 重算 excel workbook：走 excel/formula subpath。
 import { ExcelFormula } from "documonster/excel/formula";
-import { Cell } from "documonster/excel";
 Cell.setValue(sheet, "A4", { formula: "SUM(A1:A3)" });
 ExcelFormula.calculate(workbook); // 现在能填充单元格计算结果了
 
@@ -228,7 +234,7 @@ URL 中的版本号是刻意锁定的：不锁版本的 `unpkg.com/documonster/�
 <!-- iife-bundles:start -->
 
 `excel`、`word`、`pdf`、`csv`、`markdown`、`xml`、`formula`、`archive`、`stream`、
-`draw`、`mermaid`
+`draw`、`mermaid`、`utils`
 
 <!-- iife-bundles:end -->
 

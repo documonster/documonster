@@ -15,7 +15,7 @@ through published entry points.
 | ---------------------- | ------------------------------------------------ |
 | Runtime dependencies   | 0                                                |
 | Module count           | 11                                               |
-| Published entry points | 19                                               |
+| Published entry points | 20                                               |
 | Formula functions      | 467                                              |
 | Package type           | ESM only (`require(esm)` for CommonJS consumers) |
 

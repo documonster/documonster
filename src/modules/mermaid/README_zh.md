@@ -40,8 +40,8 @@ const { png, uncoveredCodePoints } = Mermaid.toPng("flowchart LR\n  A --> B", { 
 本模块是一个*生产者*:它到显示列表就停下。它内部完全不知道 SVG 或 PDF 页面是什么,而这恰恰是一套实现能服务所有输出的原因。
 
 ```typescript
-import { Mermaid } from "documonster/mermaid";
 import { Draw } from "documonster/draw";
+import { Mermaid } from "documonster/mermaid";
 
 const list = Mermaid.toDrawList('pie title Split\n "A" : 60\n "B" : 40');
 

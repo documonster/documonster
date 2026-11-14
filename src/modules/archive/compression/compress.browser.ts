@@ -20,6 +20,7 @@ import {
   hasCompressionStream,
   hasDeflateRawCompressionStream,
   hasDeflateRawDecompressionStream,
+  hasDeflateRawWebStreams,
   GZIP_ID1,
   GZIP_ID2,
   GZIP_CM_DEFLATE,
@@ -47,6 +48,7 @@ import {
 import { crc32 } from "@archive/compression/crc32.browser";
 import {
   inflateRaw,
+  inflateRawPrefix,
   deflateRawCompressed,
   deflateRawStore
 } from "@archive/compression/deflate-fallback";
@@ -61,6 +63,7 @@ import {
 } from "@archive/core/errors";
 import { readUint32LE } from "@archive/zip-spec/binary";
 import { concatUint8Arrays, asPlainBytes } from "@utils/binary";
+import { toError } from "@utils/errors";
 import { assertLimitOption } from "@utils/limits";
 
 // Re-export shared types and GZIP utilities
@@ -88,27 +91,30 @@ export {
 export { isGzipData } from "@archive/compression/compress.base";
 
 /**
- * Default threshold (1MB) above which compression automatically uses workers.
- * Set to 0 to disable auto-worker, or Infinity to always use main thread.
+ * Size (1 MB) from which a call with `useWorker` unset runs on a worker. `0` sends every call to
+ * one; `Infinity` keeps every call on this thread.
  */
 const DEFAULT_AUTO_WORKER_THRESHOLD = 1024 * 1024;
 
 export { DEFAULT_AUTO_WORKER_THRESHOLD };
 
 /**
- * Decide whether to use worker based on options and data size
+ * Whether this call goes to the worker pool.
+ *
+ * The worker codes with the platform's native deflate-raw streams, so it is useful only where they
+ * exist; without them every call stays on this thread with the pure-JS codec. A native stream runs
+ * on the thread that calls it and holds that thread for the whole input — measured at 150 ms for
+ * 8 MB of deflate in Chromium and Firefox, 312 ms in Safari, against about 5 ms on a worker for the
+ * same total time within 10 % — which is what moving a large call off this thread buys.
  */
 function shouldUseWorker(data: Uint8Array, options: CompressOptions): boolean {
-  const workerSupported = hasWorkerSupport();
-  if (options.useWorker === true) {
-    return workerSupported;
-  }
-  if (options.useWorker === false) {
+  if (options.useWorker === false || !hasWorkerSupport() || !hasDeflateRawWebStreams()) {
     return false;
   }
-
-  const threshold = options.autoWorkerThreshold ?? DEFAULT_AUTO_WORKER_THRESHOLD;
-  return workerSupported && data.length >= threshold;
+  if (options.useWorker === true) {
+    return true;
+  }
+  return data.length >= (options.autoWorkerThreshold ?? DEFAULT_AUTO_WORKER_THRESHOLD);
 }
 
 /**
@@ -134,6 +140,8 @@ function loadWorkerPool() {
 }
 
 interface CodecStrategy {
+  /** What the codec does, for a message that names it. */
+  operation: "compress" | "decompress";
   hasNative: () => boolean;
   native: (data: Uint8Array, options: CompressOptions) => Promise<Uint8Array>;
   worker: (data: Uint8Array, options: CompressOptions) => Promise<Uint8Array>;
@@ -141,6 +149,7 @@ interface CodecStrategy {
 }
 
 const deflateStrategy: CodecStrategy = {
+  operation: "compress",
   hasNative: hasDeflateRawCompressionStream,
   native: data => compressWithStream(data),
   worker: async (data, { level, signal, allowTransfer }) =>
@@ -149,6 +158,7 @@ const deflateStrategy: CodecStrategy = {
 };
 
 const inflateStrategy: CodecStrategy = {
+  operation: "decompress",
   hasNative: hasDeflateRawDecompressionStream,
   native: (data, options) => decompressWithStream(data, options.maxOutputLength),
   // The worker enforces the bound while it inflates and reports a hit as an
@@ -159,62 +169,95 @@ const inflateStrategy: CodecStrategy = {
 };
 
 /**
- * Unified compression/decompression with automatic strategy selection.
+ * Rethrow `err` when no other codec should be tried: the caller aborted, or a limit was hit — a
+ * verdict on the data that every codec would reach again.
+ */
+function rethrowIfFinal(err: unknown, signal?: AbortSignal): void {
+  rethrowIfAborted(err, signal);
+  if (err instanceof ArchiveLimitExceededError) {
+    throw err;
+  }
+}
+
+/**
+ * Run a native stream codec, and the pure-JS one when it fails.
+ *
+ * Native CompressionStream / DecompressionStream were seen to reject input that is in fact valid
+ * (Chromium, June 2026, under heavy concurrent stream creation: about 2 % of reads, on payloads the
+ * pure-JS inflater — and a fresh native stream — decode correctly). It has not been reproduced
+ * since in Chromium, Firefox or WebKit, so the cause is unknown; the fallback stays because it
+ * costs nothing when the native codec succeeds. Every format runs on the same native zlib, so raw
+ * DEFLATE, gzip and zlib all go through here. If the data is genuinely corrupt the JS path throws
+ * too, so this never masks a real error — and that error is the archive's own.
+ */
+async function withJsFallback(
+  native: () => Promise<Uint8Array>,
+  jsFallback: () => Uint8Array,
+  signal: AbortSignal | undefined
+): Promise<Uint8Array> {
+  try {
+    return await native();
+  } catch (err) {
+    rethrowIfFinal(err, signal);
+    return jsFallback();
+  }
+}
+
+/**
+ * Run on the worker pool, answering `undefined` when the work should be done on this thread instead.
+ *
+ * A worker that could not start — its script refused by a Content Security Policy, the pool's chunk
+ * not loaded, a script that would not boot — ran nothing, so the work is still to do. A worker's
+ * verdict on the data arrives as a message that has lost its class, so the in-process codec runs it
+ * again and reports it typed; corrupt data fails there too, so nothing is masked. The one failure
+ * that cannot be retried is one after `allowTransfer` gave the worker the input's buffer: the bytes
+ * are gone from this thread, and coding the empty view left behind would return a wrong answer.
+ */
+async function tryWorker(
+  strategy: CodecStrategy,
+  data: Uint8Array,
+  options: CompressOptions
+): Promise<Uint8Array | undefined> {
+  const byteLength = data.byteLength;
+  try {
+    return await strategy.worker(data, options);
+  } catch (err) {
+    rethrowIfFinal(err, options.signal);
+    if (data.byteLength !== byteLength) {
+      throw new ArchiveError(
+        `Worker ${strategy.operation} failed after allowTransfer had moved the input to it, so it ` +
+          `cannot be run on this thread instead: ${toError(err).message}`,
+        { cause: err }
+      );
+    }
+    return undefined;
+  }
+}
+
+/**
+ * Unified compression/decompression with automatic strategy selection: a worker for a large call
+ * (or when asked), else the native stream, else the pure-JS codec — each falling back to the next.
  */
 async function processWithStrategy(
   strategy: CodecStrategy,
   data: Uint8Array,
   options: CompressOptions
 ): Promise<Uint8Array> {
-  const canUseNative = strategy.hasNative();
-  const workerSupported = hasWorkerSupport();
-  const useWorker = options.useWorker;
-
-  // If the user explicitly requested workers, honor it.
-  if (useWorker === true && workerSupported) {
-    try {
-      return await strategy.worker(data, options);
-    } catch (err) {
-      // If the user aborts, do NOT fall back to main-thread work.
-      rethrowIfAborted(err, options.signal);
-      // A limit hit is a verdict on the data; retrying elsewhere would only
-      // reach the same one.
-      if (err instanceof ArchiveLimitExceededError) {
-        throw err;
-      }
-      // Fall through to best available in-process path.
+  if (shouldUseWorker(data, options)) {
+    const out = await tryWorker(strategy, data, options);
+    if (out !== undefined) {
+      return out;
     }
   }
 
-  // Default: use native stream if supported (fastest, no worker overhead).
-  if (canUseNative) {
-    try {
-      return await strategy.native(data, options);
-    } catch (err) {
-      // Respect aborts — never silently retry an aborted operation.
-      rethrowIfAborted(err, options.signal);
-      // A limit hit is a verdict on the data, not a spurious native failure.
-      if (err instanceof ArchiveLimitExceededError) {
-        throw err;
-      }
-      // Native CompressionStream / DecompressionStream can intermittently
-      // reject input that is in fact valid (observed in Chromium under heavy
-      // concurrent stream creation: a `DecompressionStream` rejects a deflate
-      // payload that the pure-JS inflater — and a fresh native stream — decode
-      // correctly). Rather than surface a spurious "invalid literal/lengths
-      // set" / corruption error, fall back to the deterministic pure-JS
-      // implementation. If the data is genuinely corrupt the JS path throws
-      // too, so this never masks a real error.
-      return strategy.jsFallback(data, options);
-    }
+  if (strategy.hasNative()) {
+    return withJsFallback(
+      () => strategy.native(data, options),
+      () => strategy.jsFallback(data, options),
+      options.signal
+    );
   }
 
-  // Use worker in fallback environments (no native deflate-raw) when appropriate.
-  if (useWorker !== true && shouldUseWorker(data, options)) {
-    return strategy.worker(data, options);
-  }
-
-  // Fallback to pure JS implementation.
   return strategy.jsFallback(data, options);
 }
 
@@ -291,38 +334,37 @@ function buildGzipTrailer(crcValue: number, size: number): Uint8Array {
   return trailer;
 }
 
-function parseGzipPayload(data: Uint8Array): {
-  deflateData: Uint8Array;
-  expectedCrc32: number;
-  expectedSize: number;
-} {
-  if (data.length < GZIP_MIN_SIZE) {
+/**
+ * Where the DEFLATE data of the gzip member at `offset` starts: just past its header (RFC 1952 §2.3).
+ */
+function skipGzipHeader(data: Uint8Array, offset: number): number {
+  if (data.length - offset < GZIP_MIN_SIZE) {
     throw new ArchiveError("Invalid gzip data (too small)");
   }
-  if (data[0] !== GZIP_ID1 || data[1] !== GZIP_ID2) {
+  if (data[offset] !== GZIP_ID1 || data[offset + 1] !== GZIP_ID2) {
     throw new ArchiveError("Invalid gzip header (magic mismatch)");
   }
-  if (data[2] !== GZIP_CM_DEFLATE) {
+  if (data[offset + 2] !== GZIP_CM_DEFLATE) {
     throw new ArchiveError("Unsupported gzip compression method");
   }
 
-  const flags = data[3];
-  let offset = 10;
+  const flags = data[offset + 3];
+  let pos = offset + 10;
 
   if (flags & GZIP_FLAG_FEXTRA) {
-    if (offset + 2 > data.length) {
+    if (pos + 2 > data.length) {
       throw new ArchiveError("Invalid gzip extra field");
     }
-    const extraLen = data[offset] | (data[offset + 1] << 8);
-    offset += 2 + extraLen;
+    const extraLen = data[pos] | (data[pos + 1] << 8);
+    pos += 2 + extraLen;
   }
 
   // Skip null-terminated strings
   const skipNullTerminated = () => {
-    while (offset < data.length && data[offset] !== 0) {
-      offset++;
+    while (pos < data.length && data[pos] !== 0) {
+      pos++;
     }
-    offset++;
+    pos++;
   };
 
   if (flags & GZIP_FLAG_FNAME) {
@@ -333,19 +375,13 @@ function parseGzipPayload(data: Uint8Array): {
   }
 
   if (flags & GZIP_FLAG_FHCRC) {
-    offset += 2;
+    pos += 2;
   }
 
-  if (offset > data.length - 8) {
+  if (pos > data.length - 8) {
     throw new ArchiveError("Invalid gzip data (truncated payload)");
   }
-
-  const trailerOffset = data.length - 8;
-  const expectedCrc32 = readUint32LE(data, trailerOffset);
-  const expectedSize = readUint32LE(data, trailerOffset + 4);
-  const deflateData = data.subarray(offset, trailerOffset);
-
-  return { deflateData, expectedCrc32, expectedSize };
+  return pos;
 }
 
 /**
@@ -363,36 +399,102 @@ function verifyGzipOutput(out: Uint8Array, expectedCrc32: number, expectedSize: 
   }
 }
 
-function wrapGzip(deflated: Uint8Array, original: Uint8Array): Uint8Array {
-  const trailer = buildGzipTrailer(crc32(original), original.length);
-  return concatUint8Arrays([GZIP_HEADER, deflated, trailer]);
+/**
+ * Inflate the DEFLATE stream at `start`, holding the output to what is left of `maxOutputLength`
+ * after `produced` bytes, and reporting a hit against the caller's own bound.
+ */
+function inflateStreamAt(
+  data: Uint8Array,
+  start: number,
+  maxOutputLength: number | undefined,
+  produced: number
+): { output: Uint8Array; end: number } {
+  try {
+    const { output, consumed } = inflateRawPrefix(
+      data.subarray(start),
+      maxOutputLength === undefined ? undefined : maxOutputLength - produced
+    );
+    return { output, end: start + consumed };
+  } catch (err) {
+    if (err instanceof ArchiveLimitExceededError && maxOutputLength !== undefined) {
+      throw new ArchiveLimitExceededError("maxOutputLength", maxOutputLength);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Every member of a gzip file, decoded and concatenated, the way zlib — and so Node — reads one.
+ *
+ * A gzip file is a series of members (RFC 1952 §2.2), which is what `cat a.gz b.gz` produces, and
+ * zero bytes after the last one are padding (tape blocks, fixed-size records). Anything else after
+ * a member must be another member. Every browser's `DecompressionStream("gzip")` refuses both
+ * shapes; decoding them here is what makes a browser read the same files Node does.
+ */
+function gunzipMembers(data: Uint8Array, maxOutputLength: number | undefined): Uint8Array {
+  const parts: Uint8Array[] = [];
+  let produced = 0;
+  let offset = 0;
+  do {
+    const start = skipGzipHeader(data, offset);
+    const { output, end } = inflateStreamAt(data, start, maxOutputLength, produced);
+    if (end + 8 > data.length) {
+      throw new ArchiveError("Invalid gzip data (truncated payload)");
+    }
+    verifyGzipOutput(output, readUint32LE(data, end), readUint32LE(data, end + 4));
+    parts.push(output);
+    produced += output.length;
+    offset = end + 8;
+  } while (offset < data.length && data[offset] !== 0);
+  return parts.length === 1 ? parts[0]! : concatUint8Arrays(parts);
+}
+
+/**
+ * `deflated` as a gzip member whose trailer says `crc` and `size`. They are taken before the input
+ * is compressed rather than from it after: `allowTransfer` may have handed its buffer to a worker.
+ */
+function wrapGzip(deflated: Uint8Array, crc: number, size: number): Uint8Array {
+  return concatUint8Arrays([GZIP_HEADER, deflated, buildGzipTrailer(crc, size)]);
 }
 
 /**
  * Gzip-compress data in the browser.
  *
  * Strategy:
- * 1. Native CompressionStream("gzip") when available
- * 2. Fallback: compress (deflate-raw) + manual GZIP wrapper
- *    - Inherits Worker Pool support from compress() for large files
+ * 1. A large call (see `CompressOptions.useWorker`): raw DEFLATE through {@link compress}, which
+ *    runs it on a worker, wrapped here
+ * 2. Native CompressionStream("gzip") when available, retried with the pure-JS codec when it
+ *    fails (see `withJsFallback`)
+ * 3. Fallback: the pure-JS codec + manual GZIP wrapper
  */
 export async function gzip(
   data: Uint8Array,
   options: CompressOptions = {}
 ): Promise<Uint8Array<ArrayBuffer>> {
   throwIfAborted(options.signal);
+  const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
+
+  if (level !== 0 && shouldUseWorker(data, options)) {
+    const crc = crc32(data);
+    const size = data.length;
+    const deflated = await compress(
+      data,
+      options.level === undefined ? { ...options, level } : options
+    );
+    return asPlainBytes(wrapGzip(deflated, crc, size));
+  }
 
   if (hasGzipCompressionStream()) {
-    const cs = new CompressionStream("gzip");
-    const out = await transformWithStream(data, cs);
+    const out = await withJsFallback(
+      () => transformWithStream(data, new CompressionStream("gzip")),
+      () => gzipSync(data, options),
+      options.signal
+    );
     throwIfAborted(options.signal);
     return asPlainBytes(out);
   }
 
-  const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
-  const compressOptions = options.level === undefined ? { ...options, level } : options;
-  const deflated = level === 0 ? deflateRawStore(data) : await compress(data, compressOptions);
-  return asPlainBytes(wrapGzip(deflated, data));
+  return gzipSync(data, options);
 }
 
 /**
@@ -401,16 +503,21 @@ export async function gzip(
 export function gzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array<ArrayBuffer> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data, level);
-  return asPlainBytes(wrapGzip(deflated, data));
+  return asPlainBytes(wrapGzip(deflated, crc32(data), data.length));
 }
 
 /**
  * Gunzip data in the browser.
  *
  * Strategy:
- * 1. Native DecompressionStream("gzip") when available
- * 2. Fallback: parse header + decompress (inflate-raw) + verify CRC32
- *    - Inherits Worker Pool support from decompress() for large files
+ * 1. Native DecompressionStream("gzip") when available; when it fails — on a file of several
+ *    members or with padding after the last, which every browser's refuses, or spuriously (see
+ *    `withJsFallback`) — the pure-JS decoder, which reads those as Node does
+ * 2. Fallback: the pure-JS decoder
+ *
+ * It stays on this thread whatever `useWorker` says: the worker decodes only raw DEFLATE, and where
+ * a member ends is known only once it has been decoded. Inflating is several times faster than
+ * deflating — 8 MB in about 27 ms.
  */
 export async function gunzip(
   data: Uint8Array,
@@ -420,30 +527,27 @@ export async function gunzip(
   throwIfAborted(options.signal);
 
   if (hasGzipDecompressionStream()) {
-    const ds = new DecompressionStream("gzip");
-    const out = await transformWithStream(data, ds, options.maxOutputLength);
+    const out = await withJsFallback(
+      () => transformWithStream(data, new DecompressionStream("gzip"), options.maxOutputLength),
+      () => gunzipSync(data, options),
+      options.signal
+    );
     throwIfAborted(options.signal);
     return asPlainBytes(out);
   }
 
-  const { deflateData, expectedCrc32, expectedSize } = parseGzipPayload(data);
-  const out = await decompress(deflateData, options);
-  verifyGzipOutput(out, expectedCrc32, expectedSize);
-  return out;
+  return gunzipSync(data, options);
 }
 
 /**
- * Gunzip data synchronously using the JS fallback.
+ * Gunzip data synchronously using the JS fallback. Reads every member, as {@link gunzip} does.
  */
 export function gunzipSync(
   data: Uint8Array,
   options: CompressOptions = {}
 ): Uint8Array<ArrayBuffer> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
-  const { deflateData, expectedCrc32, expectedSize } = parseGzipPayload(data);
-  const out = inflateRaw(deflateData, options.maxOutputLength);
-  verifyGzipOutput(out, expectedCrc32, expectedSize);
-  return asPlainBytes(out);
+  return asPlainBytes(gunzipMembers(data, options.maxOutputLength));
 }
 
 // =============================================================================
@@ -453,47 +557,49 @@ export function gunzipSync(
 /**
  * Wrap raw DEFLATE data in Zlib format
  */
-function wrapZlib(deflated: Uint8Array, original: Uint8Array, level: number): Uint8Array {
-  return concatUint8Arrays([getZlibHeader(level), deflated, buildZlibTrailer(adler32(original))]);
-}
-
-/**
- * Parse Zlib data and extract the raw DEFLATE payload
- */
-function parseZlibPayload(data: Uint8Array): {
-  deflateData: Uint8Array;
-  expectedAdler32: number;
-} {
-  const offset = parseZlibHeader(data);
-  const expectedAdler32 = readZlibTrailer(data);
-  return { deflateData: data.subarray(offset, data.length - 4), expectedAdler32 };
+/** `deflated` as a zlib stream whose trailer says `checksum` — taken before compressing, as in {@link wrapGzip}. */
+function wrapZlib(deflated: Uint8Array, checksum: number, level: number): Uint8Array {
+  return concatUint8Arrays([getZlibHeader(level), deflated, buildZlibTrailer(checksum)]);
 }
 
 /**
  * Compress data with Zlib wrapper (RFC 1950)
  *
  * Strategy:
- * 1. Native CompressionStream("deflate") when available
- * 2. Fallback: compress (deflate-raw) + manual Zlib wrapper
+ * 1. A large call (see `CompressOptions.useWorker`): raw DEFLATE through {@link compress}, which
+ *    runs it on a worker, wrapped here
+ * 2. Native CompressionStream("deflate") when available, retried with the pure-JS codec when it
+ *    fails (see `withJsFallback`)
+ * 3. Fallback: the pure-JS codec + manual Zlib wrapper
  */
 export async function zlib(
   data: Uint8Array,
   options: CompressOptions = {}
 ): Promise<Uint8Array<ArrayBuffer>> {
   throwIfAborted(options.signal);
+  const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
+
+  if (level !== 0 && shouldUseWorker(data, options)) {
+    const checksum = adler32(data);
+    const deflated = await compress(
+      data,
+      options.level === undefined ? { ...options, level } : options
+    );
+    return asPlainBytes(wrapZlib(deflated, checksum, level));
+  }
 
   // Native "deflate" format is Zlib
   if (hasDeflateCompressionStream()) {
-    const cs = new CompressionStream("deflate");
-    const out = await transformWithStream(data, cs);
+    const out = await withJsFallback(
+      () => transformWithStream(data, new CompressionStream("deflate")),
+      () => zlibSync(data, options),
+      options.signal
+    );
     throwIfAborted(options.signal);
     return asPlainBytes(out);
   }
 
-  const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
-  const compressOptions = options.level === undefined ? { ...options, level } : options;
-  const deflated = level === 0 ? deflateRawStore(data) : await compress(data, compressOptions);
-  return asPlainBytes(wrapZlib(deflated, data, level));
+  return zlibSync(data, options);
 }
 
 /**
@@ -502,15 +608,19 @@ export async function zlib(
 export function zlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array<ArrayBuffer> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data, level);
-  return asPlainBytes(wrapZlib(deflated, data, level));
+  return asPlainBytes(wrapZlib(deflated, adler32(data), level));
 }
 
 /**
  * Decompress Zlib data (RFC 1950)
  *
  * Strategy:
- * 1. Native DecompressionStream("deflate") when available
- * 2. Fallback: parse header + decompress (inflate-raw) + verify Adler-32
+ * 1. Native DecompressionStream("deflate") when available; when it fails — on bytes after the
+ *    Adler-32, which every browser's refuses and zlib ignores, or spuriously (see `withJsFallback`)
+ *    — the pure-JS decoder, which reads them as Node does
+ * 2. Fallback: the pure-JS decoder
+ *
+ * Like {@link gunzip}, it stays on this thread whatever `useWorker` says.
  */
 export async function unzlib(
   data: Uint8Array,
@@ -521,20 +631,23 @@ export async function unzlib(
 
   // Native "deflate" format is Zlib
   if (hasDeflateDecompressionStream()) {
-    const ds = new DecompressionStream("deflate");
-    const out = await transformWithStream(data, ds, options.maxOutputLength);
+    const out = await withJsFallback(
+      () => transformWithStream(data, new DecompressionStream("deflate"), options.maxOutputLength),
+      () => unzlibSync(data, options),
+      options.signal
+    );
     throwIfAborted(options.signal);
     return asPlainBytes(out);
   }
 
-  const { deflateData, expectedAdler32 } = parseZlibPayload(data);
-  const out = await decompress(deflateData, options);
-  verifyAdler32(out, expectedAdler32);
-  return out;
+  return unzlibSync(data, options);
 }
 
 /**
  * Decompress Zlib data (sync)
+ *
+ * The Adler-32 is the four bytes after the DEFLATE stream, wherever it ends; anything after them
+ * is not part of the stream and is ignored, as zlib — and so Node — ignores it.
  *
  * @param options - `maxOutputLength` bounds the output; decoding stops with a
  *   `ArchiveLimitExceededError` as soon as it is exceeded
@@ -544,10 +657,13 @@ export function unzlibSync(
   options: CompressOptions = {}
 ): Uint8Array<ArrayBuffer> {
   assertLimitOption("maxOutputLength", options.maxOutputLength);
-  const { deflateData, expectedAdler32 } = parseZlibPayload(data);
-  const out = inflateRaw(deflateData, options.maxOutputLength);
-  verifyAdler32(out, expectedAdler32);
-  return asPlainBytes(out);
+  const start = parseZlibHeader(data);
+  const { output, end } = inflateStreamAt(data, start, options.maxOutputLength, 0);
+  if (end + 4 > data.length) {
+    throw new ArchiveError("Invalid zlib data (truncated payload)");
+  }
+  verifyAdler32(output, readZlibTrailer(data.subarray(0, end + 4)));
+  return asPlainBytes(output);
 }
 
 // =============================================================================

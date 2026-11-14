@@ -163,8 +163,8 @@ pnpm example --filter formula-pdf-integration
 `Pdf.fromExcel` 不依赖公式引擎。要在渲染前重算公式,通过 `recalculate` 选项注入 `ExcelFormula.calculate` — 只有主动选用的调用方才会把约 200 KB 的引擎打进 bundle。不传时使用缓存在 XLSX 里的结果(对 Excel 自己写出的文件而言是安全的默认行为)。
 
 ```typescript
-import { Pdf } from "documonster/pdf";
 import { ExcelFormula } from "documonster/excel/formula";
+import { Pdf } from "documonster/pdf";
 
 const bytes = await Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 ```

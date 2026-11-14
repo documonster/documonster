@@ -21,6 +21,7 @@ describe("documonster/excel namespace surface", () => {
       "Column",
       "ConditionalFormatting",
       "DataValidation",
+      "DateSerial",
       "DefinedNames",
       "Form",
       "Format",

@@ -186,8 +186,8 @@ their bundle. Without it, the cached XLSX results are used (the safe
 default for files written by Excel itself).
 
 ```typescript
-import { Pdf } from "documonster/pdf";
 import { ExcelFormula } from "documonster/excel/formula";
+import { Pdf } from "documonster/pdf";
 
 const bytes = await Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 ```

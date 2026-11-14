@@ -40,8 +40,8 @@ const { png, uncoveredCodePoints } = Mermaid.toPng("flowchart LR\n  A --> B", { 
 The module is a _producer_: it stops at the display list. Nothing in it knows what SVG or a PDF page is, which is exactly what lets one implementation serve every output.
 
 ```typescript
-import { Mermaid } from "documonster/mermaid";
 import { Draw } from "documonster/draw";
+import { Mermaid } from "documonster/mermaid";
 
 const list = Mermaid.toDrawList('pie title Split\n "A" : 60\n "B" : 40');
 

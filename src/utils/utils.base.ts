@@ -4,7 +4,7 @@
  * (Node.js 16+ supports atob/btoa/TextEncoder/TextDecoder globally)
  */
 
-import { isNode } from "@utils/env";
+import { decodeBase64OrThrow, encodeBase64 } from "@utils/base64";
 import { partsToSerial, partsToUtcDate, serialToParts, utcDateToParts } from "@utils/excel-serial";
 
 // =============================================================================
@@ -12,21 +12,13 @@ import { partsToSerial, partsToUtcDate, serialToParts, utcDateToParts } from "@u
 // =============================================================================
 
 /**
- * Convert base64 string to Uint8Array
- * Uses native Buffer in Node.js for better performance
+ * The bytes `base64` encodes, read the same way on every platform (see `@utils/base64`); either
+ * alphabet is accepted, as Node's decoder accepts it, since the text usually comes from a file.
+ *
+ * @throws {InvalidBase64Error} When `base64` is not base64.
  */
-export function base64ToUint8Array(base64: string): Uint8Array {
-  // Node.js: use native Buffer (fast, C++ implementation)
-  if (isNode()) {
-    return Buffer.from(base64, "base64");
-  }
-  // Browser: use atob
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+export function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
+  return decodeBase64OrThrow(base64, "either");
 }
 
 // =============================================================================
@@ -436,21 +428,6 @@ function sortTypeRank(v: unknown): number {
 
 const textDecoder = new TextDecoder("utf-8");
 
-let latin1Decoder: TextDecoder | undefined;
-let _latin1DecoderResolved = false;
-
-function getLatin1Decoder(): TextDecoder | undefined {
-  if (!_latin1DecoderResolved) {
-    _latin1DecoderResolved = true;
-    try {
-      latin1Decoder = new TextDecoder("latin1");
-    } catch {
-      latin1Decoder = undefined;
-    }
-  }
-  return latin1Decoder;
-}
-
 /**
  * Convert a Buffer, ArrayBuffer, or Uint8Array to a UTF-8 string
  * Works in both Node.js and browser environments
@@ -462,36 +439,9 @@ export function bufferToString(chunk: ArrayBuffer | Uint8Array | string): string
   return textDecoder.decode(chunk);
 }
 
-/**
- * Convert Uint8Array to base64 string
- * Uses native Buffer in Node.js, optimized chunked conversion in browser
- */
+/** `bytes` as standard, padded base64. */
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
-  if (isNode()) {
-    return Buffer.from(bytes).toString("base64");
-  }
-
-  // Browser: fastest path when latin1 TextDecoder exists.
-  // Some environments can still throw on `btoa(...)` (e.g. if decoding yields non-Latin1 chars),
-  // so fall back to a guaranteed-binary string conversion.
-  if (getLatin1Decoder()) {
-    try {
-      return btoa(latin1Decoder!.decode(bytes));
-    } catch {
-      // fall through
-    }
-  }
-
-  // Browser: chunked String.fromCharCode to avoid stack overflow and reduce string concatenation
-  const CHUNK_SIZE = 0x8000; // 32KB chunks
-  const chunks: string[] = [];
-  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-    // Spread the chunk (a Uint8Array is an iterable of numbers) so the call is
-    // type-checked against `fromCharCode(...codes: number[])` without an `any`
-    // cast; chunk size stays within the engine's argument-count limit.
-    chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE)));
-  }
-  return btoa(chunks.join(""));
+  return encodeBase64(bytes);
 }
 
 /**

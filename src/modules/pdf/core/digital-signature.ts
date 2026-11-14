@@ -30,6 +30,7 @@ import {
 import type { Asn1Node } from "@pdf/core/asn1";
 import { PdfSignaturePlaceholderMissingError } from "@pdf/errors";
 import { sha256, md5, hash, rsaVerify, rsaSign } from "@utils/crypto";
+import { encodeHex } from "@utils/hex";
 
 export { asn1Parse } from "@pdf/core/asn1";
 export type { Asn1Node } from "@pdf/core/asn1";
@@ -903,7 +904,7 @@ export async function signPdf(
   const cms = await buildCmsSignedData({ certificate, privateKey, data: signedData });
 
   // Hex-encode the signature
-  const hexSig = bytesToHex(cms).padEnd(hexEnd - hexStart, "0");
+  const hexSig = encodeHex(cms).padEnd(hexEnd - hexStart, "0");
   for (let i = 0; i < hexSig.length && i < hexEnd - hexStart; i++) {
     result[hexStart + i] = hexSig.charCodeAt(i);
   }
@@ -922,14 +923,6 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
   }
   return bytes;
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  let hex = "";
-  for (let i = 0; i < bytes.length; i++) {
-    hex += bytes[i].toString(16).padStart(2, "0");
-  }
-  return hex;
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {

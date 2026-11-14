@@ -43,6 +43,7 @@ import {
 import { asPlainBytes } from "@utils/binary";
 import { defineDispose } from "@utils/dispose";
 import type { DisposeMember } from "@utils/dispose";
+import { toError } from "@utils/errors";
 
 export { ArchiveWorkerStreamStartError };
 
@@ -258,9 +259,14 @@ export class WorkerPool {
       this._useCustomUrl = false;
     }
 
-    // Pre-warm minimum workers
+    // Pre-warm minimum workers. Best effort: a worker that cannot be started fails the first
+    // task given to the pool instead, with the reason.
     for (let i = 0; i < this._options.minWorkers; i++) {
-      this._createWorker();
+      try {
+        this._createWorker();
+      } catch {
+        break;
+      }
     }
   }
 
@@ -357,7 +363,7 @@ export class WorkerPool {
     this._workers.clear();
 
     // Reject all pending tasks
-    const error = new Error("Worker pool terminated");
+    const error = new ArchiveError("Worker pool terminated");
     for (const task of this._pendingTasks.values()) {
       this._cleanupTask(task);
       task.reject(error);
@@ -390,7 +396,16 @@ export class WorkerPool {
     }
 
     const id = this._nextWorkerId++;
-    const worker = new Worker(this._workerUrl);
+    let worker: Worker;
+    try {
+      worker = new Worker(this._workerUrl);
+    } catch (error) {
+      // A Content Security Policy that refuses the script throws here in some browsers, and
+      // fires `error` on the new worker in others (`_handleWorkerError`).
+      throw new ArchiveError(`Web Worker could not be started: ${toError(error).message}`, {
+        cause: error
+      });
+    }
 
     const poolWorker: PoolWorker = {
       id,
@@ -486,7 +501,19 @@ export class WorkerPool {
   private _processQueue(): void {
     while (!this._terminated && this._taskQueueSize() > 0) {
       // Find an idle worker or create one.
-      const idleWorker = this._findIdleWorker() ?? this._createWorker() ?? undefined;
+      let idleWorker = this._findIdleWorker();
+      if (!idleWorker) {
+        try {
+          idleWorker = this._createWorker() ?? undefined;
+        } catch (error) {
+          // Workers already running will drain the queue; with none, nothing ever would, and the
+          // queued tasks — and the input each one holds — would wait forever.
+          if (this._workers.size === 0) {
+            this._failQueuedTasks(toError(error));
+          }
+          return;
+        }
+      }
 
       // If still no worker available, wait for one to become idle.
       if (!idleWorker) {
@@ -631,7 +658,7 @@ export class WorkerPool {
             );
             return;
           }
-          const error = new Error(message.error ?? "Unknown worker error");
+          const error = new ArchiveError(message.error ?? "Unknown worker error");
           session.ended = true;
           session.inflightChunkCount = 0;
           session.startReady = true;
@@ -687,7 +714,7 @@ export class WorkerPool {
           task.reject(
             message.limit !== undefined
               ? new ArchiveLimitExceededError("maxOutputLength", message.limit)
-              : new Error(message.error ?? "Unknown worker error")
+              : new ArchiveError(message.error ?? "Unknown worker error")
           );
         }
 
@@ -716,7 +743,7 @@ export class WorkerPool {
         this._pendingTasks.delete(taskId);
         this._cleanupTask(task);
         this._failedTasks++;
-        task.reject(new Error(event.message || "Worker error"));
+        task.reject(new ArchiveError(event.message || "Worker error"));
       }
     }
 
@@ -741,7 +768,7 @@ export class WorkerPool {
       this._resolveDrainWaiter(session);
       poolWorker.streamSession = null;
     } else if (session) {
-      const error = new Error(event.message || "Worker terminated unexpectedly");
+      const error = new ArchiveError(event.message || "Worker terminated unexpectedly");
       session.ended = true;
       session.rejectStart?.(error);
       session.rejectStart = null;
@@ -846,7 +873,15 @@ export class WorkerPool {
       }
 
       ensureWorkerPromise = (async () => {
-        const idleWorker = this._findIdleWorker() ?? this._createWorker() ?? undefined;
+        let idleWorker = this._findIdleWorker();
+        if (!idleWorker) {
+          try {
+            idleWorker = this._createWorker() ?? undefined;
+          } catch (error) {
+            // Nothing was sent; the caller can run the stream elsewhere
+            throw new ArchiveWorkerStreamStartError(toError(error).message, { cause: error });
+          }
+        }
         if (idleWorker) {
           sessionWorker = idleWorker;
           this._bindStreamSession(sessionWorker, taskId, taskType, options.level, options);
@@ -873,8 +908,10 @@ export class WorkerPool {
       }
     };
 
-    // Kick off worker/session creation immediately to surface start errors early.
-    void ensureWorker();
+    // Kick off worker/session creation immediately to surface start errors early. A failure is
+    // taken by the `write` or `end` that awaits it; this keeps one nothing awaits from being
+    // reported as unhandled.
+    ensureWorker().catch(() => {});
 
     const sendChunk = (worker: PoolWorker, session: StreamSession, data: Uint8Array): void => {
       const payload = preparePayload(data);
@@ -963,15 +1000,19 @@ export class WorkerPool {
     };
 
     const abort = (reason?: string): void => {
-      void ensureWorker().then(worker => {
-        const session = worker.streamSession;
-        if (!session || session !== boundSession) {
-          return;
-        }
-        const message = session.abortMessage;
-        message.error = reason;
-        worker.worker.postMessage(message);
-      });
+      ensureWorker().then(
+        worker => {
+          const session = worker.streamSession;
+          if (!session || session !== boundSession) {
+            return;
+          }
+          const message = session.abortMessage;
+          message.error = reason;
+          worker.worker.postMessage(message);
+        },
+        // No worker started, so there is nothing to tell
+        () => {}
+      );
     };
 
     return { write, end, abort };
@@ -1127,6 +1168,18 @@ export class WorkerPool {
     // The worker will complete, and we'll ignore the result.
 
     task.reject(createAbortError());
+  }
+
+  /**
+   * Reject every task still waiting in the queue with `error`.
+   */
+  private _failQueuedTasks(error: Error): void {
+    for (let task = this._dequeueTask(); task; task = this._dequeueTask()) {
+      this._pendingTasks.delete(task.taskId);
+      this._cleanupTask(task);
+      this._failedTasks++;
+      task.reject(error);
+    }
   }
 
   /**

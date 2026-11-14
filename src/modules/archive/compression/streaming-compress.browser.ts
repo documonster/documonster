@@ -268,21 +268,29 @@ function createWorkerStreamCodec(
   });
 
   const codec = new AsyncStreamCodec();
-  const opened = loaded.then(({ getDefaultWorkerPool }) =>
-    (pool ?? getDefaultWorkerPool()).openStream(type, {
-      level,
-      allowTransfer,
-      onData: chunk => codec.emit("data", chunk),
-      onEnd: () => {
-        codec.emit("end");
-        endResolve?.();
-      },
-      onError: err => {
-        codec.emit("error", err);
-        endReject?.(err);
-      }
-    })
-  );
+  const opened = loaded
+    .then(({ getDefaultWorkerPool }) =>
+      (pool ?? getDefaultWorkerPool()).openStream(type, {
+        level,
+        allowTransfer,
+        onData: chunk => codec.emit("data", chunk),
+        onEnd: () => {
+          codec.emit("end");
+          endResolve?.();
+        },
+        onError: err => {
+          codec.emit("error", err);
+          endReject?.(err);
+        }
+      })
+    )
+    .catch((error: unknown) => {
+      // The pool's chunk did not load, or the pool would not open a stream: nothing was sent
+      throw new ArchiveWorkerStreamStartError(
+        `Worker stream could not be opened: ${toError(error).message}`,
+        { cause: error }
+      );
+    });
   // Rejections are taken by the write or close that awaits `opened`; this keeps one that nothing awaited — an abort
   // before the first write — from being reported as unhandled.
   opened.catch(() => {});

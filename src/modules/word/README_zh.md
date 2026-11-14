@@ -624,8 +624,8 @@ const zip = await WordCrypto.Agile.decryptPackage(
 以及可选标题页的 Word 表格。隐藏的工作表会被跳过；行/列数量可以设上限。
 
 ```typescript
-import { WordExcel } from "documonster/word/excel";
 import { Document } from "documonster/word";
+import { WordExcel } from "documonster/word/excel";
 
 // Workbook → DocxDocument（所有可见工作表，保留格式）
 const doc = WordExcel.toDocx(workbook);
@@ -666,8 +666,8 @@ const extracted = WordExcel.extractTables(doc);
 与 SVG 路径完全一致。
 
 ```typescript
-import { Document } from "documonster/word";
 import { Pdf } from "documonster/pdf";
+import { Document } from "documonster/word";
 
 const doc = await Document.read(docxBytes);
 const pdfBytes = await Pdf.fromDocx(doc);

@@ -354,8 +354,9 @@ ConditionalFormatting.add(worksheet, {
 ### 图片
 
 ```typescript
-import { Image } from "documonster/excel";
 import { readFileSync } from "fs";
+
+import { Image } from "documonster/excel";
 
 const imageId = Image.add(workbook, {
   buffer: readFileSync("logo.png"),
@@ -1376,8 +1377,9 @@ const pdf = await Pdf.fromExcel(workbook, {
 要把 CSV 放进已有的工作簿，请使用 `ExcelCsv.addWorksheet(workbook, input)`，它会添加一个工作表并返回它。
 
 ```typescript
-import { ExcelCsv } from "documonster/excel/csv";
 import fs from "fs";
+
+import { ExcelCsv } from "documonster/excel/csv";
 
 // Node.js：读取/写入 CSV 文件
 const workbook = await ExcelCsv.readFile("data.csv");
@@ -2690,6 +2692,22 @@ Cell.getTemporal(ws, "A2"); // Temporal.PlainTime 09:30:00
 > 能表示那一天，所以 `Cell.setDateParts` 会拒绝 1900-02-29，而不是静默存成 3 月 1 日。
 > 序列值 61 及以后不受影响。
 
+不在单元格里的序列值——CSV 导出的数字、公式结果、流式读取器拿到的原始值——用 `DateSerial`
+以同样的方式转换：
+
+```typescript
+import { DateSerial } from "documonster/excel";
+
+DateSerial.toParts(45306); // { year: 2024, month: 1, day: 15, hour: 0, ... }
+DateSerial.fromParts({ year: 2024, month: 1, day: 15 }); // 45306
+DateSerial.fromParts({ hour: 6 }); // 0.25
+DateSerial.toParts(60); // { year: 1900, month: 2, day: 29, ... } —— Excel 虚构的那一天，序列值可以表示它
+DateSerial.fromParts({ year: 2024, month: 1, day: 15 }, { date1904: true }); // 43844
+```
+
+范围与 Excel 一致：从序列值 0 到 9999-12-31 的最后一毫秒。超出范围的数字在 Excel 里不是日期
+（显示为 `####`），所以 `DateSerial` 会直接拒绝，而不是外推出一个日期。
+
 > **可用性。** `Temporal` 需要 Node 26+、Chrome 144+、Firefox 139+、Bun 1.4+ 或 Deno 2.7+，
 > 本包不附带 polyfill。`Cell.getDateParts` 和 `Cell.setDateParts` 在任何环境都可用，是底层
 > 原语——`Temporal.PlainDate.from(parts)` 只需一行。在没有 `Temporal` 的环境中，
@@ -2945,10 +2963,8 @@ import {
   ExcelTableError,
   Workbook
 } from "documonster/excel";
-
 // PDF 导出 + PDF 错误——来自 documonster/pdf
 import { Pdf, PdfError, isPdfError } from "documonster/pdf";
-
 // XML 辅助方法 + XML 错误——来自 documonster/xml
 import { Xml, XmlError, isXmlError } from "documonster/xml";
 

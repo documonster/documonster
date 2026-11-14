@@ -216,6 +216,19 @@ describe("a package whose encryption parameters are malformed", () => {
     expect(error.message).toContain("encryptedVerifierHashInput");
   });
 
+  // Node's decoder skipped the characters it did not know and went on to a wrong-password verdict
+  it.each(["saltValue", "encryptedKeyValue", "encryptedHmacKey"])(
+    "refuses a %s that is not base64",
+    async name => {
+      const encrypted = edited(await encryptPackage(zip, "pw", { spinCount: 10 }), xml =>
+        xml.replace(new RegExp(`${name}="([^"]+)"`), (_all, value: string) => `${name}="!${value}"`)
+      );
+      const error = await failure(decryptPackage(encrypted, "pw"));
+      expect(error.reason).toBe("malformed");
+      expect(error.message).toContain(`${name} is not base64`);
+    }
+  );
+
   it("refuses a package cut off inside a cipher block", async () => {
     const encrypted = edited(
       await encryptPackage(new Uint8Array(9000), "pw", { spinCount: 10 }),

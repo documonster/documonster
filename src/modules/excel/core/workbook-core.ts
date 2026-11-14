@@ -54,6 +54,7 @@ import { checkStyle } from "@excel/utils/style-checks";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
+import { isBase64 } from "@utils/base64";
 import { excelNameKey, sheetNameKey } from "@utils/name-key";
 /**
  * A user function as the workbook *stores* it.
@@ -638,6 +639,14 @@ export function checkImageData(where: string, image: unknown): void {
   for (const key of ["base64", "filename", "link"]) {
     if (record[key] != null && typeof record[key] !== "string") {
       throw new ExcelImageError(`${where}: the image's ${key} must be a string.`);
+    }
+  }
+  // Checked here rather than when the workbook is written, where it failed in a browser and was
+  // written as whatever Node's lenient decoder made of it. The `data:` prefix is optional.
+  if (typeof record.base64 === "string") {
+    const payload = record.base64.slice(record.base64.indexOf(",") + 1);
+    if (!isBase64(payload, "either")) {
+      throw new ExcelImageError(`${where}: the image's base64 is not base64.`);
     }
   }
   if (sources.length === 0 && record.link == null) {

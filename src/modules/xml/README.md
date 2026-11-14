@@ -625,7 +625,7 @@ Note: Unprefixed attributes do **not** inherit the default namespace, per XML Na
   well-formedness (comments, processing instructions, literals and declarations, so a `]`, `>` or
   quote inside them does not end it) but not read, and a reference to an entity declared there is
   reported as `undefined entity: e (entities declared in a DOCTYPE internal subset are not
-supported)`. With `internalEntities: true` (always on for `Xml.readRecords` / `Xml.readRoot`) its
+  supported)`. With `internalEntities: true` (always on for `Xml.readRecords` / `Xml.readRoot`) its
   general entities expand as XML 1.0 §4.4 describes; replacement text that holds markup (`<`) or a
   `]]>` and recursive entities are refused, and every nested expansion counts against `maxEntityExpansions` —
   and the length of the text it makes against `maxEntityExpansionLength` — before any text is
