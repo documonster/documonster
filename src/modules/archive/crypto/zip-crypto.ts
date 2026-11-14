@@ -190,7 +190,8 @@ export function zipCryptoCreateHeader(
  * @param password - Password string or bytes
  * @param crc32 - Expected CRC32 for header verification
  * @param lastModTime - Optional last modified time for alternative verification
- * @returns Decrypted data (excluding header) or null if verification fails
+ * @returns Decrypted data (excluding header) or null if verification fails. Passing it does not prove the password:
+ *   see {@link zipCryptoDecryptOrThrow}.
  */
 export function zipCryptoDecrypt(
   encryptedData: Uint8Array,
@@ -221,7 +222,13 @@ export function zipCryptoDecrypt(
 
 /**
  * Decrypt ZipCrypto data, throwing when it cannot — the form `Archive.Crypto` publishes
- * as `zipCryptoDecrypt`, matching `aesDecrypt`, which also throws.
+ * as `decryptZipCrypto`, matching `aesDecrypt`, which also throws.
+ *
+ * **The header check is one byte**, matched against the high byte of `crc32` — or, given
+ * `lastModTime`, that of either — so a wrong password passes it about once in 256 tries, twice as
+ * often when the two high bytes differ, and returns bytes that are not the data. ZipCrypto carries
+ * nothing stronger: the CRC-32 of the uncompressed data, once inflated, is what tells a wrong
+ * password apart (all but once in 2³² tries), as the ZIP readers here check it.
  *
  * @param encryptedData - Full encrypted data including 12-byte header
  * @param password - Password string or bytes
@@ -229,7 +236,7 @@ export function zipCryptoDecrypt(
  * @param lastModTime - Optional last modified time for alternative verification
  * @returns Decrypted data (excluding header)
  * @throws {ArchiveError} When the data is shorter than the header or the password fails
- * the header check
+ * the header check — which a wrong password does not always do
  */
 export function zipCryptoDecryptOrThrow(
   encryptedData: Uint8Array,

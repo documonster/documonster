@@ -3,9 +3,8 @@
  *
  * Centralizes small utilities that were previously duplicated across multiple
  * function files (math, statistical, financial, text, date, engineering,
- * conditional, dynamic-array, database, lookup). None of these change runtime
- * semantics — they are the canonical extractions of the identical helpers that
- * appeared in several modules.
+ * conditional, dynamic-array, database, lookup), and the rounding every
+ * Excel-rounding function shares.
  */
 
 import type {
@@ -47,6 +46,107 @@ export function argToNumber(arg: RuntimeValue): NumberValue | ErrorValue {
     return s;
   }
   return toNumberRV(s);
+}
+
+// ============================================================================
+// Rounding
+// ============================================================================
+
+/**
+ * A number as Excel sees it: rounded to 15 significant digits.
+ *
+ * Excel keeps 15 significant decimal digits and rounds at that precision, so `1.005` is the
+ * decimal 1.005 to it — not the binary 1.00499999999999989… a double holds — and
+ * `0.1 + 0.2` is 0.3. Rounding the binary value instead is how `ROUND(1.005, 2)` came out 1.
+ */
+export function toExcelPrecision(value: number): number {
+  return Number.isFinite(value) ? Number(value.toPrecision(15)) : value;
+}
+
+/**
+ * Move the decimal point of `value` by `exponent` places without a binary multiplication.
+ *
+ * Done on the number's shortest decimal form, so `shiftDecimal(1.005, 2)` is exactly 100.5;
+ * `1.005 * 100` is 100.49999999999999.
+ */
+function shiftDecimal(value: number, exponent: number): number {
+  const text = String(value);
+  const e = text.indexOf("e");
+  return e < 0
+    ? Number(`${text}e${exponent}`)
+    : Number(`${text.slice(0, e)}e${Number(text.slice(e + 1)) + exponent}`);
+}
+
+/** 10^0 … 10^22: every one is exact in a double. */
+const POWERS_OF_TEN = Array.from({ length: 23 }, (_, i) => Number(`1e${i}`));
+
+/** Relative margin around a scaled value inside which a rounding boundary sends `applyRounding` the slow, decimal way. */
+const ROUNDING_GUARD = 1e-12;
+
+/**
+ * The furthest `applyRounding` moves the decimal point. Doubles span about 10^-324 to 10^308, so
+ * moving any of them by this much already overflows or underflows; a larger `digits` rounds the
+ * same way, and clamping keeps it from writing an exponent like `e1e+300` into a number literal.
+ */
+const MAX_DECIMAL_SHIFT = 1000;
+
+/**
+ * Round `value` to `digits` decimal places (negative: to the left of the point) with `round`,
+ * the way Excel's `ROUND` family does.
+ *
+ * The value is first read at Excel's precision ({@link toExcelPrecision}), then the decimal
+ * point is moved in decimal rather than by multiplying by a power of ten, so the only rounding
+ * that happens is the one asked for. `digits` is truncated. Where `digits` reaches past the
+ * value's last digit there is nothing to round; where it reaches past its first, the value rounds
+ * as the smallest amount of its sign would — to zero, or to one whole step away from it (`ROUNDUP`).
+ * That step can be larger than any double, and so can a value read at 15 digits just below the
+ * largest one: the result is then infinite, and the caller reports `#NUM!`.
+ */
+export function applyRounding(value: number, digits: number, round: (n: number) => number): number {
+  if (!Number.isFinite(value)) {
+    return value;
+  }
+  const d = Math.max(-MAX_DECIMAL_SHIFT, Math.min(MAX_DECIMAL_SHIFT, Math.trunc(digits)));
+  // Fast path. Scaling by a power of ten in binary is off by far less than one part in 10^12, so
+  // when nudging the scaled value by that much either way rounds to the same integer, no
+  // rounding boundary is near and the decimal route below would give that integer too. Turning
+  // it back is one correctly rounded operation by an exact power of ten, which is the same double
+  // as parsing the decimal result. None of that holds once the scaling overflowed to infinity or
+  // lost a non-zero value to zero — both ends then round alike for the wrong reason.
+  if (d <= 22 && d >= -22) {
+    const factor = POWERS_OF_TEN[Math.abs(d)];
+    const fast = d >= 0 ? value * factor : value / factor;
+    if (Number.isFinite(fast) && (fast !== 0 || value === 0)) {
+      const lower = round(fast * (1 - ROUNDING_GUARD));
+      if (lower === round(fast * (1 + ROUNDING_GUARD))) {
+        // `+ 0` turns -0 into 0: a spreadsheet has no negative zero, and the decimal route has none.
+        return (d >= 0 ? lower / factor : lower * factor) + 0;
+      }
+    }
+  }
+  const decimal = toExcelPrecision(value);
+  const scaled = shiftDecimal(decimal, d);
+  // Overflow means `digits` reaches past the value's last significant digit: nothing to round.
+  if (!Number.isFinite(scaled)) {
+    return decimal;
+  }
+  // Underflow means it reaches past the first: what is left is smaller than any double, and
+  // rounds as the smallest one of its sign does.
+  const rounded = round(
+    scaled !== 0 || decimal === 0 ? scaled : Math.sign(decimal) * Number.MIN_VALUE
+  );
+  return shiftDecimal(rounded, -d);
+}
+
+/**
+ * Round half away from zero, matching Excel's ROUND semantics.
+ *
+ * JavaScript's `Math.round` rounds half toward +∞ (so `Math.round(-0.5)`
+ * returns `-0` instead of `-1`), whereas Excel rounds the magnitude and
+ * preserves the sign: `ROUND(-0.5, 0) = -1`.
+ */
+export function roundHalfAwayFromZero(n: number): number {
+  return n < 0 ? -Math.round(-n) : Math.round(n);
 }
 
 // ============================================================================

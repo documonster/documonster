@@ -1115,6 +1115,38 @@ describe("NUMBERVALUE comprehensive", () => {
 });
 
 describe("FIXED comprehensive", () => {
+  // Excel's measured limits (data/excel-oracle/02 to 04): FIXED returns up to 255 characters, sign
+  // included; DOLLAR up to 255 for a negative amount and 254 for a positive one.
+  it.each([
+    ["FIXED", () => fnFIXED([rvNumber(1e191), rvNumber(0)]), 255],
+    ["FIXED", () => fnFIXED([rvNumber(-1e190), rvNumber(0)]), 255],
+    ["FIXED", () => fnFIXED([rvNumber(1e254), rvNumber(0), rvBoolean(true)]), 255],
+    ["FIXED", () => fnFIXED([rvNumber(1e126), rvNumber(127), rvBoolean(true)]), 255],
+    ["DOLLAR", () => fnDOLLAR([rvNumber(1e189), rvNumber(0)]), 254],
+    ["DOLLAR", () => fnDOLLAR([rvNumber(-1e186), rvNumber(2)]), 255]
+  ])("%s writes its longest text (%#)", (_name, call, length) => {
+    expect(asString(call())).toHaveLength(length);
+  });
+
+  it.each([
+    ["FIXED", () => fnFIXED([rvNumber(1e192), rvNumber(0)])],
+    ["FIXED", () => fnFIXED([rvNumber(-1e191), rvNumber(0)])],
+    ["FIXED", () => fnFIXED([rvNumber(1e255), rvNumber(0), rvBoolean(true)])],
+    ["FIXED", () => fnFIXED([rvNumber(1e127), rvNumber(127), rvBoolean(true)])],
+    ["FIXED", () => fnFIXED([rvNumber(1e300), rvNumber(22), rvBoolean(true)])],
+    ["DOLLAR", () => fnDOLLAR([rvNumber(1e190), rvNumber(0)])],
+    ["DOLLAR", () => fnDOLLAR([rvNumber(1e186), rvNumber(4)])],
+    ["DOLLAR", () => fnDOLLAR([rvNumber(-1e186), rvNumber(3)])]
+  ])("%s is #VALUE! one character past it (%#)", (_name, call) => {
+    expect(call()).toEqual(ERRORS.VALUE);
+  });
+
+  it("is #NUM! where the number read at 15 digits is larger than any double", () => {
+    // The largest double is 1.79769313486232E+308 at 15 digits, which is past it.
+    expect(fnFIXED([rvNumber(Number.MAX_VALUE), rvNumber(0)])).toEqual(ERRORS.NUM);
+    expect(fnDOLLAR([rvNumber(-Number.MAX_VALUE)])).toEqual(ERRORS.NUM);
+  });
+
   it("defaults to 2 decimals with commas", () => {
     expect(asString(fnFIXED([rvNumber(1234567.89)]))).toBe("1,234,567.89");
   });

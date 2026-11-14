@@ -3,6 +3,9 @@
  * local time, so the value depended on the machine: where a zone skips its midnight for daylight saving (Santiago on
  * 2019-09-08), `Sep 8 2019` read as 01:00.
  */
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
 import { parseOoxmlDate } from "@utils/utils";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -34,6 +37,59 @@ describe("parseOoxmlDate in every zone", () => {
       // Text naming its zone names an instant.
       expect(read("Jan 15 2020 10:00 +0200")).toBe("2020-01-15T08:00:00.000Z");
       expect(read("Jan 15 2020 10:00 GMT")).toBe("2020-01-15T10:00:00.000Z");
+      // A name in parentheses is a comment to the engine: the text is its calendar value, not the reader's zone's.
+      expect(read("Jan 15 2020 10:00 (CEST)")).toBe("2020-01-15T10:00:00.000Z");
     }
   );
+});
+
+// A cell's text is anyone's, and the patterns that read it backtracked: two overlapping alternatives under `+` took
+// 445 ms on 24 spaces before a letter (doubling with each), and `[^)]*` after each of 100,000 `(` 18 s. A pattern that
+// backtracks blocks the thread it runs on, so it is run in a process of its own, ended at a deadline: in this one, a
+// regression would hang the run instead of failing it.
+describe("parseOoxmlDate on adversarial text", () => {
+  // Each text is `before`, `unit` repeated `count` times, then `after` — built in the child: the texts themselves
+  // would exceed a command line.
+  const inputs: Record<
+    string,
+    readonly [before: string, unit: string, count: number, after: string]
+  > = {
+    "spaces before a letter, after a time": ["1/15/2020 10:30", " ", 100_000, "b"],
+    "spaces before a letter": ["a", " ", 100_000, "b"],
+    "tabs before a letter, after a time": ["1/15/2020 10:30", "\t", 100_000, "b"],
+    "open parentheses": ["", "(", 100_000, ""],
+    "separators and `at`": ["1/15/2020 10:30", " at ,", 50_000, ""],
+    meridiems: ["10:30 ", "AM ", 100_000, ""],
+    "digits and spaces": ["1", " 1", 100_000, ""],
+    "a long fraction": ["2024-01-01T10:00:00.", "1", 100_000, "x"]
+  };
+
+  it("reads each in linear time", () => {
+    const module = pathToFileURL(fileURLToPath(new URL("../utils.base.ts", import.meta.url))).href;
+    const script = `
+      const { parseOoxmlDate } = await import(${JSON.stringify(module)});
+      const times = {};
+      for (const [name, [before, unit, count, after]] of Object.entries(${JSON.stringify(inputs)})) {
+        const text = before + unit.repeat(count) + after;
+        const start = performance.now();
+        parseOoxmlDate(text);
+        times[name] = performance.now() - start;
+      }
+      console.log(JSON.stringify(times));
+    `;
+    // Bun runs TypeScript itself; Node is given the loader the repository's scripts run with.
+    const args =
+      "Bun" in globalThis
+        ? ["-e", script]
+        : ["--import", "@oxc-node/core/register", "--input-type=module", "-e", script];
+    const result = spawnSync(process.execPath, args, { encoding: "utf8", timeout: 30_000 });
+    expect(result.signal, "the parse did not finish within 30 s").toBeNull();
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    const times = JSON.parse(result.stdout) as Record<string, number>;
+    expect(Object.keys(times)).toEqual(Object.keys(inputs));
+    for (const [name, ms] of Object.entries(times)) {
+      expect(ms, name).toBeLessThan(2_000);
+    }
+  }, 60_000);
 });

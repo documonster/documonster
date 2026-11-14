@@ -3,6 +3,14 @@
  */
 
 import { asArrayArg, flattenNumbers, firstError } from "@formula/functions/_shared";
+import {
+  calendarParts,
+  dayCount,
+  days360Eu,
+  days360Us,
+  yearFraction,
+  yearLength
+} from "@formula/functions/year-fraction";
 import type { FunctionRuntimeContext } from "@formula/runtime/function-context";
 import { DEFAULT_FUNCTION_CONTEXT } from "@formula/runtime/function-context";
 import type { RuntimeValue, NumberValue, ErrorValue } from "@formula/runtime/values";
@@ -17,20 +25,7 @@ import {
   rvNumber,
   rvBoolean
 } from "@formula/runtime/values";
-import { partsToSerial, serialToParts } from "@utils/excel-serial";
-import { excelToDate } from "@utils/utils.base";
-
-/**
- * Convert an Excel serial to a UTC `Date`, honouring the active date1904 mode.
- *
- * All date math in this module must read fields with the `getUTC*` family
- * because `excelToDate()` returns a `Date` whose UTC timeline corresponds
- * to the Excel serial. Using local-time accessors would make bond maths
- * drift by a day whenever the host lives west of UTC.
- */
-function toDate(serial: number, context: FunctionRuntimeContext): Date {
-  return excelToDate(serial, context.date1904);
-}
+import { gregorianDaysInMonth, partsToSerial } from "@utils/excel-serial";
 
 // ============================================================================
 // Type alias for native function signature
@@ -1480,7 +1475,12 @@ export function fnDISC(
   // Use the same day-count fraction engine the other bond functions rely
   // on so DISC with basis 0 (30/360) and basis 4 (European 30/360)
   // actually differ instead of both collapsing to Actual/360.
-  const dcf = dayCountFraction(settlement.value, maturity.value, Math.floor(basis.value), context);
+  const dcf = yearFraction(
+    settlement.value,
+    maturity.value,
+    Math.floor(basis.value),
+    context.date1904
+  );
   if (dcf <= 0) {
     return ERRORS.NUM;
   }
@@ -1518,7 +1518,12 @@ export function fnPRICEDISC(
   if (maturity.value <= settlement.value || disc.value <= 0 || redemption.value <= 0) {
     return ERRORS.NUM;
   }
-  const dcf = dayCountFraction(settlement.value, maturity.value, Math.floor(basis.value), context);
+  const dcf = yearFraction(
+    settlement.value,
+    maturity.value,
+    Math.floor(basis.value),
+    context.date1904
+  );
   return rvNumber(redemption.value - disc.value * redemption.value * dcf);
 }
 
@@ -1553,7 +1558,12 @@ export function fnYIELDDISC(
   if (maturity.value <= settlement.value || pr.value <= 0 || redemption.value <= 0) {
     return ERRORS.NUM;
   }
-  const dcf = dayCountFraction(settlement.value, maturity.value, Math.floor(basis.value), context);
+  const dcf = yearFraction(
+    settlement.value,
+    maturity.value,
+    Math.floor(basis.value),
+    context.date1904
+  );
   if (dcf <= 0) {
     return ERRORS.NUM;
   }
@@ -1591,7 +1601,12 @@ export function fnRECEIVED(
   if (maturity.value <= settlement.value || investment.value <= 0 || disc.value <= 0) {
     return ERRORS.NUM;
   }
-  const dcf = dayCountFraction(settlement.value, maturity.value, Math.floor(basis.value), context);
+  const dcf = yearFraction(
+    settlement.value,
+    maturity.value,
+    Math.floor(basis.value),
+    context.date1904
+  );
   const denom = 1 - disc.value * dcf;
   if (denom === 0) {
     return ERRORS.NUM;
@@ -1630,7 +1645,12 @@ export function fnINTRATE(
   if (maturity.value <= settlement.value || investment.value <= 0 || redemption.value <= 0) {
     return ERRORS.NUM;
   }
-  const dcf = dayCountFraction(settlement.value, maturity.value, Math.floor(basis.value), context);
+  const dcf = yearFraction(
+    settlement.value,
+    maturity.value,
+    Math.floor(basis.value),
+    context.date1904
+  );
   if (dcf <= 0) {
     return ERRORS.NUM;
   }
@@ -1642,200 +1662,129 @@ export function fnINTRATE(
 // ============================================================================
 
 /**
- * Day-count fraction between two Excel date serials under a given basis.
+ * The coupon date `k` periods before maturity, for `frequency` coupons a year.
  *
- * Implements:
- *   basis 0 — US (NASD) 30/360 with end-of-month adjustments.
- *   basis 1 — Actual/Actual (year length from the spanning year).
- *   basis 2 — Actual/360.
- *   basis 3 — Actual/365.
- *   basis 4 — European 30/360.
- *
- * Unknown basis values fall back to basis 0 for safety.
+ * Each date is counted from maturity directly rather than from the coupon after it, and a maturity
+ * on the last day of its month puts every coupon on the last day of its month. Stepping back one
+ * coupon at a time clamped the day for good at the first short month — an August 31st maturity's
+ * schedule became Feb 28, Aug 28, … — and the end-of-month rule is what Excel follows: measured over
+ * 758 settlement dates, `COUPPCD` / `COUPNCD` agree with this on every one.
  */
-function yearBasisDays(basis: number): number {
-  // Approximate denominator used when converting a day-count fraction
-  // back to raw days (for PRICE's A / E accrual ratio). The Actual/
-  // Actual bucket uses 365.25 as an average-year constant; since PRICE
-  // only needs the ratio A/E the small inaccuracy cancels out.
-  switch (basis) {
-    case 0:
-    case 2:
-    case 4:
-      return 360;
-    case 3:
-      return 365;
-    case 1:
-    default:
-      return 365.25;
-  }
-}
-
-function dayCountFraction(
-  startSerial: number,
-  endSerial: number,
-  basis: number,
+function couponDate(
+  maturity: number,
+  k: number,
+  frequency: number,
   context: FunctionRuntimeContext
 ): number {
-  const startD = toDate(startSerial, context);
-  const endD = toDate(endSerial, context);
-  const diffDays = Math.floor(endSerial) - Math.floor(startSerial);
-
-  switch (basis) {
-    case 1: {
-      // Actual/Actual (ISDA convention). See YEARFRAC in date.ts for the
-      // rationale — the previous simple averaging produced visibly wrong
-      // results like YEARFRAC(2020-01-01, 2021-01-01) ≈ 1.001 instead of 1.
-      const y1 = startD.getUTCFullYear();
-      const y2 = endD.getUTCFullYear();
-      if (y1 === y2) {
-        const yearDays = (Date.UTC(y1 + 1, 0, 1) - Date.UTC(y1, 0, 1)) / 86400000;
-        return diffDays / yearDays;
-      }
-      let leapDays = 0;
-      let nonLeapDays = 0;
-      const sdMs = startD.getTime();
-      const edMs = endD.getTime();
-      for (let y = y1; y <= y2; y++) {
-        const yStart = Math.max(sdMs, Date.UTC(y, 0, 1));
-        const yEnd = Math.min(edMs, Date.UTC(y + 1, 0, 1));
-        if (yEnd <= yStart) {
-          continue;
-        }
-        const d = (yEnd - yStart) / 86400000;
-        const isLeap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-        if (isLeap) {
-          leapDays += d;
-        } else {
-          nonLeapDays += d;
-        }
-      }
-      return leapDays / 366 + nonLeapDays / 365;
-    }
-    case 2:
-      return diffDays / 360;
-    case 3:
-      return diffDays / 365;
-    case 4: {
-      const d1 = Math.min(startD.getUTCDate(), 30);
-      const d2 = Math.min(endD.getUTCDate(), 30);
-      const m1 = startD.getUTCMonth() + 1;
-      const m2 = endD.getUTCMonth() + 1;
-      const y1 = startD.getUTCFullYear();
-      const y2 = endD.getUTCFullYear();
-      return ((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1)) / 360;
-    }
-    case 0:
-    default: {
-      let d1 = startD.getUTCDate();
-      const m1 = startD.getUTCMonth() + 1;
-      const y1 = startD.getUTCFullYear();
-      let d2 = endD.getUTCDate();
-      const m2 = endD.getUTCMonth() + 1;
-      const y2 = endD.getUTCFullYear();
-      if (d1 === 31) {
-        d1 = 30;
-      }
-      if (d2 === 31 && d1 >= 30) {
-        d2 = 30;
-      }
-      return ((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1)) / 360;
-    }
-  }
-}
-
-/**
- * Subtract (or add) `months` from an Excel date serial, clamping to month-end
- * as needed.
- *
- * Calendar arithmetic on {@link ExcelDateTimeParts}, so no `Date` and no
- * timezone is involved at any point. This previously went through `Date.UTC`
- * against a fourth hand-written spelling of the Excel epoch; the discipline
- * it needed to stay correct is now a property of the types instead of a
- * paragraph of commentary.
- */
-function addMonthsToSerial(
-  serial: number,
-  months: number,
-  context: FunctionRuntimeContext
-): number {
-  const { year, month, day } = serialToParts(serial, context.date1904);
-  const total = month - 1 + months;
+  const { year, month, day } = calendarParts(maturity, context.date1904);
+  const total = month - 1 - k * (12 / frequency);
   const targetYear = year + Math.floor(total / 12);
   const targetMonth = (((total % 12) + 12) % 12) + 1;
-  // Clamp to month end, so Jan-31 + 1 month is Feb-28/29 rather than Mar-3.
-  // Day 0 of the following month is that month's last day, the same carry
-  // rule `Date.UTC` applies.
-  const lastDay = serialToParts(
-    partsToSerial({ year: targetYear, month: targetMonth + 1, day: 0 }, context.date1904),
-    context.date1904
-  ).day;
+  const lastDay = gregorianDaysInMonth(targetYear, targetMonth);
+  const monthEnd = day === gregorianDaysInMonth(year, month);
   return partsToSerial(
-    { year: targetYear, month: targetMonth, day: Math.min(day, lastDay) },
+    { year: targetYear, month: targetMonth, day: monthEnd ? lastDay : Math.min(day, lastDay) },
     context.date1904
   );
 }
 
 /**
- * Find the next coupon date on or after settlement, given a maturity date
- * and coupon frequency (1=annual, 2=semi-annual, 4=quarterly).
- *
- * Computed by stepping backward from maturity by (12/frequency) months
- * until the resulting date is ≤ settlement, then stepping one coupon forward.
+ * `serial` moved by `months` calendar months, keeping its day of the month — clamped to the
+ * target month's length — or, with `toMonthEnd`, landing on the target month's last day.
  */
-function nextCouponAfter(
-  settlement: number,
-  maturity: number,
-  frequency: number,
+function shiftMonths(
+  serial: number,
+  months: number,
+  toMonthEnd: boolean,
   context: FunctionRuntimeContext
 ): number {
-  const stepMonths = Math.round(12 / frequency);
-  let cur = maturity;
-  // Step backward until just before or at settlement.
-  while (cur > settlement) {
-    const prev = addMonthsToSerial(cur, -stepMonths, context);
-    if (prev <= settlement) {
-      return cur;
-    }
-    cur = prev;
-  }
-  return cur;
+  const { year, month, day } = calendarParts(serial, context.date1904);
+  const total = month - 1 + months;
+  const targetYear = year + Math.floor(total / 12);
+  const targetMonth = (((total % 12) + 12) % 12) + 1;
+  const lastDay = gregorianDaysInMonth(targetYear, targetMonth);
+  return partsToSerial(
+    { year: targetYear, month: targetMonth, day: toMonthEnd ? lastDay : Math.min(day, lastDay) },
+    context.date1904
+  );
+}
+
+/** Whether `serial` is the last day of its month. */
+function isMonthEnd(serial: number, context: FunctionRuntimeContext): boolean {
+  const { year, month, day } = calendarParts(serial, context.date1904);
+  return day === gregorianDaysInMonth(year, month);
 }
 
 /**
- * Find the previous coupon date (on or before settlement).
+ * The coupon period that holds `settlement` (`pcd <= settlement < ncd`) and the number of coupons
+ * from it to maturity, `settlement < maturity`.
  */
-function prevCouponOnOrBefore(
+function couponPeriod(
   settlement: number,
   maturity: number,
   frequency: number,
   context: FunctionRuntimeContext
-): number {
-  const stepMonths = Math.round(12 / frequency);
-  let cur = maturity;
-  while (cur > settlement) {
-    cur = addMonthsToSerial(cur, -stepMonths, context);
+): { pcd: number; ncd: number; count: number } {
+  let k = 1;
+  while (couponDate(maturity, k, frequency, context) > settlement) {
+    k++;
   }
-  return cur;
+  return {
+    pcd: couponDate(maturity, k, frequency, context),
+    ncd: couponDate(maturity, k - 1, frequency, context),
+    count: k
+  };
 }
 
 /**
- * Count coupon periods between settlement and maturity (rounded up).
+ * Excel's `E`: the days in the coupon period that holds settlement — the actual days between its
+ * coupon dates for basis 1, and a fixed 360 / 365 split by frequency otherwise. What `PRICE`,
+ * `YIELD` and `DURATION` divide by.
  */
-function couponsBetween(
-  settlement: number,
-  maturity: number,
+function couponPeriodDays(
+  period: { pcd: number; ncd: number },
   frequency: number,
+  basis: number
+): number {
+  if (basis === 1) {
+    return period.ncd - period.pcd;
+  }
+  return (basis === 3 ? 365 : 360) / frequency;
+}
+
+/** Excel's `A` (`COUPDAYBS`): days from the coupon before settlement to settlement, counted on `basis`. */
+function couponDaysBefore(
+  settlement: number,
+  pcd: number,
+  basis: number,
   context: FunctionRuntimeContext
 ): number {
-  const stepMonths = Math.round(12 / frequency);
-  let count = 0;
-  let cur = maturity;
-  while (cur > settlement) {
-    cur = addMonthsToSerial(cur, -stepMonths, context);
-    count++;
+  return dayCount(pcd, settlement, basis, context.date1904);
+}
+
+/**
+ * `COUPDAYSNC`: days from settlement to the next coupon. On US 30/360 it is the period's length,
+ * both ends adjusted, less the days already run, rather than a count from settlement — Excel's
+ * `COUPDAYSNC(2023-03-15, 2026-08-31, 2, 0)` is 180 - 15 = 165, where counting gives 166.
+ */
+function couponDaysAfter(
+  settlement: number,
+  period: { pcd: number; ncd: number },
+  basis: number,
+  context: FunctionRuntimeContext
+): number {
+  const date1904 = context.date1904;
+  switch (basis) {
+    case 0:
+      return (
+        days360Us(period.pcd, period.ncd, true, date1904) -
+        days360Us(period.pcd, settlement, false, date1904)
+      );
+    case 4:
+      return days360Eu(settlement, period.ncd, date1904);
+    default:
+      return period.ncd - settlement;
   }
-  return count;
 }
 
 /**
@@ -1861,6 +1810,8 @@ function validateBondBasis(frequency: number, basis: number): ErrorValue | null 
  *   P = [redemption / (1 + y/f)^(N - 1 + DSC/E)]
  *     + Σ_{k=1..N} [100 * r / f / (1 + y/f)^(k - 1 + DSC/E)]
  *     - 100 * r / f * A/E
+ *
+ * and, with one coupon left (N = 1), (redemption + 100 r/f) / (1 + DSC/E · y/f) - 100 r/f · A/E.
  *
  * Where:
  *   f  = frequency
@@ -1918,31 +1869,43 @@ export function fnPRICE(
     return basisErr;
   }
 
-  const nextCoupon = nextCouponAfter(settlement, maturity, frequency, context);
-  const prevCoupon = prevCouponOnOrBefore(settlement, maturity, frequency, context);
-  // Period length E, accrued A, and days-to-next-coupon DSC must all
-  // honour the selected basis. The previous implementation used raw
-  // `floor(next) - floor(prev)` day counts, which is correct for basis
-  // 1/2/3 (Actual/something) but off by up to ~5 days for basis 0 and 4
-  // (30/360). Using `dayCountFraction` — which already implements every
-  // basis — keeps PRICE consistent with YIELD and the rest of the bond
-  // family.
-  const e = dayCountFraction(prevCoupon, nextCoupon, basis, context) * yearBasisDays(basis);
-  const a = dayCountFraction(prevCoupon, settlement, basis, context) * yearBasisDays(basis);
-  const dscDays = e - a;
-  // Fractional position in period (DSC/E).
-  const dscE = e === 0 ? 0 : dscDays / e;
+  return rvNumber(
+    bondPrice(settlement, maturity, rate, yld, redemption, frequency, basis, context)
+  );
+}
 
-  const N = couponsBetween(settlement, maturity, frequency, context);
-  const couponAmt = (100 * rate) / frequency;
-  const discountBase = 1 + yld / frequency;
-
-  let price = redemption / Math.pow(discountBase, N - 1 + dscE);
-  for (let k = 1; k <= N; k++) {
-    price += couponAmt / Math.pow(discountBase, k - 1 + dscE);
+/**
+ * Excel's price per 100 of face value, from its documented formula with Excel's own `A`, `E` and
+ * `DSC` (`DSC = E - A`, not `COUPDAYSNC`): measured against 215 `PRICE` results across every basis
+ * and frequency, it agrees with all of them. With one coupon left the discounting is simple rather
+ * than compound, as Excel documents.
+ */
+function bondPrice(
+  settlement: number,
+  maturity: number,
+  rate: number,
+  yld: number,
+  redemption: number,
+  frequency: number,
+  basis: number,
+  context: FunctionRuntimeContext
+): number {
+  const period = couponPeriod(settlement, maturity, frequency, context);
+  const n = period.count;
+  const a = couponDaysBefore(settlement, period.pcd, basis, context);
+  const e = couponPeriodDays(period, frequency, basis);
+  const dsc = e - a;
+  const coupon = (100 * rate) / frequency;
+  const accrued = (coupon * a) / e;
+  if (n === 1) {
+    return (redemption + coupon) / (1 + ((dsc / e) * yld) / frequency) - accrued;
   }
-  price -= couponAmt * (a / e);
-  return rvNumber(price);
+  const base = 1 + yld / frequency;
+  let price = redemption / Math.pow(base, n - 1 + dsc / e);
+  for (let k = 1; k <= n; k++) {
+    price += coupon / Math.pow(base, k - 1 + dsc / e);
+  }
+  return price - accrued;
 }
 
 /**
@@ -1987,6 +1950,33 @@ export function fnYIELD(
 
   if (prRV.value <= 0 || redemptionRV.value <= 0) {
     return ERRORS.NUM;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const frequency = Math.floor(frequencyRV.value);
+  const basis = Math.floor(basisRV.value);
+  if (settlement >= maturity || rateRV.value < 0) {
+    return ERRORS.NUM;
+  }
+  const basisErr = validateBondBasis(frequency, basis);
+  if (basisErr) {
+    return basisErr;
+  }
+  const period = couponPeriod(settlement, maturity, frequency, context);
+  if (period.count === 1) {
+    // One coupon left: Excel's closed form, not the root of PRICE. Its period length is the
+    // 30/360 split for bases 0 and 4 and the actual days between the coupon dates otherwise — not
+    // PRICE's E, which splits 360 or 365 by frequency for bases 2 and 3 — and DSR counts from
+    // settlement to maturity on the basis. Measured on 55 one-period YIELDs, every basis.
+    const a = couponDaysBefore(settlement, period.pcd, basis, context);
+    const e = basis === 0 || basis === 4 ? 360 / frequency : period.ncd - period.pcd;
+    const dsr = dayCount(settlement, maturity, basis, context.date1904);
+    const rate = rateRV.value;
+    const growth =
+      (redemptionRV.value / 100 + rate / frequency) /
+      (prRV.value / 100 + ((a / e) * rate) / frequency);
+    return rvNumber(((growth - 1) * frequency * e) / dsr);
   }
 
   const priceAt = (y: number): number => {
@@ -2084,12 +2074,12 @@ export function fnDURATION(
     return basisErr;
   }
 
-  const nextCoupon = nextCouponAfter(settlement, maturity, frequency, context);
-  const prevCoupon = prevCouponOnOrBefore(settlement, maturity, frequency, context);
-  const periodDays = Math.floor(nextCoupon) - Math.floor(prevCoupon);
-  const dscDays = Math.floor(nextCoupon) - settlement;
-  const dscE = periodDays === 0 ? 0 : dscDays / periodDays;
-  const N = couponsBetween(settlement, maturity, frequency, context);
+  // Excel's A and E, as PRICE uses them (DSC = E - A): the actual days to the next coupon over the
+  // actual period disagreed with Excel on every basis but 1.
+  const period = couponPeriod(settlement, maturity, frequency, context);
+  const periodDays = couponPeriodDays(period, frequency, basis);
+  const dscE = (periodDays - couponDaysBefore(settlement, period.pcd, basis, context)) / periodDays;
+  const N = period.count;
   const couponPerPeriod = (100 * coupon) / frequency;
   const discountBase = 1 + yld / frequency;
 
@@ -2133,9 +2123,10 @@ export function fnMDURATION(
 /**
  * ACCRINT(issue, first_interest, settlement, rate, par, frequency, [basis], [calc_method])
  *
- * Accrued interest for a security that pays periodic interest.
- * The simplified implementation (calc_method TRUE, the default) treats
- * accrued interest from issue to settlement as par * rate * dcf(issue, settlement, basis).
+ * Accrued interest for a security that pays periodic interest: `par × rate / frequency` times the
+ * number of coupon periods accrued, counted over quasi-coupon periods anchored on
+ * `first_interest`. With `calc_method` TRUE (the default) a settlement after `first_interest`
+ * accrues from issue; with FALSE it accrues from the period before `first_interest` only.
  */
 export function fnACCRINT(
   args: RuntimeValue[],
@@ -2145,7 +2136,10 @@ export function fnACCRINT(
   if (isError(issueRV)) {
     return issueRV;
   }
-  // first_interest (args[1]) is unused in the simplified implementation.
+  const firstInterestRV = toNumberRV(topLeft(args[1]));
+  if (isError(firstInterestRV)) {
+    return firstInterestRV;
+  }
   const settlementRV = toNumberRV(topLeft(args[2]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -2162,14 +2156,21 @@ export function fnACCRINT(
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
-  const basisRV = args.length > 6 ? toNumberRV(topLeft(args[6])) : rvNumber(0);
+  const basisRV =
+    args.length > 6 && args[6].kind !== RVKind.Blank ? toNumberRV(topLeft(args[6])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
-  // calc_method (args[7]) — we ignore the distinction between TRUE/FALSE
-  // because the simplified semantics always accrue from issue date.
+  const calcMethodRV =
+    args.length > 7 && args[7].kind !== RVKind.Blank
+      ? toBooleanRV(topLeft(args[7]))
+      : rvBoolean(true);
+  if (isError(calcMethodRV)) {
+    return calcMethodRV;
+  }
 
   const issue = Math.floor(issueRV.value);
+  const firstInterest = Math.floor(firstInterestRV.value);
   const settlement = Math.floor(settlementRV.value);
   const frequency = Math.floor(frequencyRV.value);
   const basis = Math.floor(basisRV.value);
@@ -2182,14 +2183,97 @@ export function fnACCRINT(
     return basisErr;
   }
 
-  const dcf = dayCountFraction(issue, settlement, basis, context);
-  return rvNumber(parRV.value * rateRV.value * dcf);
+  const periods = accruedPeriods(
+    issue,
+    firstInterest,
+    settlement,
+    frequency,
+    basis,
+    calcMethodRV.value,
+    context
+  );
+  return rvNumber(((parRV.value * rateRV.value) / frequency) * periods);
+}
+
+/**
+ * The coupon periods `ACCRINT` accrues, as Excel counts them.
+ *
+ * Quasi-coupon dates step from `first_interest` one coupon at a time, each keeping the previous
+ * date's day (clamped) — on the last day of the month throughout when `first_interest` is one. The
+ * period settlement falls in is the last of them before settlement (with `fromIssue`), or the one
+ * ending at `first_interest`; settlement's part of it is its days over that period's length
+ * (`first_interest` minus the date a coupon before, on basis 1; 360 or 365 over the frequency
+ * otherwise). Walking back from that period to issue, every whole period counts 1 (0 when not
+ * `fromIssue`) and the one holding issue its days over its own length.
+ *
+ * Derived from and checked against 1,645 results of Excel for Mac 16.x across every basis,
+ * frequency and calc_method (data/excel-oracle); it agrees with every one.
+ */
+function accruedPeriods(
+  issue: number,
+  firstInterest: number,
+  settlement: number,
+  frequency: number,
+  basis: number,
+  fromIssue: boolean,
+  context: FunctionRuntimeContext
+): number {
+  const date1904 = context.date1904;
+  const months = 12 / frequency;
+  const monthEnd = isMonthEnd(firstInterest, context);
+  const step = (serial: number, by: number) => shiftMonths(serial, by, monthEnd, context);
+  const before = step(firstInterest, -months);
+  const settlementPeriod =
+    basis === 1 ? firstInterest - before : (basis === 3 ? 365 : 360) / frequency;
+  let pcd = before;
+  if (settlement > firstInterest && fromIssue) {
+    pcd = firstInterest;
+    for (let next = step(pcd, months); next < settlement; next = step(pcd, months)) {
+      pcd = next;
+    }
+  }
+  let periods = dayCount(Math.max(issue, pcd), settlement, basis, date1904) / settlementPeriod;
+  for (
+    let end = pcd, start = step(pcd, -months);
+    end > issue;
+    end = start, start = step(start, -months)
+  ) {
+    if (issue <= start) {
+      periods += fromIssue ? 1 : 0;
+      continue;
+    }
+    periods +=
+      dayCount(issue, end, basis, date1904) /
+      quasiPeriodLength(start, end, frequency, basis, date1904);
+  }
+  return periods;
+}
+
+/** The length `ACCRINT` divides a quasi-coupon period's days by, on `basis`. */
+function quasiPeriodLength(
+  start: number,
+  end: number,
+  frequency: number,
+  basis: number,
+  date1904?: boolean
+): number {
+  switch (basis) {
+    case 0:
+    case 2:
+      return days360Us(start, end, true, date1904);
+    case 3:
+      return 365 / frequency;
+    case 4:
+      return days360Eu(start, end, date1904);
+    default:
+      return end - start;
+  }
 }
 
 /**
  * ACCRINTM(issue, settlement, rate, par, [basis]) — accrued interest
  * for a security that pays interest at maturity.
- *   result = par × rate × dayCountFraction(issue, settlement, basis, context)
+ *   result = par × rate × YEARFRAC(issue, settlement, basis)
  */
 export function fnACCRINTM(
   args: RuntimeValue[],
@@ -2226,7 +2310,7 @@ export function fnACCRINTM(
     return ERRORS.NUM;
   }
 
-  const dcf = dayCountFraction(issue, settlement, basis, context);
+  const dcf = yearFraction(issue, settlement, basis, context.date1904);
   return rvNumber(parRV.value * rateRV.value * dcf);
 }
 
@@ -2346,6 +2430,26 @@ export function fnTBILLEQ(
 }
 
 /**
+ * `A`, `DSM` and `DIM` of `PRICEMAT` / `YIELDMAT` as fractions of one year length — the one from
+ * issue to settlement — with `DSM` the remainder `DIM - A` rather than a count of its own, as
+ * Excel computes them. Three separate year fractions differ on basis 1, where each span has its
+ * own year length, and on 30/360, where a month end moves one count and not the other.
+ */
+function maturityFractions(
+  settlement: number,
+  maturity: number,
+  issue: number,
+  basis: number,
+  context: FunctionRuntimeContext
+): { a: number; dsm: number; dim: number } {
+  const date1904 = context.date1904;
+  const b = yearLength(issue, settlement, basis, date1904);
+  const dimDays = dayCount(issue, maturity, basis, date1904);
+  const aDays = dayCount(issue, settlement, basis, date1904);
+  return { a: aDays / b, dsm: (dimDays - aDays) / b, dim: dimDays / b };
+}
+
+/**
  * PRICEMAT(settlement, maturity, issue, rate, yld, [basis]) —
  * price per $100 face value for a security that pays interest at maturity.
  *
@@ -2399,9 +2503,7 @@ export function fnPRICEMAT(
     return ERRORS.NUM;
   }
 
-  const a = dayCountFraction(issue, settlement, basis, context);
-  const dsm = dayCountFraction(settlement, maturity, basis, context);
-  const dim = dayCountFraction(issue, maturity, basis, context);
+  const { a, dsm, dim } = maturityFractions(settlement, maturity, issue, basis, context);
   const numerator = 100 + dim * rate * 100;
   const denominator = 1 + dsm * yld;
   return rvNumber(numerator / denominator - a * rate * 100);
@@ -2461,9 +2563,7 @@ export function fnYIELDMAT(
     return ERRORS.NUM;
   }
 
-  const a = dayCountFraction(issue, settlement, basis, context);
-  const dsm = dayCountFraction(settlement, maturity, basis, context);
-  const dim = dayCountFraction(issue, maturity, basis, context);
+  const { a, dsm, dim } = maturityFractions(settlement, maturity, issue, basis, context);
   if (dsm <= 0) {
     return ERRORS.NUM;
   }
@@ -2531,7 +2631,7 @@ export function fnCOUPNCD(
   if ("kind" in p) {
     return p;
   }
-  return rvNumber(nextCouponAfter(p.settlement, p.maturity, p.frequency, context));
+  return rvNumber(couponPeriod(p.settlement, p.maturity, p.frequency, context).ncd);
 }
 
 /**
@@ -2546,7 +2646,7 @@ export function fnCOUPPCD(
   if ("kind" in p) {
     return p;
   }
-  return rvNumber(prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency, context));
+  return rvNumber(couponPeriod(p.settlement, p.maturity, p.frequency, context).pcd);
 }
 
 /**
@@ -2561,7 +2661,7 @@ export function fnCOUPNUM(
   if ("kind" in p) {
     return p;
   }
-  return rvNumber(couponsBetween(p.settlement, p.maturity, p.frequency, context));
+  return rvNumber(couponPeriod(p.settlement, p.maturity, p.frequency, context).count);
 }
 
 /**
@@ -2576,15 +2676,8 @@ export function fnCOUPDAYSNC(
   if ("kind" in p) {
     return p;
   }
-  const next = nextCouponAfter(p.settlement, p.maturity, p.frequency, context);
-  if (p.basis === 0 || p.basis === 4) {
-    // 30/360 methods — Excel treats the period day-count via NASD-style
-    // adjustment; dayCountFraction already handles this. Multiply by
-    // 360 (days in 30/360 "year") to get days.
-    return rvNumber(dayCountFraction(p.settlement, next, p.basis, context) * 360);
-  }
-  // Actual day count: plain serial difference works for basis 1/2/3.
-  return rvNumber(next - p.settlement);
+  const period = couponPeriod(p.settlement, p.maturity, p.frequency, context);
+  return rvNumber(couponDaysAfter(p.settlement, period, p.basis, context));
 }
 
 /**
@@ -2599,11 +2692,52 @@ export function fnCOUPDAYBS(
   if ("kind" in p) {
     return p;
   }
-  const prev = prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency, context);
-  if (p.basis === 0 || p.basis === 4) {
-    return rvNumber(dayCountFraction(prev, p.settlement, p.basis, context) * 360);
+  const { pcd } = couponPeriod(p.settlement, p.maturity, p.frequency, context);
+  return rvNumber(couponDaysBefore(p.settlement, pcd, p.basis, context));
+}
+
+/**
+ * `COUPDAYS` on basis 1, computed as Excel computes it — which is not the actual days between
+ * `COUPPCD` and `COUPNCD`.
+ *
+ * Excel finds the period by stepping back from maturity one coupon at a time, each step keeping
+ * the previous date's day of the month, clamped: an August 31st maturity's dates become Feb 28,
+ * Aug 28, Feb 28, … once a short month has clamped the day. The first such date after settlement
+ * ends the period, and its start is one coupon before that, on the last day of its month when the
+ * end is the last day of its own (repeating the step back while that start still falls after
+ * settlement). So the result depends on where in the true period settlement falls:
+ * `COUPDAYS(2024-08-30, 2027-08-31, 2, 1)` is 184 and `COUPDAYS(2024-08-31, …)` is 181, where
+ * both sit in the 2024-02-29 → 2024-08-31 period by `COUPPCD` / `COUPNCD`.
+ *
+ * Derived from and checked against 12,878 results of Excel for Mac 16.x (data/excel-oracle),
+ * including every settlement day of 2024 for seven maturities; it agrees with every one.
+ * `PRICE`, `YIELD` and `DURATION` do not use this: their `E` is the actual period length.
+ */
+function actualCouponDays(
+  settlement: number,
+  maturity: number,
+  frequency: number,
+  context: FunctionRuntimeContext
+): number {
+  const months = 12 / frequency;
+  let end = maturity;
+  let date = maturity;
+  while (date > settlement) {
+    end = date;
+    date = shiftMonths(date, -months, false, context);
   }
-  return rvNumber(p.settlement - prev);
+  for (;;) {
+    const start = shiftMonths(end, -months, isMonthEnd(end, context), context);
+    if (start <= settlement) {
+      // Real days when the period starts before Excel's first date: Excel counts such a date on the
+      // real calendar, which has no 1900-02-29, so `COUPDAYS(1900-05-28, 1901-09-30, 1, 1)` is 365.
+      // From 1900-01-01 on it counts its own serials, phantom day included: `COUPDAYS(1900-05-15,
+      // 1901-01-10, 2, 1)` is 182.
+      const crossesPhantomDay = !context.date1904 && start < 1 && end > 60;
+      return end - start - (crossesPhantomDay ? 1 : 0);
+    }
+    end = start;
+  }
 }
 
 /**
@@ -2618,18 +2752,8 @@ export function fnCOUPDAYS(
   if ("kind" in p) {
     return p;
   }
-  const prev = prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency, context);
-  const next = nextCouponAfter(p.settlement, p.maturity, p.frequency, context);
   if (p.basis === 1) {
-    // Actual/actual — actual days between the two coupon dates.
-    return rvNumber(next - prev);
+    return rvNumber(actualCouponDays(p.settlement, p.maturity, p.frequency, context));
   }
-  if (p.basis === 2 || p.basis === 3) {
-    // Actual/360 or actual/365 — the period length is conventionally the
-    // period basis divided by frequency (e.g. 360/freq, 365/freq).
-    const yearDays = p.basis === 2 ? 360 : 365;
-    return rvNumber(yearDays / p.frequency);
-  }
-  // 30/360 NASD or 30/360 European: 360/freq conventional.
-  return rvNumber(360 / p.frequency);
+  return rvNumber((p.basis === 3 ? 365 : 360) / p.frequency);
 }

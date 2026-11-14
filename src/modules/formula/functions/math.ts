@@ -3,8 +3,11 @@
  */
 
 import {
+  applyRounding,
   argToNumber,
   asArrayArg,
+  roundHalfAwayFromZero,
+  toExcelPrecision,
   flattenAll,
   flattenNumbers,
   firstError,
@@ -33,64 +36,6 @@ import {
 // ============================================================================
 // Native Function Type
 // ============================================================================
-
-// ============================================================================
-// Internal Helpers
-// ============================================================================
-
-/**
- * Apply a rounding operation using an integer factor, avoiding the
- * floating-point drift that `Math.pow(10, d) / Math.pow(10, d)` introduces
- * when `d` is negative (e.g. `1/0.1` is not exactly `10`).
- *
- * For `digits >= 0` we scale up by `10^digits`, round, and scale back down.
- * For `digits < 0` we divide by `10^|digits|`, round, and multiply back up.
- * In both branches the scaling factor is an integer, so only one rounding
- * error is introduced.
- */
-function applyRounding(value: number, digits: number, round: (n: number) => number): number {
-  const d = Math.trunc(digits);
-  // Clamp digits to Excel's documented range [-127, 127]. Without this
-  // guard, extreme inputs blow `Math.pow(10, d)` up to Infinity; the
-  // resulting `round(value * Infinity) / Infinity` is NaN, which then
-  // leaks through the whole rounding family (ROUND / ROUNDDOWN /
-  // ROUNDUP / TRUNC / MROUND) and persists to the worksheet. Return
-  // `value` itself for well-behaved "nothing to do" edge cases (d very
-  // large is effectively "no rounding"; d very negative rounds to 0).
-  if (!Number.isFinite(value)) {
-    return value;
-  }
-  if (d >= 308) {
-    return value;
-  }
-  if (d <= -308) {
-    return round(0);
-  }
-  if (d >= 0) {
-    const factor = Math.pow(10, d);
-    if (!Number.isFinite(factor) || factor === 0) {
-      return value;
-    }
-    return round(value * factor) / factor;
-  }
-  const factor = Math.pow(10, -d);
-  if (!Number.isFinite(factor) || factor === 0) {
-    return value;
-  }
-  return round(value / factor) * factor;
-}
-
-/**
- * Round half away from zero, matching Excel's ROUND semantics.
- *
- * JavaScript's `Math.round` rounds half toward +∞ (so `Math.round(-0.5)`
- * returns `-0` instead of `-1`), whereas Excel rounds the magnitude and
- * preserves the sign: `ROUND(-0.5, 0) = -1`. This helper implements the
- * Excel rule by operating on the absolute value and restoring the sign.
- */
-function roundHalfAwayFromZero(n: number): number {
-  return n < 0 ? -Math.round(-n) : Math.round(n);
-}
 
 // ============================================================================
 // Trigonometric Functions
@@ -746,6 +691,16 @@ export function fnPOWER(args: RuntimeValue[]): RuntimeValue {
   return !isFinite(result) ? ERRORS.NUM : rvNumber(result);
 }
 
+/**
+ * The result of rounding `input`: `#NUM!` when a finite number rounds to one larger than any
+ * double — up to a whole step past every digit can be (`ROUNDUP(5, -400)` is 1e400) — and the
+ * number otherwise. A non-finite input is passed through, as it always was: nothing upstream
+ * produces one, and rounding did not.
+ */
+function roundingResult(input: number, result: number): RuntimeValue {
+  return Number.isFinite(result) || !Number.isFinite(input) ? rvNumber(result) : ERRORS.NUM;
+}
+
 export function fnROUND(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
@@ -755,7 +710,7 @@ export function fnROUND(args: RuntimeValue[]): RuntimeValue {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  return rvNumber(applyRounding(num.value, digitsRV.value, roundHalfAwayFromZero));
+  return roundingResult(num.value, applyRounding(num.value, digitsRV.value, roundHalfAwayFromZero));
 }
 
 export function fnROUNDDOWN(args: RuntimeValue[]): RuntimeValue {
@@ -767,7 +722,7 @@ export function fnROUNDDOWN(args: RuntimeValue[]): RuntimeValue {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  return rvNumber(applyRounding(num.value, digitsRV.value, Math.trunc));
+  return roundingResult(num.value, applyRounding(num.value, digitsRV.value, Math.trunc));
 }
 
 export function fnROUNDUP(args: RuntimeValue[]): RuntimeValue {
@@ -784,7 +739,7 @@ export function fnROUNDUP(args: RuntimeValue[]): RuntimeValue {
   // restoring the sign.
   const sign = num.value >= 0 ? 1 : -1;
   const rounded = applyRounding(Math.abs(num.value), digitsRV.value, Math.ceil);
-  return rvNumber(sign * rounded);
+  return roundingResult(num.value, sign * rounded);
 }
 
 export function fnSQRT(args: RuntimeValue[]): RuntimeValue {
@@ -921,7 +876,7 @@ export function fnTRUNC(args: RuntimeValue[]): RuntimeValue {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  return rvNumber(applyRounding(num.value, digitsRV.value, Math.trunc));
+  return roundingResult(num.value, applyRounding(num.value, digitsRV.value, Math.trunc));
 }
 
 export function fnSUMSQ(args: RuntimeValue[]): RuntimeValue {
@@ -1059,7 +1014,10 @@ export function fnMROUND(args: RuntimeValue[]): RuntimeValue {
   if ((num.value > 0 && multiple.value < 0) || (num.value < 0 && multiple.value > 0)) {
     return ERRORS.NUM;
   }
-  return rvNumber(roundHalfAwayFromZero(num.value / multiple.value) * multiple.value);
+  // The quotient is read at Excel's precision before it is rounded: `1.3 / 0.2` is
+  // 6.499999999999999 in binary, which would round to 6 where Excel's 6.5 rounds to 7.
+  const quotient = roundHalfAwayFromZero(toExcelPrecision(num.value / multiple.value));
+  return rvNumber(toExcelPrecision(quotient * multiple.value));
 }
 
 export function fnQUOTIENT(args: RuntimeValue[]): RuntimeValue {

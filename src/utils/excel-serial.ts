@@ -212,13 +212,15 @@ export function serialToParts(serial: number, date1904?: boolean): ExcelDateTime
 /**
  * Calendar fields as an Excel date serial.
  *
- * The inverse of {@link serialToParts}. Fields out of range carry, the way `Date.UTC` does:
+ * The inverse of {@link serialToParts}. Fields out of range carry, the way Excel's `DATE` does:
  * `{ month: 13 }` is January of the next year, and `{ day: 0 }` is the last day of the previous
  * month. That is relied on by month arithmetic such as `EDATE` and coupon-date stepping — and it
  * is why this stays permissive while the public `Cell.setDateParts` validates.
  *
- * `1900-02-29` is accepted and yields serial 60, Excel's own answer for a day that does not
- * exist. The carry rule would otherwise silently turn it into 1900-03-01 and serial 61.
+ * **The day carries over Excel's calendar, not the real one.** The month is normalised first and
+ * the day is then counted on from its first, in serials — so under the 1900 epoch February 1900
+ * has 29 days, as it does to Excel: `1900-03-00` and `1900-01-60` are both serial 60, and
+ * `1900-02-29` is serial 60 because it is the 29th day of February, not by a special case.
  *
  * @param parts - Calendar fields. Missing time fields default to 0, so a date-only value needs
  *   only `year`, `month` and `day` and yields a whole-number serial.
@@ -230,25 +232,54 @@ export function partsToSerial(
 ): number {
   const { year, month, day, hour = 0, minute = 0, second = 0, millisecond = 0 } = parts;
   const ms = ((hour * 60 + minute) * 60 + second) * 1000 + millisecond;
-  if (isPhantomLeapDay(year, month, day, date1904)) {
-    // Checked before the carry, which cannot distinguish the phantom from 1900-03-01.
-    return toSerialScale((SERIAL_60_DAYS * MS_PER_DAY + ms) / MS_PER_DAY, date1904);
-  }
-  // Normalise the month before the day, so an out-of-range month lands on a real month and the
-  // day's own overflow is then measured against it.
+  // Normalise the month first, so an out-of-range month lands on a real month.
   const monthIndex = month - 1;
   const yearCarry = Math.floor(monthIndex / 12);
-  let days = daysFromCivil(year + yearCarry, monthIndex - yearCarry * 12 + 1, day);
-  if (date1904 !== true && days <= SERIAL_60_DAYS) {
+  let first = daysFromCivil(year + yearCarry, monthIndex - yearCarry * 12 + 1, 1);
+  if (date1904 !== true && first <= SERIAL_60_DAYS) {
     // Anything before 1900-03-01 sits one day lower on the serial scale, because Excel spends a
-    // serial on a day the calendar does not have. `<=` and not `<`: the phantom's own day count
-    // is 1900-03-01's, and it was already returned above.
-    days -= 1;
+    // serial on a day the calendar does not have. The first of a month is never the phantom, so
+    // this needs no exception; the day is then counted on from it in serials, which do include it.
+    first -= 1;
   }
+  const days = first + day - 1;
   // Accumulate in whole milliseconds and divide once. Adding `days` and `ms / MS_PER_DAY`
   // separately is the same value in exact arithmetic but not in floating point, and the two
   // disagree in the last ULP — enough to change the digits written into a `<v>` element.
   return toSerialScale((days * MS_PER_DAY + ms) / MS_PER_DAY, date1904);
+}
+
+/**
+ * The number of days in a month of Excel's calendar — 29 for February 1900 under the 1900 epoch.
+ *
+ * `month` may be out of range; it carries as in {@link partsToSerial}.
+ */
+export function excelDaysInMonth(year: number, month: number, date1904?: boolean): number {
+  return (
+    partsToSerial({ year, month: month + 1, day: 1 }, date1904) -
+    partsToSerial({ year, month, day: 1 }, date1904)
+  );
+}
+
+/** Whether a year is a leap year of the real (Gregorian) calendar, in which 1900 is not. */
+export function isGregorianLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/**
+ * The number of days in a month of the real (Gregorian) calendar — 28 for February 1900.
+ *
+ * Excel is not consistent about its 1900-02-29: `DATE`, `DAYS360` and the weekday functions
+ * count it, `EOMONTH`, `EDATE` and `YEARFRAC` do not. A function that does not, uses this rather
+ * than {@link excelDaysInMonth}. `month` may be out of range; it carries.
+ */
+export function gregorianDaysInMonth(year: number, month: number): number {
+  const carry = Math.floor((month - 1) / 12);
+  const m = month - carry * 12;
+  if (m === 2) {
+    return isGregorianLeapYear(year + carry) ? 29 : 28;
+  }
+  return m === 4 || m === 6 || m === 9 || m === 11 ? 30 : 31;
 }
 
 /**
@@ -259,6 +290,18 @@ export function partsToSerial(
  */
 export function isExcelPhantomDay(parts: ExcelDateTimeParts, date1904?: boolean): boolean {
   return isPhantomLeapDay(parts.year, parts.month, parts.day, date1904);
+}
+
+/**
+ * The day of the week of an Excel serial, 0 for Sunday through 6 for Saturday.
+ *
+ * Computed from the serial, not from the calendar date: Excel's 1900 calendar counts a
+ * 1900-02-29 that never existed, so serial 1 (1900-01-01) is a Sunday to Excel, and every day
+ * before March 1900 falls a weekday earlier than the real one. Serial 0 is a Saturday under the
+ * 1900 epoch and a Friday (1904-01-01) under the 1904 one. The time of day is ignored.
+ */
+export function serialToWeekday(serial: number, date1904?: boolean): number {
+  return (((Math.floor(serial) + (date1904 ? 5 : 6)) % 7) + 7) % 7;
 }
 
 /**

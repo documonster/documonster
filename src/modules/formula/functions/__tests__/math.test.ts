@@ -149,6 +149,17 @@ describe("ROUND", () => {
 });
 
 describe("ROUNDUP / ROUNDDOWN / TRUNC", () => {
+  it("is #NUM! when the rounded number is larger than any double", () => {
+    // Up to a multiple of 1e400 is 1e400; down or to nearest is 0, and 1e308 stays itself.
+    expect(fnROUNDUP([rvNumber(5), rvNumber(-400)])).toEqual(ERRORS.NUM);
+    expect(fnROUNDUP([rvNumber(-5), rvNumber(-400)])).toEqual(ERRORS.NUM);
+    expect(asNumber(fnROUNDUP([rvNumber(5), rvNumber(-308)]))).toBe(1e308);
+    expect(asNumber(fnROUNDDOWN([rvNumber(5), rvNumber(-400)]))).toBe(0);
+    expect(asNumber(fnTRUNC([rvNumber(5), rvNumber(-400)]))).toBe(0);
+    expect(asNumber(fnROUND([rvNumber(1e308), rvNumber(-308)]))).toBe(1e308);
+    expect(asNumber(fnROUND([rvNumber(1e300), rvNumber(22)]))).toBe(1e300);
+  });
+
   it("ROUNDUP rounds away from zero", () => {
     expect(asNumber(fnROUNDUP([rvNumber(3.1), rvNumber(0)]))).toBe(4);
     expect(asNumber(fnROUNDUP([rvNumber(-3.1), rvNumber(0)]))).toBe(-4);

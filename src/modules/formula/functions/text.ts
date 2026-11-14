@@ -2,7 +2,13 @@
  * Text Functions — Native RuntimeValue implementations.
  */
 
-import { argToNumber, checkError, excelWildcardToRegex } from "@formula/functions/_shared";
+import {
+  applyRounding,
+  argToNumber,
+  checkError,
+  excelWildcardToRegex,
+  roundHalfAwayFromZero
+} from "@formula/functions/_shared";
 import type { FunctionRuntimeContext } from "@formula/runtime/function-context";
 import { DEFAULT_FUNCTION_CONTEXT } from "@formula/runtime/function-context";
 import type { RuntimeValue, ScalarValue, ErrorValue } from "@formula/runtime/values";
@@ -623,35 +629,77 @@ export function fnBAHTTEXT(args: RuntimeValue[]): RuntimeValue {
   return rvString(toStringRV(topLeft(args[0])));
 }
 
+/** Excel's largest `decimals` for `FIXED` and `DOLLAR`; beyond it both are `#VALUE!`. */
+const MAX_FIXED_DECIMALS = 127;
+
+/**
+ * The longest text `FIXED` and `DOLLAR` return; a longer one is `#VALUE!`. Measured: `FIXED` writes
+ * 255 characters and refuses 256, sign included. `DOLLAR` writes a negative amount of 255 but a
+ * positive one only up to 254 — its positive form carries the space Excel's currency format keeps
+ * for the closing parenthesis (`$#,##0.00_)`), which counts but is not returned.
+ */
+const MAX_FIXED_LENGTH = 255;
+
+/**
+ * A number rounded the way `ROUND` rounds, written out with exactly `decimals` places and no
+ * exponent, its integer part optionally grouped in threes. `#VALUE!` when `decimals` is out of
+ * Excel's range, `#NUM!` when the rounded number is larger than any double.
+ *
+ * `toFixed` cannot do this: it rounds the binary value (`(1.005).toFixed(2)` is "1.00"), prints
+ * the binary expansion past 17 digits, switches to an exponent at 1e21, and refuses more than 100
+ * places. The rounded value has at most 15 significant digits, so its shortest decimal form is
+ * exact and is padded with zeros instead.
+ */
+function formatFixed(value: number, decimals: number, grouped: boolean): string | ErrorValue {
+  const d = Math.trunc(decimals);
+  if (d > MAX_FIXED_DECIMALS) {
+    return ERRORS.VALUE;
+  }
+  const rounded = applyRounding(value, d, roundHalfAwayFromZero);
+  if (!Number.isFinite(rounded)) {
+    return ERRORS.NUM;
+  }
+  const [mantissa, exponent = "0"] = String(Math.abs(rounded)).split("e");
+  const [whole, fraction = ""] = mantissa.split(".");
+  let digits = whole + fraction;
+  let point = whole.length + Number(exponent);
+  if (point <= 0) {
+    digits = "0".repeat(1 - point) + digits;
+    point = 1;
+  }
+  digits = digits.padEnd(point, "0");
+  let integer = digits.slice(0, point).replace(/^0+(?=\d)/, "");
+  if (grouped) {
+    integer = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  const sign = rounded < 0 ? "-" : "";
+  return d > 0
+    ? `${sign}${integer}.${digits.slice(point).padEnd(d, "0").slice(0, d)}`
+    : `${sign}${integer}`;
+}
+
 export function fnDOLLAR(args: RuntimeValue[]): RuntimeValue {
   const numRV = toNumberRV(topLeft(args[0]));
   if (isError(numRV)) {
     return numRV;
   }
-  const num = numRV.value;
-  let decimals: number;
+  let decimals = 2;
   if (args.length > 1) {
     const decRV = toNumberRV(topLeft(args[1]));
     if (isError(decRV)) {
       return decRV;
     }
     decimals = decRV.value;
-  } else {
-    decimals = 2;
   }
-  const d = Math.floor(decimals);
-  let rounded: number;
-  if (d < 0) {
-    const factor = Math.pow(10, -d);
-    rounded = Math.round(Math.abs(num) / factor) * factor;
-  } else {
-    rounded = Math.abs(num);
+  const formatted = formatFixed(Math.abs(numRV.value), decimals, true);
+  if (typeof formatted !== "string") {
+    return formatted;
   }
-  const formatted = rounded.toFixed(Math.max(0, d));
-  const parts = formatted.split(".");
-  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const result = parts.join(".");
-  return rvString(num < 0 ? `($${result})` : `$${result}`);
+  // A negative amount is parenthesised even when it rounds to zero: Excel's `DOLLAR(-0.001)` is
+  // "($0.00)", while `FIXED(-0.001, 2)` is "0.00".
+  const negative = numRV.value < 0;
+  const text = negative ? `($${formatted})` : `$${formatted}`;
+  return text.length + (negative ? 0 : 1) > MAX_FIXED_LENGTH ? ERRORS.VALUE : rvString(text);
 }
 
 export function fnFIXED(args: RuntimeValue[]): RuntimeValue {
@@ -659,42 +707,27 @@ export function fnFIXED(args: RuntimeValue[]): RuntimeValue {
   if (isError(numRV)) {
     return numRV;
   }
-  const num = numRV.value;
-  let decimals: number;
+  let decimals = 2;
   if (args.length > 1) {
     const decRV = toNumberRV(topLeft(args[1]));
     if (isError(decRV)) {
       return decRV;
     }
     decimals = decRV.value;
-  } else {
-    decimals = 2;
   }
-  let noCommas: boolean;
+  let noCommas = false;
   if (args.length > 2) {
     const ncRV = toBooleanRV(topLeft(args[2]));
     if (isError(ncRV)) {
       return ncRV;
     }
     noCommas = ncRV.value;
-  } else {
-    noCommas = false;
   }
-  const d = Math.floor(decimals);
-  let rounded: number;
-  if (d < 0) {
-    const factor = Math.pow(10, -d);
-    rounded = Math.round(num / factor) * factor;
-  } else {
-    rounded = num;
+  const formatted = formatFixed(numRV.value, decimals, !noCommas);
+  if (typeof formatted !== "string") {
+    return formatted;
   }
-  let result = rounded.toFixed(Math.max(0, d));
-  if (!noCommas) {
-    const parts = result.split(".");
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    result = parts.join(".");
-  }
-  return rvString(result);
+  return formatted.length > MAX_FIXED_LENGTH ? ERRORS.VALUE : rvString(formatted);
 }
 
 export function fnASC(args: RuntimeValue[]): RuntimeValue {

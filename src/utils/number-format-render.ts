@@ -15,7 +15,7 @@
  * and for input parsing.
  */
 
-import { partsToSerial, serialToParts, utcDateToParts } from "./excel-serial";
+import { partsToSerial, serialToParts, serialToWeekday, utcDateToParts } from "./excel-serial";
 import type { FormatCompareOp, FormatDatePart, FormatSection, FormatToken } from "./number-format";
 import { DAY_NAMES, MONTH_NAMES, parseNumberFormat } from "./number-format";
 
@@ -857,10 +857,7 @@ function renderDateSection(
   // Serial 0 of the 1900 system is Excel's 1900-01-00, a Saturday.
   const parts =
     day === 0 && !date1904 ? { year: 1900, month: 1, day: 0 } : serialToParts(day, date1904);
-  // From the serial, not the calendar date: Excel's 1900 calendar counts a 1900-02-29 that never existed,
-  // so serial 1 is a Sunday and every day before March 1900 is a weekday earlier than the real one.
-  // Serial 0 is a Saturday under 1900 and a Friday under 1904.
-  const weekday = (day + (date1904 ? 5 : 6)) % 7;
+  const weekday = serialToWeekday(day, date1904);
   const hour = Math.floor(secondOfDay / 3600);
   const minute = Math.floor((secondOfDay % 3600) / 60);
   const second = secondOfDay % 60;

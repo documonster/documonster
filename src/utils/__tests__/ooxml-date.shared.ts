@@ -39,6 +39,14 @@ export function describeOoxmlDate(): void {
       ["10:30 1/15/2020", "2020-01-15T10:30:00.000Z"],
       ["January 15, 2020 at 10:30 AM", "2020-01-15T10:30:00.000Z"],
       ["2020/01/15 10:30", "2020-01-15T10:30:00.000Z"],
+      // The last day of each February, and of a year — read in another year, a date could overflow into the next month.
+      ["2023-02-28", "2023-02-28T00:00:00.000Z"],
+      ["1900-02-28", "1900-02-28T00:00:00.000Z"],
+      ["2000-02-29", "2000-02-29T00:00:00.000Z"],
+      ["2024-02-29", "2024-02-29T00:00:00.000Z"],
+      ["0099-02-28", "0099-02-28T00:00:00.000Z"],
+      ["2023-02-28T23:59:59.999", "2023-02-28T23:59:59.999Z"],
+      ["2023-12-31T24:00:00.000", "2024-01-01T00:00:00.000Z"],
       // `Date#toString()`: an instant, its zone named.
       [
         "Wed Jan 15 2020 10:30:00 GMT+1100 (Australian Eastern Daylight Time)",
@@ -62,7 +70,15 @@ export function describeOoxmlDate(): void {
       "2024-13-01",
       // A time this cannot read, or a second one, was read as midnight.
       "1/15/2020 1:2",
-      "1/15/2020 10:30 11:45"
+      "1/15/2020 10:30 11:45",
+      // A day the month does not have, February of a common year included: every February of one read as a day long.
+      "2023-02-29",
+      "1900-02-29",
+      "2100-02-29",
+      "2023-04-31",
+      // The end of the day is 24:00 exactly.
+      "2024-02-09T24:00:00.0001",
+      "2024-02-09T24:00:01"
     ])("reads %j as an invalid date", text => {
       expect(Number.isNaN(parseOoxmlDate(text).getTime())).toBe(true);
     });

@@ -15,6 +15,9 @@ import {
   EXCEL_1900_EPOCH_OFFSET,
   EXCEL_1904_EPOCH_DELTA,
   MS_PER_DAY,
+  excelDaysInMonth,
+  gregorianDaysInMonth,
+  serialToWeekday,
   partsToSerial,
   partsToUtcDate,
   serialHasTime,
@@ -284,5 +287,37 @@ describe("the Date bridge", () => {
 
   it("agrees with MS_PER_DAY", () => {
     expect(MS_PER_DAY).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
+describe("Excel's calendar arithmetic", () => {
+  it("carries an out-of-range day across 1900-02-29, as DATE does", () => {
+    expect(partsToSerial({ year: 1900, month: 3, day: 0 })).toBe(60);
+    expect(partsToSerial({ year: 1900, month: 1, day: 60 })).toBe(60);
+    expect(partsToSerial({ year: 1900, month: 1, day: 61 })).toBe(61);
+    expect(partsToSerial({ year: 1900, month: 2, day: 29 })).toBe(60);
+    expect(partsToSerial({ year: 1900, month: 1, day: 0 })).toBe(0);
+    // The 1904 system has no phantom day.
+    expect(partsToSerial({ year: 1904, month: 3, day: 0 }, true)).toBe(59);
+  });
+
+  it("counts February 1900 as 29 days on Excel's calendar (1900 epoch only) and 28 on the real one", () => {
+    expect(excelDaysInMonth(1900, 2)).toBe(29);
+    expect(excelDaysInMonth(1900, 2, true)).toBe(28);
+    expect(excelDaysInMonth(2023, 2)).toBe(28);
+    expect(excelDaysInMonth(2024, 14)).toBe(28); // February 2025
+    expect(gregorianDaysInMonth(1900, 2)).toBe(28);
+    expect(gregorianDaysInMonth(2000, 2)).toBe(29);
+    expect(gregorianDaysInMonth(2024, 13)).toBe(31); // January 2025
+  });
+
+  it("names weekdays from the serial, so serial 1 is a Sunday", () => {
+    expect(serialToWeekday(0)).toBe(6);
+    expect(serialToWeekday(1)).toBe(0);
+    expect(serialToWeekday(60)).toBe(3);
+    expect(serialToWeekday(61)).toBe(4); // 1900-03-01, a Thursday
+    expect(serialToWeekday(45306.75)).toBe(1); // 2024-01-15 18:00, a Monday
+    expect(serialToWeekday(0, true)).toBe(5); // 1904-01-01, a Friday
+    expect(serialToWeekday(-1)).toBe(5);
   });
 });

@@ -565,13 +565,10 @@ describe("HOUR / MINUTE / SECOND comprehensive", () => {
 });
 
 describe("YEAR / MONTH / DAY comprehensive", () => {
-  it("serial 0 is the day before Excel's serial 1", () => {
-    // Excel renders serial 0 as the fake "1900-01-00"; the real day before 1900-01-01 is
-    // 1899-12-31, which is what the converter reports. It used to say 1899-12-30, because the
-    // linear model had no room for the phantom leap day.
-    expect(asNumber(fnYEAR([rvNumber(0)]))).toBe(1899);
-    expect(asNumber(fnMONTH([rvNumber(0)]))).toBe(12);
-    expect(asNumber(fnDAY([rvNumber(0)]))).toBe(31);
+  it("serial 0 is Excel's 1900-01-00", () => {
+    expect(asNumber(fnYEAR([rvNumber(0)]))).toBe(1900);
+    expect(asNumber(fnMONTH([rvNumber(0)]))).toBe(1);
+    expect(asNumber(fnDAY([rvNumber(0)]))).toBe(0);
   });
 
   it("serial 1 is 1900-01-01, as Excel says", () => {
@@ -992,10 +989,8 @@ describe("NETWORKDAYS_INTL comprehensive", () => {
     expect(fnNETWORKDAYS_INTL([rvNumber(mon), rvNumber(fri), ERRORS.NA])).toEqual(ERRORS.NA);
   });
 
-  it("unknown weekend code falls back to Sat/Sun (default)", () => {
-    // The implementation returns the default set for unknown codes (no #NUM!).
-    // Verify behaviour matches default NETWORKDAYS.
-    expect(asNumber(fnNETWORKDAYS_INTL([rvNumber(mon), rvNumber(fri), rvNumber(999)]))).toBe(5);
+  it("unknown weekend code is #NUM!, as in Excel", () => {
+    expect(fnNETWORKDAYS_INTL([rvNumber(mon), rvNumber(fri), rvNumber(999)])).toEqual(ERRORS.NUM);
   });
 });
 
@@ -1263,16 +1258,12 @@ describe("UTC stability of date functions", () => {
 // Minimal check that the BLANK scalar is accepted (coerces to 0) by a
 // representative date function.
 describe("BLANK coercion", () => {
-  it("DATE(BLANK, BLANK, BLANK) → #NUM! (year 0 after coercion is valid → 1900; month/day = 0 → rolls to previous Nov 30 1899)", () => {
-    // 0 + 1900 = 1900; month 0 → Dec of previous year, day 0 → last-day-1.
-    // The exact serial is implementation defined; verify it returns a
-    // Number (not an error) — blanks must not route to #VALUE!.
-    const r = fnDATE([BLANK, BLANK, BLANK]);
-    expect(r.kind).toBe(RVKind.Number);
+  it("DATE(BLANK, BLANK, BLANK) is #NUM!: 1900-00-00 is before Excel's day 0", () => {
+    expect(fnDATE([BLANK, BLANK, BLANK])).toEqual(ERRORS.NUM);
   });
 
-  it("YEAR(BLANK) returns the epoch year 1899", () => {
-    expect(asNumber(fnYEAR([BLANK]))).toBe(1899);
+  it("YEAR(BLANK) is 1900, the year of serial 0 (1900-01-00)", () => {
+    expect(asNumber(fnYEAR([BLANK]))).toBe(1900);
   });
 });
 
@@ -1662,5 +1653,85 @@ describe("SECOND / MINUTE / WORKDAY.INTL finishers (R9)", () => {
     const holidays = rvArray([[rvNumber(mon + 2)]]);
     const r = fnWORKDAY_INTL([rvNumber(mon), rvNumber(5), rvNumber(1), holidays]);
     expect(r.kind).toBe(RVKind.Number);
+  });
+});
+
+// Excel's dates run from serial 0 to 9999-12-31 (2958465, or 2957003 under the 1904 epoch). A
+// serial outside that is "out of range for the current date base value", which Microsoft documents
+// as #NUM! for WEEKDAY, WEEKNUM, DAYS, NETWORKDAYS.INTL and WORKDAY.INTL; every function that reads
+// a date answers the same way rather than a field of a day Excel has no date for.
+describe("a serial outside Excel's date range is #NUM!", () => {
+  const LAST = 2958465;
+  const date1904 = { date1904: true } as const;
+
+  it.each([
+    ["YEAR", fnYEAR],
+    ["MONTH", fnMONTH],
+    ["DAY", fnDAY],
+    ["HOUR", fnHOUR],
+    ["MINUTE", fnMINUTE],
+    ["SECOND", fnSECOND],
+    ["WEEKDAY", fnWEEKDAY],
+    ["WEEKNUM", fnWEEKNUM],
+    ["ISOWEEKNUM", fnISOWEEKNUM]
+  ])("%s", (_name, fn) => {
+    expect(fn([rvNumber(-1)])).toEqual(ERRORS.NUM);
+    expect(fn([rvNumber(LAST + 1)])).toEqual(ERRORS.NUM);
+    expect(fn([rvNumber(LAST + 0.5)]).kind).toBe(RVKind.Number);
+    expect(fn([rvNumber(0)]).kind).toBe(RVKind.Number);
+  });
+
+  it("uses the 1904 epoch's last date", () => {
+    expect(asNumber(fnYEAR([rvNumber(2957003)], date1904))).toBe(9999);
+    expect(fnYEAR([rvNumber(2957004)], date1904)).toEqual(ERRORS.NUM);
+  });
+
+  it.each([
+    ["DATEDIF", (a: number, b: number) => fnDATEDIF([rvNumber(a), rvNumber(b), rvString("D")])],
+    ["DAYS", (a: number, b: number) => fnDAYS([rvNumber(b), rvNumber(a)])],
+    ["DAYS360", (a: number, b: number) => fnDAYS360([rvNumber(a), rvNumber(b)])],
+    ["NETWORKDAYS", (a: number, b: number) => fnNETWORKDAYS([rvNumber(a), rvNumber(b)])],
+    ["NETWORKDAYS.INTL", (a: number, b: number) => fnNETWORKDAYS_INTL([rvNumber(a), rvNumber(b)])],
+    ["YEARFRAC", (a: number, b: number) => fnYEARFRAC([rvNumber(a), rvNumber(b)])]
+  ])("%s refuses either date out of range", (_name, call) => {
+    expect(call(-5, 10)).toEqual(ERRORS.NUM);
+    expect(call(10, LAST + 1)).toEqual(ERRORS.NUM);
+    expect(call(LAST - 10, LAST).kind).toBe(RVKind.Number);
+  });
+
+  it("EDATE and EOMONTH refuse a start date out of range", () => {
+    expect(fnEDATE([rvNumber(LAST + 1), rvNumber(-1)])).toEqual(ERRORS.NUM);
+    expect(fnEOMONTH([rvNumber(-1), rvNumber(1)])).toEqual(ERRORS.NUM);
+  });
+
+  it("WORKDAY and WORKDAY.INTL refuse a start date or an answer out of range", () => {
+    for (const fn of [fnWORKDAY, fnWORKDAY_INTL]) {
+      expect(fn([rvNumber(-1), rvNumber(5)])).toEqual(ERRORS.NUM);
+      // 9999-12-31 is a Friday: the next working day has no date.
+      expect(fn([rvNumber(LAST), rvNumber(1)])).toEqual(ERRORS.NUM);
+      expect(asNumber(fn([rvNumber(LAST), rvNumber(-1)]))).toBe(LAST - 1);
+      expect(fn([rvNumber(1), rvNumber(-1)])).toEqual(ERRORS.NUM);
+    }
+  });
+
+  it("a holiday out of range is #NUM!, as Microsoft documents for WORKDAY.INTL", () => {
+    const outside = rvArray([[rvNumber(45306), rvNumber(LAST + 1)]]);
+    expect(fnWORKDAY_INTL([rvNumber(45306), rvNumber(1), rvNumber(1), outside])).toEqual(
+      ERRORS.NUM
+    );
+    expect(fnWORKDAY([rvNumber(45306), rvNumber(1), outside])).toEqual(ERRORS.NUM);
+    expect(fnNETWORKDAYS([rvNumber(45306), rvNumber(45313), rvNumber(-1)])).toEqual(ERRORS.NUM);
+    expect(fnNETWORKDAYS_INTL([rvNumber(45306), rvNumber(45313), rvNumber(1), outside])).toEqual(
+      ERRORS.NUM
+    );
+    // The last day itself is a date, and a holiday.
+    expect(
+      asNumber(fnNETWORKDAYS([rvNumber(LAST - 4), rvNumber(LAST), rvArray([[rvNumber(LAST)]])]))
+    ).toBe(4);
+  });
+
+  it("WORKDAY answers an unreachable day count at once instead of walking to it", () => {
+    expect(fnWORKDAY([rvNumber(45306), rvNumber(1e15)])).toEqual(ERRORS.NUM);
+    expect(fnWORKDAY_INTL([rvNumber(45306), rvNumber(-1e15), rvNumber(11)])).toEqual(ERRORS.NUM);
   });
 });

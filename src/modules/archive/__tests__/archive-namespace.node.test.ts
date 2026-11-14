@@ -128,8 +128,10 @@ describe("Archive.Crypto", () => {
   });
 
   it("zipCryptoDecrypt throws on a wrong password; the deprecated Archive form returns null", () => {
+    // A fixed header, which "wrong" fails: ZipCrypto checks a password against one byte of it, so with a random one a
+    // wrong password passed the check once in 256 runs.
     const encrypted = Archive.Crypto.encryptZipCrypto(plain, password, crc, n =>
-      crypto.getRandomValues(new Uint8Array(n))
+      new Uint8Array(n).fill(7)
     );
     expect(Archive.Crypto.decryptZipCrypto(encrypted, password, crc)).toEqual(plain);
     expect(() => Archive.Crypto.decryptZipCrypto(encrypted, "wrong", crc)).toThrow(ArchiveError);

@@ -895,11 +895,19 @@ export function fnTAKE(args: RuntimeValue[]): RuntimeValue {
   if (isError(d)) {
     return d;
   }
-  const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(d.height);
+  // An omitted `rows` / `columns` (`TAKE(a,,-2)`) arrives as Blank and keeps the whole
+  // dimension; coerced, it would be 0 and leave nothing to take.
+  const rowsV =
+    args.length > 1 && args[1].kind !== RVKind.Blank
+      ? toNumberRV(topLeft(args[1]))
+      : rvNumber(d.height);
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(d.width);
+  const colsV =
+    args.length > 2 && args[2].kind !== RVKind.Blank
+      ? toNumberRV(topLeft(args[2]))
+      : rvNumber(d.width);
   if (isError(colsV)) {
     return colsV;
   }
@@ -1041,11 +1049,18 @@ export function fnEXPAND(args: RuntimeValue[]): RuntimeValue {
   if (isError(d)) {
     return d;
   }
-  const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(d.height);
+  // An omitted `rows` / `columns` (`EXPAND(a,,3)`) arrives as Blank and keeps the source's size.
+  const rowsV =
+    args.length > 1 && args[1].kind !== RVKind.Blank
+      ? toNumberRV(topLeft(args[1]))
+      : rvNumber(d.height);
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(d.width);
+  const colsV =
+    args.length > 2 && args[2].kind !== RVKind.Blank
+      ? toNumberRV(topLeft(args[2]))
+      : rvNumber(d.width);
   if (isError(colsV)) {
     return colsV;
   }

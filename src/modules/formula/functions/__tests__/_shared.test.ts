@@ -19,6 +19,7 @@ import {
   rvString
 } from "../../runtime/values";
 import {
+  applyRounding,
   argToNumber,
   asArray,
   checkError,
@@ -29,6 +30,7 @@ import {
   forEachNumber,
   getCell,
   hasUnescapedWildcard,
+  roundHalfAwayFromZero,
   stripErrorCells,
   stripHiddenRowCells,
   stripSubtotalMaskedCells,
@@ -611,5 +613,66 @@ describe("strip helpers: combined pipeline (SUBTOTAL/AGGREGATE path)", () => {
     }
     // [1, (99 stripped)], [(row hidden)], [3, 4], [(err stripped), 5]
     expect(nums.sort((a, b) => a - b)).toEqual([1, 3, 4, 5]);
+  });
+});
+
+describe("applyRounding", () => {
+  /** The rounding spelled out in decimal, with no fast path: what `applyRounding` must equal. */
+  function reference(value: number, digits: number, round: (n: number) => number): number {
+    const shift = (v: number, e: number) => {
+      const [m, x = "0"] = String(v).split("e");
+      return Number(`${m}e${Number(x) + e}`);
+    };
+    return shift(round(shift(Number(value.toPrecision(15)), digits)), -digits);
+  }
+
+  it("agrees with the decimal definition, including on and around every rounding boundary", () => {
+    const rounds = [roundHalfAwayFromZero, Math.trunc, Math.ceil, Math.floor];
+    let seed = 1;
+    const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    for (let i = 0; i < 20000; i++) {
+      const digits = Math.floor(random() * 13) - 4;
+      const magnitude = 10 ** (Math.floor(random() * 12) - 4);
+      // Half of the inputs sit exactly on a boundary at `digits` (x.5 or a whole step), as a
+      // decimal literal would — the case binary scaling gets wrong.
+      const steps = Math.floor(random() * 100000);
+      const value =
+        i % 2 === 0 ? Number(`${steps}5e${-digits - 1}`) : (random() - 0.5) * magnitude * 1000;
+      for (const round of rounds) {
+        expect(applyRounding(value, digits, round)).toBe(reference(value, digits, round));
+      }
+    }
+  });
+
+  // Where scaling by a power of ten overflows or underflows, both ends of the fast path's guard
+  // round alike for the wrong reason: Infinity equals Infinity, and a value lost to zero rounds as
+  // zero. Each case here answered Infinity or 0 when the fast path accepted it.
+  it("does not take the fast path when the scaling overflows or underflows", () => {
+    expect(applyRounding(1e300, 22, roundHalfAwayFromZero)).toBe(1e300);
+    expect(applyRounding(1e307, 2, Math.trunc)).toBe(1e307);
+    expect(applyRounding(-1e300, 22, Math.ceil)).toBe(-1e300);
+    expect(applyRounding(1e-307, -22, Math.ceil)).toBe(1e22);
+    expect(applyRounding(-1e-307, -22, Math.floor)).toBe(-1e22);
+    expect(applyRounding(1e-307, -22, roundHalfAwayFromZero)).toBe(0);
+  });
+
+  it("rounds at any depth, not only within ±308 places", () => {
+    // To a multiple of 1e308, 1e308 is itself; 4e307 is under half of one.
+    expect(applyRounding(1e308, -308, roundHalfAwayFromZero)).toBe(1e308);
+    expect(applyRounding(6e307, -308, roundHalfAwayFromZero)).toBe(1e308);
+    expect(applyRounding(4e307, -308, roundHalfAwayFromZero)).toBe(0);
+    // Past every digit of the value: up is one whole step, which may be no double at all.
+    expect(applyRounding(5, -308, Math.ceil)).toBe(1e308);
+    expect(applyRounding(5, -400, Math.ceil)).toBe(Infinity);
+    expect(applyRounding(5, -400, Math.trunc)).toBe(0);
+    expect(applyRounding(-5, -400, roundHalfAwayFromZero)).toBe(0);
+    expect(Object.is(applyRounding(-5, -400, Math.trunc), 0)).toBe(true);
+    // A tiny value rounds at a depth past 308 places, and keeps its digits beyond its last.
+    expect(applyRounding(1.5e-310, 308, roundHalfAwayFromZero)).toBe(0);
+    expect(applyRounding(1.5e-310, 310, roundHalfAwayFromZero)).toBe(2e-310);
+    expect(applyRounding(1.5e-310, 400, roundHalfAwayFromZero)).toBe(1.5e-310);
+    expect(applyRounding(1.5, 400, roundHalfAwayFromZero)).toBe(1.5);
+    expect(applyRounding(1.5, 1e300, roundHalfAwayFromZero)).toBe(1.5);
+    expect(applyRounding(1.5, -1e300, Math.ceil)).toBe(Infinity);
   });
 });

@@ -102,13 +102,11 @@ export function parseOoxmlDate(raw: string): Date {
   const rest =
     time === null
       ? text
-      : (
+      : withoutTrailingConnective(
           text.slice(0, time.index + time[1]!.length) +
-          " " +
-          text.slice(time.index + time[0].length)
-        )
-          .replace(TRAILING_CONNECTIVE, "")
-          .trim();
+            " " +
+            text.slice(time.index + time[0].length)
+        ).trim();
   // A time left over is one this cannot read, or a second one: the engine would read it, or drop it, its own way.
   if (/\d:\d/.test(rest) || /^\d*$/.test(rest)) {
     return new Date(NaN);
@@ -164,7 +162,9 @@ function isoDate(text: string): Date {
   const minutes = m[5] === undefined ? 0 : Number(m[5]);
   const seconds = m[6] === undefined ? 0 : Number(m[6]);
   const ms = milliseconds(m[7]);
-  const endOfDay = hours === 24 && minutes === 0 && seconds === 0 && ms === 0;
+  // The end of the day is 24:00 exactly: a fraction past it, however small, is checked whole, not as milliseconds.
+  const endOfDay =
+    hours === 24 && minutes === 0 && seconds === 0 && (m[7] === undefined || /^0+$/.test(m[7]));
   if (
     month < 1 ||
     month > 12 ||
@@ -200,7 +200,11 @@ function daysInMonth(year: number, month: number): number {
   return utcDate(year, month + 1, 0, 0, 0, 0, 0).getUTCDate();
 }
 
-/** `Date.UTC` for any year: it reads a year from 0 to 99 as 1900 to 1999. */
+/**
+ * `Date.UTC` for any year — it reads a year from 0 to 99 as 1900 to 1999. The year, month and day are set in one call,
+ * so no date passes through another year on the way: built in 2000 and moved, 29 February became 1 March of a year
+ * that has none, and every February of such a year read as one day long.
+ */
 function utcDate(
   year: number,
   month: number,
@@ -210,8 +214,9 @@ function utcDate(
   seconds: number,
   ms: number
 ): Date {
-  const date = new Date(Date.UTC(2000, month, day, hours, minutes, seconds, ms));
-  date.setUTCFullYear(date.getUTCFullYear() - 2000 + year);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month, day);
+  date.setUTCHours(hours, minutes, seconds, ms);
   return date;
 }
 
@@ -234,12 +239,31 @@ function calendarDate(text: string): { year: number; month: number; day: number 
 const TIME_OF_DAY =
   /(^|[^\d:.])(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?![\d:])(?:\s*([AaPp][Mm])(?![A-Za-z]))?/;
 
-/** What joined a time to its date — `, ` or ` at ` — left at the end once the time is taken out. */
-const TRAILING_CONNECTIVE = /(?:[\s,]+|\s+at)+$/i;
+/**
+ * `text` without what joined a time to its date — commas, white space and ` at ` — left at its end once the time is
+ * taken out. A loop rather than `/(?:[\s,]+|\s+at)+$/i`: its two overlapping alternatives under `+` backtracked
+ * exponentially, 445 ms on 24 spaces before a letter, and the text is a cell's.
+ */
+function withoutTrailingConnective(text: string): string {
+  let end = text.length;
+  for (;;) {
+    while (end > 0 && /[\s,]/.test(text[end - 1]!)) {
+      end--;
+    }
+    if (end >= 3 && /\sat/i.test(text.slice(end - 3, end))) {
+      end -= 2;
+      continue;
+    }
+    return text.slice(0, end);
+  }
+}
 
-/** A zone in date text: `Z`, `GMT`, `UTC`, an offset (`+0200`, `-05:00`), or a named zone (`EST`, `(CEST)`). */
-const ZONE =
-  /\b(?:Z|GMT|UTC|UT)\b|[+-]\d{2}:?\d{2}(?!\d)|\([^)]*\)\s*$|\d(?:\s*[AP]M)?\s+[A-Z]{3,4}\s*$/;
+/**
+ * A zone in date text: `Z`, `GMT`, `UTC`, an offset (`+0200`, `-05:00`), or a named zone after the time (`EST`). Not
+ * a name in parentheses: an engine reads `(CEST)` as a comment, so text naming its zone only so was read in the
+ * reader's zone — and `Date#toString()`'s `(…)` follows a `GMT` offset, which is matched.
+ */
+const ZONE = /\b(?:Z|GMT|UTC|UT)\b|[+-]\d{2}:?\d{2}(?!\d)|\d(?:\s*[AP]M)?\s+[A-Z]{3,4}\s*$/;
 
 // =============================================================================
 // OOXML escape utilities (ST_Xstring, ISO/IEC 29500 clause 22.4.2.4)
