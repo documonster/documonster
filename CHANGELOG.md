@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/documonster/documonster/compare/v0.24.0...v0.25.0) (2026-11-14)
+
+
+### Features
+
+* Documonster/utils with Bytes, Excel DateSerial; browser compression falls back instead of failing ([19429a5](https://github.com/documonster/documonster/commit/19429a58870f7daed9e67664c50febc5b02cb1a6))
+
 ## [0.24.0](https://github.com/documonster/documonster/compare/v0.23.0...v0.24.0) (2026-11-14)
 
 
