@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.0](https://github.com/documonster/documonster/compare/v0.23.0...v0.24.0) (2026-11-14)
+
+
+### Features
+
+* Let the event loop run through every large read, decrypt and hash; type disposal per consumer lib ([5e27401](https://github.com/documonster/documonster/commit/5e2740121e83efcc3d2f087f81f0f2bb9e6a0fc1)), closes [#261](https://github.com/documonster/documonster/issues/261)
+
+
+### Bug Fixes
+
+* **formula:** Match Excel's dates, rounding and securities maths, verified against Excel itself ([b1c1a9e](https://github.com/documonster/documonster/commit/b1c1a9ecdfdf495ea7940240573f44a2471760c3))
+
 ## [0.23.0](https://github.com/documonster/documonster/compare/v0.22.1...v0.23.0) (2026-11-11)
 
 

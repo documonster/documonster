@@ -262,7 +262,7 @@ for everything; `documonster` publishes one per module, each extending the share
 <!-- x-release-please-start-version -->
 
 ```html
-<script src="https://unpkg.com/documonster@0.23.0/dist/iife/documonster.excel.iife.min.js"></script>
+<script src="https://unpkg.com/documonster@0.24.0/dist/iife/documonster.excel.iife.min.js"></script>
 <script>
   const { Workbook, Cell } = Documonster.Excel;
   const wb = Workbook.create();
