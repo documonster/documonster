@@ -55,6 +55,7 @@ import {
 import { hasWorkerSupport } from "@archive/compression/worker-pool/pool.base";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
 import {
+  ArchiveDecompressionError,
   ArchiveError,
   ArchiveLimitExceededError,
   createAbortError,
@@ -208,8 +209,9 @@ async function withJsFallback(
  *
  * A worker that could not start — its script refused by a Content Security Policy, the pool's chunk
  * not loaded, a script that would not boot — ran nothing, so the work is still to do. A worker's
- * verdict on the data arrives as a message that has lost its class, so the in-process codec runs it
- * again and reports it typed; corrupt data fails there too, so nothing is masked. The one failure
+ * verdict on the data (an `ArchiveDecompressionError`) comes from the native codec, which has been
+ * seen to refuse valid input (see {@link withJsFallback}), so the in-process codecs run it again
+ * and give the verdict; corrupt data fails there too, so nothing is masked. The one failure
  * that cannot be retried is one after `allowTransfer` gave the worker the input's buffer: the bytes
  * are gone from this thread, and coding the empty view left behind would return a wrong answer.
  */
@@ -224,11 +226,14 @@ async function tryWorker(
   } catch (err) {
     rethrowIfFinal(err, options.signal);
     if (data.byteLength !== byteLength) {
-      throw new ArchiveError(
+      const message =
         `Worker ${strategy.operation} failed after allowTransfer had moved the input to it, so it ` +
-          `cannot be run on this thread instead: ${toError(err).message}`,
-        { cause: err }
-      );
+        `cannot be run on this thread instead: ${toError(err).message}`;
+      // The worker's verdict on the data is the only one there can be: it stays a verdict on the data, so a
+      // reader still tells its caller the bytes are damaged. Any other failure says nothing about them.
+      throw err instanceof ArchiveDecompressionError
+        ? new ArchiveDecompressionError(message, { cause: err })
+        : new ArchiveError(message, { cause: err });
     }
     return undefined;
   }
@@ -339,13 +344,13 @@ function buildGzipTrailer(crcValue: number, size: number): Uint8Array {
  */
 function skipGzipHeader(data: Uint8Array, offset: number): number {
   if (data.length - offset < GZIP_MIN_SIZE) {
-    throw new ArchiveError("Invalid gzip data (too small)");
+    throw new ArchiveDecompressionError("Invalid gzip data (too small)");
   }
   if (data[offset] !== GZIP_ID1 || data[offset + 1] !== GZIP_ID2) {
-    throw new ArchiveError("Invalid gzip header (magic mismatch)");
+    throw new ArchiveDecompressionError("Invalid gzip header (magic mismatch)");
   }
   if (data[offset + 2] !== GZIP_CM_DEFLATE) {
-    throw new ArchiveError("Unsupported gzip compression method");
+    throw new ArchiveDecompressionError("Invalid gzip data (unknown compression method)");
   }
 
   const flags = data[offset + 3];
@@ -353,7 +358,7 @@ function skipGzipHeader(data: Uint8Array, offset: number): number {
 
   if (flags & GZIP_FLAG_FEXTRA) {
     if (pos + 2 > data.length) {
-      throw new ArchiveError("Invalid gzip extra field");
+      throw new ArchiveDecompressionError("Invalid gzip extra field");
     }
     const extraLen = data[pos] | (data[pos + 1] << 8);
     pos += 2 + extraLen;
@@ -379,7 +384,7 @@ function skipGzipHeader(data: Uint8Array, offset: number): number {
   }
 
   if (pos > data.length - 8) {
-    throw new ArchiveError("Invalid gzip data (truncated payload)");
+    throw new ArchiveDecompressionError("Invalid gzip data (truncated payload)");
   }
   return pos;
 }
@@ -392,10 +397,10 @@ function verifyGzipOutput(out: Uint8Array, expectedCrc32: number, expectedSize: 
   const actualSize = out.length >>> 0;
 
   if (actualCrc32 !== expectedCrc32) {
-    throw new ArchiveError("Invalid gzip data (CRC32 mismatch)");
+    throw new ArchiveDecompressionError("Invalid gzip data (CRC32 mismatch)");
   }
   if (actualSize !== expectedSize) {
-    throw new ArchiveError("Invalid gzip data (ISIZE mismatch)");
+    throw new ArchiveDecompressionError("Invalid gzip data (ISIZE mismatch)");
   }
 }
 
@@ -439,7 +444,7 @@ function gunzipMembers(data: Uint8Array, maxOutputLength: number | undefined): U
     const start = skipGzipHeader(data, offset);
     const { output, end } = inflateStreamAt(data, start, maxOutputLength, produced);
     if (end + 8 > data.length) {
-      throw new ArchiveError("Invalid gzip data (truncated payload)");
+      throw new ArchiveDecompressionError("Invalid gzip data (truncated payload)");
     }
     verifyGzipOutput(output, readUint32LE(data, end), readUint32LE(data, end + 4));
     parts.push(output);
@@ -660,7 +665,7 @@ export function unzlibSync(
   const start = parseZlibHeader(data);
   const { output, end } = inflateStreamAt(data, start, options.maxOutputLength, 0);
   if (end + 4 > data.length) {
-    throw new ArchiveError("Invalid zlib data (truncated payload)");
+    throw new ArchiveDecompressionError("Invalid zlib data (truncated payload)");
   }
   verifyAdler32(output, readZlibTrailer(data.subarray(0, end + 4)));
   return asPlainBytes(output);

@@ -19,6 +19,7 @@ import {
   ZipCrc32MismatchError,
   ZipDecryptionError,
   ZipEntrySizeMismatchError,
+  ZipParseError,
   ArchiveFileTooLargeError,
   ZipPasswordRequiredError,
   ZipUnsupportedCompressionError,
@@ -824,7 +825,7 @@ function decompressDataSync(
 export function readLocalHeaderDataOffset(reader: BinaryReader, expectedOffset: number): number {
   const sig = reader.readUint32();
   if (sig !== LOCAL_FILE_HEADER_SIG) {
-    throw new ArchiveError(`Invalid local file header signature at offset ${expectedOffset}`);
+    throw new ZipParseError(`Invalid local file header signature at offset ${expectedOffset}`);
   }
 
   reader.skip(2); // version needed

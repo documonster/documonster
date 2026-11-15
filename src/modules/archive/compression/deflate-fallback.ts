@@ -11,7 +11,7 @@
  * - Chrome < 103
  */
 
-import { ArchiveError, ArchiveLimitExceededError } from "@archive/core/errors";
+import { ArchiveDecompressionError, ArchiveLimitExceededError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 import { assertLimitOption } from "@utils/limits";
 
@@ -179,7 +179,7 @@ class BitReader {
   readBits(n: number): number {
     while (this.bitCount < n) {
       if (this.pos >= this.data.length) {
-        throw new ArchiveError("Unexpected end of DEFLATE data");
+        throw new ArchiveDecompressionError("Unexpected end of DEFLATE data");
       }
       this.bitBuf |= this.data[this.pos++] << this.bitCount;
       this.bitCount += 8;
@@ -199,7 +199,7 @@ class BitReader {
       const bit = this.readBits(1);
       node = bit === 0 ? node.left! : node.right!;
       if (!node) {
-        throw new ArchiveError("Invalid Huffman code");
+        throw new ArchiveDecompressionError("Invalid Huffman code");
       }
     }
     return node.symbol;
@@ -223,7 +223,7 @@ class BitReader {
    */
   readByte(): number {
     if (this.pos >= this.data.length) {
-      throw new ArchiveError("Unexpected end of data");
+      throw new ArchiveDecompressionError("Unexpected end of data");
     }
     return this.data[this.pos++];
   }
@@ -303,7 +303,7 @@ export function inflateRawPrefix(
       const nlen = reader.readUint16();
 
       if ((len ^ nlen) !== 0xffff) {
-        throw new ArchiveError("Invalid stored block length");
+        throw new ArchiveDecompressionError("Invalid stored block length");
       }
 
       ensureCapacity(len);
@@ -386,17 +386,17 @@ export function inflateRawPrefix(
           // no read consumes input and the block decodes forever.
           const lengthCode = symbol - 257;
           if (lengthCode >= LENGTH_BASE.length) {
-            throw new ArchiveError(`Invalid DEFLATE length code: ${symbol}`);
+            throw new ArchiveDecompressionError(`Invalid DEFLATE length code: ${symbol}`);
           }
           const length = LENGTH_BASE[lengthCode] + reader.readBits(LENGTH_EXTRA[lengthCode]);
 
           const distCode = reader.decodeSymbol(distanceTree);
           if (distCode >= DISTANCE_BASE.length) {
-            throw new ArchiveError(`Invalid DEFLATE distance code: ${distCode}`);
+            throw new ArchiveDecompressionError(`Invalid DEFLATE distance code: ${distCode}`);
           }
           const distance = DISTANCE_BASE[distCode] + reader.readBits(DISTANCE_EXTRA[distCode]);
           if (distance > outLen) {
-            throw new ArchiveError("Invalid DEFLATE distance too far back");
+            throw new ArchiveDecompressionError("Invalid DEFLATE distance too far back");
           }
 
           // Copy from output buffer. Overlapping copies (distance < length) are
@@ -410,7 +410,7 @@ export function inflateRawPrefix(
         }
       }
     } else {
-      throw new ArchiveError("Invalid DEFLATE block type: " + blockType);
+      throw new ArchiveDecompressionError("Invalid DEFLATE block type: " + blockType);
     }
   }
 

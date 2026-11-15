@@ -163,13 +163,50 @@ export class DocxDuplicateIdError extends DocxWriteError {
 }
 
 /**
- * Error thrown when a required DOCX part is missing.
+ * Error thrown when the bytes read are not a Word package this library can read, and not because of a password
+ * (that is {@link DocxEncryptedError} / {@link DocxDecryptionError}) or a limit ({@link DocxLimitExceededError}).
+ * `reason` says what was found, so a caller can tell the user what to do without reading the message. The
+ * counterpart of `ExcelPackageError`, with `"not-a-document"` for its `"not-a-workbook"`; Word has no second format, so
+ * no `"format-mismatch"`:
+ *
+ * - `"legacy-format"` — an OLE compound file that is not an encrypted package: a legacy `.doc` (Word 97–2003) or
+ *   another Office binary format, which this library does not read. Save it as `.docx` and read that.
+ * - `"damaged"` — a ZIP package that cannot be read through: truncated, its directory or a part's compressed data
+ *   broken, or a part whose bytes do not match the CRC-32 the package records for it. The archive's diagnosis is
+ *   the `cause`.
+ * - `"not-a-document"` — not a ZIP package (nor Flat OPC text) at all, a package with no main document part
+ *   ({@link DocxMissingPartError}), or one whose main part is not a Word document — a workbook or a presentation.
+ *
+ * Telling `"damaged"` from `"not-a-document"` relies on the first bytes: input that starts with a ZIP local-file
+ * signature but cannot be read is `"damaged"`.
+ *
+ * A {@link DocxParseError}, so a `catch` for a file that cannot be read catches it too. A package that is a Word
+ * document but whose content is malformed stays a plain `DocxParseError`.
  */
-export class DocxMissingPartError extends DocxParseError {
+export class DocxPackageError extends DocxParseError {
+  override name = "DocxPackageError";
+  /** What was found instead of a readable Word package — see {@link DocxPackageError}. */
+  readonly reason: "legacy-format" | "damaged" | "not-a-document";
+
+  constructor(
+    reason: "legacy-format" | "damaged" | "not-a-document",
+    message: string,
+    options?: BaseErrorOptions
+  ) {
+    super(message, options);
+    this.reason = reason;
+  }
+}
+
+/**
+ * Error thrown when a package has no main document part — the part its `officeDocument` relationship names, or
+ * `word/document.xml`. A {@link DocxPackageError} with `reason: "not-a-document"`.
+ */
+export class DocxMissingPartError extends DocxPackageError {
   override name = "DocxMissingPartError";
 
   constructor(partPath: string) {
-    super(`Required DOCX part not found: ${partPath}`);
+    super("not-a-document", `Required DOCX part not found: ${partPath}`);
   }
 }
 

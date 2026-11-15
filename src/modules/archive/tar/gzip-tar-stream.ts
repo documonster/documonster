@@ -6,6 +6,7 @@ import type {
   GzipStream
 } from "@archive/compression/streaming-compress";
 import { createGzipEncoder } from "@archive/compression/streaming-compress";
+import { ArchiveError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 
 const GZIP_PREMATURE_CLOSE_MESSAGE = "Gzip stream closed before completing";
@@ -49,7 +50,7 @@ export async function* gzipTarChunks(
   }
 
   function currentFailure(): Error | null {
-    return gzipError ?? (gzipClosed ? new Error(GZIP_PREMATURE_CLOSE_MESSAGE) : null);
+    return gzipError ?? (gzipClosed ? new ArchiveError(GZIP_PREMATURE_CLOSE_MESSAGE) : null);
   }
 
   async function waitForDrain(): Promise<void> {
@@ -77,7 +78,7 @@ export async function* gzipTarChunks(
 
       function handleClose(): void {
         cleanup();
-        reject(gzipError ?? new Error(GZIP_PREMATURE_CLOSE_MESSAGE));
+        reject(gzipError ?? new ArchiveError(GZIP_PREMATURE_CLOSE_MESSAGE));
       }
 
       gzipStream.once("drain", handleDrain);
@@ -120,7 +121,7 @@ export async function* gzipTarChunks(
 
       function handleClose(): void {
         cleanup();
-        reject(gzipError ?? new Error(GZIP_PREMATURE_CLOSE_MESSAGE));
+        reject(gzipError ?? new ArchiveError(GZIP_PREMATURE_CLOSE_MESSAGE));
       }
 
       gzipStream.once("end", handleEnd);

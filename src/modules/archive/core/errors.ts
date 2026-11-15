@@ -34,8 +34,8 @@ export class ArchiveError extends BaseError {
 
 /**
  * A wrong argument or option given to an archive function: the caller's mistake, not damage
- * in archive data (which stays an {@link ArchiveError}). It is an `ArchiveError`, so existing
- * `catch` blocks and `isArchiveError` still see it.
+ * in archive data (which is a `ZipParseError`, an `ArchiveDecompressionError` or another of the
+ * data classes). It is an `ArchiveError`, so existing `catch` blocks and `isArchiveError` still see it.
  */
 export class ArchiveArgumentError extends ArchiveError {
   override name = "ArchiveArgumentError";
@@ -112,20 +112,47 @@ export class ZipEocdNotFoundError extends ZipParseError {
 }
 
 /**
+ * Error thrown when compressed data does not decompress: a DEFLATE stream that is invalid or ends early, or a gzip or
+ * zlib wrapper whose header, length or checksum does not match what it holds. It describes the bytes read, not the
+ * call — the counterpart, for compressed data, of {@link ZipParseError} for a ZIP's records — and is the same class
+ * whichever inflater found it: the pure-JS one, Node's zlib, a `DecompressionStream` or a worker. A native inflater's
+ * own error is its `cause`.
+ *
+ * That includes data that asks for what no inflater here implements — a gzip method other than DEFLATE, a zlib preset
+ * dictionary. Some native inflaters say why (Node's zlib reports `Z_NEED_DICT`), `DecompressionStream` does not,
+ * so the archive does not distinguish them: every platform reports the same data with the same class.
+ */
+export class ArchiveDecompressionError extends ArchiveError {
+  override name = "ArchiveDecompressionError";
+}
+
+/**
  * A native inflater's failure — one of Node's zlib `Z_*` errors, or a `DecompressionStream`'s — as the archive's own
  * error, with the original as its `cause`.
  *
  * Corrupt DEFLATE data is malformed input like any other, and the pure-JS inflater already reports it as an
- * `ArchiveError`; without this, the same damage surfaced as a bare `Error` or `TypeError` on the platforms that use a
- * native one. An error this library already typed (a limit, an abort, the pure-JS inflater's) passes through.
+ * {@link ArchiveDecompressionError}; without this, the same damage surfaced as a bare `Error` or `TypeError` on the
+ * platforms that use a native one. An error this library already typed (a limit, an abort, the pure-JS inflater's)
+ * passes through.
  */
 export function toInflateError(error: unknown, path?: string): Error {
+  return toDecompressionError(error, "DEFLATE", path);
+}
+
+/**
+ * {@link toInflateError} for any codec a native decompressor implements — `format` names it in the message (`gzip`,
+ * `zlib`). Only for an error the decompressor raised about its input: a stream torn down by its caller is destroyed
+ * with the caller's error, which is not the data's to rename.
+ */
+export function toDecompressionError(error: unknown, format: string, path?: string): Error {
   if (error instanceof BaseError) {
     return error;
   }
   const cause = error instanceof Error ? error : new Error(String(error));
   const where = path === undefined ? "" : ` in "${path}"`;
-  return new ArchiveError(`Invalid DEFLATE data${where}: ${cause.message}`, { cause });
+  return new ArchiveDecompressionError(`Invalid ${format} data${where}: ${cause.message}`, {
+    cause
+  });
 }
 
 /** Whether `error` came from Node's zlib binding, whose errors carry a `Z_*` code. */

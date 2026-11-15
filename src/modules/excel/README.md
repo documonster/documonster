@@ -123,8 +123,48 @@ whose `reason` is `"password"` (other reasons: `"unsupported"` for Excel 2007's 
 not implemented; `"malformed"`, `"integrity"`, `"limit"`). Both are `ExcelFileError`s. The decrypted package is bounded
 by `zip.maxTotalUncompressedSize`. An encrypted workbook is one encrypted stream, so it is decrypted whole — streamed
 readers read it after decrypting, and writers assemble the package before encrypting it. The encryption code is
-loaded only when a password is given. A legacy `.xls` is an `ExcelFileError` that says so. `Workbook.protect`'s
-password is something else: it locks the workbook's structure and encrypts nothing.
+loaded only when a password is given. `Workbook.protect`'s password is something else: it locks the workbook's
+structure and encrypts nothing.
+
+### Files That Cannot Be Read
+
+Bytes that are not a workbook this library can read — and not because of a password or a read limit — are an
+`ExcelPackageError`, from every reader. Its `reason` says what was found:
+
+| `reason`            | What it means                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| `"legacy-format"`   | An OLE compound file that is not encrypted: a legacy `.xls` (BIFF), which is not read               |
+| `"damaged"`         | A ZIP package that cannot be read through: truncated, a broken record, a part failing its CRC-32    |
+| `"not-a-workbook"`  | Not a ZIP package at all, or a package with no workbook part                                        |
+| `"format-mismatch"` | The other format than the one read: XLSB read as XLSX (`format`, or a `.xlsx` name), or the reverse |
+
+```javascript
+import {
+  Workbook,
+  ExcelDecryptionError,
+  ExcelEncryptedError,
+  ExcelLimitExceededError,
+  ExcelPackageError
+} from "documonster/excel";
+
+try {
+  await Workbook.read(bytes);
+} catch (error) {
+  if (error instanceof ExcelEncryptedError || error instanceof ExcelDecryptionError) {
+    // password-protected
+  } else if (error instanceof ExcelPackageError && error.reason === "legacy-format") {
+    // a .xls: ask for it to be saved as .xlsx
+  } else if (error instanceof ExcelLimitExceededError) {
+    // error.limit names the option, e.g. "maxRows"
+  }
+}
+```
+
+All of them — `ExcelEncryptedError` and `ExcelDecryptionError` too — are `ExcelFileError`s, so test the specific
+classes first. A truncated file and a damaged one are both `"damaged"`; input that starts like a ZIP package but cannot
+be read is reported as damaged rather than as something else. A streamed read (`Workbook.readStream`,
+`Stream.WorkbookReader`) checks a part against its CRC-32 once it has read the part to the end, so damage that breaks
+the part's markup before that is reported as the `XlsxParseError` naming the part.
 
 ### Browser Bundle Size
 

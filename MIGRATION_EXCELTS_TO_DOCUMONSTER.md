@@ -358,7 +358,7 @@ Also exported, flat: the error classes `ExcelError`, `isExcelError`,
 `ExcelWorksheetNameError`, `ExcelInvalidAddressError`, `ExcelColumnOutOfBoundsError`,
 `ExcelRowOutOfBoundsError`, `ExcelMergeConflictError`, `ExcelInvalidValueTypeError`,
 `ExcelUnsupportedFeatureError`, `ExcelEncryptedError`, `ExcelDecryptionError`,
-`ExcelFileError`, `ExcelStreamStateError`, `ExcelDownloadError`, `ExcelPivotTableError`,
+`ExcelFileError`, `ExcelPackageError`, `ExcelStreamStateError`, `ExcelDownloadError`, `ExcelPivotTableError`,
 `ExcelChartOptionsError`, `ExcelTableError`, `ExcelDefinedNameError`, `ExcelImageError`,
 `ExcelLimitExceededError`, `XlsxParseError`, `XlsbParseError`, `XlsbFormulaDecodeError`.
 

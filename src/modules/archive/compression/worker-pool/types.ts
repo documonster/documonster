@@ -101,6 +101,8 @@ export type WorkerResponseMessage =
       error?: string;
       /** Set when the task failed because output exceeded this `maxOutputLength` */
       limit?: number;
+      /** Set when a decompressor refused its input: the data is damaged, not the worker */
+      dataError?: true;
       duration?: number;
     };
 

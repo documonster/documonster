@@ -51,30 +51,38 @@ import type {
 } from "@archive/compression/streaming-compress";
 import { checkArchiveArgument } from "@archive/core/arguments";
 import { checkBytes, checkLevel } from "@archive/core/entry-checks";
-import { ArchiveError, isAbortError } from "@archive/core/errors";
+import { ArchiveError, isAbortError, toDecompressionError } from "@archive/core/errors";
 import { s } from "@utils/schema";
 
 // Every member checks its arguments as the archive builders do and reports damaged input
-// as an `ArchiveError` — the codecs below throw their own errors (zlib's on Node, the JS
-// inflater's or `DecompressionStream`'s in a browser), which differ by platform.
+// as an `ArchiveDecompressionError` — the codecs below throw their own errors (zlib's on Node,
+// the JS inflater's or `DecompressionStream`'s in a browser), which differ by platform. A
+// compressor's own failure says nothing about its input's integrity, so it is a plain
+// `ArchiveError`.
 
 type Codec = "deflate" | "gzip" | "zlib" | "compressed";
+
+/** What a member does with its codec: decoding fails on damaged input, encoding does not. */
+type Direction = "decode" | "encode";
 
 function checkArguments(where: string, data: unknown, options: CompressOptions | undefined): void {
   checkBytes(`Compression.${where}`, "data", data);
   checkLevel(`Compression.${where}`, "options.level", options?.level);
 }
 
-function toDataError(codec: Codec, error: unknown): unknown {
+function toCodecError(codec: Codec, direction: Direction, error: unknown): unknown {
   if (error instanceof ArchiveError || isAbortError(error) || !(error instanceof Error)) {
     return error;
   }
-  return new ArchiveError(`Invalid ${codec} data: ${error.message}`, { cause: error });
+  return direction === "decode"
+    ? toDecompressionError(error, codec)
+    : new ArchiveError(`${codec} compression failed: ${error.message}`, { cause: error });
 }
 
 function wrapSync<R>(
   where: string,
   codec: Codec,
+  direction: Direction,
   run: (data: Uint8Array, options?: CompressOptions) => R
 ): (data: Uint8Array, options?: CompressOptions) => R {
   return (data, options) => {
@@ -82,7 +90,7 @@ function wrapSync<R>(
     try {
       return run(data, options);
     } catch (error) {
-      throw toDataError(codec, error);
+      throw toCodecError(codec, direction, error);
     }
   };
 }
@@ -90,6 +98,7 @@ function wrapSync<R>(
 function wrapAsync<R>(
   where: string,
   codec: Codec,
+  direction: Direction,
   run: (data: Uint8Array, options?: CompressOptions) => Promise<R>
 ): (data: Uint8Array, options?: CompressOptions) => Promise<R> {
   return async (data, options) => {
@@ -97,45 +106,57 @@ function wrapAsync<R>(
     try {
       return await run(data, options);
     } catch (error) {
-      throw toDataError(codec, error);
+      throw toCodecError(codec, direction, error);
     }
   };
 }
 
 /** Raw DEFLATE (RFC 1951), as a ZIP entry holds it. */
-export const deflate = /* @__PURE__ */ wrapAsync("deflate", "deflate", compress);
+export const deflate = /* @__PURE__ */ wrapAsync("deflate", "deflate", "encode", compress);
 /** {@link deflate}, synchronously. */
-export const deflateSync = /* @__PURE__ */ wrapSync("deflateSync", "deflate", compressSync);
-/** Inflate raw DEFLATE data; damaged data is an `ArchiveError`. */
-export const inflate = /* @__PURE__ */ wrapAsync("inflate", "deflate", decompress);
+export const deflateSync = /* @__PURE__ */ wrapSync(
+  "deflateSync",
+  "deflate",
+  "encode",
+  compressSync
+);
+/** Inflate raw DEFLATE data; damaged data is an `ArchiveDecompressionError`. */
+export const inflate = /* @__PURE__ */ wrapAsync("inflate", "deflate", "decode", decompress);
 /** {@link inflate}, synchronously. */
-export const inflateSync = /* @__PURE__ */ wrapSync("inflateSync", "deflate", decompressSync);
+export const inflateSync = /* @__PURE__ */ wrapSync(
+  "inflateSync",
+  "deflate",
+  "decode",
+  decompressSync
+);
 /** gzip (RFC 1952). */
-export const gzip = /* @__PURE__ */ wrapAsync("gzip", "gzip", gzipImpl);
-/** Decompress gzip data; damaged data is an `ArchiveError`. */
-export const gunzip = /* @__PURE__ */ wrapAsync("gunzip", "gzip", gunzipImpl);
+export const gzip = /* @__PURE__ */ wrapAsync("gzip", "gzip", "encode", gzipImpl);
+/** Decompress gzip data; damaged data is an `ArchiveDecompressionError`. */
+export const gunzip = /* @__PURE__ */ wrapAsync("gunzip", "gzip", "decode", gunzipImpl);
 /** {@link gzip}, synchronously. */
-export const gzipSync = /* @__PURE__ */ wrapSync("gzipSync", "gzip", gzipSyncImpl);
+export const gzipSync = /* @__PURE__ */ wrapSync("gzipSync", "gzip", "encode", gzipSyncImpl);
 /** {@link gunzip}, synchronously. */
-export const gunzipSync = /* @__PURE__ */ wrapSync("gunzipSync", "gzip", gunzipSyncImpl);
+export const gunzipSync = /* @__PURE__ */ wrapSync("gunzipSync", "gzip", "decode", gunzipSyncImpl);
 /** zlib (RFC 1950). */
-export const zlib = /* @__PURE__ */ wrapAsync("zlib", "zlib", zlibImpl);
-/** Decompress zlib data; damaged data is an `ArchiveError`. */
-export const unzlib = /* @__PURE__ */ wrapAsync("unzlib", "zlib", unzlibImpl);
+export const zlib = /* @__PURE__ */ wrapAsync("zlib", "zlib", "encode", zlibImpl);
+/** Decompress zlib data; damaged data is an `ArchiveDecompressionError`. */
+export const unzlib = /* @__PURE__ */ wrapAsync("unzlib", "zlib", "decode", unzlibImpl);
 /** {@link zlib}, synchronously. */
-export const zlibSync = /* @__PURE__ */ wrapSync("zlibSync", "zlib", zlibSyncImpl);
+export const zlibSync = /* @__PURE__ */ wrapSync("zlibSync", "zlib", "encode", zlibSyncImpl);
 /** {@link unzlib}, synchronously. */
-export const unzlibSync = /* @__PURE__ */ wrapSync("unzlibSync", "zlib", unzlibSyncImpl);
+export const unzlibSync = /* @__PURE__ */ wrapSync("unzlibSync", "zlib", "decode", unzlibSyncImpl);
 /** Decompress gzip, zlib or raw DEFLATE, whichever {@link detectFormat} finds. */
 export const decompressAuto = /* @__PURE__ */ wrapAsync(
   "decompressAuto",
   "compressed",
+  "decode",
   decompressAutoImpl
 );
 /** {@link decompressAuto}, synchronously. */
 export const decompressAutoSync = /* @__PURE__ */ wrapSync(
   "decompressAutoSync",
   "compressed",
+  "decode",
   decompressAutoSyncImpl
 );
 

@@ -28,6 +28,7 @@ import {
   DocxInvalidStructureError,
   DocxLimitExceededError,
   DocxMissingPartError,
+  DocxPackageError,
   DocxParseError,
   DocxUnsupportedFeatureError,
   DocxWriteError,
@@ -270,7 +271,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // Hierarchy (each class extends the one to its left):
 //   DocxError
 //   ├── DocxParseError
-//   │   ├── DocxMissingPartError
+//   │   ├── DocxPackageError  (+ DocxMissingPartError) — `reason`: legacy .doc, damaged, not a document
 //   │   ├── DocxInvalidStructureError
 //   │   └── DocxLimitExceededError
 //   ├── DocxWriteError
@@ -286,6 +287,10 @@ fs.mkdirSync(outDir, { recursive: true });
     { name: "DocxError", err: new DocxError("base error") },
     { name: "DocxParseError", err: new DocxParseError("malformed XML in document.xml") },
     { name: "DocxWriteError", err: new DocxWriteError("failed to write docProps") },
+    {
+      name: "DocxPackageError",
+      err: new DocxPackageError("legacy-format", "a legacy .doc, which is not read")
+    },
     { name: "DocxMissingPartError", err: new DocxMissingPartError("word/document.xml") },
     {
       name: "DocxInvalidStructureError",

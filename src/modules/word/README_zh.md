@@ -142,6 +142,31 @@ const results = Query.searchText(doc, /pattern/g);
 `Document.read`。系统不允许读取或写入的文件报 `DocxFileError`（含 `path`、`operation`），以系统错误为 `cause`（`error.cause.code`
 为 `ENOENT`、`EACCES` 等），与 Excel 的 `ExcelFileError` 一致；读到了但不是有效文档的文件报 `DocxParseError`。
 
+根本不是 Word 包、且原因不是密码或读取限制的字节，`Document.read`、`Stream.DocumentReader` 与 `Package` 系列函数都报
+`DocxPackageError`（它是 `DocxParseError`）。它对应 Excel 的 `ExcelPackageError`，其 `reason` 说明发现了什么：
+
+| `reason`           | 含义                                                              |
+| ------------------ | ----------------------------------------------------------------- |
+| `"legacy-format"`  | 未加密的 OLE 复合文件：旧式 `.doc`，不支持读取                    |
+| `"damaged"`        | 无法完整读取的 ZIP 包：被截断、记录损坏，或 CRC-32 校验失败       |
+| `"not-a-document"` | 不是 ZIP 包、没有主文档部件，或主部件不是 Word 的（例如是工作簿） |
+
+```javascript
+import { Document, DocxEncryptedError, DocxPackageError } from "documonster/word";
+
+try {
+  await Document.read(bytes);
+} catch (error) {
+  if (error instanceof DocxEncryptedError) {
+    // 有密码保护
+  } else if (error instanceof DocxPackageError && error.reason === "legacy-format") {
+    // .doc：请用户另存为 .docx
+  }
+}
+```
+
+`Stream.DocumentReader` 在读完主文档部件后才校验它的 CRC-32，因此如果损坏先破坏了部件的标记，报告的是普通的 `DocxParseError`。
+
 部件中的 XML 按 Word 的方式读取：从第一个 `<` 开始（生成方在 XML 声明之前写的空白不算错误）；不是合法 UTF-8 的字节读作
 U+FFFD，而不是拒绝整个文件，所以有个别损坏字节的文档仍能打开。`Document.read` 与 `Stream.DocumentReader` 读取方式一致，
 受同一 `securityPolicy` 约束；任一方触及限额都报 `DocxLimitExceededError`。

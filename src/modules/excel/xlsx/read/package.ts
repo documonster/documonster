@@ -1,6 +1,3 @@
-import { ZipParser } from "@archive/unzip/zip-parser";
-import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
-import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 /**
  * The XLSX reader: ZIP entries in, a populated workbook out.
  *
@@ -8,10 +5,13 @@ import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
  * draws for XLSB, so a consumer that only writes never downloads it. Nothing in `write/` may import from
  * here — `scripts/treeshake-verify.ts` asserts that a write-only bundle holds no reader module.
  */
+import { ZipParser } from "@archive/unzip/zip-parser";
+import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
+import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 import { loadWorkbookModel } from "@excel/core/model-load";
 import { isArrayBufferLike } from "@excel/core/workbook-format";
 import type { Workbook } from "@excel/core/workbook.browser";
-import { ExcelFileError, XlsxParseError } from "@excel/errors";
+import { ExcelFileError, ExcelPackageError, XlsxParseError } from "@excel/errors";
 import { containerReadError, containerReadLimits } from "@excel/utils/container-errors";
 import { xlsxPartError } from "@excel/utils/file-content-errors";
 import {
@@ -436,24 +436,33 @@ async function processKnownEntry(
 }
 
 /**
- * Refuse a binary workbook that reached the XML reader.
+ * Refuse a package without the workbook part this reader reads.
  *
- * A `.xlsb` read as XLSX produces an *empty* workbook rather than an error: none of the parts this
- * reader knows are present, so nothing loads and nothing complains. `read()` guards against it by
- * sniffing the bytes before choosing a loader, but that guard is bypassed whenever the format was not
- * inferred from them — `readFile` on a misnamed `.xlsx`, or any caller passing `format: "xlsx"`
- * explicitly. Both loaders below therefore ask this, because they are the two places that have seen
- * the part names.
+ * Without `xl/workbook.xml` nothing names the sheets, so none is loaded: the read used to return an
+ * *empty* workbook and no error — for a `.xlsb` read as XLSX, for a `.docx` or `.pptx` renamed, and for
+ * a package that holds sheets but lost its workbook part, whose sheets were dropped in silence. Excel
+ * does not open such a package either. A `.xlsb` is told apart, because what to do about it differs:
+ * `read()` sniffs the bytes before choosing a loader, but `readFile` on a misnamed `.xlsx`, `readStream`
+ * and an explicit `format: "xlsx"` bypass that. Both loaders below ask this, because they are the two
+ * places that have seen the part names.
  */
-function assertNotBinaryWorkbook(sawBinaryWorkbook: boolean, sawXmlWorkbook: boolean): void {
-  if (!sawBinaryWorkbook || sawXmlWorkbook) {
+function assertWorkbookPart(sawBinaryWorkbook: boolean, sawXmlWorkbook: boolean): void {
+  if (sawXmlWorkbook) {
     return;
   }
-  throw new ExcelFileError(
+  if (!sawBinaryWorkbook) {
+    throw new ExcelPackageError(
+      "<input>",
+      "not-a-workbook",
+      `the package has no ${OOXML_PATHS.xlWorkbook}, so it is not an XLSX workbook — it may be another ` +
+        `kind of Office document (a .docx or .pptx), or a workbook that lost its workbook part`
+    );
+  }
+  throw new ExcelPackageError(
     "<input>",
-    "read",
+    "format-mismatch",
     `the package contains xl/workbook.bin and no ${OOXML_PATHS.xlWorkbook}, so it is XLSB and not ` +
-      `XLSX. Reading it here would return an empty workbook rather than fail. Pass format: "xlsb" — ` +
+      `XLSX. Pass format: "xlsb" — ` +
       `Workbook.read and Workbook.readFile also detect it when no format is given; Workbook.readStream ` +
       `cannot, since it reads the package as it arrives.`
   );
@@ -516,7 +525,7 @@ export async function readXlsxEntriesInto(
     }
   }
 
-  assertNotBinaryWorkbook(sawBinaryWorkbook, sawXmlWorkbook);
+  assertWorkbookPart(sawBinaryWorkbook, sawXmlWorkbook);
   await assembleWorkbook(workbook, model, options);
   return workbook;
 }
@@ -842,7 +851,7 @@ async function readXlsxFilesInto(
     data: zipData[name]
   }));
 
-  assertNotBinaryWorkbook(
+  assertWorkbookPart(
     entries.some(entry => normalizeZipPath(entry.name) === "xl/workbook.bin"),
     entries.some(entry => normalizeZipPath(entry.name) === OOXML_PATHS.xlWorkbook)
   );

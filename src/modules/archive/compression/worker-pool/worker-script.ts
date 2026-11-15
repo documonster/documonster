@@ -138,14 +138,18 @@ function closeSession(taskId) {
 // Signal ready
 self.postMessage({ type: 'ready' });
 
-function postError(taskId, err, startTime) {
+// \`decoding\` is set where the failure is a decompressor refusing its input: an Error loses its class
+// through postMessage, so the pool learns from \`dataError\` that the data was damaged, not the worker.
+function postError(taskId, err, startTime, decoding) {
   const error = typeof err === 'string' ? err : err?.message || String(err);
   const duration = performance.now() - startTime;
+  const limit = err instanceof LimitError ? err.limit : undefined;
   self.postMessage({
     type: 'error',
     taskId,
     error,
-    limit: err instanceof LimitError ? err.limit : undefined,
+    limit,
+    dataError: decoding === true && limit === undefined ? true : undefined,
     duration
   });
 }
@@ -208,6 +212,7 @@ self.onmessage = async function(event) {
       const session = {
         writer,
         reader,
+        decoding: taskType === 'inflate',
         startTime,
         closed: false,
         startedMessage: { type: 'started', taskId },
@@ -254,7 +259,7 @@ self.onmessage = async function(event) {
       await session.writer.write(data);
       self.postMessage(session.ackMessage);
     } catch (err) {
-      postError(taskId, err, session.startTime);
+      postError(taskId, err, session.startTime, session.decoding);
       session.closed = true;
       closeSession(taskId);
     }
@@ -277,7 +282,7 @@ self.onmessage = async function(event) {
       session.doneMessage.duration = performance.now() - session.startTime;
       self.postMessage(session.doneMessage);
     } catch (err) {
-      postError(taskId, err, session.startTime);
+      postError(taskId, err, session.startTime, session.decoding);
     } finally {
       closeSession(taskId);
     }
@@ -319,11 +324,17 @@ self.onmessage = async function(event) {
           throw new Error('Unknown task type: ' + taskType);
       }
 
-      const result = await processWithStream(
-        stream,
-        data,
-        taskType === 'inflate' ? maxOutputLength : undefined
-      );
+      let result;
+      try {
+        result = await processWithStream(
+          stream,
+          data,
+          taskType === 'inflate' ? maxOutputLength : undefined
+        );
+      } catch (err) {
+        postError(taskId, err, startTime, taskType === 'inflate');
+        return;
+      }
 
       // Transfer the result buffer for zero-copy
       postResult(taskId, result, startTime);

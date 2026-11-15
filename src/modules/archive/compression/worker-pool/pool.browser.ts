@@ -36,6 +36,7 @@ import {
 } from "@archive/compression/worker-pool/worker-script";
 import {
   ArchiveArgumentError,
+  ArchiveDecompressionError,
   ArchiveError,
   ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError
@@ -44,6 +45,22 @@ import { asPlainBytes } from "@utils/binary";
 import { defineDispose } from "@utils/dispose";
 import type { DisposeMember } from "@utils/dispose";
 import { toError } from "@utils/errors";
+
+/**
+ * The error a worker's `error` message stands for. An `Error` does not survive `postMessage` with its class, so the
+ * worker says what kind of failure it was — a bound it hit (`limit`), input a decompressor refused (`dataError`) — and
+ * the archive's own class is rebuilt here: damaged data is an `ArchiveDecompressionError` whichever thread found it,
+ * and anything else a plain `ArchiveError`, which says nothing about the data.
+ */
+function workerTaskError(message: Extract<WorkerResponseMessage, { type: "error" }>): Error {
+  if (message.limit !== undefined) {
+    return new ArchiveLimitExceededError("maxOutputLength", message.limit);
+  }
+  const text = message.error ?? "Unknown worker error";
+  return message.dataError
+    ? new ArchiveDecompressionError(`Invalid DEFLATE data: ${text}`)
+    : new ArchiveError(text);
+}
 
 export { ArchiveWorkerStreamStartError };
 
@@ -658,7 +675,7 @@ export class WorkerPool {
             );
             return;
           }
-          const error = new ArchiveError(message.error ?? "Unknown worker error");
+          const error = workerTaskError(message);
           session.ended = true;
           session.inflightChunkCount = 0;
           session.startReady = true;
@@ -711,11 +728,7 @@ export class WorkerPool {
           this._failedTasks++;
           // An Error does not survive postMessage with its class, so a limit
           // hit travels as the bound and is rebuilt as the archive's own error.
-          task.reject(
-            message.limit !== undefined
-              ? new ArchiveLimitExceededError("maxOutputLength", message.limit)
-              : new ArchiveError(message.error ?? "Unknown worker error")
-          );
+          task.reject(workerTaskError(message));
         }
 
         this._workerBecameIdle(poolWorker);

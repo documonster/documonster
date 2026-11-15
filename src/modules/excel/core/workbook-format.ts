@@ -38,7 +38,7 @@
 import { refuseUnsupported } from "@excel/core/unsupported";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { getWorkbookModel } from "@excel/core/workbook-model";
-import { ExcelFileError } from "@excel/errors";
+import { ExcelPackageError } from "@excel/errors";
 import { containerReadLimits } from "@excel/utils/container-errors";
 import type { ContainerReadOptions } from "@excel/utils/container-errors";
 import { isXlsbPackage } from "@excel/xlsb/detect";
@@ -105,12 +105,10 @@ export function detectFormat(
 /**
  * Resolve the format to read as, refusing a request that would silently lose everything.
  *
- * Detection runs even when the caller states a format, because the one combination worth
- * rejecting is invisible otherwise: the XLSX loader is deliberately tolerant of a package it
- * does not recognise — there is a fixture pinning that it reads a damaged file without
- * throwing — so handing it an XLSB package yields an empty workbook and no error at all. A
- * caller who asked for the wrong format gets told, rather than getting a workbook with
- * nothing in it.
+ * Detection runs even when the caller states a format, so a caller who asked for the wrong one
+ * is told so here, by name, before a loader is chosen. The XLSX loader refuses a package without
+ * `xl/workbook.xml` too, and says the same of an XLSB package, but only once it has walked the
+ * parts.
  *
  * The reverse direction needs no special handling: the XLSB reader already reports a missing
  * `xl/workbook.bin` by name.
@@ -125,12 +123,11 @@ export function resolveReadFormat(
 ): WorkbookFormat {
   const detected = detectFormat(bytes, zip);
   if (requested === "xlsx" && detected === "xlsb") {
-    throw new ExcelFileError(
+    throw new ExcelPackageError(
       "<buffer>",
-      "read",
+      "format-mismatch",
       `the package contains xl/workbook.bin, so it is XLSB, but format: "xlsx" was requested. ` +
-        `The XLSX reader would return an empty workbook rather than fail. Omit the format to ` +
-        `detect it, or pass format: "xlsb".`
+        `Omit the format to detect it, or pass format: "xlsb".`
     );
   }
   return requested ?? detected;

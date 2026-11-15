@@ -84,6 +84,7 @@ import {
   readOptionsShape,
   flatOpcEntries
 } from "@word/reader/package-limits";
+import { notWordDocumentError, packageReadError } from "@word/reader/package-read-error";
 import {
   parseParagraphProperties,
   parseSectionProperties
@@ -3523,7 +3524,10 @@ function parseDocumentXml(
 
   // The body is `w:body` in Word's namespace, under a root that is `w:document`: a part in another
   // namespace — or with `w:` bound to nothing — has no body Word would read.
-  const bodyEl = isWordDocumentRoot(root) ? findChild(root, "w:body") : undefined;
+  if (!isWordDocumentRoot(root)) {
+    throw notWordDocumentError(root.name);
+  }
+  const bodyEl = findChild(root, "w:body");
   if (!bodyEl) {
     throw new DocxParseError("Missing w:body element in document.xml");
   }
@@ -3870,8 +3874,8 @@ export interface ReadDocxOptions {
   readonly securityPolicy?: DocxSecurityPolicy;
   /**
    * Whether each part is checked against the CRC-32 the package records for it. A
-   * mismatch fails the read with a `DocxParseError` whose `cause` is the archive's
-   * `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * mismatch fails the read with a `DocxPackageError` (`reason: "damaged"`) whose `cause`
+   * is the archive's `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
    * @default true
    */
   readonly checkCrc32?: boolean;
@@ -3952,11 +3956,7 @@ async function readDocxBytes(
     }
     return await _readDocxInner(buffer, policy, options?.checkCrc32);
   } catch (e) {
-    if (e instanceof DocxError) {
-      throw e;
-    }
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new DocxParseError(`Failed to read DOCX: ${msg}`, { cause: e });
+    throw packageReadError(e, buffer);
   }
 }
 

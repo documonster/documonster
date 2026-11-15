@@ -18,6 +18,7 @@ import {
 } from "zlib";
 
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import { isZlibError, toDecompressionError } from "@archive/core/errors";
 import type { TransformCallback } from "@stream";
 import { Transform } from "@stream";
 
@@ -106,7 +107,23 @@ export function createDeflateStream(options: StreamCompressOptions = {}): Deflat
 export function createInflateStream(options: StreamCompressOptions = {}): InflateStream {
   // Note: options.useWorker is ignored in Node.js (zlib uses native thread pool)
   void options;
-  return createInflateRaw();
+  return typedDecodeErrors(createInflateRaw(), "DEFLATE");
+}
+
+/**
+ * `stream`, a zlib decompressor, failing with an `ArchiveDecompressionError` where zlib fails it with its own error:
+ * damaged input is malformed data, as the one-shot `Compression.*` functions report it. Only zlib's errors are typed —
+ * a stream destroyed by its caller keeps the caller's error.
+ *
+ * zlib reports a failure by calling the stream's own `destroy(error)`, so that is where the error is replaced. Neither
+ * stream hook can do it: an `error` listener sees the error after it was emitted, and `_destroy` runs after `destroy`
+ * has recorded the original as `errored`, so the stream would emit one error and report another.
+ */
+function typedDecodeErrors<T extends Transform | Gunzip | Inflate>(stream: T, format: string): T {
+  const destroy = stream.destroy.bind(stream);
+  stream.destroy = ((error?: Error) =>
+    destroy(isZlibError(error) ? toDecompressionError(error, format) : error)) as T["destroy"];
+  return stream;
 }
 
 /**
@@ -138,7 +155,7 @@ export function createGzipStream(options: StreamCompressOptions = {}): GzipStrea
 export function createGunzipStream(options: StreamCompressOptions = {}): GunzipStream {
   // `level` means nothing to a decompressor, and `useWorker` is browser-only
   void options;
-  return createGunzip();
+  return typedDecodeErrors(createGunzip(), "gzip");
 }
 
 /** A gzip compressor whose output does not depend on how its input was split. */
@@ -177,7 +194,7 @@ export function createZlibStream(options: StreamCompressOptions = {}): ZlibStrea
 export function createUnzlibStream(options: StreamCompressOptions = {}): UnzlibStream {
   // `level` means nothing to a decompressor, and `useWorker` is browser-only
   void options;
-  return createInflate();
+  return typedDecodeErrors(createInflate(), "zlib");
 }
 
 // =============================================================================

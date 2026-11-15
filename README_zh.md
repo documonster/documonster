@@ -264,6 +264,12 @@ URL 中的版本号是刻意锁定的：不锁版本的 `unpkg.com/documonster/�
 | Safari  | 15.4+（2022 年 3 月） |
 | Opera   | 84+（2022 年 2 月）   |
 
+这个下限既针对 API，也针对语法，并且每个发布的文件都会在这些浏览器本身里接受检查
+（`pnpm verify:browser-floor`，CI 中的一个任务）：`dist/esm` 和 `dist/iife` 里的每个文件都必须能解析，
+每个 IIFE 包都必须能加载，每个模块都必须能运行。浏览器解析不了一个文件就会拒绝整个文件，所以
+`pnpm build` 还会拦下最容易漏掉的语法：任何编译器都不会降级的正则 lookbehind、`v` 标志、
+内联修饰符、重复的命名组，以及 class 静态块、`using` 和 import attributes。
+
 本包是纯 ESM。Node ESM、打包工具、`<script>` 标签一切不变；CommonJS 的 `require()` 写法也
 不变 —— Node 从 22.12 起支持用 `require()` 加载 ES 模块，从 22.13 起不再为此打印警告，所以
 下限定在这个补丁版本。

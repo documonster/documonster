@@ -9,7 +9,7 @@ import { gunzip, gunzipSync } from "@archive/compression/compress";
 import { createGunzipStream } from "@archive/compression/streaming-compress";
 import { OPTIONS, checkArchiveArgument, levelSchema } from "@archive/core/arguments";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
-import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
+import { ArchiveArgumentError, ArchiveError, toDecompressionError } from "@archive/core/errors";
 import { collect } from "@archive/io/archive-sink";
 import type { ArchiveBytes, ArchiveSource } from "@archive/io/archive-source";
 import {
@@ -157,17 +157,19 @@ function gunzipChunks(
 }
 
 /**
- * Report a decoder failure as an {@link ArchiveError}. Errors already in the archive's
- * vocabulary — TAR errors, limits — and aborts pass through unchanged.
+ * Report a decoder failure as an `ArchiveDecompressionError`. Errors already in the archive's
+ * vocabulary — TAR errors, limits — and aborts pass through unchanged. Only for a whole buffer handed
+ * to the decoder, where a failure that is not the archive's can only be the decoder's: where the input
+ * is a source being read, the source's own failure says nothing about the data.
  */
 function toGzipError(error: unknown): unknown {
   if (error instanceof ArchiveError || isAbortError(error) || !(error instanceof Error)) {
     return error;
   }
-  return new ArchiveError(`Invalid gzip data: ${error.message}`, { cause: error });
+  return toDecompressionError(error, "gzip");
 }
 
-/** Decompress a whole `.tar.gz`, reporting a damaged gzip stream as an {@link ArchiveError}. */
+/** Decompress a whole `.tar.gz`, reporting a damaged gzip stream as an `ArchiveDecompressionError`. */
 async function gunzipTar(compressed: Uint8Array): Promise<Uint8Array> {
   try {
     return await gunzip(compressed);
@@ -210,7 +212,8 @@ export async function* parseTarGzStream(
  * it (after earlier entries have been yielded); iterate {@link parseTarGz} instead to fail
  * before the first entry. An archive cut off inside an entry throws. Once the TAR ends, the
  * rest of the gzip stream is still read, so a damaged or missing gzip trailer is reported
- * too; a damaged gzip stream is reported as an `ArchiveError`. Published as
+ * too; a damaged gzip stream is reported as an `ArchiveDecompressionError`, while a failure of
+ * `source` itself is passed on as it is. Published as
  * `Archive.parseTarGzStream`.
  *
  * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
@@ -230,14 +233,14 @@ async function* readTarGzStream(
 ): AsyncGenerator<TarEntry> {
   const inflated = gunzipChunks(source, options.signal)[Symbol.asyncIterator]();
   let drained = false;
+  // No translation here: the gunzip stream reports damaged data as an `ArchiveDecompressionError` itself,
+  // and anything else that fails — the source being read, the TAR parser — is not the gzip data's fault.
   try {
     yield* readTarStream(borrow(inflated), options);
     while (!(await inflated.next()).done) {
       // Padding after the end-of-archive blocks; only the gzip stream's end matters
     }
     drained = true;
-  } catch (error) {
-    throw toGzipError(error);
   } finally {
     if (!drained) {
       await inflated.return?.();

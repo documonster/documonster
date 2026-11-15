@@ -406,7 +406,7 @@ export async function blobBytes<T>(data: T | Blob): Promise<T | Uint8Array> {
  * The input of `read` / `readWithDiagnostics`: bytes — a `Uint8Array` or any other `ArrayBufferView`, an
  * `ArrayBuffer` from any realm, a `Blob` (read first, by {@link blobBytes}) — or base64 text with `{ base64: true }`. Anything else (`42`, `null`, `{}`, text without
  * the flag) is an argument error, as it is for `readStream`; it used to reach the ZIP loader and come back as an
- * `ExcelFileError` about "the loaded zip file". Real bytes that are not a workbook stay an `ExcelFileError`.
+ * `ExcelFileError` about "the loaded zip file". Real bytes that are not a workbook are an `ExcelPackageError`.
  */
 export function checkReadData(where: string, data: unknown, base64: unknown): void {
   if (ArrayBuffer.isView(data) || isArrayBufferLike(data)) {

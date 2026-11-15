@@ -1,11 +1,12 @@
 /**
- * Corrupt DEFLATE data is malformed input, and every unzip path reports it as an `ArchiveError` — the error the
- * pure-JS inflater already raised — rather than the bare `Error` Node's zlib produces, with that kept as the `cause`.
+ * Corrupt DEFLATE data is malformed input, and every unzip path reports it as an `ArchiveDecompressionError` — the
+ * error the pure-JS inflater already raises — rather than the bare `Error` Node's zlib produces, with that kept as the
+ * `cause`.
  */
 
 import { Readable } from "stream";
 
-import { ArchiveError } from "@archive/core/errors";
+import { ArchiveDecompressionError } from "@archive/core/errors";
 import { zip } from "@archive/create-archive";
 import type { ZipEntry } from "@archive/unzip/stream";
 import { createParse } from "@archive/unzip/stream";
@@ -51,13 +52,13 @@ async function streamAll(bytes: Uint8Array, thresholdBytes?: number): Promise<un
 }
 
 function expectTypedInflateError(error: unknown): void {
-  expect(error).toBeInstanceOf(ArchiveError);
+  expect(error).toBeInstanceOf(ArchiveDecompressionError);
   expect((error as Error).message).toMatch(/DEFLATE/);
   expect((error as Error).cause).toBeInstanceOf(Error);
 }
 
 describe("unzip: corrupt DEFLATE data", () => {
-  it("is an ArchiveError from the buffer parser", async () => {
+  it("is an ArchiveDecompressionError from the buffer parser", async () => {
     const parser = new ZipParser(await corruptDeflate({ descriptor: false }), {
       checkCrc32: false
     });
@@ -71,15 +72,15 @@ describe("unzip: corrupt DEFLATE data", () => {
     expectTypedInflateError(syncError);
   });
 
-  it("is an ArchiveError from the streaming parser (in-memory inflate)", async () => {
+  it("is an ArchiveDecompressionError from the streaming parser (in-memory inflate)", async () => {
     expectTypedInflateError(await streamAll(await corruptDeflate({ descriptor: false })));
   });
 
-  it("is an ArchiveError from the streaming parser (streamed inflate)", async () => {
+  it("is an ArchiveDecompressionError from the streaming parser (streamed inflate)", async () => {
     expectTypedInflateError(await streamAll(await corruptDeflate({ descriptor: false }), 0));
   });
 
-  it("is an ArchiveError from the streaming parser (size in a data descriptor)", async () => {
+  it("is an ArchiveDecompressionError from the streaming parser (size in a data descriptor)", async () => {
     expectTypedInflateError(await streamAll(await corruptDeflate({ descriptor: true })));
   });
 });

@@ -145,6 +145,34 @@ them to `Document.read`. A file the system will not read or write is a `DocxFile
 `ENOENT`, `EACCES`, …), as Excel's `ExcelFileError` is; a file that was read but is
 not a valid document is a `DocxParseError`.
 
+Bytes that are not a Word package at all — and not because of a password or a read limit — are a
+`DocxPackageError` (a `DocxParseError`), from `Document.read`, `Stream.DocumentReader` and the
+`Package` functions alike — the counterpart of Excel's `ExcelPackageError`. Its `reason` says what
+was found:
+
+| `reason`           | What it means                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `"legacy-format"`  | An OLE compound file that is not encrypted: a legacy `.doc`, which is not read           |
+| `"damaged"`        | A ZIP package that cannot be read through: truncated, a broken record, a bad CRC-32      |
+| `"not-a-document"` | Not a ZIP package, no main document part, or a main part that is not Word's (a workbook) |
+
+```javascript
+import { Document, DocxEncryptedError, DocxPackageError } from "documonster/word";
+
+try {
+  await Document.read(bytes);
+} catch (error) {
+  if (error instanceof DocxEncryptedError) {
+    // password-protected
+  } else if (error instanceof DocxPackageError && error.reason === "legacy-format") {
+    // a .doc: ask for it to be saved as .docx
+  }
+}
+```
+
+`Stream.DocumentReader` checks the main part against its CRC-32 once it has read the part to the
+end, so damage that breaks the part's markup before that is reported as a plain `DocxParseError`.
+
 A part's XML is read as Word reads it: from its first `<` (white space a producer wrote before the
 XML declaration is no error), and a byte that is not well-formed UTF-8 is read as U+FFFD rather than
 refused, so a document with a damaged byte still opens. `Document.read` and `Stream.DocumentReader`

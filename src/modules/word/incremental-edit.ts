@@ -65,12 +65,7 @@ import {
 import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
 import { checkSchema, w } from "@word/core/option-schema";
 import { walkBlocks } from "@word/core/walker";
-import {
-  DocxError,
-  DocxParseError,
-  DocxUnsupportedFeatureError,
-  DocxWriteError
-} from "@word/errors";
+import { DocxParseError, DocxUnsupportedFeatureError, DocxWriteError } from "@word/errors";
 import { checkReadOptions } from "@word/reader/docx-reader";
 import type { ReadDocxOptions } from "@word/reader/docx-reader";
 import {
@@ -79,6 +74,7 @@ import {
   flatOpcEntries,
   readOptionsShape
 } from "@word/reader/package-limits";
+import { packageReadError } from "@word/reader/package-read-error";
 import { asPartLimitError } from "@word/reader/part-xml";
 import { decryptIfEncrypted } from "@word/security/package-encryption";
 import type { DocxSecurityPolicy } from "@word/security/policy";
@@ -352,8 +348,8 @@ function checkPackageBytes(buffer: unknown, where: string): Uint8Array {
  * some ZIP writers emit stripped — until `visit` returns `true`, reading it as
  * `Document.read` does: under the options' security policy, an encrypted file
  * decrypted with `password` (a `DocxEncryptedError` without one), a Flat OPC
- * file as the package it holds. Bytes that are not a package are a
- * `DocxParseError`, as `Document.read` reports them.
+ * file as the package it holds. Bytes that are not a package, or a damaged
+ * one, are a `DocxPackageError`, as `Document.read` reports them.
  *
  * A part's size counts against the policy when its bytes are read, so
  * `listParts` decompresses nothing and `readPart` only the part it returns.
@@ -394,11 +390,7 @@ async function readPackageEntries(
       }
     }
   } catch (e) {
-    if (e instanceof DocxError) {
-      throw e;
-    }
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new DocxParseError(`Failed to read DOCX: ${msg}`, { cause: e });
+    throw packageReadError(e, buffer);
   }
 }
 

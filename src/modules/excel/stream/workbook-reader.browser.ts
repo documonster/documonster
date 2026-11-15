@@ -12,7 +12,7 @@
 import { ArchiveFileTooLargeError } from "@archive/core/errors";
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
-import { ExcelFileError, ExcelStreamStateError } from "@excel/errors";
+import { ExcelFileError, ExcelPackageError, ExcelStreamStateError } from "@excel/errors";
 import type { Hyperlink } from "@excel/stream/hyperlink-reader";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
@@ -30,6 +30,7 @@ import type {
 import { checkSchema } from "@excel/utils/arguments";
 import {
   compoundFileChecked,
+  CompoundFileSniffer,
   containerLimitError,
   withContainerErrors
 } from "@excel/utils/container-errors";
@@ -47,15 +48,6 @@ import { createPartDecoder } from "@excel/utils/part-decoder";
 import { createInterpretableRecordFilter } from "@excel/xlsb/binary";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
-
-/**
- * A part's (or the package's) chunks, with a damaged package — a part whose bytes do not match its CRC-32, input that
- * is not a ZIP package — reported as the buffered readers report it: an `ExcelFileError` with the archive's error as
- * the cause.
- */
-function iterateStream<T = Uint8Array | string>(stream: IterableStreamLike<T>): AsyncGenerator<T> {
-  return withContainerErrors(iterateRawStream(stream));
-}
 
 /**
  * The binary package's fixed part paths — the `.bin` counterparts of `OOXML_PATHS`.
@@ -234,9 +226,12 @@ export interface WorkbookReaderOptions {
    */
   maxEntrySize?: number;
   /**
-   * Whether each part is checked against the CRC-32 the package records for it, failing
-   * the read on a mismatch with an `ExcelFileError` whose `cause` is the archive's
-   * `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * Whether each part the reader reads is checked against the CRC-32 the package records for
+   * it, failing the read on a mismatch with an `ExcelPackageError` (`reason: "damaged"`) whose
+   * `cause` is the archive's `ZipCrc32MismatchError`. A part it does not need — one it skips, as
+   * it skips `[Content_Types].xml`, or a sheet with `worksheets: "ignore"` — is passed over
+   * without being inflated, so damage there goes unseen; `Workbook.read` checks every part. Set
+   * `false` to read a damaged package as far as it goes.
    * @default true
    */
   checkCrc32?: boolean;
@@ -509,6 +504,22 @@ export abstract class WorkbookReaderBase<
     return paceChunks(chunks, this._yieldPoint);
   }
 
+  /**
+   * Looks at the input's first bytes on its way to the ZIP parser — see `_parseEntries`.
+   * @internal
+   */
+  protected _sniffer?: CompoundFileSniffer;
+
+  /**
+   * A part's (or the package's) chunks, with a damaged package — a part whose bytes do not match its CRC-32, input
+   * that is not a ZIP package — reported as the buffered readers report it: an `ExcelPackageError` with the archive's
+   * error as the cause.
+   * @internal
+   */
+  protected _iterate<T = Uint8Array | string>(stream: IterableStreamLike<T>): AsyncGenerator<T> {
+    return withContainerErrors(iterateRawStream(stream), () => this._sniffer?.leading);
+  }
+
   getHyperlinkReader(sheetNo: number | string): THyperlinkReader | undefined {
     return this._hyperlinkReadersBySheetNo?.[String(sheetNo)];
   }
@@ -687,7 +698,7 @@ export abstract class WorkbookReaderBase<
 
   private async _parseRels(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new RelationshipsXform();
-    this.workbookRels = await parseXformStream(xform, this._readPart(iterateStream(entry)));
+    this.workbookRels = await parseXformStream(xform, this._readPart(this._iterate(entry)));
 
     // Build fast lookup for worksheet relationship ids.
     this._workbookRelIdByTarget = Object.create(null) as Record<string, string>;
@@ -701,7 +712,7 @@ export abstract class WorkbookReaderBase<
   private async _parseWorkbook(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     this._emitEntry({ type: "workbook" });
     const workbook = new WorkbookXform();
-    this.model = await parseXformStream(workbook, this._readPart(iterateStream(entry)));
+    this.model = await parseXformStream(workbook, this._readPart(this._iterate(entry)));
     this.properties = workbook.map?.workbookPr as WorkbookPropertiesXform;
 
     // Build fast lookup for sheet metadata by relationship id.
@@ -839,7 +850,7 @@ export abstract class WorkbookReaderBase<
         }
       });
 
-      await saxStream(parser, scanningChunks(this._readPart(iterateStream(entry)), parserPrefixes));
+      await saxStream(parser, scanningChunks(this._readPart(this._iterate(entry)), parserPrefixes));
       return;
     }
 
@@ -954,7 +965,7 @@ export abstract class WorkbookReaderBase<
       }
     });
 
-    for await (const chunk of this._readPart(iterateStream(entry))) {
+    for await (const chunk of this._readPart(this._iterate(entry))) {
       const chunkStr =
         typeof chunk === "string"
           ? chunk
@@ -988,13 +999,13 @@ export abstract class WorkbookReaderBase<
     this._emitEntry({ type: "styles" });
     if (this.options.styles === "cache") {
       this.styles = new StylesXform();
-      await parseXformStream(this.styles, this._readPart(iterateStream(entry)));
+      await parseXformStream(this.styles, this._readPart(this._iterate(entry)));
     }
   }
 
   private async _parseMetadata(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new MetadataXform();
-    const result = await parseXformStream(xform, this._readPart(iterateStream(entry)));
+    const result = await parseXformStream(xform, this._readPart(this._iterate(entry)));
     if (result) {
       this.hasDynamicArrayMetadata = !!result.hasDynamicArrays;
       this.dynamicArrayCmIndices = result.dynamicArrayCmIndices;
@@ -1060,7 +1071,7 @@ export abstract class WorkbookReaderBase<
     add: (record: StreamedRecord) => void
   ): Promise<void> {
     const interpretable = createInterpretableRecordFilter();
-    const chunks = this._readPart(iterateStream(entry)) as AsyncIterable<Uint8Array>;
+    const chunks = this._readPart(this._iterate(entry)) as AsyncIterable<Uint8Array>;
     for await (const batch of streamBiffRecordBatches(chunks, part)) {
       for (const record of batch) {
         if (interpretable(record.id)) {
@@ -1178,11 +1189,13 @@ export abstract class WorkbookReaderBase<
     // An OLE compound file — an encrypted workbook, a legacy .xls — never reaches the ZIP parser: it is reported as
     // what it is (`ExcelEncryptedError`) rather than as a ZIP without a central directory.
     // An encrypted workbook is collected, decrypted with `options.password`, and its package parsed.
+    const sniffer = new CompoundFileSniffer({
+      password: this.options.password,
+      format: "XLSX or XLSB"
+    });
+    this._sniffer = sniffer;
     const stream = Readable.from(
-      compoundFileChecked(source as unknown as AsyncIterable<Uint8Array>, {
-        password: this.options.password,
-        format: "workbook"
-      })
+      compoundFileChecked(source as unknown as AsyncIterable<Uint8Array>, sniffer)
     ) as unknown as Readable;
     // The parser's one-shot `inflateRawSync` path inflates a part of up to 5 MB in a single call and hands it over
     // whole: slicing a chunk (see `_readPart`) cannot shorten that call, and the part would be held whole besides,
@@ -1224,7 +1237,7 @@ export abstract class WorkbookReaderBase<
     let current: ZipEntry | undefined;
     let completed = false;
     try {
-      for await (const entry of iterateStream(zip)) {
+      for await (const entry of this._iterate(zip)) {
         current = entry;
         let sheetNo;
         const normalizedPath = normalizeZipPath(entry.path);
@@ -1285,7 +1298,7 @@ export abstract class WorkbookReaderBase<
               // the shared-string table rather than a string, so a sheet that arrives first has to be spooled and come
               // back later. `_storeWaitingWorksheet` is shared.
               if (this._xlsbSharedStrings !== undefined && !!this._xlsbWorkbook) {
-                const part = handOut(this._readPart(iterateStream(entry)), `worksheet ${sheetNo}`);
+                const part = handOut(this._readPart(this._iterate(entry)), `worksheet ${sheetNo}`);
                 yield* this._parseXlsbWorksheet(part.chunks, sheetNo);
                 await releasePart(entry, part, false);
                 continue;
@@ -1306,7 +1319,7 @@ export abstract class WorkbookReaderBase<
                 !!this.model &&
                 (this.options.sharedStrings !== "cache" || !!this.sharedStrings);
               if (hasPrerequisites) {
-                const part = handOut(this._readPart(iterateStream(entry)), `worksheet ${sheetNo}`);
+                const part = handOut(this._readPart(this._iterate(entry)), `worksheet ${sheetNo}`);
                 yield* this._parseWorksheet(part.chunks, sheetNo);
                 await releasePart(entry, part, false);
                 continue;
@@ -1323,7 +1336,7 @@ export abstract class WorkbookReaderBase<
             ) {
               const source = boundedPart(entry, this._maxEntrySize);
               const part = handOut(
-                this._readPart(iterateStream(source)),
+                this._readPart(this._iterate(source)),
                 `the hyperlinks of sheet ${sheetNo}`
               );
               yield* this._parseHyperlinks(part.chunks, sheetNo);
@@ -1335,6 +1348,16 @@ export abstract class WorkbookReaderBase<
         entry.autodrain();
       }
       completed = true;
+      // Sheets are spooled until the workbook part names them, so none has been handed out yet: a package that never
+      // delivered one is not a workbook, as `Workbook.read` reports it, rather than a read that ends with nothing.
+      if (!this.model && !this._xlsbWorkbook) {
+        throw new ExcelPackageError(
+          "<input>",
+          "not-a-workbook",
+          `the package has neither ${OOXML_PATHS.xlWorkbook} nor ${XLSB_PATHS.workbook}, so it is not a workbook — it ` +
+            `may be another kind of Office document (a .docx or .pptx), or a workbook that lost its workbook part`
+        );
+      }
     } catch (error) {
       // The part boundary: a position the part's content puts outside the grid is the part's `XlsxParseError`.
       throw current === undefined ? error : xlsxPartError(error, normalizeZipPath(current.path));
@@ -1389,7 +1412,7 @@ class WorkbookReader extends WorkbookReaderBase<
   async _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<WaitingWorksheet> {
     const chunks: Uint8Array[] = [];
     const encoder = new TextEncoder();
-    for await (const chunk of iterateStream(entry)) {
+    for await (const chunk of this._iterate(entry)) {
       let bytes: Uint8Array;
       if (chunk instanceof Uint8Array) {
         bytes = chunk;

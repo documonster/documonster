@@ -35,11 +35,12 @@ describe("read → write of fixtures the self-check used to flag", () => {
     });
   }
 
-  it("a source with no workbook part can be written", async () => {
-    // `missing-bits.xlsx` holds a sheet and the workbook rels, and nothing else.
-    const wb = Workbook.create();
-    await Workbook.read(wb, fs.readFileSync(streamDataPath("missing-bits.xlsx")));
-    await expectValidXlsx(await Workbook.toBuffer(wb, { validate: false }));
+  it("a source with no workbook part is refused, not read as an empty workbook", async () => {
+    // `missing-bits.xlsx` holds a sheet and the workbook rels, and nothing else: nothing names the
+    // sheet, so the read used to drop it and return an empty workbook with no error.
+    await expect(
+      Workbook.read(Workbook.create(), fs.readFileSync(streamDataPath("missing-bits.xlsx")))
+    ).rejects.toMatchObject({ name: "ExcelPackageError", reason: "not-a-workbook" });
   });
 
   it("a theme-less source gets the default theme its relationship names", async () => {

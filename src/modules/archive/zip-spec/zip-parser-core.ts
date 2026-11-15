@@ -6,9 +6,9 @@
  */
 
 import {
-  ArchiveError,
   ArchiveLimitExceededError,
-  ZipEocdNotFoundError
+  ZipEocdNotFoundError,
+  ZipParseError
 } from "@archive/core/errors";
 import type { ZipStringEncoding, ZipStringCodec } from "@archive/core/text";
 import { decodeZipPath, decodeZipComment, resolveZipStringCodec } from "@archive/core/text";
@@ -43,7 +43,7 @@ const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
  */
 function safeBigIntToNumber(value: bigint, fieldName: string): number {
   if (value > MAX_SAFE) {
-    throw new ArchiveError(
+    throw new ZipParseError(
       `ZIP64 ${fieldName} value ${value} exceeds Number.MAX_SAFE_INTEGER. ` +
         "The archive may be corrupted or malicious."
     );
@@ -464,7 +464,7 @@ export function parseCentralDirectoryAt(
   // Every record is at least 46 bytes, so a count the buffer cannot hold is a
   // lie — reject it before sizing an array from it.
   if (totalEntries * ZIP_CENTRAL_DIR_HEADER_FIXED_SIZE > data.length - offset) {
-    throw new ArchiveError(
+    throw new ZipParseError(
       `Central Directory declares ${totalEntries} entries, more than its ${data.length - offset} bytes can hold`
     );
   }
@@ -483,7 +483,7 @@ export function parseCentralDirectoryAt(
   for (let i = 0; i < totalEntries; i++) {
     const sig = reader.readUint32();
     if (sig !== CENTRAL_DIR_HEADER_SIG) {
-      throw new ArchiveError(`Invalid Central Directory header signature at entry ${i}`);
+      throw new ZipParseError(`Invalid Central Directory header signature at entry ${i}`);
     }
 
     entries[i] = parseCentralDirectoryEntry(reader, decodeStrings, decoder);

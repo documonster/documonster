@@ -14,13 +14,14 @@ import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 import { invalidArgument } from "@word/core/argument-checks";
 import { checkSchema, w } from "@word/core/option-schema";
-import { DocxEncryptedError, DocxParseError } from "@word/errors";
+import { DocxEncryptedError, DocxPackageError } from "@word/errors";
 import { HASH_ALGORITHM_NAMES } from "@word/security/hash-names";
 
 /**
  * The package inside `buffer`, as every reader opens it: an encrypted file is decrypted with `password`, its size
  * capped at `maxPackageSize`; one without a password is a `DocxEncryptedError`. A compound file that is not an
- * encrypted package — a legacy `.doc` — is a `DocxParseError` saying so. Anything else is returned as it is.
+ * encrypted package — a legacy `.doc` — is a `DocxPackageError` with `reason: "legacy-format"`. Anything else is
+ * returned as it is.
  */
 export async function decryptIfEncrypted(
   buffer: Uint8Array,
@@ -31,7 +32,8 @@ export async function decryptIfEncrypted(
     return buffer;
   }
   if (!hasEncryptedPackageStreams(buffer)) {
-    throw new DocxParseError(
+    throw new DocxPackageError(
+      "legacy-format",
       "Not a DOCX package — an OLE compound file: a legacy .doc document (Word 97–2003) or another Office " +
         "binary format, which this library does not read"
     );

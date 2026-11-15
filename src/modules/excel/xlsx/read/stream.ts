@@ -155,7 +155,7 @@ export async function readXlsxStreamInto(
     }
     // A failure of the source is the cause of whatever the parser then reported about the truncated input. A
     // package that is damaged or not one is reported as the buffered read reports it.
-    throw sourceError ?? containerReadError(err);
+    throw sourceError ?? containerReadError(err, undefined, undefined, sniffer.leading);
   } finally {
     try {
       parser.off("error", onParserError);

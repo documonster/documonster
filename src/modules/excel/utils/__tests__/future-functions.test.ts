@@ -1,5 +1,43 @@
-import { FUTURE_FUNCTION_PREFIXES, toFileFormula } from "@excel/utils/future-functions";
+import {
+  FUTURE_FUNCTION_PREFIXES,
+  lambdaParameters,
+  toFileFormula
+} from "@excel/utils/future-functions";
 import { describe, expect, it } from "vitest";
+
+// Expected values were recorded from the lookbehind implementation this one replaced.
+describe("lambdaParameters", () => {
+  it.each<[string, string[]]>([
+    ["_xlpm.x", ["_xlpm.x"]],
+    ["", []],
+    ["_xlpm.", []],
+    ["_xlpm.a _xlpm.b", ["_xlpm.a", "_xlpm.b"]],
+    ["_xlpm.a,_xlpm.b", ["_xlpm.a", "_xlpm.b"]],
+    ["(_xlpm.a)(_xlpm.b", ["_xlpm.a", "_xlpm.b"]],
+    ["_xlpm.a$_xlpm.b", ["_xlpm.a"]],
+    ["_xlpm.a?_xlpm.b", ["_xlpm.a?_xlpm.b"]],
+    ["_xlpm.a._xlpm.b", ["_xlpm.a._xlpm.b"]],
+    ["_xlpm._xlpm.x", ["_xlpm._xlpm.x"]],
+    [" _xlpm.x?", ["_xlpm.x?"]],
+    ["_xlpm.a\\b,_xlpm.c\\", ["_xlpm.a\\b", "_xlpm.c\\"]],
+    ["_xlpm.名前+_xlpm.été*_xlpm.Ωmega", ["_xlpm.名前", "_xlpm.été", "_xlpm.Ωmega"]],
+    ["a_xlpm.x", []],
+    ["1_xlpm.x", []],
+    ["__xlpm.x", []],
+    ["._xlpm.x", []],
+    ["\\_xlpm.x", []],
+    ["$_xlpm.x", []],
+    ["名_xlpm.x", []],
+    ["_XLPM.x,_Xlpm.Y,_xlPM.z", ["_XLPM.x", "_Xlpm.Y", "_xlPM.z"]],
+    ["_xlfn.LET(_xlpm.x,2,_xlpm.x*3)", ["_xlpm.x", "_xlpm.x"]],
+    [
+      "_xlfn.LAMBDA(_xlpm.a,_xlpm.b,_xlpm.a+_xlpm.b)(1,2)",
+      ["_xlpm.a", "_xlpm.b", "_xlpm.a", "_xlpm.b"]
+    ]
+  ])("finds the parameters in %j", (stored, expected) => {
+    expect(lambdaParameters(stored)).toEqual(expected);
+  });
+});
 
 describe("toFileFormula", () => {
   it.each([

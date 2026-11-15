@@ -1,8 +1,8 @@
 /**
  * The `Compression` namespace checks its arguments as the archive builders do and reports
- * damaged input as an `ArchiveError`, on every platform, rather than the codec's own error.
+ * damaged input as an `ArchiveDecompressionError`, on every platform, rather than the codec's own error.
  */
-import { ArchiveError, Compression } from "@archive";
+import { ArchiveDecompressionError, ArchiveError, Compression } from "@archive";
 import { describe, expect, it } from "vitest";
 
 const bytes = new TextEncoder().encode("hello hello hello");
@@ -69,12 +69,12 @@ describe("Compression arguments", () => {
 describe("damaged input", () => {
   const garbage = new TextEncoder().encode("garbage!! not compressed at all");
 
-  it.each(decompressors)("%s rejects with an ArchiveError", async (_name, fn) => {
-    await expect(fn(garbage)).rejects.toBeInstanceOf(ArchiveError);
+  it.each(decompressors)("%s rejects with an ArchiveDecompressionError", async (_name, fn) => {
+    await expect(fn(garbage)).rejects.toBeInstanceOf(ArchiveDecompressionError);
   });
 
-  it.each(decompressorsSync)("%s throws an ArchiveError", (_name, fn) => {
-    expect(() => fn(garbage)).toThrow(ArchiveError);
+  it.each(decompressorsSync)("%s throws an ArchiveDecompressionError", (_name, fn) => {
+    expect(() => fn(garbage)).toThrow(ArchiveDecompressionError);
   });
 
   it("keeps the codec's message as the cause", () => {
@@ -83,7 +83,7 @@ describe("damaged input", () => {
       expect.unreachable();
     } catch (error) {
       expect((error as Error).message).toMatch(/^Invalid gzip data/);
-      expect((error as ArchiveError).cause).toBeInstanceOf(Error);
+      expect((error as ArchiveDecompressionError).cause).toBeInstanceOf(Error);
     }
   });
 });

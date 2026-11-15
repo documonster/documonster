@@ -1777,7 +1777,7 @@ describe("layoutDocumentFull — paragraph decoration and indents", () => {
     for (const line of laid.lines) {
       const text = line.runs.map(r => ("text" in r ? r.text : "")).join("");
       expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-      expect(text).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+      expect(text).not.toMatch(/(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/);
     }
   });
 

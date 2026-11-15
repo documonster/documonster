@@ -114,8 +114,45 @@ try {
 未提供密码时，加密工作簿报告为 `ExcelEncryptedError`；密码错误时为 `ExcelDecryptionError`，其 `reason` 为 `"password"`
 （其他取值：`"unsupported"` 表示 Excel 2007 的标准加密或 RC4，未实现；`"malformed"`、`"integrity"`、`"limit"`）。
 两者都是 `ExcelFileError`。解密后的包大小受 `zip.maxTotalUncompressedSize` 限制。加密工作簿是一整个加密流，因此需整体解密——
-流式读取器在解密后再读取，写入器先组装完整的包再加密。只有提供密码时才加载加密代码。旧式 `.xls` 报告为说明原因的
-`ExcelFileError`。`Workbook.protect` 的密码与此无关：它只锁定工作簿结构，不加密文件。
+流式读取器在解密后再读取，写入器先组装完整的包再加密。只有提供密码时才加载加密代码。`Workbook.protect` 的密码与此无关：
+它只锁定工作簿结构，不加密文件。
+
+### 无法读取的文件
+
+不是本库能读取的工作簿、且原因不是密码或读取限制的字节，每个读取器都报告为 `ExcelPackageError`，其 `reason` 说明发现了什么：
+
+| `reason`            | 含义                                                                          |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `"legacy-format"`   | 未加密的 OLE 复合文件：旧式 `.xls`（BIFF），不支持读取                        |
+| `"damaged"`         | 无法完整读取的 ZIP 包：被截断、记录损坏，或某个部件未通过 CRC-32 校验         |
+| `"not-a-workbook"`  | 根本不是 ZIP 包，或包里没有工作簿部件                                         |
+| `"format-mismatch"` | 与所读格式相反：XLSB 被当作 XLSX 读取（`format`，或文件名为 `.xlsx`），或反之 |
+
+```javascript
+import {
+  Workbook,
+  ExcelDecryptionError,
+  ExcelEncryptedError,
+  ExcelLimitExceededError,
+  ExcelPackageError
+} from "documonster/excel";
+
+try {
+  await Workbook.read(bytes);
+} catch (error) {
+  if (error instanceof ExcelEncryptedError || error instanceof ExcelDecryptionError) {
+    // 有密码保护
+  } else if (error instanceof ExcelPackageError && error.reason === "legacy-format") {
+    // .xls：请用户另存为 .xlsx
+  } else if (error instanceof ExcelLimitExceededError) {
+    // error.limit 指出是哪个选项，例如 "maxRows"
+  }
+}
+```
+
+它们——包括 `ExcelEncryptedError` 与 `ExcelDecryptionError`——都是 `ExcelFileError`，因此要先判断具体的类。被截断的文件与损坏的文件
+都是 `"damaged"`：以 ZIP 包开头却无法读取的输入按损坏报告。流式读取（`Workbook.readStream`、`Stream.WorkbookReader`）在读完一个部件后
+才校验它的 CRC-32，因此如果损坏先破坏了部件的标记，报告的是指明该部件的 `XlsxParseError`。
 
 ### 浏览器打包体积
 

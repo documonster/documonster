@@ -167,6 +167,7 @@ export {
   ArchiveFileError,
   ZipUnsupportedCompressionError,
   ZipEntrySizeMismatchError,
+  ArchiveDecompressionError,
   ArchiveLimitExceededError,
   ArchiveWorkerStreamStartError,
   ArchiveWorkerUnsupportedError,

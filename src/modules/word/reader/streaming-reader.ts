@@ -72,6 +72,7 @@ import {
 import { WORD_NAMESPACES } from "@word/reader/namespaces";
 import { numberingOfPart } from "@word/reader/numbering-parser";
 import { createPartBudget, readOptionsShape } from "@word/reader/package-limits";
+import { notWordDocumentError, packageReadError } from "@word/reader/package-read-error";
 import { parseSectionProperties } from "@word/reader/paragraph-section-parsers";
 import {
   attrVal,
@@ -279,19 +280,16 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
 
   /**
    * The body, failing as `Document.read` does: a damaged package — a ZIP
-   * that ends early, a corrupt entry, malformed XML — is a `DocxParseError`
-   * with the archive's or parser's error as its `cause`, never a bare
-   * `RangeError` from deep in the reader.
+   * that ends early, a corrupt entry — or bytes that are not one are a
+   * `DocxPackageError` with the archive's error as its `cause`; malformed XML
+   * is a `DocxParseError` with the parser's — never a bare `RangeError` from
+   * deep in the reader.
    */
   private async *_iterate(): AsyncGenerator<BodyContent> {
     try {
       yield* this._read();
     } catch (e) {
-      if (e instanceof DocxError) {
-        throw e;
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new DocxParseError(`Failed to read DOCX: ${msg}`, { cause: e });
+      throw packageReadError(e, this._source);
     }
   }
 
@@ -595,6 +593,9 @@ export class DocumentReader implements AsyncIterable<BodyContent> {
       }
     }
     part.close();
+    if (builder.rootName !== undefined && !builder.isDocument) {
+      throw notWordDocumentError(builder.rootName);
+    }
     if (!builder.sawBody) {
       // As `Document.read` reads it: a main part without a body is not a document — a part whose
       // elements are in another namespace than Word's has none either.
@@ -897,6 +898,13 @@ class BodySubtreeBuilder {
   private _outerDepth = 0;
   /** Whether the root is Word's `w:document`. */
   private _inDocument = false;
+  /** The root element's name, once it has been read. */
+  rootName: string | undefined;
+
+  /** Whether the root, once read, is Word's `w:document`. */
+  get isDocument(): boolean {
+    return this._inDocument;
+  }
   /** The UTF-8 bytes of the names, attributes and text of the body-level element being built. */
   /**
    * The UTF-16 units charged to the element being built, and — once they could be past the limit —
@@ -1030,6 +1038,7 @@ class BodySubtreeBuilder {
       if (depth === 0) {
         // The root: the body is only read under a `w:document` in Word's namespace.
         this._inDocument = isWordDocumentRoot(tag);
+        this.rootName = tag.name;
         this._scopeAround(tag);
         return;
       }

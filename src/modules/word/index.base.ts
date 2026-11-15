@@ -366,6 +366,7 @@ export {
   DocxInvalidImageError,
   DocxArgumentError,
   DocxInvalidDrawingError,
+  DocxPackageError,
   DocxMissingPartError,
   DocxInvalidStructureError,
   DocxUnsupportedFeatureError,

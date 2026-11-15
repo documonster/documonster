@@ -19,6 +19,7 @@ import {
   XlsbParseError,
   XlsxParseError
 } from "@excel/errors";
+import { isXmlParseError, XmlLimitExceededError } from "@xml/errors";
 
 /** A position error: a row, a column or an address outside the grid, or not where it is written. */
 export function isPositionError(
@@ -31,16 +32,36 @@ export function isPositionError(
   );
 }
 
-/** The error an XLSX reader reports for `error` raised reading `part`: an `XlsxParseError` for a position error. */
+/**
+ * Whether `error` says the part's content is malformed: a position error, or the XML parser refusing the part's markup
+ * (`XmlParseError` — not well-formed, truncated, not valid UTF-8). Both are the XML module's or the API's errors, and
+ * a read reports them as its own. A parser limit (`XmlLimitExceededError`, nesting past `maxDepth`) is not: the parse
+ * stopped on purpose, on content that may be well-formed, and is passed on as it is.
+ */
+function isMalformedContent(error: unknown): error is Error {
+  return (
+    isPositionError(error) || (isXmlParseError(error) && !(error instanceof XmlLimitExceededError))
+  );
+}
+
+/**
+ * The error an XLSX reader reports for `error` raised reading `part`: an `XlsxParseError` naming the part for a
+ * position error or markup the XML parser refused, the original as its `cause`.
+ */
 export function xlsxPartError(error: unknown, part: string): unknown {
-  return isPositionError(error)
+  return isMalformedContent(error)
     ? new XlsxParseError(part, `${part}: ${error.message}`, { cause: error })
     : error;
 }
 
-/** The error an XLSB reader reports for `error` raised reading `part`: an `XlsbParseError` for a position error. */
+/**
+ * The error an XLSB reader reports for `error` raised reading `part`: an `XlsbParseError` for a position error or
+ * markup the XML parser refused (an XLSB package keeps its relationships and theme as XML).
+ */
 export function xlsbPartError(error: unknown, part: string): unknown {
-  return isPositionError(error) ? new XlsbParseError(part, error.message, { cause: error }) : error;
+  return isMalformedContent(error)
+    ? new XlsbParseError(part, error.message, { cause: error })
+    : error;
 }
 
 /**

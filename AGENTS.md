@@ -779,6 +779,38 @@ breaking 12 of the 19 CJS entries while the entire test suite stayed green — b
 run against source, through ESM. There is now one emit, so source and artifact cannot disagree
 that way.
 
+## Browser Floor
+
+The browser floor is the README's: Chrome 98, Firefox 102, Safari 15.4 — the `browserslist` in
+`package.json`, which is also the lowering target of both rolldown configs (`scripts/lib/browser-targets.ts`).
+A file an engine cannot parse is not one broken function: the engine rejects it at load, so the module and
+every chunk a bundler put it in are gone. 0.25.1 shipped two such defects, and every browser job passed,
+because they all run current engines:
+
+- **A regex lookbehind** in `excel/utils/future-functions.ts` — Safari parses lookbehind only from 16.4.
+  Neither `tsc` nor rolldown lowers a regular expression; a pattern ships as written.
+- **Class static blocks in eight of the twelve IIFE bundles** — also Safari 16.4. rolldown's transform
+  defaults to `esnext`, so with no target it emitted TypeScript's static fields as static blocks. `dist/esm`
+  was never affected: `tsc` lowers to `tsconfig.json`'s `target`.
+
+So regex syntax is held to what the floor parses: no lookbehind (`(?<=` / `(?<!`), no `v` flag, no inline
+modifiers (`(?i:`), no group name used twice. Replace a lookbehind with a consumed prefix and a capture
+group — `(?:^|[^…])(…)` — and say beside it why that cannot swallow a match.
+
+Two checks hold the floor, and they are different in kind:
+
+- `pnpm verify:browser-syntax` (part of `pnpm build:verify`) parses every file in `dist/esm` and `dist/iife`,
+  and the worker scripts shipped as strings, and refuses the regex syntax above plus class static blocks,
+  `using`, import attributes and decorators. It is fast and runs on every build, but refuses only what it
+  names. `node scripts/verify-browser-syntax.ts src` runs it over the source that ships. A file that starts a
+  worker must be listed in `WORKER_SPAWNERS` (`scripts/lib/worker-scripts.ts`), with where that worker's
+  source is; both checks read the worker scripts through it.
+- `pnpm verify:browser-floor` (the `Browser floor` CI job; needs Docker and a build) parses every shipped file
+  in the floor's own engines, loads every IIFE bundle `scripts/lib/iife-bundles.ts` publishes and runs each
+  module through them. It does not depend on
+  anyone having named the problem — it is how the static blocks were found. Each engine comes from the
+  Playwright release that shipped it, in that release's image.
+
 ## Documentation
 
 Examples are the first thing a consumer copies, and until recently they were the only artefact

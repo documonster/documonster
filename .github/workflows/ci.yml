@@ -174,6 +174,42 @@ jobs:
           BROWSER_ENGINE: ${{ matrix.engine }}
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
 
+  browser-floor:
+    # **The published build in the oldest browsers the README supports**: Chrome 98, Firefox 102, Safari 15.4.
+    # Every other browser job runs a current engine, which parses anything, so a file the floor cannot even load
+    # passed all of them — 0.25.1 shipped a regex lookbehind (Safari 16.4) and eight IIFE bundles holding class
+    # static blocks (Safari 16.4), and the whole suite was green. `pnpm build` already refuses the syntax it
+    # knows of (`verify:browser-syntax`); this is the check that does not depend on knowing. Each engine comes
+    # from the Playwright release that shipped it, in that release's image — see `scripts/verify-browser-floor.ts`.
+    needs: should-run
+    timeout-minutes: 30
+    name: Browser floor in ${{ matrix.engine }}
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Use Node.js 26
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Parse, load and run the build in the floor's engine
+        run: pnpm verify:browser-floor --engine ${{ matrix.engine }}
+
   timezone:
     # **The whole suite outside UTC.**
     #

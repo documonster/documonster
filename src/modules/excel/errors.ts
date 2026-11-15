@@ -303,6 +303,44 @@ export class ExcelDecryptionError extends ExcelFileError {
   }
 }
 
+/**
+ * Error thrown when the bytes read are not a workbook package this library can read, and not because of a password
+ * (that is {@link ExcelEncryptedError} / {@link ExcelDecryptionError}) or a limit (`ExcelLimitExceededError`).
+ * `reason` says what was found, so a caller can tell the user what to do without reading the message:
+ *
+ * - `"legacy-format"` — an OLE compound file that is not an encrypted package: a legacy `.xls` workbook (BIFF) or
+ *   another Office binary format, which this library does not read. Save it as `.xlsx` and read that.
+ * - `"damaged"` — a ZIP package that cannot be read through: truncated, its directory or a part's compressed data
+ *   broken, or a part whose bytes do not match the CRC-32 the package records for it. The archive's diagnosis is
+ *   the `cause`.
+ * - `"not-a-workbook"` — not a ZIP package at all (the bytes do not start like one), or a package with no workbook
+ *   part.
+ * - `"format-mismatch"` — a workbook of the other format than the one read: an XLSB package read as XLSX, or an XLSX
+ *   package read as XLSB — `format` given, or a file name whose extension says the other one. Omit `format` with
+ *   `Workbook.read` to have it detected.
+ *
+ * Telling `"damaged"` from `"not-a-workbook"` relies on the first bytes: input that starts with a ZIP local-file
+ * signature but cannot be read is `"damaged"`. A truncated workbook and a truncated archive of anything else are
+ * therefore both `"damaged"`.
+ *
+ * An {@link ExcelFileError}, so a `catch` for a file that cannot be read catches it too.
+ */
+export class ExcelPackageError extends ExcelFileError {
+  override name = "ExcelPackageError";
+  /** What was found instead of a readable workbook package — see {@link ExcelPackageError}. */
+  readonly reason: "legacy-format" | "damaged" | "not-a-workbook" | "format-mismatch";
+
+  constructor(
+    path: string,
+    reason: "legacy-format" | "damaged" | "not-a-workbook" | "format-mismatch",
+    details: string,
+    options?: BaseErrorOptions
+  ) {
+    super(path, "read", details, options);
+    this.reason = reason;
+  }
+}
+
 /** Options for {@link ExcelFileError}: the base options plus what kind of file it was, for the message. */
 export interface ExcelFileErrorOptions extends BaseErrorOptions {
   /** The kind of file, as the message names it — `"CSV"`, `"Markdown"`. Default `"Excel"`. */

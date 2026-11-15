@@ -182,7 +182,7 @@ class WorkbookReader extends WorkbookReaderBase<
       try {
         await ws.writePromise;
       } catch (error) {
-        throw containerReadError(error);
+        throw containerReadError(error, undefined, undefined, this._sniffer?.leading);
       }
       const fileStream = createReadStream(ws.path);
       const part = handOut(

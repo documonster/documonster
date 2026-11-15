@@ -150,12 +150,19 @@ describe("the main part is recognised by its namespace", () => {
     await expect(Document.read(bytes)).rejects.toThrow(/Missing w:body/);
     await expect(streamAll(bytes)).rejects.toThrow(/Missing w:body/);
   };
+  // A root that is not Word's `w:document` makes the package something other than a Word document.
+  const notWord = async (xml: string): Promise<void> => {
+    const bytes = await packageWith(xml);
+    const expected = { name: "DocxPackageError", reason: "not-a-document" };
+    await expect(Document.read(bytes)).rejects.toMatchObject(expected);
+    await expect(streamAll(bytes)).rejects.toMatchObject(expected);
+  };
 
   it("refuses a document in another namespace", () =>
-    refused(`<document xmlns="urn:WRONG"><body><p><r><t>WRONG</t></r></p></body></document>`));
+    notWord(`<document xmlns="urn:WRONG"><body><p><r><t>WRONG</t></r></p></body></document>`));
 
   it("refuses an unbound w: prefix", () =>
-    refused(`<w:document><w:body>${P}</w:body></w:document>`));
+    notWord(`<w:document><w:body>${P}</w:body></w:document>`));
 
   it("refuses a body that is not the document's child", () =>
     refused(

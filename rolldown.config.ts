@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { defineConfig } from "rolldown";
 import { visualizer } from "rollup-plugin-visualizer";
 
+import { browserTargets } from "./scripts/lib/browser-targets";
 import { IIFE_BUNDLES } from "./scripts/lib/iife-bundles";
 import { preferBrowserFilesPlugin } from "./src/utils/browser";
 
@@ -81,6 +82,7 @@ const common = (input: string) => ({
   input,
   platform: "browser" as const,
   tsconfig: "./tsconfig.json",
+  transform: { target: browserTargets() },
   treeshake: {
     moduleSideEffects: false
   },

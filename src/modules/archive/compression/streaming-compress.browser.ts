@@ -28,7 +28,7 @@ import {
 import type { WorkerPool } from "@archive/compression/worker-pool/index.browser";
 import { hasWorkerSupport } from "@archive/compression/worker-pool/pool.base";
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
-import { ArchiveWorkerStreamStartError } from "@archive/core/errors";
+import { ArchiveWorkerStreamStartError, toDecompressionError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 
@@ -199,6 +199,13 @@ class AsyncStreamCodec extends EventEmitter {
 
 type WebStreamFormat = "deflate-raw" | "deflate" | "gzip";
 
+/** What each Web Streams format is called in an error: `"deflate"` there is zlib's wrapper. */
+const DECODED_FORMAT: Record<WebStreamFormat, string> = {
+  "deflate-raw": "DEFLATE",
+  deflate: "zlib",
+  gzip: "gzip"
+};
+
 function createNativeWebStreamCodec(format: WebStreamFormat, isCompress: boolean): DeflateStream {
   const stream = isCompress
     ? new CompressionStream(format as CompressionFormat)
@@ -208,36 +215,69 @@ function createNativeWebStreamCodec(format: WebStreamFormat, isCompress: boolean
 
   const codec = new AsyncStreamCodec();
   let readLoopError: Error | null = null;
+  // A `DecompressionStream` refuses damaged input with a bare `TypeError`; it is the input's fault, so it is the
+  // archive's `ArchiveDecompressionError`, as the one-shot functions report it. Once the codec is aborted, a failure
+  // is the abort's reason, which is the caller's and keeps its own class — as is a listener that threw.
+  let aborted = false;
+  let listenerError: Error | undefined;
+  const typed = (err: unknown): Error => {
+    if (listenerError !== undefined) {
+      return listenerError;
+    }
+    return isCompress || aborted ? toError(err) : toDecompressionError(err, DECODED_FORMAT[format]);
+  };
 
   const readLoop = (async (): Promise<void> => {
     try {
       while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
+        // Only the codec's own failure is a verdict on the data — not what a listener of its events throws.
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try {
+          next = await reader.read();
+        } catch (err) {
+          readLoopError = typed(err);
+          codec.emit("error", readLoopError);
+          return;
+        }
+        if (next.done) {
           break;
         }
-        if (value) {
-          codec.emit("data", value);
+        if (next.value) {
+          codec.emit("data", next.value);
         }
       }
       codec.emit("end");
     } catch (err) {
-      const error = toError(err);
-      readLoopError = error;
-      codec.emit("error", error);
+      // A `data` or `end` listener threw. It is the caller's error, reported as it is; the native stream is
+      // cancelled with it so a write or close still waiting on it settles, with that error rather than a hang.
+      listenerError = toError(err);
+      readLoopError = listenerError;
+      reader.cancel(listenerError).catch(() => {});
+      codec.emit("error", listenerError);
     }
   })();
 
   codec.setBackend({
-    write: chunk => writer.write(toNativeStreamChunk(chunk)),
+    write: async chunk => {
+      try {
+        await writer.write(toNativeStreamChunk(chunk));
+      } catch (err) {
+        throw typed(err);
+      }
+    },
     close: async () => {
-      await writer.close();
+      try {
+        await writer.close();
+      } catch (err) {
+        throw typed(err);
+      }
       await readLoop;
       if (readLoopError) {
         throw toError(readLoopError);
       }
     },
     abort: err => {
+      aborted = true;
       reader.cancel(err).catch(() => {});
       writer.abort(err).catch(() => {});
     }

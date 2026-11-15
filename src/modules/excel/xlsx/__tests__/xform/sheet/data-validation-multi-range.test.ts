@@ -94,12 +94,16 @@ describe("a multi-range data validation", () => {
 // `TypeError` instead of the XML error the mangled tag is; a rule with no `sqref` is skipped, and the intact rule
 // beside it kept.
 describe("a damaged data validation", () => {
-  it("reports a misspelled open tag as an XML error", async () => {
+  it("reports a misspelled open tag as the part's XlsxParseError, the XML error as its cause", async () => {
     const damaged = await withValidations(
       '<dataValidations count="1"><dataVaMidation type="whole" sqref="G1:H1">' +
         "<formula1>0</formula1><formula2>0</formula2></dataValidation></dataValidations>"
     );
-    await expect(Workbook.read(Workbook.create(), damaged)).rejects.toBeInstanceOf(XmlParseError);
+    await expect(Workbook.read(Workbook.create(), damaged)).rejects.toMatchObject({
+      name: "XlsxParseError",
+      context: "xl/worksheets/sheet1.xml",
+      cause: expect.any(XmlParseError)
+    });
   });
 
   it("skips a rule with no sqref", async () => {

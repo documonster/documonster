@@ -167,9 +167,9 @@ export interface RemoteZipStats {
 export { ZipCrc32MismatchError } from "@archive/core/errors";
 import {
   ArchiveArgumentError,
-  ArchiveError,
   ZipCrc32MismatchError,
   ZipEocdNotFoundError,
+  ZipParseError,
   throwIfAborted
 } from "@archive/core/errors";
 import { asPlainBytes, isUint8Array } from "@utils/binary";
@@ -1138,7 +1138,7 @@ export class RemoteZipReader {
     const headerReader = new BinaryReader(localHeaderData, 0);
     const sig = headerReader.readUint32();
     if (sig !== LOCAL_FILE_HEADER_SIG) {
-      throw new ArchiveError(`Invalid local file header signature for "${entry.path}"`);
+      throw new ZipParseError(`Invalid local file header signature for "${entry.path}"`);
     }
 
     headerReader.skip(22); // skip to filename length

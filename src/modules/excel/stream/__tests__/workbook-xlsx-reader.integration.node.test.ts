@@ -455,11 +455,12 @@ describe("WorkbookReader", () => {
   });
 
   describe("with a spreadsheet that is missing some files in the zip container", () => {
-    it("should not break", async () => {
-      const workbook = Workbook.create();
-      await Workbook.readFile(workbook, streamTestDataPath("missing-bits.xlsx"));
-      // Should load gracefully despite missing zip entries
-      expect(getWorksheets(workbook).length).toBeGreaterThanOrEqual(0);
+    // It holds a sheet and the workbook rels and no workbook part, so nothing names the sheet: it is
+    // refused as not a workbook rather than read as an empty one.
+    it("is refused as not a workbook", async () => {
+      await expect(
+        Workbook.readFile(Workbook.create(), streamTestDataPath("missing-bits.xlsx"))
+      ).rejects.toMatchObject({ name: "ExcelPackageError", reason: "not-a-workbook" });
     });
   });
 

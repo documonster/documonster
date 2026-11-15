@@ -565,7 +565,7 @@ for await (const entry of Archive.parseTarGzStream(response.body!)) {
 `parseTarGzStream`（与纯 TAR 的 `parseTarStream` 一样）不会，它每次只在内存中保留一个条目。它的错误在迭代途中（已产出前面的条目之后）才抛出。
 所有 TAR 和 tar.gz 读取函数都会以 `ArchiveError` 拒绝在条目或头部内部被截断的归档，而不是返回不完整的条目。TAR 结束后它仍会读完剩余的 gzip 流，
 因此被截断或损坏的 gzip 尾部同样会被报告。所有 tar.gz 读取函数都把损坏的 gzip 流报告为
-`ArchiveError`（解码器自身的错误作为其 `cause`）。
+`ArchiveDecompressionError`（解码器自身的错误作为其 `cause`）；读取来源本身的失败（例如网络中断）则原样抛出。
 
 在 Node 中，无论用哪种方式构建——`packTarGz`、`packTarGzSync`、`createTarGz().toBuffer()`、
 `toBufferSync()` 或 `stream()`——得到的 `.tar.gz` 都逐字节相同。在浏览器中这只在 `level: 0`
@@ -694,6 +694,7 @@ import {
   ZipUnsupportedCompressionError,
   ZipEntrySizeMismatchError,
   ZipCrc32MismatchError,
+  ArchiveDecompressionError, // 压缩数据无法解压（DEFLATE、gzip、zlib）
   ArchiveRangeNotSupportedError,
   ArchiveHttpRangeError,
   ArchiveLimitExceededError,
@@ -706,8 +707,10 @@ import {
 ```
 
 所有归档错误都继承自 `ArchiveError`，因此 `isArchiveError` 可以识别其中任何一个。错误的参数或选项抛出
-`ArchiveArgumentError`，其 `field` 是从参数名起的路径（`"options.level"`、`"source"`、`"entries[0]"` 等），消息以调用名开头（`Archive.packZip: …`）；归档数据本身的损坏仍是普通的
-`ArchiveError` 或其数据类子类。被取消的操作抛出的是共享的
+`ArchiveArgumentError`，其 `field` 是从参数名起的路径（`"options.level"`、`"source"`、`"entries[0]"` 等），消息以调用名开头（`Archive.packZip: …`）。
+读取的数据有损坏时有专门的类，在各平台、无论由哪个解压器发现都相同：不成立的 ZIP 记录（被截断、签名错误）是
+`ZipParseError`，CRC-32 或声明大小不符的部件是 `ZipCrc32MismatchError` 或 `ZipEntrySizeMismatchError`，无法解压的压缩数据是
+`ArchiveDecompressionError`。普通的 `ArchiveError` 与数据是否损坏无关——例如 Worker 失败、同一条目被读取两次。被取消的操作抛出的是共享的
 `AbortError`，它不是 `ArchiveError`（与 `documonster/stream` 导出的是同一个类）：
 
 ```typescript

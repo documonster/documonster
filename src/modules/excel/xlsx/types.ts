@@ -101,7 +101,7 @@ export interface XlsxReadOptions {
  *
  * A package past a limit fails the read with an `ExcelLimitExceededError` whose `limit` names the option here and whose
  * `cause` is the archive's `ArchiveLimitExceededError`; a damaged package — a part that fails its CRC-32, or bytes that are not a ZIP package —
- * fails with an `ExcelFileError` whose `cause` is the archive's error.
+ * fails with an `ExcelPackageError` (`reason: "damaged"` or `"not-a-workbook"`) whose `cause` is the archive's error.
  */
 export interface XlsxZipReadLimits {
   /** Largest uncompressed size of one part, in bytes. */
@@ -112,8 +112,8 @@ export interface XlsxZipReadLimits {
   maxEntries?: number;
   /**
    * Whether each part is checked against the CRC-32 the package records for it, failing
-   * the read on a mismatch with an `ExcelFileError` whose `cause` is the archive's
-   * `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * the read on a mismatch with an `ExcelPackageError` (`reason: "damaged"`) whose `cause` is
+   * the archive's `ZipCrc32MismatchError`. Set `false` to read a damaged package as far as it goes.
    * @default true
    */
   checkCrc32?: boolean;

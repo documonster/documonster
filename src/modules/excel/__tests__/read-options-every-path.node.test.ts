@@ -76,7 +76,10 @@ describe("XLSB reads honour the read's options", () => {
 
   it("honours checkCrc32: false", async () => {
     const bad = withBadCrc(await sample("xlsb", { level: 0 }));
-    await expect(Workbook.read(bad)).rejects.toMatchObject({ name: "ExcelFileError" });
+    await expect(Workbook.read(bad)).rejects.toMatchObject({
+      name: "ExcelPackageError",
+      reason: "damaged"
+    });
     await expect(Workbook.read(bad, { zip: { checkCrc32: false } })).resolves.toBeDefined();
   });
 });

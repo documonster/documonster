@@ -1,10 +1,12 @@
 /**
  * How a read reports a package that is not a readable workbook, so every Excel reader — buffered XLSX and XLSB,
- * streamed XLSX, `Stream.WorkbookReader` — reports it the same way: bytes that are not a ZIP package, and a part whose
- * bytes do not match the CRC-32 the package records for it, are an `ExcelFileError` (which `isExcelError` answers for)
- * with the archive's diagnosis as the cause — and an OLE compound file, an encrypted workbook (`ExcelEncryptedError`)
- * or a legacy `.xls`, is reported as what it is. A container limit is an `ExcelLimitExceededError` naming the `zip`
- * option, with the archive's `ArchiveLimitExceededError` as its cause; a ZIP password keeps its archive error.
+ * streamed XLSX, `Stream.WorkbookReader` — reports it the same way: bytes that are not a ZIP package, a package that
+ * cannot be read through, and a part whose bytes do not match the CRC-32 the package records for it, are an
+ * `ExcelPackageError` (an `ExcelFileError`, which `isExcelError` answers for) whose `reason` says which, with the
+ * archive's diagnosis as the cause — and an OLE compound file, an encrypted workbook (`ExcelEncryptedError`) or a
+ * legacy `.xls` (`reason: "legacy-format"`), is reported as what it is. A container limit is an
+ * `ExcelLimitExceededError` naming the `zip` option, with the archive's `ArchiveLimitExceededError` as its cause; a
+ * ZIP password keeps its archive error.
  *
  * An encrypted workbook read with its `password` is decrypted here ({@link openWorkbookPackage}), by the Office
  * encryption Word uses too (`@archive/office-crypto/agile`) — loaded only then, through `import()`.
@@ -17,14 +19,15 @@ import {
   ZipCrc32MismatchError,
   ZipParseError
 } from "@archive/core/errors";
+import { isArchiveDataError, startsLikeZip } from "@archive/core/read-failure";
 import type { EncryptOptions } from "@archive/office-crypto/agile";
 import {
   ExcelDecryptionError,
   ExcelEncryptedError,
-  ExcelFileError,
-  ExcelLimitExceededError
+  ExcelLimitExceededError,
+  ExcelPackageError
 } from "@excel/errors";
-import type { ExcelLimit } from "@excel/errors";
+import type { ExcelFileError, ExcelLimit } from "@excel/errors";
 
 /** Whether `bytes` start with the compound-file signature. */
 export const isCompoundFile = isCfb;
@@ -134,8 +137,8 @@ export async function encryptWorkbookPackage(
 /**
  * The error for a compound file read as a workbook package: `ExcelEncryptedError` when it holds the `EncryptionInfo`
  * and `EncryptedPackage` streams of an encrypted OOXML package (MS-OFFCRYPTO 2.3.4 — what Excel writes for a file with
- * a password to open), else an `ExcelFileError` saying it is a compound file and not a ZIP package. The directory
- * names are found as the directory stores them, UTF-16LE.
+ * a password to open), else an `ExcelPackageError` (`reason: "legacy-format"`) saying it is a compound file and not a
+ * ZIP package. The directory names are found as the directory stores them, UTF-16LE.
  */
 export function compoundFileError(
   bytes: Uint8Array,
@@ -145,9 +148,9 @@ export function compoundFileError(
   if (hasEncryptedPackageStreams(bytes)) {
     return new ExcelEncryptedError(source);
   }
-  return new ExcelFileError(
+  return new ExcelPackageError(
     source,
-    "read",
+    "legacy-format",
     `not an ${format} package — an OLE compound file: a legacy .xls workbook (BIFF) or another Office binary format, ` +
       "which this library does not read"
   );
@@ -164,9 +167,20 @@ export class CompoundFileSniffer {
   private headLength = 0;
   private state: "head" | "pass" | "compound" = "head";
   private readonly decryption: WorkbookDecryption;
+  private leadingBytes: Uint8Array | undefined;
 
   constructor(decryption: WorkbookDecryption = {}) {
     this.decryption = { source: "<input>", format: "XLSX", ...decryption };
+  }
+
+  /**
+   * The first bytes (up to eight) of what is handed on to the ZIP parser, once they are known — what
+   * {@link containerReadError} needs to tell a damaged package from bytes that are not one. For an encrypted workbook
+   * they are the decrypted package's, not the compound file's: a package that decrypts and then fails to read is
+   * damaged, not a legacy `.xls`. `undefined` before then, and for text input.
+   */
+  get leading(): Uint8Array | undefined {
+    return this.leadingBytes;
   }
 
   /** The chunks to hand on for `chunk` — none while the head is undecided or the input is a compound file. */
@@ -184,10 +198,12 @@ export class CompoundFileSniffer {
     if (this.state === "compound" || this.headLength < 8) {
       return [];
     }
-    if (isCfb(concat(this.head, this.headLength))) {
+    const head = concat(this.head, this.headLength);
+    if (isCfb(head)) {
       this.state = "compound";
       return [];
     }
+    this.leadingBytes = head.slice(0, 8);
     this.state = "pass";
     return this.release();
   }
@@ -201,7 +217,12 @@ export class CompoundFileSniffer {
       const bytes = concat(this.head, this.headLength);
       this.head = [];
       this.headLength = 0;
-      return [await openWorkbookPackage(bytes, this.decryption)];
+      const opened = await openWorkbookPackage(bytes, this.decryption);
+      this.leadingBytes = opened.slice(0, 8);
+      return [opened];
+    }
+    if (this.state === "head" && this.headLength > 0) {
+      this.leadingBytes = concat(this.head, this.headLength);
     }
     return this.release() as Uint8Array[];
   }
@@ -215,14 +236,14 @@ export class CompoundFileSniffer {
 }
 
 /**
- * `chunks` passed through a {@link CompoundFileSniffer}: an encrypted workbook is decrypted once it has been read, and
- * a compound file that cannot be read throws its error.
+ * `chunks` passed through `sniffer`: an encrypted workbook is decrypted once it has been read, and a compound file
+ * that cannot be read throws its error. The sniffer is the caller's so it can ask for the input's
+ * {@link CompoundFileSniffer.leading} bytes when the package fails.
  */
 export async function* compoundFileChecked<T extends Uint8Array | string>(
   chunks: AsyncIterable<T>,
-  decryption?: WorkbookDecryption
+  sniffer: CompoundFileSniffer
 ): AsyncGenerator<T> {
-  const sniffer = new CompoundFileSniffer(decryption);
   for await (const chunk of chunks) {
     yield* sniffer.push(chunk) as T[];
   }
@@ -348,9 +369,14 @@ export function containerLimitError(error: ArchiveLimitExceededError): ExcelLimi
 }
 
 /**
- * The error a read reports for `error`: an `ExcelFileError` for a package that is damaged or not one — the
+ * The error a read reports for `error`: an `ExcelPackageError` for a package that is damaged or not one — the
  * {@link compoundFileError} when `bytes`, the input read, are a compound file — an `ExcelLimitExceededError` for a
  * container limit, else `error`.
+ *
+ * Any other archive error that describes the bytes ({@link isArchiveDataError}) is `"damaged"`; the rest — a ZIP
+ * password, a compression method the archive does not implement, a mistake in how it was called — is passed on.
+ * Without `bytes` a package that is not a ZIP is `"not-a-workbook"`; with them, one that starts like a ZIP is
+ * `"damaged"` — a truncated workbook has its first bytes and no central directory.
  */
 export function containerReadError(
   error: unknown,
@@ -365,29 +391,56 @@ export function containerReadError(
     return compoundFileError(bytes, source, format);
   }
   if (error instanceof ZipCrc32MismatchError) {
-    return new ExcelFileError(
+    return new ExcelPackageError(
       source,
-      "read",
+      "damaged",
       `the part "${error.path}" is damaged: its bytes do not match the CRC-32 the package records for it`,
       { cause: error }
     );
   }
   if (error instanceof ZipParseError) {
-    return new ExcelFileError(source, "read", `not an ${format} package — ${error.message}`, {
-      cause: error
-    });
+    return startsLikeZip(bytes)
+      ? new ExcelPackageError(
+          source,
+          "damaged",
+          `the ${format} package is damaged — ${error.message}`,
+          {
+            cause: error
+          }
+        )
+      : new ExcelPackageError(
+          source,
+          "not-a-workbook",
+          `not an ${format} package — ${error.message}`,
+          {
+            cause: error
+          }
+        );
+  }
+  if (isArchiveDataError(error)) {
+    return new ExcelPackageError(
+      source,
+      "damaged",
+      `the ${format} package is damaged — ${error.message}`,
+      {
+        cause: error
+      }
+    );
   }
   return error;
 }
 
-/** `chunks`, with a damaged or unreadable package reported as {@link containerReadError} reports it. */
+/**
+ * `chunks`, with a damaged or unreadable package reported as {@link containerReadError} reports it; `leading` gives
+ * the input's first bytes, when they are known, to tell the two apart.
+ */
 export async function* withContainerErrors<T>(
   chunks: AsyncIterable<T>,
-  source?: string
+  leading?: () => Uint8Array | undefined
 ): AsyncGenerator<T> {
   try {
     yield* chunks;
   } catch (error) {
-    throw containerReadError(error, source);
+    throw containerReadError(error, undefined, undefined, leading?.());
   }
 }

@@ -266,6 +266,13 @@ For older browsers without native `CompressionStream` API, Documonster automatic
 | Safari  | 15.4+ (March 2022)  |
 | Opera   | 84+ (February 2022) |
 
+That floor covers syntax as well as APIs, and every shipped file is checked against it in those
+browsers themselves (`pnpm verify:browser-floor`, a CI job): each file in `dist/esm` and `dist/iife`
+must parse, each IIFE bundle must load, and each module must run. A browser that cannot parse a file
+refuses the whole file, so `pnpm build` also fails on the syntax most likely to slip through — regex
+lookbehind, the `v` flag, inline modifiers and duplicate group names, which no compiler
+lowers, and class static blocks, `using` and import attributes.
+
 The package is ESM-only. Nothing changes for Node ESM, a bundler or a `<script>` tag, and a
 CommonJS `require()` call site is unchanged too — Node loads an ES module through `require()`
 from 22.12, and stops warning about it from 22.13, which is why the floor is that patch.

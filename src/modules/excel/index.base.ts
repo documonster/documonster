@@ -402,6 +402,7 @@ export {
   ExcelDecryptionError,
   ExcelEncryptedError,
   ExcelFileError,
+  ExcelPackageError,
   ExcelStreamStateError,
   ExcelDownloadError,
   ExcelPivotTableError,

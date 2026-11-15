@@ -390,7 +390,7 @@ describe("renderRun", () => {
     expect(output.includes(">b<")).toBe(true);
     expect(output.includes(">c<")).toBe(true);
     // No raw CR/LF should leak into the XML payload of any <w:t>
-    expect(/[\r\n]/.test(output.replace(/(?<=>)[\s\S]*?(?=<)/g, ""))).toBe(false);
+    expect(/[\r\n]/.test(output.replace(/>[\s\S]*?(?=<)/g, ">"))).toBe(false);
   });
 
   it("skips empty segments around newlines (does not emit empty <w:t>)", () => {

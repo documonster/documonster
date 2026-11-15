@@ -57,12 +57,13 @@ describe("XLSX package integrity", () => {
 });
 
 /**
- * A damaged part is an `ExcelFileError` — which `isExcelError` answers for — with the archive's `ZipCrc32MismatchError` as
- * its cause, as a package that is not one is reported.
+ * A damaged part is an `ExcelPackageError` with `reason: "damaged"` — an `ExcelFileError`, which `isExcelError` answers
+ * for — with the archive's `ZipCrc32MismatchError` as its cause.
  */
 function damagedPackage() {
   return expect.objectContaining({
-    name: "ExcelFileError",
+    name: "ExcelPackageError",
+    reason: "damaged",
     cause: expect.any(ZipCrc32MismatchError)
   });
 }

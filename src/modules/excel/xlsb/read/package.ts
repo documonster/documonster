@@ -47,7 +47,7 @@ import {
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
 import { getCell, setStyledBlankRanges, type WorksheetData } from "@excel/core/worksheet-core";
-import { ExcelFileError, XlsbFormulaDecodeError, XlsbParseError } from "@excel/errors";
+import { ExcelPackageError, XlsbFormulaDecodeError, XlsbParseError } from "@excel/errors";
 import { getValue, setStyle, setValue } from "@excel/surface/cell";
 import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/surface/column";
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
@@ -56,6 +56,7 @@ import { decodeCell, decodeRange, encodeCol } from "@excel/utils/address";
 import { containerReadError, containerReadLimits } from "@excel/utils/container-errors";
 import type { ContainerReadOptions } from "@excel/utils/container-errors";
 import { mediaFromDrawingAnchors } from "@excel/utils/drawing-utils";
+import { OOXML_PATHS } from "@excel/utils/ooxml-paths";
 import {
   attrByLocalName,
   findChildrenLocal,
@@ -252,7 +253,8 @@ export interface XlsbReadOptions {
   /**
    * Container limits and integrity checking — the `zip` options of `Workbook.read`, applied as the XLSX reader applies
    * them ({@link containerReadLimits}). A limit hit is an `ExcelLimitExceededError`; a part that fails its CRC-32 an
-   * `ExcelFileError` whose `cause` is the archive's `ZipCrc32MismatchError`, unless `checkCrc32: false`.
+   * `ExcelPackageError` (`reason: "damaged"`) whose `cause` is the archive's `ZipCrc32MismatchError`, unless
+   * `checkCrc32: false`.
    */
   readonly zip?: ContainerReadOptions;
   /** Refuse a worksheet with more rows than this, as the XLSX reader does (`ExcelLimitExceededError`). */
@@ -336,12 +338,19 @@ async function readInto(
 
   const workbookPart = findPart(entries, WORKBOOK_PART);
   if (!workbookPart) {
-    throw new ExcelFileError(
-      source,
-      "read",
-      `not an XLSB package: no ${WORKBOOK_PART}. An XLSX package stores its workbook as XML, ` +
-        `so a package without this part is not one this reader can interpret.`
-    );
+    throw findPart(entries, OOXML_PATHS.xlWorkbook)
+      ? new ExcelPackageError(
+          source,
+          "format-mismatch",
+          `the package contains ${OOXML_PATHS.xlWorkbook} and no ${WORKBOOK_PART}, so it is XLSX and not XLSB. ` +
+            `Pass format: "xlsx" — Workbook.read also detects it when no format is given.`
+        )
+      : new ExcelPackageError(
+          source,
+          "not-a-workbook",
+          `not an XLSB package: no ${WORKBOOK_PART}, and no ${OOXML_PATHS.xlWorkbook} either, so the package is ` +
+            `not a workbook.`
+        );
   }
 
   const {

@@ -624,8 +624,9 @@ use it for large archives. Its errors surface mid-iteration, after earlier entri
 yielded. Every TAR and tar.gz reader refuses an archive cut off inside an entry or a header
 with an `ArchiveError` rather than returning the partial entry. Once the TAR ends it
 still reads the rest of the gzip stream, so a truncated or damaged gzip tail is reported
-too. Every tar.gz reader reports a damaged gzip stream as an `ArchiveError` (the decoder's
-own error is its `cause`).
+too. Every tar.gz reader reports a damaged gzip stream as an `ArchiveDecompressionError` (the
+decoder's own error is its `cause`); a failure of the source being read — a dropped connection,
+say — is passed on as it is.
 
 A `.tar.gz` comes out byte-for-byte the same whichever way it is built — `packTarGz`,
 `packTarGzSync`, `createTarGz().toBuffer()`, `toBufferSync()` or `stream()` — in Node. In a
@@ -759,6 +760,7 @@ import {
   ZipUnsupportedCompressionError,
   ZipEntrySizeMismatchError,
   ZipCrc32MismatchError,
+  ArchiveDecompressionError, // compressed data that does not decompress (DEFLATE, gzip, zlib)
   ArchiveRangeNotSupportedError,
   ArchiveHttpRangeError,
   ArchiveLimitExceededError,
@@ -773,8 +775,12 @@ import {
 Every archive error extends `ArchiveError`, so `isArchiveError` catches all of them. A wrong argument
 or option is an `ArchiveArgumentError` whose `field` is the path from the parameter name
 (`"options.level"`, `"source"`, `"entries[0]"`, …) and whose message starts with the call
-(`Archive.packZip: …`);
-damage in the archive data stays a plain `ArchiveError` or one of its data subclasses. A cancelled
+(`Archive.packZip: …`).
+Damage in the data read has classes of its own, the same on every platform and whichever inflater met it:
+a ZIP record that is not one (truncated, a bad signature) is a `ZipParseError`, a part that fails its
+CRC-32 or its declared size a `ZipCrc32MismatchError` or `ZipEntrySizeMismatchError`, and compressed
+data that does not decompress an `ArchiveDecompressionError`. A plain `ArchiveError` says nothing about
+the data — a worker that failed, an entry read twice. A cancelled
 operation throws the shared `AbortError` instead, which is not an `ArchiveError` (it is the
 same class `documonster/stream` exports):
 

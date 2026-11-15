@@ -1244,6 +1244,7 @@ exceljs threw plain `Error`s. documonster throws classes you can test for, all s
 | `ExcelStreamStateError`                                   | editing what a streaming writer has already written                   |
 | `ExcelFileError`                                          | the file system refused a read or write (the system error is `cause`) |
 | `ExcelEncryptedError`, `ExcelDecryptionError`             | an encrypted file without, or with a wrong, password                  |
+| `ExcelPackageError`                                       | not a readable workbook; `reason` says `.xls`, damaged, or other      |
 | `ExcelLimitExceededError`                                 | a read past `maxRows`, `maxCols` or a `zip` limit                     |
 | `XlsxParseError`, `XlsbParseError`                        | a file that is not a valid workbook                                   |
 

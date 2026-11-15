@@ -295,8 +295,11 @@ export const FUTURE_FUNCTION_PREFIXES: ReadonlyMap<string, string> = new Map([
 
 /** The `_xlpm.` parameter names stored formula text uses, as written. */
 export function lambdaParameters(stored: string): string[] {
-  return [...stored.matchAll(/(?<![\p{L}\p{N}_.\\$])_xlpm\.[\p{L}\p{N}_.\\?]+/giu)].map(
-    match => match[0]
+  // The preceding character is consumed rather than asserted, because Safari before 16.4 cannot parse a
+  // lookbehind. That cannot swallow a match: the greedy name class runs each match up to the first character
+  // outside it, so the character before the next candidate always lies outside the previous match.
+  return [...stored.matchAll(/(?:^|[^\p{L}\p{N}_.\\$])(_xlpm\.[\p{L}\p{N}_.\\?]+)/giu)].map(
+    match => match[1]
   );
 }
 
