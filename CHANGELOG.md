@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.26.0](https://github.com/documonster/documonster/compare/v0.25.1...v0.26.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* a package with no workbook part (`xl/workbook.xml`) is refused as `ExcelPackageError` with `reason: "not-a-workbook"`; it used to read as an empty workbook, dropping any sheets it held. Malformed XML in a workbook part is the part's `XlsxParseError` (cause: the `XmlParseError`) rather than the bare `XmlParseError`. A Word main part whose root is not Word's `w:document` is a `DocxPackageError` (`reason: "not-a-document"`); it is still a `DocxParseError`. Compressed data that does not decompress is an `ArchiveDecompressionError`, which is an `ArchiveError`, so existing `instanceof ArchiveError` checks still match.
+
+### Features
+
+* Name why a package cannot be read; hold every shipped file to the browser floor ([d520fff](https://github.com/documonster/documonster/commit/d520fffa14c5d7275106896562f84e264bb5d6fe))
+
+
+### Bug Fixes
+
+* Lower the IIFE bundles to the browser floor, and drop a regex lookbehind Safari before 16.4 cannot parse ([d520fff](https://github.com/documonster/documonster/commit/d520fffa14c5d7275106896562f84e264bb5d6fe))
+
 ## [0.25.1](https://github.com/documonster/documonster/compare/v0.25.0...v0.25.1) (2026-11-14)
 
 
