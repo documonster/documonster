@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -228,7 +229,8 @@ describe("browserTargets", () => {
         [
           "--input-type=module",
           "-e",
-          `import { browserTargets } from ${JSON.stringify(path.join(SCRIPTS, "lib/browser-targets.ts"))};` +
+          // A file URL, not a path: on Windows the ESM loader reads `D:\…` as a URL whose scheme is `d:`.
+          `import { browserTargets } from ${JSON.stringify(pathToFileURL(path.join(SCRIPTS, "lib/browser-targets.ts")).href)};` +
             `console.log(JSON.stringify(browserTargets(${JSON.stringify(root)})));`
         ],
         { encoding: "utf8", stdio: "pipe" }
