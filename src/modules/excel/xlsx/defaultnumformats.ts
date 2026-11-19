@@ -88,20 +88,19 @@ const defaultNumFormats: { [key: number]: NumFormat } = {
   38: { f: "#,##0 ;[Red](#,##0)" },
   39: { f: "#,##0.00;(#,##0.00)" },
   40: { f: "#,##0.00;[Red](#,##0.00)" },
-  // **41–44 are the built-in accounting formats and were missing from this table.** Their absence had two
-  // consequences, and the second is the expensive one: a workbook using them got its formats re-registered as
-  // *custom* ids 164+ (because nothing matched), and the styles part Excel then repaired — `Removed Records:
-  // Style from /xl/styles.bin`.
+  // **41–44, the accounting formats, are the locale's**, as the currencies 5–8 are: ECMA-376 leaves them out of its
+  // table of built-in codes, and Excel shows them in the form of the reader's locale — `$` in an English one, `¥` in
+  // Chinese. Excel writes each with a `<numFmt>` declaring that form, which a read takes as it is; the forms a display
+  // gives them are in `display-locale.ts`.
   //
-  // The codes are the ones Excel itself writes, read out of a template it produced. Note the `\-`: the escape is
-  // part of the code, and dropping it is what stopped these from matching even after they were added here.
-  41: { f: '_ * #,##0_ ;_ * \\-#,##0_ ;_ * "-"_ ;_ @_ ' },
-  42: { f: '_ "￥"* #,##0_ ;_ "￥"* \\-#,##0_ ;_ "￥"* "-"_ ;_ @_ ' },
-  43: { f: '_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * "-"??_ ;_ @_ ' },
-  44: { f: '_ "￥"* #,##0.00_ ;_ "￥"* \\-#,##0.00_ ;_ "￥"* "-"??_ ;_ @_ ' },
+  // They once sat here as the codes a Chinese Excel wrote, under `f`. That made a bare id 42 read as a `￥` format
+  // whatever the file's locale, and a `￥` code set by a caller written as id 42, which an English Excel shows in
+  // dollars. Without an `f` the bare id is kept instead (`kept-num-fmt.ts`) and a code is written as the code.
   45: { f: "mm:ss" },
   46: { f: "[h]:mm:ss" },
-  47: { f: "mmss.0" },
+  // ECMA-376's table prints `mmss.0`, a misprint: Excel shows and writes id 47 as `mm:ss.0` (measured), and
+  // `mmss.0` would show 45000.75 as `0000.0` where Excel shows `00:00.0`.
+  47: { f: "mm:ss.0" },
   48: { f: "##0.0E+0" },
   49: { f: "@" },
 
@@ -169,6 +168,16 @@ const defaultNumFormats: { [key: number]: NumFormat } = {
   69: { "th-th": "t# ?/?" },
   70: { "th-th": "t# ??/??" },
 
+  71: { "th-th": "ว/ด/ปปปป" },
+  72: { "th-th": "ว-ดดด-ปป" },
+  73: { "th-th": "ว-ดดด" },
+  74: { "th-th": "ดดด-ปป" },
+  75: { "th-th": "ช:นน" },
+  76: { "th-th": "ช:นน:ทท" },
+  77: { "th-th": "ว/ด/ปปปป ช:นน" },
+  78: { "th-th": "นน:ทท" },
+  79: { "th-th": "[ช]:นน:ทท" },
+  80: { "th-th": "นน:ทท.0" },
   81: { "th-th": "d/m/bb" }
 };
 

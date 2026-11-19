@@ -55,6 +55,7 @@ export {
   listPersons,
   getDefaultFont,
   setDefaultFont,
+  getDefaultStyle,
   registerFunction,
   unregisterFunction,
   getModel,

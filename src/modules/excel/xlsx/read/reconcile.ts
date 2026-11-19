@@ -10,7 +10,8 @@ import type {
 } from "@excel/core/pivot-table";
 import { restateRenamedTableReferences } from "@excel/core/table-references";
 import type { ExternalLinkModel } from "@excel/core/workbook.browser";
-import { pivotTablePathFromName, worksheetPath } from "@excel/utils/ooxml-paths";
+import { xlsxPartError } from "@excel/utils/file-content-errors";
+import { OOXML_PATHS, pivotTablePathFromName, worksheetPath } from "@excel/utils/ooxml-paths";
 import { collectOpaqueParts, groupOpaqueRelationshipsBySource } from "@excel/xlsx/opaque-parts";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { XlsxOptions } from "@excel/xlsx/types";
@@ -200,7 +201,16 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
   };
   model.worksheets.forEach((worksheet: any) => {
     worksheet.relationships = model.worksheetRels[worksheet.sheetNo];
-    worksheetXform.reconcile(worksheet, sheetOptions);
+    // A cell's content is checked against the rest of the package here (a shared string index), and a refusal is the
+    // sheet part's, as one found parsing it is.
+    try {
+      worksheetXform.reconcile(worksheet, sheetOptions);
+    } catch (error) {
+      const path = Object.keys(model.worksheetHash ?? {}).find(
+        key => model.worksheetHash[key] === worksheet
+      );
+      throw xlsxPartError(error, path ?? worksheetPath(worksheet.sheetNo));
+    }
     // Attach any threaded comments that arrived in a separate
     // `xl/threadedComments/threadedComment{N}.xml` part. The sheet
     // index in that path maps to `worksheet.sheetNo`, not
@@ -322,6 +332,11 @@ export async function reconcile(model: any, options?: XlsxOptions): Promise<void
   delete model.sheetDefs;
   // Preserve default font before deleting styles
   model.defaultFont = model.styles?.defaultFont;
+  model.defaultStyle = model.styles?.getDefaultStyleModel?.();
+  model.normalStyle = model.styles?.getNormalStyleModel?.();
+  model.readLost = (model.styles?.listDanglingNumFmts?.() ?? []).map(
+    (line: string) => `${OOXML_PATHS.xlStyles}: ${line}`
+  );
   // Preserve named cell styles (OOXML cellStyles) for round-trip fidelity
   if (model.styles?.getNamedStyles) {
     const namedStyles = model.styles.getNamedStyles();

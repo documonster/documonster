@@ -1,24 +1,17 @@
 /**
- * Number format codes: the built-in table, and the escapes that decide whether a code matches it.
+ * Number format codes: the built-in table, and the escapes a code read out of a file keeps.
  *
- * **Three defects stacked here, and the third cost a workbook its whole styles part.**
- *
- * 1. The built-in table was missing ids **41–44**, the accounting formats.
- * 2. The XLSX reader stripped every `\x` escape out of a `formatCode` on the way in, while the writer wrote the
- *    code back unchanged — a one-way loss that also changed what the code *means* (`\-` is a literal minus).
- * 3. Together those meant a workbook using an accounting format had it re-registered as a **custom** id 164+,
- *    and Excel answered `Removed Records: Style from /xl/styles.bin part (Styles)`: it discarded every named
- *    style in the file.
- *
- * The chain is what made this hard to see. Nothing was wrong with any *style*; the styles were discarded because
- * the formats they referenced had been turned into something Excel would not accept. So these tests assert the
- * two mechanical facts — the table's contents and the reader's fidelity — rather than the symptom.
+ * The table holds a code only for an id every locale shows the same way. The accounting formats 41–44 are the
+ * locale's, as the currencies 5–8 are: Excel writes each with a `<numFmt>` declaring its own locale's form (a Chinese
+ * Excel `￥`, an English one `$`), so a code read out of a file is the code, and a bare id is kept as an id
+ * (`kept-num-fmt.ts`). They once carried the Chinese codes here, so a bare id 42 read as `￥` whatever the file, and a
+ * `￥` code was written as id 42 — which an English Excel shows in dollars.
  */
 import { defaultNumFormats } from "@excel/xlsx/defaultnumformats";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { describe, expect, it } from "vitest";
 
-/** The four accounting formats, exactly as Excel writes them — read out of a template Excel produced. */
+/** The four accounting formats as a Chinese Excel writes them — read out of a template it produced. */
 const ACCOUNTING = {
   41: '_ * #,##0_ ;_ * \\-#,##0_ ;_ * "-"_ ;_ @_ ',
   42: '_ "￥"* #,##0_ ;_ "￥"* \\-#,##0_ ;_ "￥"* "-"_ ;_ @_ ',
@@ -27,21 +20,23 @@ const ACCOUNTING = {
 } as const;
 
 describe("the built-in number format table", () => {
-  it.each(Object.entries(ACCOUNTING))("carries id %s", (id, code) => {
-    expect(defaultNumFormats[Number(id)]?.f).toBe(code);
+  it.each(Object.keys(ACCOUNTING))("has no one code for the accounting format %s", id => {
+    expect(NumFmtXform.getDefaultFmtCode(Number(id))).toBeUndefined();
   });
 
-  it.each(Object.entries(ACCOUNTING))("resolves the code for id %s back to it", (id, code) => {
-    // The lookup is by the *escaped* code, because that is what a file contains. A reader that unescapes first
-    // will miss every one of these.
-    expect(NumFmtXform.getDefaultFmtId(code)).toBe(Number(id));
-  });
+  it.each(Object.entries(ACCOUNTING))(
+    "does not write the Chinese code for %s as the id",
+    (id, code) => {
+      expect(defaultNumFormats[Number(id)]).toBeUndefined();
+      // Written as the code, it shows as the file's author saw it in every locale; written as the id, it would not.
+      expect(NumFmtXform.getDefaultFmtId(code)).toBeUndefined();
+    }
+  );
 
-  it("does not resolve the same code with its escapes stripped", () => {
-    // The negative half, and the one that names the defect: this is what the reader used to hand the lookup.
-    const stripped = ACCOUNTING[41].replace(/\\(.)/g, "$1");
-    expect(stripped).not.toBe(ACCOUNTING[41]);
-    expect(NumFmtXform.getDefaultFmtId(stripped)).toBeUndefined();
+  it("has id 47 as Excel shows and writes it, not as ECMA-376's table misprints it", () => {
+    expect(NumFmtXform.getDefaultFmtCode(47)).toBe("mm:ss.0");
+    expect(NumFmtXform.getDefaultFmtId("mm:ss.0")).toBe(47);
+    expect(NumFmtXform.getDefaultFmtId("mmss.0")).toBeUndefined();
   });
 });
 

@@ -2,6 +2,14 @@ import { Enums } from "@excel/core/enums";
 import type { NamedStyleEntry } from "@excel/core/workbook-core";
 import { ExcelUnsupportedFeatureError } from "@excel/errors";
 import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
+import { statePlainFacets, withInheritedFacets } from "@excel/utils/inherited-format";
+import {
+  FIRST_CUSTOM_NUM_FMT_ID,
+  isBuiltInNumFmtId,
+  keepNumFmtId,
+  keptNumFmtId
+} from "@excel/utils/kept-num-fmt";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
@@ -15,11 +23,12 @@ import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { StyleXform } from "@excel/xlsx/xform/style/style-xform";
 import { excelNameKey } from "@utils/name-key";
+import { isGeneralFormat } from "@utils/number-format";
 import type { XmlSaxTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // custom numfmt ids start here
-const NUMFMT_BASE = 164;
+const NUMFMT_BASE = FIRST_CUSTOM_NUM_FMT_ID;
 
 /** The built-in "Normal" style's name as cell style names are compared — without regard to case, as Excel does. */
 const NORMAL_STYLE_KEY = excelNameKey("Normal");
@@ -149,15 +158,49 @@ void _allStyleFacetsAreKeyed;
 const TYPE_KEYS: string[] = [];
 
 /** Whether a style model has no keys at all, without allocating the key array `Object.keys` would. */
-function isEmptyStyleModel(model: Partial<Style>): boolean {
+function isEmptyStyleModel(model: object): boolean {
   for (const _key in model) {
     return false;
   }
   return true;
 }
 
+/** The xf of a cell style that sets nothing: what a format with no other cell style is measured against. */
+const PLAIN_STYLE_REF: StyleRef = {};
+
+/** Whether two xfs' alignment (or protection) are the same; both absent is the same. */
+function sameXfPart(a: object | undefined, b: object | undefined): boolean {
+  return a === b || (a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b));
+}
+
 /** Absent facet marker. Keeps a literal `null` in a key unambiguous — see below. */
 const ABSENT = 0;
+
+/** What each alignment attribute is when the attribute is absent; one set to this says nothing. */
+const DEFAULT_ALIGNMENT: Readonly<Record<string, unknown>> = {
+  horizontal: "general",
+  vertical: "bottom",
+  wrapText: false,
+  shrinkToFit: false,
+  justifyLastLine: false,
+  indent: 0,
+  relativeIndent: 0,
+  textRotation: 0,
+  readingOrder: "context"
+};
+
+/** `alignment` without the attributes that restate their default, or `undefined` when none is left. */
+function withoutDefaultAlignment(
+  alignment: Partial<Alignment> | undefined
+): Partial<Alignment> | undefined {
+  if (!alignment) {
+    return undefined;
+  }
+  const kept = Object.fromEntries(
+    Object.entries(alignment).filter(([key, value]) => DEFAULT_ALIGNMENT[key] !== value)
+  ) as Partial<Alignment>;
+  return isEmptyStyleModel(kept) ? undefined : kept;
+}
 
 /**
  * A content key identifying the xf {@link StylesXform.addStyleModel} would build
@@ -195,8 +238,10 @@ function styleModelKey(model: Partial<Style>, type: number): string | undefined 
   const { numFmt, font, border, fill, alignment, protection, styleName } = model;
   // Truthiness, not `!== undefined`, to mirror `addStyleModel`'s own
   // `if (model.numFmt)`: a falsy numFmt (a JS caller's `null`, an empty string)
-  // means the cell type picks the format, and must not be dereferenced.
-  const numFmtCode = !numFmt ? undefined : typeof numFmt === "string" ? numFmt : numFmt.formatCode;
+  // means the cell type picks the format, and must not be dereferenced. A kept
+  // built-in id stands in for the code, marked so that it cannot equal one.
+  const keptId = numFmt ? undefined : keptNumFmtId(model);
+  const code = numFmt ? numFmtCode(numFmt) : keptId === undefined ? undefined : `\u0001${keptId}`;
   const flags = packXfFlags(model);
   // Fast path for a style that is a number format and nothing else — the shape
   // `Column.setNumFmt`/`Cell.setNumFmt` produce, and the one case where the array
@@ -204,13 +249,13 @@ function styleModelKey(model: Partial<Style>, type: number): string | undefined 
   // with a distinct numFmt each, 224ms → 132ms). A digit-led key can never
   // collide with the `[`-led JSON below.
   if (!font && !border && !fill && !alignment && !protection && !flags && !styleName) {
-    return numFmtCode === undefined ? `${type}` : `${type}\u0000${numFmtCode}`;
+    return code === undefined ? `${type}` : `${type}\u0000${code}`;
   }
   let key: string;
   try {
     key = JSON.stringify([
       type,
-      numFmtCode ?? ABSENT,
+      code ?? ABSENT,
       font ?? ABSENT,
       border ?? ABSENT,
       fill ?? ABSENT,
@@ -276,6 +321,19 @@ class StylesXform extends BaseXform {
   declare private dxfIds?: Map<DxfStyle, number>;
   declare private _hasCheckboxes?: boolean;
   declare public defaultFont?: Partial<Font>;
+  /** {@link getDefaultStyleModel}, once built: `null` when the default format sets nothing. */
+  declare private defaultStyleModel?: Partial<Style> | null;
+  /** {@link listDanglingNumFmts}, found once the part is read. */
+  declare private danglingNumFmts?: string[];
+  /** The format {@link setDefaultStyle} gave `cellXfs[0]`, when it gave it one. */
+  declare private writtenDefaultStyle?: Partial<Style>;
+  /**
+   * The xfs of the cell styles a cell format is based on, by `cellStyleXfs` index: the Normal style's at 0, when
+   * {@link setDefaultStyle} gave it one, and each named style's — what {@link markOverrides} compares against.
+   */
+  declare private baseStyles?: Map<number, StyleRef>;
+  /** The named styles {@link registerNamedStyles} registered, by `excelNameKey` of their name. */
+  declare private namedStyles?: Map<string, Partial<Style>>;
   declare public parser?: BaseXform;
   /** name → cellStyleXfs index, populated by {@link registerNamedStyles}. */
   declare private _namedStyleIds?: Map<string, number>;
@@ -385,6 +443,9 @@ class StylesXform extends BaseXform {
 
     this.styleMemo = new Map();
     this._hasCheckboxes = false;
+    this.writtenDefaultStyle = undefined;
+    this.baseStyles = undefined;
+    this.namedStyles = undefined;
   }
 
   /**
@@ -393,6 +454,42 @@ class StylesXform extends BaseXform {
    */
   setDefaultFont(font: Partial<Font> | undefined): void {
     this.defaultFont = font;
+  }
+
+  /**
+   * Write `cellXfs[0]` — the format of every cell written without `s` — and `cellStyleXfs[0]`, the Normal style's, as
+   * the formats a read found ({@link getDefaultStyleModel}, {@link getNormalStyleModel}), instead of General in the
+   * default font. A cell with no style of its own is then written without `s`, which gives it that format, as it had
+   * in the file read. Call after {@link registerNamedStyles}, which a default format may be based on, and before any
+   * cell's style is added.
+   */
+  setDefaultStyle(style: Partial<Style> | undefined, normal: Partial<Style> | undefined): void {
+    // Only the manager role (init()) holds the collections.
+    if (!this.model.styles || !this.index?.style || !this.model.cellStyleXfs) {
+      return;
+    }
+    this._ensureDefaultFont();
+    // The Normal style first: the default format is based on it, and says which of its facets it applies.
+    if (normal && !isEmptyStyleModel(normal)) {
+      const ref = this._buildStyleRef(normal);
+      this.model.cellStyleXfs[0] = this.map.cellStyleXf.toXml(ref);
+      (this.baseStyles ??= new Map()).set(0, ref);
+      this.styleMemo?.clear();
+    }
+    if (style && !isEmptyStyleModel(style)) {
+      const ref: StyleRef = { ...this._buildStyleRef(style), xfId: 0 };
+      if (style.styleName && this._namedStyleIds) {
+        ref.xfId = this._namedStyleIds.get(excelNameKey(style.styleName)) ?? 0;
+      }
+      this.markOverrides(ref);
+      const xml = this.map.style.toXml(ref);
+      // Neither xf is left to be found by content: `0` is for a cell with no style of its own (see `addStyleModel`),
+      // and a style that states the same facets is a style of its own, written as one — which is what it reads as.
+      delete this.index.style[this.model.styles[0] as string];
+      this.model.styles[0] = xml;
+      this.writtenDefaultStyle = style;
+      this.styleMemo?.clear();
+    }
   }
 
   /**
@@ -428,6 +525,8 @@ class StylesXform extends BaseXform {
       const name = existingIndex >= 0 ? this.model.cellStyles![existingIndex].name : style.name;
       const ref = this._buildStyleRef(style);
       const xfId = this._addCellStyleXf(ref);
+      (this.baseStyles ??= new Map()).set(xfId, ref);
+      (this.namedStyles ??= new Map()).set(key, style);
       const cellStyle: CellStyleModel = {
         name,
         xfId,
@@ -449,6 +548,29 @@ class StylesXform extends BaseXform {
     // a name allocates a fresh cellStyleXf, so a surviving memo entry would hand
     // out an xf pointing at the superseded one.
     this.styleMemo?.clear();
+  }
+
+  /**
+   * Say which facets `style` applies: each it holds differently from the cell style it is based on (`xfId`), and each a
+   * read said it applied.
+   *
+   * [MS-OI29500] §18.8.45: in `cellXfs`, `apply*` says whether a later change to the cell style reaches the cell, and is
+   * to be true wherever the format differs from its cell style. Excel shows a format's own facets either way; other
+   * readers (LibreOffice among them) take the cell style's facet where the flag is absent. So a facet held as the cell
+   * style holds it says nothing — the cell keeps following the style — and one held otherwise, at index 0 as much as
+   * any other (General, the first font), says it applies.
+   */
+  private markOverrides(style: StyleRef): void {
+    const base = this.baseStyles?.get(style.xfId ?? 0) ?? PLAIN_STYLE_REF;
+    const mark = (flag: (typeof XF_FLAGS)[number], differs: boolean): void => {
+      style[flag] = differs || style[flag] === true;
+    };
+    mark("applyNumberFormat", (style.numFmtId ?? 0) !== (base.numFmtId ?? 0));
+    mark("applyFont", (style.fontId ?? 0) !== (base.fontId ?? 0));
+    mark("applyFill", (style.fillId ?? 0) !== (base.fillId ?? 0));
+    mark("applyBorder", (style.borderId ?? 0) !== (base.borderId ?? 0));
+    mark("applyAlignment", !sameXfPart(style.alignment, base.alignment));
+    mark("applyProtection", !sameXfPart(style.protection, base.protection));
   }
 
   /** Ensure fontId 0 (the default font) exists in the fonts collection. */
@@ -474,9 +596,9 @@ class StylesXform extends BaseXform {
   private _buildStyleRef(model: Partial<Style>): StyleRef {
     const ref: StyleRef = {};
     if (model.numFmt) {
-      ref.numFmtId = this._addNumFmtStr(
-        typeof model.numFmt === "string" ? model.numFmt : model.numFmt.formatCode
-      );
+      ref.numFmtId = this._addNumFmtStr(numFmtCode(model.numFmt));
+    } else if (keptNumFmtId(model) !== undefined) {
+      ref.numFmtId = keptNumFmtId(model);
     }
     if (model.font) {
       ref.fontId = this._addFont(model.font);
@@ -659,6 +781,7 @@ class StylesXform extends BaseXform {
         if (fontsModel && fontsModel.length > 0) {
           this.defaultFont = fontsModel[0];
         }
+        this.defaultStyleModel = undefined;
 
         // index numFmts
         this.index = {
@@ -671,6 +794,7 @@ class StylesXform extends BaseXform {
             numFmtIndex[numFmt.id] = numFmt.formatCode;
           });
         }
+        this.danglingNumFmts = this.findDanglingNumFmts();
 
         return false;
       }
@@ -693,10 +817,28 @@ class StylesXform extends BaseXform {
 
     const type = cellType || Enums.ValueType.Number;
 
+    // With a default format of its own, `cellXfs[0]` is what a cell with no style has — see `setDefaultStyle`. A date
+    // or a checkbox still needs the format its value does. A style that sets some facets has the default's for the
+    // rest: a cell given only a font keeps the default's number format, as it does in Excel.
+    //
+    // A cell of a named style has that style's facets for the ones it does not set, as a cell of the default format
+    // has the default's. Written as an index of 0 they were the first font and General — which is what Excel shows a
+    // format's index of 0 as, whatever its cell style holds ([MS-OI29500] §18.8.45).
+    const defaults = this.writtenDefaultStyle;
+    if (
+      defaults &&
+      isEmptyStyleModel(model) &&
+      type !== Enums.ValueType.Date &&
+      type !== Enums.ValueType.Checkbox
+    ) {
+      return 0;
+    }
+
     // Have we already built an xf with this exact content for this cell type?
-    // Everything below is a pure function of (model, type), so an equal key means
-    // an equal xf and the whole registration — up to four XML renders — is
-    // redundant.
+    // Everything below is a pure function of (model, type) — the default and the
+    // named styles are fixed while cells are added — so an equal key means an
+    // equal xf and the whole registration — up to four XML renders — is
+    // redundant. Asked before the facets are filled in, so a hit allocates nothing.
     const memoKey = this.styleMemo ? styleModelKey(model, type) : undefined;
     if (memoKey !== undefined) {
       const memoised = this.styleMemo!.get(memoKey);
@@ -705,22 +847,28 @@ class StylesXform extends BaseXform {
       }
     }
 
+    const named =
+      model.styleName === undefined
+        ? undefined
+        : this.namedStyles?.get(excelNameKey(model.styleName));
+    const inherited = named ?? defaults;
+    if (inherited) {
+      model = withInheritedFacets(model, inherited, type === Enums.ValueType.Date);
+    }
+
     const style: StyleRef = {};
 
     if (model.numFmt) {
-      style.numFmtId = this._addNumFmtStr(
-        typeof model.numFmt === "string" ? model.numFmt : model.numFmt.formatCode
-      );
+      style.numFmtId = this._addNumFmtStr(numFmtCode(model.numFmt));
     } else {
-      switch (type) {
-        case Enums.ValueType.Number:
-          style.numFmtId = this._addNumFmtStr("General");
-          break;
-        case Enums.ValueType.Date:
-          style.numFmtId = this._addNumFmtStr("mm-dd-yy");
-          break;
-        default:
-          break;
+      // A built-in format the read could name only by its id is written back by it — see `kept-num-fmt.ts`.
+      const keptId = keptNumFmtId(model);
+      if (keptId !== undefined) {
+        style.numFmtId = keptId;
+      } else if (type === Enums.ValueType.Number) {
+        style.numFmtId = this._addNumFmtStr("General");
+      } else if (type === Enums.ValueType.Date) {
+        style.numFmtId = this._addNumFmtStr("mm-dd-yy");
       }
     }
 
@@ -771,6 +919,8 @@ class StylesXform extends BaseXform {
       style.xfComplementIndex = 0;
     }
 
+    this.markOverrides(style);
+
     const styleId = this._addStyle(style);
     if (memoKey !== undefined) {
       this.styleMemo!.set(memoKey, styleId);
@@ -800,13 +950,12 @@ class StylesXform extends BaseXform {
 
     // -------------------------------------------------------
     // number format
+    //
+    // The format's own, whatever its cell style's and whatever `applyNumberFormat` says: in `cellXfs` the flag decides
+    // whether a later change to the cell style reaches the cell, not what it shows ([MS-OI29500] §18.8.45), and Excel
+    // shows a format's own with it absent. The writer sets it wherever the two differ — see `markOverrides`.
     if (style.numFmtId) {
-      const numFmt =
-        (this.index!.numFmt as Record<string, string>)[style.numFmtId] ||
-        NumFmtXform.getDefaultFmtCode(style.numFmtId);
-      if (numFmt) {
-        model.numFmt = numFmt;
-      }
+      this.setNumFmtById(model, style.numFmtId);
     }
 
     function addStyle<K extends "font" | "border" | "fill">(
@@ -861,7 +1010,136 @@ class StylesXform extends BaseXform {
       }
     }
 
+    // A plain facet the default sets is stated — see `statePlainFacets`. The default's own facets are its own.
+    if (id !== 0) {
+      statePlainFacets(model, this.getDefaultStyleModel(), {
+        font: (this.model.fonts as Partial<Font>[] | undefined)?.[0] ?? {},
+        fill: (this.model.fills as Fill[] | undefined)?.[0] ?? { type: "pattern", pattern: "none" },
+        border: (this.model.borders as Partial<Borders>[] | undefined)?.[0] ?? {}
+      });
+    }
+
     return model as Style;
+  }
+
+  /**
+   * Give `holder` the number format `id` names: its code — the part's own, else the built-in one — or, for a built-in
+   * with no code, the id itself, kept (`kept-num-fmt.ts`). A custom id the part does not define names nothing, and
+   * sets nothing; {@link listDanglingNumFmts} reports it.
+   */
+  private setNumFmtById(holder: Partial<Style>, id: number): void {
+    const code =
+      (this.index?.numFmt as Record<string, string> | undefined)?.[id] ||
+      NumFmtXform.getDefaultFmtCode(id);
+    if (code) {
+      holder.numFmt = code;
+    } else if (isBuiltInNumFmtId(id)) {
+      keepNumFmtId(holder, id);
+    }
+  }
+
+  /**
+   * The formats that name a custom number format the part does not define, one line each: `cellXfs[3] names number
+   * format 170, …`. Such an id names nothing — it cannot be written back, since a writer numbers its custom formats
+   * afresh and would point it at whichever format took the number — so its cells read as General, and the read
+   * reports the loss (`readWithDiagnostics().lost`).
+   */
+  listDanglingNumFmts(): readonly string[] {
+    return this.danglingNumFmts ?? [];
+  }
+
+  private findDanglingNumFmts(): string[] {
+    const found: string[] = [];
+    const scan = (collection: string, xfs: unknown[] | undefined): void => {
+      xfs?.forEach((xf, index) => {
+        const id = (xf as StyleRef | undefined)?.numFmtId;
+        if (
+          id !== undefined &&
+          id >= FIRST_CUSTOM_NUM_FMT_ID &&
+          !(this.index?.numFmt as Record<number, string> | undefined)?.[id]
+        ) {
+          found.push(
+            `${collection}[${index}] names number format ${id}, which the styles part does not define: read as General`
+          );
+        }
+      });
+    };
+    scan("cellXfs", this.model.styles);
+    scan("cellStyleXfs", this.model.cellStyleXfs);
+    return found;
+  }
+
+  /**
+   * The workbook's default cell format: `cellXfs[0]`, which a cell with no `s` has (ECMA-376 §18.3.1.4, `s` defaults
+   * to 0) — given as what it sets beyond a cell with no format at all, or `undefined` when it sets nothing.
+   *
+   * Excel writes its own as General in the default font, which sets nothing; changing the Normal style's number
+   * format or alignment changes it. A cell without `s` used to read as unformatted whatever it said, and the writer's
+   * own `cellXfs[0]` then replaced it, so such a workbook's unstyled cells — every cell it does not hold among them —
+   * lost their format on a round trip.
+   *
+   * A facet at its default is left out, so a format that merely restates the defaults (LibreOffice writes General as
+   * a custom `numFmtId="164"`, with every alignment attribute at its default) sets nothing; the xf-level `apply*`
+   * flags say nothing about how a cell looks and are left out too.
+   */
+  getDefaultStyleModel(): Partial<Style> | undefined {
+    if (this.defaultStyleModel === undefined) {
+      const ref = this.model.styles?.[0] as StyleRef | undefined;
+      const model = this.formatBeyondDefaults(ref) ?? {};
+      // A default format based on a named style other than Normal is that style's.
+      const styleName = ref?.xfId ? this.getStyleModel(0)?.styleName : undefined;
+      if (styleName) {
+        model.styleName = styleName;
+      }
+      this.defaultStyleModel = isEmptyStyleModel(model) ? null : model;
+    }
+    return this.defaultStyleModel ?? undefined;
+  }
+
+  /**
+   * The Normal style's format, `cellStyleXfs[0]`, as {@link getDefaultStyleModel} gives the default cell format. In
+   * a file Excel wrote the two are the same, since changing the Normal style is how its default format changes.
+   */
+  getNormalStyleModel(): Partial<Style> | undefined {
+    return this.formatBeyondDefaults(this.model.cellStyleXfs?.[0] as StyleRef | undefined);
+  }
+
+  /** What the xf `ref` sets beyond a cell with no format — see {@link getDefaultStyleModel}. */
+  private formatBeyondDefaults(ref: StyleRef | undefined): Partial<Style> | undefined {
+    if (!ref || typeof ref !== "object") {
+      return undefined;
+    }
+    const model: Partial<Style> = {};
+    if (ref.numFmtId) {
+      this.setNumFmtById(model, ref.numFmtId);
+      if (typeof model.numFmt === "string" && isGeneralFormat(model.numFmt)) {
+        delete model.numFmt;
+      }
+    }
+    const font = ref.fontId
+      ? (this.model.fonts as Partial<Font>[] | undefined)?.[ref.fontId]
+      : undefined;
+    if (font) {
+      model.font = font;
+    }
+    const fill = ref.fillId ? (this.model.fills as Fill[] | undefined)?.[ref.fillId] : undefined;
+    if (fill) {
+      model.fill = fill;
+    }
+    const border = ref.borderId
+      ? (this.model.borders as Partial<Borders>[] | undefined)?.[ref.borderId]
+      : undefined;
+    if (border) {
+      model.border = border;
+    }
+    const alignment = withoutDefaultAlignment(ref.alignment);
+    if (alignment) {
+      model.alignment = alignment;
+    }
+    if (ref.protection) {
+      model.protection = ref.protection;
+    }
+    return isEmptyStyleModel(model) ? undefined : model;
   }
 
   /**
@@ -901,12 +1179,7 @@ class StylesXform extends BaseXform {
       }
       if (ref) {
         if (ref.numFmtId) {
-          const numFmt =
-            (this.index?.numFmt as Record<string, string> | undefined)?.[ref.numFmtId] ||
-            NumFmtXform.getDefaultFmtCode(ref.numFmtId);
-          if (numFmt) {
-            entry.numFmt = numFmt;
-          }
+          this.setNumFmtById(entry, ref.numFmtId);
         }
         if (ref.fontId) {
           const font = (this.model.fonts as Partial<Font>[] | undefined)?.[ref.fontId];
@@ -974,9 +1247,7 @@ class StylesXform extends BaseXform {
     const entry: DxfStyle = style.numFmt
       ? {
           ...style,
-          numFmtId: this._addNumFmtStr(
-            typeof style.numFmt === "string" ? style.numFmt : style.numFmt.formatCode
-          )
+          numFmtId: this._addNumFmtStr(numFmtCode(style.numFmt))
         }
       : style;
 

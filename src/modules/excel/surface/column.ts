@@ -75,6 +75,8 @@ import { argumentChecks, checkNumber, checkSchema } from "@excel/utils/arguments
 import { colCache } from "@excel/utils/col-cache";
 import { copyPlain } from "@excel/utils/copy-plain";
 import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
+import { DISPLAY_LOCALES } from "@excel/utils/display-locale";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 import { numberedValues } from "@excel/utils/numbered-values";
 import type { ValuesBase, ValuesOptions } from "@excel/utils/numbered-values";
 import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
@@ -341,7 +343,10 @@ export function eachAddress(
   }
 }
 
-const autoFitColumnShape = { includeHiddenRows: s.boolean().optional() };
+const autoFitColumnShape = {
+  includeHiddenRows: s.boolean().optional(),
+  locale: s.member<ExcelDisplayLocale>(DISPLAY_LOCALES).optional()
+};
 const autoFitColumnOptionsSchema = s.object(autoFitColumnShape);
 const _autoFitColumnOptionsMatch: SchemaMatches<
   typeof autoFitColumnOptionsSchema,

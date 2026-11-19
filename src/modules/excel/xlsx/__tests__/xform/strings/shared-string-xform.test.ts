@@ -1,6 +1,9 @@
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
-import { describe } from "vitest";
+import { PassThrough } from "@stream";
+import { parseSax } from "@xml/sax";
+import { describe, expect, it } from "vitest";
 
 const expectations = [
   {
@@ -131,9 +134,41 @@ const expectations = [
     xml: "<si><t>_x005F_x000D_</t></si>",
     parsedModel: "_x000D_",
     tests: ["render", "renderIn", "parse"]
+  },
+  {
+    title: "text before runs, as the first run",
+    create() {
+      return new SharedStringXform();
+    },
+    xml: "<si><t>a</t><r><t>b</t></r></si>",
+    parsedModel: { richText: [{ text: "a" }, { text: "b" }] },
+    tests: ["parse"]
+  },
+  {
+    title: "empty",
+    create() {
+      return new SharedStringXform();
+    },
+    xml: "<si/>",
+    parsedModel: "",
+    tests: ["parse"]
   }
 ];
 
 describe("SharedStringXform", () => {
   testXformHelper(expectations);
+
+  // `CT_Rst` is `t?`, `r*`: a second `<t>` used to replace the first, and one after a run replaced the runs.
+  it.each([
+    ["more than one <t>", "<si><t>a</t><t>b</t></si>"],
+    ["a <t> after an <r>", "<si><r><t>a</t></r><t>b</t></si>"],
+    ["a run with more than one <t>", "<si><r><t>a</t><t>b</t></r></si>"]
+  ])("refuses a string with %s", async (detail, xml) => {
+    const stream = new PassThrough();
+    stream.write(xml);
+    stream.end();
+    await expect(parseXformEvents(new SharedStringXform(), parseSax(stream))).rejects.toThrow(
+      `<si> has ${detail}`
+    );
+  });
 });

@@ -273,6 +273,20 @@ Cell.setNumFmt(worksheet, "A1", "yyyy-mm-dd");
 Cell.setNumFmt(worksheet, "A1", '#,##0.00 "units"');
 ```
 
+`Cell.getDisplayText` 按格式显示值。少数内置格式没有自己的格式代码：文件里只记编号（货币 5–8、
+会计 41–44、东亚和泰文日期），每个 Excel 按自己的区域显示。读取时保留编号并原样写回；
+`locale` 指定按哪个区域显示，`Pdf.fromExcel`、`WordExcel.toDocx`、`Worksheet.toJson` 和
+`Column.autoFit` 也接受同一个选项。`Row.autoFit` 没有这个选项：Excel 只折行文本、从不折行数字和日期，
+而区域不会改变文本本身的内容，所以行高与区域无关：
+
+```typescript
+Cell.getDisplayText(worksheet, "C1"); // "$3.50 " —— 不指定时按 en-US
+Cell.getDisplayText(worksheet, "C1", { locale: "zh-CN" }); // "¥3.50 "
+```
+
+格式里的 `*x` 会重复 `x` 直到填满单元格。显示文本没有宽度，所以不展开；`Pdf.fromExcel` 和
+`WordExcel.toDocx` 会按列宽展开。
+
 ### 富文本
 
 ```typescript

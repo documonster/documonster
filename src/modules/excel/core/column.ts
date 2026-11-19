@@ -1,6 +1,7 @@
 import type { Worksheet } from "@excel/core/worksheet";
 import type { Style, Font, Alignment, CellValue, ColBreak } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
+import { keptNumFmtId } from "@excel/utils/kept-num-fmt";
 import { deepEqual } from "@utils/object";
 import type { DeepReadonly } from "@utils/types";
 
@@ -180,7 +181,14 @@ export function columnIsDefault(c: ColumnData): boolean {
   const s = c.style;
   if (
     s &&
-    (s.font || s.numFmt || s.alignment || s.border || s.fill || s.protection || s.styleName)
+    (s.font ||
+      s.numFmt ||
+      keptNumFmtId(s) !== undefined ||
+      s.alignment ||
+      s.border ||
+      s.fill ||
+      s.protection ||
+      s.styleName)
   ) {
     return false;
   }

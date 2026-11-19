@@ -666,4 +666,43 @@ describe("ixfParent, which decides whether a style XF is a root", () => {
     expect(found.cell.length).toBeGreaterThan(0);
     expect(found.cell.every(parent => parent === 0)).toBe(true);
   });
+
+  it("is a named style's style XF on a cell XF of that style, and reads back as its name", () => {
+    // A cell of a named style is based on that style's XF, as in XLSX's `xfId`. Writing 0 here showed the cell in
+    // Normal's font in Excel: the named style's facets were neither the cell's own nor its parent's.
+    const named = [
+      { name: "Note", font: { italic: true } },
+      { name: "Heading 1", font: { name: "Georgia", size: 20 } }
+    ];
+    const table = new CellFormatTable();
+    table.setDefaults(undefined, undefined, named);
+    const cell = table.intern({ styleName: "heading 1", alignment: { horizontal: "center" } });
+    const bytes = writeStyles(table, undefined, named as never[]);
+
+    expect(parents(bytes).cell[cell]).toBe(2);
+    const read = readStyles(bytes, "xl/styles.bin");
+    expect(read.styleNames[cell]).toBe("Heading 1");
+    expect(read.fonts[cell]).toMatchObject({ name: "Georgia", size: 20 });
+  });
+});
+
+describe("named cell styles in a workbook", () => {
+  it("round-trip through XLSB: the cell keeps its style's name and facets, and its own", async () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Workbook.addCellStyle(wb, "Heading 1", { font: { name: "Georgia", size: 20, bold: true } });
+    Cell.setValue(ws, "A1", "styled");
+    Cell.setStyle(ws, "A1", { styleName: "Heading 1", alignment: { horizontal: "center" } });
+    Cell.setValue(ws, "B1", "plain");
+
+    const bytes = await Workbook.toBuffer(wb, { format: "xlsb" });
+    await expectValidXlsb(bytes);
+    const back = Workbook.getWorksheet(await Workbook.read(bytes, { format: "xlsb" }), "S")!;
+    expect(Cell.findStyle(back, "A1")).toMatchObject({
+      styleName: "Heading 1",
+      font: { name: "Georgia", size: 20, bold: true },
+      alignment: { horizontal: "center" }
+    });
+    expect(Cell.findStyle(back, "B1")?.styleName).toBeUndefined();
+  });
 });

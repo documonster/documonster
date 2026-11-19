@@ -130,6 +130,9 @@ export function loadWorkbookModel(
 
   // Preserve default font for round-trip fidelity
   wb._defaultFont = value.defaultFont;
+  wb._defaultStyle = value.defaultStyle;
+  wb._normalStyle = value.normalStyle;
+  wb._readLost = value.readLost;
   // Restore named cell styles for round-trip fidelity
   // Keyed as Excel compares the names, without regard to case; of two that differ only in case the first is kept, as
   // Excel keeps it.

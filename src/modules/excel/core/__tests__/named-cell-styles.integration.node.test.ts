@@ -247,9 +247,21 @@ describe("named cell styles", () => {
       .split("<xf ")
       .find(xf => xf.includes('xfId="1"') && xf.includes("applyAlignment"));
     expect(inheritingXf).toBeDefined();
-    // Inherited font ⇒ fontId is 0 and applyFont is absent.
-    expect(inheritingXf).toMatch(/fontId="0"/);
+    // Inherited font ⇒ the cell's xf holds the named style's font, as Excel shows a format's own facets, and does not
+    // apply it, so the cell follows the style ([MS-OI29500] §18.8.45). It used to hold font 0 — the first font, which
+    // is what Excel then showed.
+    const styleXfsBlock = stylesXml.slice(
+      stylesXml.indexOf("<cellStyleXfs"),
+      stylesXml.indexOf("</cellStyleXfs>")
+    );
+    const namedFontId = /fontId="(\d+)"/.exec(styleXfsBlock.split("<xf ")[2]!)![1];
+    expect(namedFontId).not.toBe("0");
+    expect(inheritingXf).toContain(`fontId="${namedFontId}"`);
     expect(inheritingXf).not.toMatch(/applyFont/);
+    // Read back, the cell has the named style's font, and still names the style.
+    const back = Workbook.getWorksheet(await Workbook.read(buffer), "Sheet1")!;
+    expect(Cell.getFont(back, "A1")).toMatchObject({ name: "Arial", size: 20, bold: true });
+    expect(Cell.getStyle(back, "A1").styleName).toBe("Heading 1");
   });
 
   it("applyCellStyle throws for an undefined named style", () => {

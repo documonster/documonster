@@ -63,22 +63,24 @@ class StyleXform extends BaseXform {
       xmlStream.addAttribute("xfId", model.xfId ?? 0);
     }
 
-    if (model.applyNumberFormat || model.numFmtId) {
+    // An `apply*` the model states — `false` included, which `StylesXform.markOverrides` gives a facet held as its cell
+    // style holds it — is written as stated; otherwise a facet not at its first entry is said to apply.
+    if (model.applyNumberFormat ?? model.numFmtId) {
       xmlStream.addAttribute("applyNumberFormat", "1");
     }
-    if (model.applyFont || model.fontId) {
+    if (model.applyFont ?? model.fontId) {
       xmlStream.addAttribute("applyFont", "1");
     }
-    if (model.applyFill || model.fillId) {
+    if (model.applyFill ?? model.fillId) {
       xmlStream.addAttribute("applyFill", "1");
     }
-    if (model.applyBorder || model.borderId) {
+    if (model.applyBorder ?? model.borderId) {
       xmlStream.addAttribute("applyBorder", "1");
     }
-    if (model.applyAlignment || model.alignment) {
+    if (model.applyAlignment ?? model.alignment) {
       xmlStream.addAttribute("applyAlignment", "1");
     }
-    if (model.applyProtection || model.protection) {
+    if (model.applyProtection ?? model.protection) {
       xmlStream.addAttribute("applyProtection", "1");
     }
     if (model.pivotButton) {

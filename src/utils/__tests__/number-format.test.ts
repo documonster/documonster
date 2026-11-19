@@ -103,8 +103,8 @@ describe("tokenizeFormatSection", () => {
       ["[Color12]", { kind: "color", name: "Color12" }],
       ["[>=100]", { kind: "condition", op: ">=", value: 100 }],
       ["[<>-1.5]", { kind: "condition", op: "<>", value: -1.5 }],
-      ["[$€-407]", { kind: "locale", symbol: "€" }],
-      ["[$-409]", { kind: "locale", symbol: "" }],
+      ["[$€-407]", { kind: "locale", symbol: "€", lcid: 0x407 }],
+      ["[$-409]", { kind: "locale", symbol: "", lcid: 0x409 }],
       ["[hh]", { kind: "elapsed", unit: "h", width: 2, fraction: 0 }],
       ["[MM]", { kind: "elapsed", unit: "m", width: 2, fraction: 0 }],
       ["[DBNum1]", { kind: "bracket", text: "DBNum1" }]

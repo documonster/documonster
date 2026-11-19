@@ -29,7 +29,17 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> {
   }
 
   get sharedStringXform(): SharedStringXform {
-    return this._sharedStringXform || (this._sharedStringXform = new SharedStringXform());
+    return (
+      this._sharedStringXform ||
+      (this._sharedStringXform = new SharedStringXform(undefined, {
+        // Numbered as a `t="s"` cell's `<v>` numbers it.
+        fail: detail =>
+          new XlsxParseError(
+            "sharedStrings",
+            `shared string ${this.model!.values.length}: <si> ${detail}`
+          )
+      }))
+    );
   }
 
   get values(): SharedStringValue[] {

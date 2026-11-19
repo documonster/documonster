@@ -3,6 +3,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { cellGetValue } from "@excel/core/cell";
 import type { CellData } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
+import { XlsxParseError } from "@excel/errors";
 import { Cell, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { Readable } from "@stream";
@@ -202,6 +203,179 @@ describe("formula cached results", () => {
     expect(Cell.getValue(ws, "A1")).toEqual(expected);
     expect((await readStream(buffer)).A1).toEqual(expected);
     expect(Cell.getValue(await roundTrip(buffer), "A1")).toEqual(expected);
+  });
+});
+
+describe("cell values that are not what their type says", () => {
+  // Read with `parseFloat`, which takes the number at the front of the text, a malformed value became a plausible
+  // different one: a price of `49,99` read as `49`.
+  it.each(["49,99", "0x10", "49_x002E_99", "12abc", "INF", "NaN", "1e400", " "])(
+    "both readers refuse the number value <v>%s</v>, naming the part and the cell",
+    async v => {
+      const buffer = await withSheetData(sheet(`<row r="2"><c r="A2"><v>${v}</v></c></row>`));
+      const message = `xl/worksheets/sheet1.xml: cell A2: <v>${v}</v> is not a number`;
+      await expect(readFull(buffer)).rejects.toThrow(XlsxParseError);
+      await expect(readFull(buffer)).rejects.toThrow(message);
+      await expect(readStream(buffer)).rejects.toThrow(XlsxParseError);
+      await expect(readStream(buffer)).rejects.toThrow(message);
+    }
+  );
+
+  it("both readers refuse a formula's cached number that is not one", async () => {
+    const buffer = await withSheetData(
+      sheet('<row r="2"><c r="A2"><f>1+1</f><v>2,5</v></c></row>')
+    );
+    await expect(readFull(buffer)).rejects.toThrow("cell A2: <v>2,5</v> is not a number");
+    await expect(readStream(buffer)).rejects.toThrow("cell A2: <v>2,5</v> is not a number");
+  });
+
+  it.each([
+    [" 12 ", 12],
+    ["+.5", 0.5],
+    ["5.", 5],
+    ["-1.5E3", -1500],
+    ["1e-400", 0]
+  ])("both readers read the xsd:double <v>%s</v> as %d", async (v, expected) => {
+    const buffer = await withSheetData(sheet(`<row r="2"><c r="A2"><v>${v}</v></c></row>`));
+    expect(Cell.getValue(await readFull(buffer), "A2")).toBe(expected);
+    expect(await readStream(buffer)).toEqual({ A2: expected });
+  });
+
+  it("both readers refuse a shared string index that is not an integer", async () => {
+    const buffer = await withSheetData(sheet('<row r="2"><c r="A2" t="s"><v>0abc</v></c></row>'));
+    await expect(readFull(buffer)).rejects.toThrow(
+      "cell A2: <v>0abc</v> is not a shared string index"
+    );
+    await expect(readStream(buffer)).rejects.toThrow(
+      "cell A2: <v>0abc</v> is not a shared string index"
+    );
+  });
+
+  it("both readers refuse a negative shared string index, and one past the shared strings", async () => {
+    const negative = await withSheetData(sheet('<row r="2"><c r="A2" t="s"><v>-1</v></c></row>'));
+    await expect(readFull(negative)).rejects.toThrow(
+      "cell A2: <v>-1</v> is not a shared string index"
+    );
+    await expect(readStream(negative)).rejects.toThrow(
+      "cell A2: <v>-1</v> is not a shared string index"
+    );
+
+    const wb = Workbook.create();
+    Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "only");
+    const archive = zip();
+    for (const [name, file] of await extractAll(await Workbook.toBuffer(wb))) {
+      if (file.type !== "directory") {
+        archive.add(
+          name,
+          name === "xl/worksheets/sheet1.xml"
+            ? new TextDecoder()
+                .decode(file.data)
+                .replace(
+                  /<sheetData>.*<\/sheetData>/s,
+                  sheet('<row r="2"><c r="A2" t="s"><v>5</v></c></row>')
+                )
+            : file.data
+        );
+      }
+    }
+    const past = await archive.toBuffer();
+    const message = "xl/worksheets/sheet1.xml: cell A2: <v>5</v> names a shared string";
+    await expect(readFull(past)).rejects.toThrow(XlsxParseError);
+    await expect(readFull(past)).rejects.toThrow(message);
+    await expect(readStream(past)).rejects.toThrow(message);
+  });
+
+  // A cell may omit `r`, and follows the previous one; a refusal of its content named `cell undefined`.
+  it("both readers name a cell with no r by where it is", async () => {
+    const buffer = await withSheetData(sheet('<row r="2"><c><v>1</v></c><c><v>x</v></c></row>'));
+    await expect(readFull(buffer)).rejects.toThrow("cell B2: <v>x</v> is not a number");
+    await expect(readStream(buffer)).rejects.toThrow("cell B2: <v>x</v> is not a number");
+  });
+
+  // A cell's text may arrive in pieces, which are joined; a second element was joined the same way.
+  it.each([
+    ["<v>", '<c r="A3"><v>12.5</v><v>99</v></c>'],
+    ["<f>", '<c r="A3"><f>1</f><f>+1</f><v>2</v></c>'],
+    ["<is>", '<c r="A3" t="inlineStr"><is><t>a</t></is><is><t>b</t></is></c>']
+  ])("both readers refuse a cell with more than one %s", async (element, cell) => {
+    const buffer = await withSheetData(sheet(`<row r="3">${cell}</row>`));
+    await expect(readFull(buffer)).rejects.toThrow(`cell A3: has more than one ${element}`);
+    await expect(readStream(buffer)).rejects.toThrow(`cell A3: has more than one ${element}`);
+  });
+
+  it.each([
+    ["1", true],
+    ["0", false],
+    ["true", true],
+    ["false", false]
+  ])("both readers read the boolean <v>%s</v> as %s", async (v, expected) => {
+    const buffer = await withSheetData(sheet(`<row r="2"><c r="A2" t="b"><v>${v}</v></c></row>`));
+    expect(Cell.getValue(await readFull(buffer), "A2")).toBe(expected);
+    expect(await readStream(buffer)).toEqual({ A2: expected });
+  });
+
+  // Read as "not zero", `false` was `true`, and so was any text.
+  it.each([
+    ["a boolean", '<c r="A2" t="b"><v>2x</v></c>', "<v>2x</v> is not a boolean"],
+    ["a cached boolean", '<c r="A2" t="b"><f>1=1</f><v>yes</v></c>', "<v>yes</v> is not a boolean"],
+    ["a date", '<c r="A2" t="d"><v>soon</v></c>', "<v>soon</v> is not a date"]
+  ])("both readers refuse %s that is not one", async (_what, cell, detail) => {
+    const buffer = await withSheetData(sheet(`<row r="2">${cell}</row>`));
+    await expect(readFull(buffer)).rejects.toThrow(`cell A2: ${detail}`);
+    await expect(readStream(buffer)).rejects.toThrow(`cell A2: ${detail}`);
+  });
+});
+
+describe("inline strings", () => {
+  // `<is>` is read as the shared strings' `<si>` is. Its text used to be collected from every `<t>` below the cell.
+  it.each([
+    [
+      "a phonetic run, which is not part of the text",
+      '<c r="A1" t="inlineStr"><is><t>漢字</t><rPh sb="0" eb="2"><t>かんじ</t></rPh><phoneticPr fontId="1"/></is></c>',
+      "漢字"
+    ],
+    [
+      "a <t> before runs, as the first run",
+      '<c r="A1" t="inlineStr"><is><t>a</t><r><t>b</t></r></is></c>',
+      { richText: [{ text: "a" }, { text: "b" }] }
+    ],
+    [
+      "<is> rather than <v> in an inline string",
+      '<c r="A1" t="inlineStr"><v>x</v><is><t>y</t></is></c>',
+      "y"
+    ],
+    ["an escape once", '<c r="A1" t="inlineStr"><is><t>_x005F_x0041_</t></is></c>', "_x0041_"],
+    ["an empty <is> as the empty string", '<c r="A1" t="inlineStr"><is/></c>', ""]
+  ])("both readers read %s", async (_what, cell, expected) => {
+    const buffer = await withSheetData(sheet(`<row r="1">${cell}<c r="B1"><v>2</v></c></row>`));
+    const ws = await readFull(buffer);
+    expect(Cell.getValue(ws, "A1")).toEqual(expected);
+    expect(Cell.getValue(ws, "B1")).toBe(2);
+    expect(await readStream(buffer)).toEqual({ A1: expected, B1: 2 });
+  });
+
+  it.each([
+    ["more than one <t>", "<t>a</t><t>b</t>"],
+    ["a <t> after an <r>", "<r><t>a</t></r><t>b</t>"],
+    ["a run with more than one <t>", "<r><t>a</t><t>b</t></r>"]
+  ])("both readers refuse an <is> with %s", async (detail, content) => {
+    const buffer = await withSheetData(
+      sheet(`<row r="1"><c r="A1" t="inlineStr"><is>${content}</is></c></row>`)
+    );
+    await expect(readFull(buffer)).rejects.toThrow(`cell A1: its <is> has ${detail}`);
+    await expect(readStream(buffer)).rejects.toThrow(`cell A1: its <is> has ${detail}`);
+  });
+
+  // An `<extLst>` (or a foreign element) in a cell ended the cell at its closing tag in the full reader.
+  it("both readers skip an element of a cell they do not model", async () => {
+    const buffer = await withSheetData(
+      sheet(
+        '<row r="1"><c r="A1"><v>5</v><extLst><ext uri="x"><v>9</v></ext></extLst></c><c r="B1"><v>2</v></c></row>'
+      )
+    );
+    const ws = await readFull(buffer);
+    expect([Cell.getValue(ws, "A1"), Cell.getValue(ws, "B1")]).toEqual([5, 2]);
+    expect(await readStream(buffer)).toEqual({ A1: 5, B1: 2 });
   });
 });
 

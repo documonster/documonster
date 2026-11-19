@@ -14,6 +14,7 @@
 import { ValueType } from "@excel/core/enums";
 import type { CellValue } from "@excel/types";
 import { encodeCol } from "@excel/utils/address";
+import { keptNumFmtId } from "@excel/utils/kept-num-fmt";
 import {
   encodeCell,
   encodeRange,
@@ -645,6 +646,11 @@ export function numberFormatOf(cell: CellLike): string | undefined {
     return numFmt;
   }
   return typeof numFmt?.formatCode === "string" ? numFmt.formatCode : undefined;
+}
+
+/** A cell's number format as the built-in id a read kept for it — see `kept-num-fmt.ts` — or `undefined`. */
+export function keptFormatIdOf(cell: CellLike): number | undefined {
+  return numberFormatOf(cell) === undefined ? keptNumFmtId(cell.style) : undefined;
 }
 
 /**

@@ -120,7 +120,8 @@ import {
   validationsFromModel,
   viewSettingsFromModel,
   mergesFromModel,
-  sheetRowsFromModel
+  sheetRowsFromModel,
+  styleFacets
 } from "@excel/xlsb/write/model-adapter";
 import { SharedStringTable, writeSharedStrings } from "@excel/xlsb/write/shared-strings";
 import { withSheetExternSheets, writeWorkbookPart } from "@excel/xlsb/write/workbook";
@@ -290,6 +291,31 @@ export async function writeXlsbPackage(
   // than returned because the tables are filled in as rows arrive, long before this function is called.
   const strings = options?.streamed?.strings ?? new SharedStringTable();
   const formats = options?.streamed?.formats ?? new CellFormatTable();
+  // Named cell styles: an *array*, each entry already carrying its own `name` — not a record keyed by name. Reading it
+  // as a record produced styles called "0" and "1", and those names round-tripped. One per name as Excel compares
+  // them, without regard to case: the first is kept, as Excel keeps it.
+  const styleKeys = new Set<string>();
+  const namedStyles = (
+    (model as unknown as { cellStyles?: readonly NamedStyleLike[] }).cellStyles ?? []
+  ).filter(style => {
+    if (typeof style.name !== "string" || style.name === "") {
+      return false;
+    }
+    const key = excelNameKey(style.name);
+    if (styleKeys.has(key)) {
+      return false;
+    }
+    styleKeys.add(key);
+    return true;
+  });
+  // Before any cell is interned: a cell with no format of its own is index 0, the workbook's default cell format, and
+  // one of a named style is based on that style's style XF.
+  const normal = model.normalStyle === undefined ? undefined : styleFacets(model.normalStyle);
+  formats.setDefaults(
+    model.defaultStyle === undefined ? undefined : styleFacets(model.defaultStyle),
+    normal,
+    namedStyles.map(named => ({ name: named.name, ...styleFacets(named) }))
+  );
   const alreadyWritten = options?.streamed?.sheetPaths ?? new Set<string>();
   const features: WorksheetFeatures = options?.streamed?.features ?? { dynamicArrays: false };
   const unsupported: string[] = [];
@@ -803,23 +829,6 @@ export async function writeXlsbPackage(
   // Named cell styles. Their facets are interned *before* the tables are serialised, so a style that
   // bolds its text shares the bold font record with any cell that does — and so `table.fontIndex` can
   // resolve it at all, which it cannot for a font it has never seen.
-  // An *array*, each entry already carrying its own `name` — not a record keyed by name. Reading it as
-  // a record produced styles called "0" and "1", and those names round-tripped.
-  // One per name as Excel compares them, without regard to case: the first is kept, as Excel keeps it.
-  const styleKeys = new Set<string>();
-  const namedStyles = (
-    (model as unknown as { cellStyles?: readonly NamedStyleLike[] }).cellStyles ?? []
-  ).filter(style => {
-    if (typeof style.name !== "string" || style.name === "") {
-      return false;
-    }
-    const key = excelNameKey(style.name);
-    if (styleKeys.has(key)) {
-      return false;
-    }
-    styleKeys.add(key);
-    return true;
-  });
   for (const named of namedStyles) {
     internStyle(formats, {
       ...(named.numFmt === undefined ? {} : { numberFormat: named.numFmt }),
@@ -830,7 +839,11 @@ export async function writeXlsbPackage(
       ...(named.protection === undefined ? {} : { protection: named.protection })
     });
   }
-  const styles = writeStyles(formats, model.defaultFont, namedStyles, dxfIndex.styles);
+  // The Normal style's format, interned as a named style's is so its facets reach the tables.
+  if (normal !== undefined) {
+    internStyle(formats, normal);
+  }
+  const styles = writeStyles(formats, model.defaultFont, namedStyles, dxfIndex.styles, normal);
   // Properties a differential format carries that `BrtDXF` cannot express. Everything the model can hold is
   // written; this is the guard for what it cannot, and for a model field added without a branch.
   unsupported.push(...dxfIndex.lost.map(entry => `xl/styles.bin: ${entry}`));

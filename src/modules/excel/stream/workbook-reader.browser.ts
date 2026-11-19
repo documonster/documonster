@@ -489,6 +489,8 @@ export abstract class WorkbookReaderBase<
   protected _xlsbSharedStrings?: readonly string[];
   /** Number formats by style index, from `styles.bin`. */
   protected _xlsbNumberFormats?: readonly (string | undefined)[];
+  /** Beside {@link _xlsbNumberFormats}: the built-in ids kept for want of a code, which a date may be. */
+  protected _xlsbKeptFormatIds?: readonly (number | undefined)[];
   protected _sheetByRelId?: Record<string, SheetMetadata>;
   /** The read's yield point, shared by every part so the budget counts the work of the whole read. */
   private _yieldPoint = createYieldBudget();
@@ -1054,7 +1056,9 @@ export abstract class WorkbookReaderBase<
     const { createStylesReader } = await import("@excel/xlsb/styles");
     const reader = createStylesReader(XLSB_PATHS.styles);
     await this._readXlsbRecords(entry, XLSB_PATHS.styles, record => reader.add(record));
-    this._xlsbNumberFormats = reader.finish().numberFormats;
+    const table = reader.finish();
+    this._xlsbNumberFormats = table.numberFormats;
+    this._xlsbKeptFormatIds = table.keptFormatIds;
   }
 
   /**
@@ -1102,6 +1106,7 @@ export abstract class WorkbookReaderBase<
     reader.xlsbContext = {
       sharedStrings: this._xlsbSharedStrings ?? [],
       ...(this._xlsbNumberFormats === undefined ? {} : { numberFormats: this._xlsbNumberFormats }),
+      ...(this._xlsbKeptFormatIds === undefined ? {} : { keptFormatIds: this._xlsbKeptFormatIds }),
       ...(this._xlsbWorkbook?.date1904 === undefined
         ? {}
         : { date1904: this._xlsbWorkbook.date1904 }),

@@ -1,39 +1,46 @@
 /**
- * The built-in number formats, end to end through a file on disk.
+ * The accounting formats, end to end through a template a Chinese Excel produced.
  *
- * **Split out of `numfmt-builtins.test.ts` so that file keeps its browser coverage.** This one case reads a template
- * with `Workbook.readFile`, which is Node-only — and the browser configuration excludes `*.node.test.ts` by glob,
- * which is the repository's rule for exactly this. Left where it was, it failed in the browser with
- * `Workbook.readFile is not a function` and took the other ten cases' browser run down with it.
+ * **Split out of `numfmt-builtins.test.ts` so that file keeps its browser coverage.** This case reads a template off
+ * disk, which is Node-only — and the browser configuration excludes `*.node.test.ts` by glob.
  */
-import { extractAll } from "@archive/unzip/extract";
-import { Workbook } from "@excel";
-import { iterateInterpretableRecords } from "@excel/xlsb/binary";
-import { recordSpec } from "@excel/xlsb/spec/records";
+import { readFileSync } from "node:fs";
+
+import { Cell, Workbook } from "@excel";
 import { describe, expect, it } from "vitest";
 
-describe("a format code read out of a file", () => {
-  it("survives a round trip through a workbook without becoming a custom id", async () => {
-    // End-to-end, because the three defects only combined into the symptom at the far end: a built-in format
-    // that fails to match is written as a `BrtFmt` with an id of 164 or above, and a styles part full of those
-    // is what Excel discarded.
-    const source = "src/modules/excel/examples/data/comments.xlsx";
-    const workbook = Workbook.create();
-    await Workbook.readFile(workbook, source);
-    const parts = await extractAll(
-      await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" })
-    );
+const TEMPLATE = "src/modules/excel/examples/data/comments.xlsx";
 
-    const customIds: number[] = [];
-    for (const record of iterateInterpretableRecords(parts.get("xl/styles.bin")!.data, "b")) {
-      if (recordSpec(record.id)?.name !== "BrtFmt") {
-        continue;
-      }
-      customIds.push(
-        new DataView(record.payload.buffer, record.payload.byteOffset).getUint16(0, true)
+/** The four accounting codes the template declares, with `<numFmt numFmtId="41…44">`. */
+const DECLARED = [
+  '_ * #,##0_ ;_ * \\-#,##0_ ;_ * "-"_ ;_ @_ ',
+  '_ "￥"* #,##0_ ;_ "￥"* \\-#,##0_ ;_ "￥"* "-"_ ;_ @_ ',
+  '_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * "-"??_ ;_ @_ ',
+  '_ "￥"* #,##0.00_ ;_ "￥"* \\-#,##0.00_ ;_ "￥"* "-"??_ ;_ @_ '
+];
+
+describe("a format code a file declares for an accounting id", () => {
+  // The codes are the template's, so they are written as codes and a reader in any locale shows them as its author
+  // did. Excel opens the result keeping all 49 of the template's named styles (checked in Excel for both containers):
+  // custom format ids were once blamed for Excel discarding them, which was the style XFs' `ixfParent`.
+  it.each(["xlsx", "xlsb"] as const)(
+    "is read and written back as that code in %s",
+    async format => {
+      const source = await Workbook.read(readFileSync(TEMPLATE));
+      const ws = Workbook.addWorksheet(source, "Probe");
+      DECLARED.forEach((code, i) => {
+        Cell.setValue(ws, { row: i + 1, col: 1 }, -1234.5);
+        Cell.setNumFmt(ws, { row: i + 1, col: 1 }, code);
+      });
+      const back = await Workbook.read(
+        await Workbook.toBuffer(source, { format, unsupported: "ignore" }),
+        { format }
       );
+      const probe = Workbook.getWorksheet(back, "Probe")!;
+      expect(DECLARED.map((_, i) => Cell.getNumFmt(probe, { row: i + 1, col: 1 }))).toEqual(
+        DECLARED
+      );
+      expect(Cell.getDisplayText(probe, "A2")).toBe(" ￥-1,235 ");
     }
-    // The template's four formats are built-ins, so nothing should be registered as custom at all.
-    expect(customIds).toEqual([]);
-  });
+  );
 });

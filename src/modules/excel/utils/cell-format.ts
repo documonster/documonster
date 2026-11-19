@@ -9,8 +9,14 @@
  */
 
 import type { NumFmt } from "@excel/types";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import { isGeneralFormat, numberFormatFacets } from "@utils/number-format";
-import { formatDateAsGeneral, renderNumberFormat } from "@utils/number-format-render";
+import {
+  formatDateAsGeneral,
+  renderNumberFormat,
+  renderNumberFormatLayout
+} from "@utils/number-format-render";
+import type { NumberFormatLayout } from "@utils/number-format-render";
 import { dateToExcel } from "@utils/utils";
 
 /**
@@ -94,27 +100,50 @@ export function formatCellValue(
   dateFormat?: string,
   date1904 = false
 ): string {
-  if (value instanceof Date) {
-    let serial = dateToExcel(value, date1904);
-    if (isTimeOnlyFormat(fmt)) {
-      serial = serial % 1;
-      if (serial < 0) {
-        serial += 1;
-      }
-      return renderNumberFormat(fmt, serial, { date1904 });
-    }
-    // A Date whose numFmt is missing or General: the shared rule (see `formatDateAsGeneral`).
-    let effectiveFmt: string;
-    if (dateFormat && isDateDisplayFormat(fmt)) {
-      effectiveFmt = dateFormat;
-    } else if (isGeneralFormat(fmt)) {
-      return formatDateAsGeneral(value, date1904);
-    } else {
-      effectiveFmt = fmt;
-    }
-    return renderNumberFormat(effectiveFmt, serial, { date1904 });
+  const shown = renderInput(value, fmt, dateFormat, date1904);
+  return "text" in shown ? shown.text : renderNumberFormat(shown.fmt, shown.value, { date1904 });
+}
+
+/**
+ * {@link formatCellValue}, with where its format fills the cell (`*x`): for a renderer that knows the cell's width
+ * and can expand it.
+ */
+export function formatCellValueLayout(
+  value: Date | number | boolean | string,
+  fmt: string,
+  dateFormat?: string,
+  date1904 = false
+): NumberFormatLayout {
+  const shown = renderInput(value, fmt, dateFormat, date1904);
+  return "text" in shown ? shown : renderNumberFormatLayout(shown.fmt, shown.value, { date1904 });
+}
+
+/** What a value is rendered through: the format and the value it reads, or — a `Date` under General — its text. */
+function renderInput(
+  value: Date | number | boolean | string,
+  fmt: string,
+  dateFormat: string | undefined,
+  date1904: boolean
+): { fmt: string; value: number | boolean | string } | { text: string } {
+  if (!(value instanceof Date)) {
+    return { fmt, value };
   }
-  return renderNumberFormat(fmt, value, { date1904 });
+  let serial = dateToExcel(value, date1904);
+  if (isTimeOnlyFormat(fmt)) {
+    serial = serial % 1;
+    if (serial < 0) {
+      serial += 1;
+    }
+    return { fmt, value: serial };
+  }
+  // A Date whose numFmt is missing or General: the shared rule (see `formatDateAsGeneral`).
+  if (dateFormat && isDateDisplayFormat(fmt)) {
+    return { fmt: dateFormat, value: serial };
+  }
+  if (isGeneralFormat(fmt)) {
+    return { text: formatDateAsGeneral(value, date1904) };
+  }
+  return { fmt, value: serial };
 }
 
 // =============================================================================
@@ -140,12 +169,19 @@ interface CellLike {
  * @param dateFormat - Optional custom date format override
  */
 export function getCellDisplayText(cell: CellLike, dateFormat?: string): string {
+  return getCellDisplayLayout(cell, dateFormat).text;
+}
+
+/**
+ * {@link getCellDisplayText}, with where its number format fills the cell (`*x`) — see {@link formatCellValueLayout}.
+ */
+export function getCellDisplayLayout(cell: CellLike, dateFormat?: string): NumberFormatLayout {
   const value = cell.value;
   const numFmt = cell.numFmt;
-  const fmt = typeof numFmt === "string" ? numFmt : (numFmt?.formatCode ?? "General");
+  const fmt = numFmtCode(numFmt) ?? "General";
 
   if (value == null) {
-    return "";
+    return { text: "" };
   }
 
   if (
@@ -154,7 +190,7 @@ export function getCellDisplayText(cell: CellLike, dateFormat?: string): string 
     typeof value === "boolean" ||
     typeof value === "string"
   ) {
-    return formatCellValue(value, fmt, dateFormat, cell.date1904);
+    return formatCellValueLayout(value, fmt, dateFormat, cell.date1904);
   }
 
   // Formula type — use the result value. A shared-formula clone carries `sharedFormula` and no `formula`,
@@ -162,7 +198,7 @@ export function getCellDisplayText(cell: CellLike, dateFormat?: string): string 
   if (typeof value === "object" && ("formula" in value || "sharedFormula" in value)) {
     const result = (value as { result?: unknown }).result;
     if (result == null) {
-      return "";
+      return { text: "" };
     }
     if (
       result instanceof Date ||
@@ -170,10 +206,10 @@ export function getCellDisplayText(cell: CellLike, dateFormat?: string): string 
       typeof result === "boolean" ||
       typeof result === "string"
     ) {
-      return formatCellValue(result, fmt, dateFormat, cell.date1904);
+      return formatCellValueLayout(result, fmt, dateFormat, cell.date1904);
     }
   }
 
   // Fallback to cell.text for other types (rich text, hyperlink, error, etc.)
-  return cell.text;
+  return { text: cell.text };
 }

@@ -1,4 +1,5 @@
 import type { Alignment, Borders, Fill, Font, NumFmt, Protection } from "@excel/types";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import { AlignmentXform } from "@excel/xlsx/xform/style/alignment-xform";
@@ -74,8 +75,10 @@ class DxfXform extends BaseXform {
     }
     // `!== undefined`, not truthiness: `General` is built-in id 0, and a truthiness test dropped it.
     if (model.numFmt && model.numFmtId !== undefined) {
-      const formatCode = typeof model.numFmt === "string" ? model.numFmt : model.numFmt.formatCode;
-      this.map.numFmt.render(xmlStream, { id: model.numFmtId, formatCode });
+      this.map.numFmt.render(xmlStream, {
+        id: model.numFmtId,
+        formatCode: numFmtCode(model.numFmt)
+      });
     }
     if (model.fill) {
       this.map.fill.render(xmlStream, model.fill);

@@ -1,5 +1,5 @@
 import { Enums } from "@excel/core/enums";
-import { ExcelError } from "@excel/errors";
+import { ExcelError, XlsxParseError } from "@excel/errors";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { CellXform, attachHyperlink } from "@excel/xlsx/xform/sheet/cell-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
@@ -681,7 +681,7 @@ describe("CellXform", () => {
   // path would crash with `TypeError: cannot access property "richText",
   // model.value is undefined`.
   describe("reconcile with malformed sharedStrings", () => {
-    it("throws ExcelError when shared-string index is out of range", () => {
+    it("throws XlsxParseError when shared-string index is out of range", () => {
       const xform = new CellXform();
       const sharedStrings = new SharedStringsXform();
       const options = { sharedStrings, styles: fakeStyles };
@@ -689,7 +689,10 @@ describe("CellXform", () => {
       const makeModel = () => ({ address: "B47", type: Enums.ValueType.String, value: 5 });
 
       expect(() => xform.reconcile(makeModel(), options)).toThrow(ExcelError);
-      expect(() => xform.reconcile(makeModel(), options)).toThrow(/shared string index 5.*B47/);
+      expect(() => xform.reconcile(makeModel(), options)).toThrow(XlsxParseError);
+      expect(() => xform.reconcile(makeModel(), options)).toThrow(
+        "cell B47: <v>5</v> names a shared string the shared strings do not have"
+      );
     });
 
     it("degrades gracefully when sharedStrings table is missing entirely", () => {

@@ -472,6 +472,8 @@ class WorksheetReader extends EventEmitter {
               cellCol = readCellColumn(node.attributes.r, row.number, lastCellCol);
               lastCellCol = cellCol;
               cellXform.parseOpen(node);
+              // Before its content is read, so that a refusal of the content names the cell even when `r` is absent.
+              cellXform.model.address = colCache.encodeAddress(row.number, cellCol);
             }
             break;
           case "mergeCell":

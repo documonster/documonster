@@ -311,6 +311,22 @@ Cell.setNumFmt(worksheet, "A1", "yyyy-mm-dd");
 Cell.setNumFmt(worksheet, "A1", '#,##0.00 "units"');
 ```
 
+`Cell.getDisplayText` shows a value through its format. A few built-in formats have no code of
+their own — a file names them by id (the currencies 5–8, the accounting formats 41–44, the East
+Asian and Thai dates) and every Excel shows them in its own locale's form. The read keeps the id
+and writes it back; `locale` says whose display the text is, and `Pdf.fromExcel`,
+`WordExcel.toDocx`, `Worksheet.toJson` and `Column.autoFit` take the same option. `Row.autoFit` does
+not: Excel wraps only text, never a number or a date, and no locale's form changes a text's words — so no
+row's height depends on it:
+
+```typescript
+Cell.getDisplayText(worksheet, "C1"); // "$3.50 " — en-US when no locale is named
+Cell.getDisplayText(worksheet, "C1", { locale: "zh-CN" }); // "¥3.50 "
+```
+
+A `*x` in a format repeats `x` until the text fills the cell. A display text has no width and
+leaves it out; `Pdf.fromExcel` and `WordExcel.toDocx` expand it to the column.
+
 ### Rich Text
 
 ```typescript

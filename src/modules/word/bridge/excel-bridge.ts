@@ -54,19 +54,16 @@ import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
 import type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 import type { CellData as ExcelCell } from "@excel/core/cell";
 import {
-  cellAlignment,
-  cellBorder,
-  cellFill,
-  cellFont,
   cellGetValue,
   cellHyperlink,
-  cellDisplayText,
+  cellDisplayLayout,
   cellSetValue,
+  cellShownStyle,
   cellType
 } from "@excel/core/cell";
 import { ValueType } from "@excel/core/enums";
 import { rowCellCount } from "@excel/core/row";
-import { addWorksheet, createWorkbook, getWorksheets } from "@excel/core/workbook";
+import { addWorksheet, createWorkbook, getDefaultFont, getWorksheets } from "@excel/core/workbook";
 // Use the browser base class so the public `excelToDocx(workbook)` signature
 // is callable from both the Node entry (where `Workbook` is the Node subclass
 // — trivially assignable to the base) and the browser entry (where `Workbook`
@@ -93,7 +90,10 @@ import type {
   Alignment as ExcelAlignment,
   Color as ExcelColor
 } from "@excel/types";
+import { DEFAULT_DISPLAY_LOCALE, DISPLAY_LOCALES } from "@excel/utils/display-locale";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 import { sheetNameKey } from "@utils/name-key";
+import type { NumberFormatLayout } from "@utils/number-format-render";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
 import { CELL_THEME_PALETTE } from "@utils/theme-colors";
@@ -136,7 +136,9 @@ import type {
   TableProperties,
   TableCellProperties,
   Border,
-  Shading
+  Shading,
+  TabStop,
+  TabStopLeader
 } from "@word/types";
 import { EMU_PER_INCH, charWidthToPixel, pixelToPoints, ptToTwips } from "@word/units";
 
@@ -173,6 +175,13 @@ export interface ExcelToDocxOptions {
   readonly preserveFormatting?: boolean;
   /** Include cell borders in table. Default: true. */
   readonly includeBorders?: boolean;
+  /**
+   * Whose display the cells are shown in: the form a built-in number format with no code of its own takes — the
+   * symbol of a currency, an East Asian date, Thai digits — as Excel in that locale shows it, as
+   * `Cell.getDisplayText` takes it. A format with a code shows as its code says in every locale.
+   * Default: `"en-US"`.
+   */
+  readonly locale?: ExcelDisplayLocale;
 }
 
 const excelToDocxOptionsSchema = w.record({
@@ -191,7 +200,8 @@ const excelToDocxOptionsSchema = w.record({
   maxColumns: w.integer({ min: 0 }).optional(),
   maxRows: w.integer({ min: 0 }).optional(),
   preserveFormatting: w.boolean().optional(),
-  includeBorders: w.boolean().optional()
+  includeBorders: w.boolean().optional(),
+  locale: s.member<ExcelDisplayLocale>(DISPLAY_LOCALES).optional()
 });
 const _excelToDocxOptionsMatch: SchemaMatches<typeof excelToDocxOptionsSchema, ExcelToDocxOptions> =
   true;
@@ -261,7 +271,8 @@ export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions
     maxColumns: options?.maxColumns ?? 50,
     maxRows: options?.maxRows ?? 10000,
     preserveFormatting: options?.preserveFormatting ?? true,
-    includeBorders: options?.includeBorders ?? true
+    includeBorders: options?.includeBorders ?? true,
+    locale: options?.locale ?? DEFAULT_DISPLAY_LOCALE
   };
 
   const body: BodyContent[] = [];
@@ -301,8 +312,18 @@ export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions
   // Register the heading styles we actually used (plus Normal as the
   // basedOn root). Without these entries Word logs "missing referenced
   // style" warnings on every heading inserted by the bridge.
+  // Normal carries the workbook's default font (`Workbook.getDefaultFont`), which Excel shows a cell with no font of
+  // its own in — as `Pdf.fromExcel` takes it for its default — rather than every run repeating it.
+  const defaultRun = opts.preserveFormatting ? fontToRun(getDefaultFont(workbook)) : undefined;
   const styles: StyleDef[] = [
-    { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true, qFormat: true }
+    {
+      type: "paragraph",
+      styleId: "Normal",
+      name: "Normal",
+      isDefault: true,
+      qFormat: true,
+      ...(defaultRun === undefined ? {} : { runProperties: defaultRun })
+    }
   ];
   const usedHeadingLevels = new Set<number>();
   if (opts.includeTitlePage) {
@@ -399,6 +420,17 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
     return null;
   }
 
+  // Column widths from worksheet definitions (Excel char width → twips),
+  // via the shared char-width→pixel→point chain so the table column widths
+  // match the Excel / PDF column geometry. MDW = 7 (Calibri 11pt default).
+  const columnWidths: number[] = [];
+  for (let c = 1; c <= maxCol; c++) {
+    const col = getColumn(ws, c);
+    const charWidth = col.width ?? 10;
+    const pt = pixelToPoints(charWidthToPixel(charWidth, 7));
+    columnWidths.push(ptToTwips(pt));
+  }
+
   const rows: TableRow[] = [];
 
   for (let r = 1; r <= rowCount; r++) {
@@ -420,24 +452,13 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
     const cells: TableCell[] = [];
     for (let c = 1; c <= maxCol; c++) {
       const cell = rowGetCell(row, c);
-      cells.push(convertCell(cell, opts));
+      cells.push(convertCell(cell, opts, columnWidths[c - 1]!));
     }
     rows.push({ cells });
   }
 
   if (rows.length === 0) {
     return null;
-  }
-
-  // Column widths from worksheet definitions (Excel char width → twips),
-  // via the shared char-width→pixel→point chain so the table column widths
-  // match the Excel / PDF column geometry. MDW = 7 (Calibri 11pt default).
-  const columnWidths: number[] = [];
-  for (let c = 1; c <= maxCol; c++) {
-    const col = getColumn(ws, c);
-    const charWidth = col.width ?? 10;
-    const pt = pixelToPoints(charWidthToPixel(charWidth, 7));
-    columnWidths.push(ptToTwips(pt));
   }
 
   const tableProps: TableProperties = {
@@ -456,9 +477,27 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
 // Cell → TableCell
 // =============================================================================
 
-function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): TableCell {
-  const text = renderCellText(cell);
+function convertCell(
+  cell: ExcelCell,
+  opts: Required<ExcelToDocxOptions>,
+  widthTwips: number
+): TableCell {
+  const { text, fill } = renderCellLayout(cell, opts.locale);
+  // How the cell shows in Excel: its own format, and its named style's or the workbook default's for the rest.
+  const shown = cellShownStyle(cell, opts.locale);
   const children: Run[] = [];
+  // A fill (`*x`) is a right-aligned tab stop at the cell's far edge whose leader is the fill character, which is
+  // how Word fills a width with a character: the text before it starts at the left and the rest ends at the right,
+  // as Excel lays them. Word has leaders for a few characters only; any other fill is left out.
+  const leader = fill === undefined ? undefined : TAB_LEADERS[fill.char];
+  const tabStop: TabStop | undefined =
+    leader === undefined
+      ? undefined
+      : {
+          type: "right",
+          position: Math.max(widthTwips - 2 * DEFAULT_CELL_MARGIN_TWIPS, 0),
+          leader
+        };
 
   if (text) {
     if (cellType(cell) === ValueType.RichText) {
@@ -476,31 +515,41 @@ function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): Table
         }
       }
     } else {
-      const runProps = opts.preserveFormatting ? fontToRun(cellFont(cell)) : undefined;
+      const runProps = opts.preserveFormatting ? fontToRun(shown.font) : undefined;
       children.push({
         properties: runProps,
-        content: [{ type: "text", text }]
+        content:
+          tabStop === undefined || fill === undefined
+            ? [{ type: "text", text }]
+            : [
+                { type: "text", text: text.slice(0, fill.at) },
+                { type: "tab" },
+                { type: "text", text: text.slice(fill.at) }
+              ]
       });
     }
   }
 
+  const alignment = opts.preserveFormatting ? alignmentToParaProps(shown.alignment) : undefined;
   const para: Paragraph = {
     type: "paragraph",
-    properties: opts.preserveFormatting ? alignmentToParaProps(cellAlignment(cell)) : undefined,
+    // The tab stop lays the text out itself; an alignment would move the stop with it.
+    properties:
+      tabStop === undefined ? alignment : { ...alignment, alignment: "left", tabs: [tabStop] },
     children: wrapHyperlink(cellHyperlink(cell), children)
   };
 
   const cellProps: Mutable<TableCellProperties> = {};
 
-  if (opts.preserveFormatting && cellFill(cell)) {
-    const shading = fillToShading(cellFill(cell));
+  if (opts.preserveFormatting && shown.fill) {
+    const shading = fillToShading(shown.fill);
     if (shading) {
       cellProps.shading = shading;
     }
   }
 
-  if (opts.includeBorders && cellBorder(cell)) {
-    const borders = bordersToCellBorders(cellBorder(cell));
+  if (opts.includeBorders && shown.border) {
+    const borders = bordersToCellBorders(shown.border);
     if (borders) {
       cellProps.borders = borders;
     }
@@ -536,13 +585,25 @@ function wrapHyperlink(
   return [link];
 }
 
-function renderCellText(cell: ExcelCell): string {
+function renderCellLayout(cell: ExcelCell, locale: ExcelDisplayLocale): NumberFormatLayout {
   // As the cell shows in Excel, `Cell.getDisplayText` and `Pdf.fromExcel`: its
   // number format applied to the value (a date by its calendar fields, so the
   // text does not depend on the machine's timezone), the text of anything else.
   // A cell merged into another holds nothing of its own.
-  return cellType(cell) === ValueType.Merge ? "" : cellDisplayText(cell);
+  return cellType(cell) === ValueType.Merge ? { text: "" } : cellDisplayLayout(cell, locale);
 }
+
+/** Word's tab leaders, by the fill character each draws. */
+const TAB_LEADERS: Readonly<Record<string, TabStopLeader>> = {
+  " ": "none",
+  ".": "dot",
+  "-": "hyphen",
+  _: "underscore",
+  "·": "middleDot"
+};
+
+/** Word's default left and right cell margin (0.075"), which the table sets no other of. */
+const DEFAULT_CELL_MARGIN_TWIPS = 108;
 
 // =============================================================================
 // Style Conversion

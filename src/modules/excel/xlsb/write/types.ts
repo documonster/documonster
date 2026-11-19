@@ -19,9 +19,8 @@ import type { Alignment, Borders, CellValue, Fill, Font, Protection } from "@exc
  * same five fields — and each of the three intern sites listed them again. A sixth facet meant editing
  * three places and hoping, which is how a facet comes to be written for cells and dropped for rows.
  *
- * Deliberately *not* the public `Style`: its fields are required, its `numFmt` admits an id-and-code
- * pair, and it carries `styleName` — which this writer does not express. A `Pick<Partial<Style>>` would
- * say the same thing less clearly and imply support that is not there.
+ * Deliberately *not* the public `Style`: its fields are required, and its `numFmt` admits an id-and-code
+ * pair. A `Pick<Partial<Style>>` would say the same thing less clearly.
  */
 export interface StyleFacets {
   /**
@@ -31,6 +30,10 @@ export interface StyleFacets {
    * seen every cell, and a caller building a row has no way to know it.
    */
   readonly numberFormat?: string;
+  /** A built-in number-format id the read kept because it has no format code — see `kept-num-fmt.ts`. */
+  readonly keptFormatId?: number;
+  /** The named cell style the format is based on — its parent style XF, which it takes what it leaves out from. */
+  readonly styleName?: string;
   readonly font?: Partial<Font> | undefined;
   readonly fill?: Fill | undefined;
   readonly border?: Partial<Borders> | undefined;
@@ -123,6 +126,7 @@ export interface CellLike {
     readonly border?: Partial<Borders>;
     readonly alignment?: Partial<Alignment>;
     readonly protection?: Partial<Protection>;
+    readonly styleName?: string;
   };
   readonly value?: unknown;
   readonly formula?: string;

@@ -24,6 +24,7 @@ import {
   type ArrayRange
 } from "@excel/utils/array-ranges";
 import { hasUnnamedThisRow, toFileFormula } from "@excel/utils/future-functions";
+import { keptNumFmtId } from "@excel/utils/kept-num-fmt";
 import { slideFormula } from "@excel/utils/shared-formula";
 import { isStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import { tableNameAt, type TableExtent } from "@excel/utils/table-at";
@@ -60,6 +61,7 @@ import type { SheetTable } from "@excel/xlsb/tables";
 import {
   formulaCachedResultLoss,
   hyperlinkLabelLoss,
+  keptFormatIdOf,
   numberFormatOf,
   unsupportedKind,
   writableValue
@@ -143,11 +145,13 @@ export function sheetRowsFromModel(
         column,
         value: writableValue(cell),
         numberFormat: numberFormatOf(cell),
+        keptFormatId: keptFormatIdOf(cell),
         font: cell.style?.font,
         fill: cell.style?.fill,
         border: cell.style?.border,
         alignment: cell.style?.alignment,
         protection: cell.style?.protection,
+        styleName: cell.style?.styleName,
         // Withheld when the cell was classified unsupported, and that is the whole mechanism by
         // which an unsupported cell becomes a blank. Passing the formula through anyway meant a
         // cell reported as an array formula was *written as an ordinary one*: it computed a single
@@ -276,11 +280,15 @@ function expandStyledBlanks(
           column,
           value: null,
           ...(range.style?.numFmt === undefined ? {} : { numberFormat: range.style.numFmt }),
+          ...(range.style === undefined || keptNumFmtId(range.style) === undefined
+            ? {}
+            : { keptFormatId: keptNumFmtId(range.style) }),
           ...(range.style?.font === undefined ? {} : { font: range.style.font }),
           ...(range.style?.fill === undefined ? {} : { fill: range.style.fill }),
           ...(range.style?.border === undefined ? {} : { border: range.style.border }),
           ...(range.style?.alignment === undefined ? {} : { alignment: range.style.alignment }),
           ...(range.style?.protection === undefined ? {} : { protection: range.style.protection }),
+          ...(range.style?.styleName === undefined ? {} : { styleName: range.style.styleName }),
           date1904
         } as SheetCell);
       }
@@ -310,6 +318,7 @@ interface StyledBlankRectangle {
     readonly border?: unknown;
     readonly alignment?: unknown;
     readonly protection?: unknown;
+    readonly styleName?: string;
   };
 }
 
@@ -1054,6 +1063,11 @@ export function mergesFromModel(worksheet: WorkbookModel["worksheets"][number]):
   return { ranges, unsupported };
 }
 
+/** A style's facets in the shape the format table interns — {@link styleOf} for a style held by nothing. */
+export function styleFacets(style: CellLike["style"]): ReturnType<typeof styleOf> {
+  return styleOf({ style });
+}
+
 /**
  * The formatting a row or a column declares, in the shape the format table interns.
  *
@@ -1062,24 +1076,29 @@ export function mergesFromModel(worksheet: WorkbookModel["worksheets"][number]):
  */
 function styleOf(owner: { readonly style?: CellLike["style"] }): {
   numberFormat?: string;
+  keptFormatId?: number;
   font?: Partial<Font>;
   fill?: Fill;
   border?: Partial<Borders>;
   alignment?: Partial<Alignment>;
   protection?: Partial<Protection>;
+  styleName?: string;
 } {
   const style = owner.style;
   if (style === undefined) {
     return {};
   }
   const numberFormat = numberFormatOf({ address: "A1", style });
+  const keptFormatId = keptFormatIdOf({ address: "A1", style });
   return {
     ...(numberFormat === undefined ? {} : { numberFormat }),
+    ...(keptFormatId === undefined ? {} : { keptFormatId }),
     ...(style.font === undefined ? {} : { font: style.font }),
     ...(style.fill === undefined ? {} : { fill: style.fill }),
     ...(style.border === undefined ? {} : { border: style.border }),
     ...(style.alignment === undefined ? {} : { alignment: style.alignment }),
-    ...(style.protection === undefined ? {} : { protection: style.protection })
+    ...(style.protection === undefined ? {} : { protection: style.protection }),
+    ...(style.styleName === undefined ? {} : { styleName: style.styleName })
   };
 }
 

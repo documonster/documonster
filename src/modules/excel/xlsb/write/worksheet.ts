@@ -56,7 +56,7 @@ import { encodePane, paneSelections, type SheetPane } from "@excel/xlsb/pane";
 import { encodeSheetProperties, type SheetProperties } from "@excel/xlsb/sheet-properties";
 import { sparklineRecords, type SheetSparklineGroup } from "@excel/xlsb/sparkline";
 import { requireRecordSpec } from "@excel/xlsb/spec/records";
-import { DEFAULT_DATE_FORMAT, internStyle, type CellFormatTable } from "@excel/xlsb/styles";
+import { internStyle, type CellFormatTable } from "@excel/xlsb/styles";
 import { encodeCellRecord, isRefused, usedRange } from "@excel/xlsb/write/cells";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
 import { encodeRowHeader } from "@excel/xlsb/write/rows";
@@ -843,15 +843,10 @@ export function encodeRowRecords(
     // rejection branch is what made a cell whose formula could not be encoded lose its number
     // format and font as well: `SheetCell.styleIndex` is never populated by the model reader,
     // so that branch always fell back to 0 — the "no formatting" entry.
-    // A date with no format of its own gets the built-in date format, as this library's XLSX writer does with
-    // its `dateStyleId`. Without it the cell holds a serial number and says nothing about how to show it, so
-    // a date written to XLSB opened as `45306` — the value was right and unreadable.
-    const styleIndex = internStyle(
-      formats,
-      cell.value instanceof Date && cell.numberFormat === undefined
-        ? { ...cell, numberFormat: DEFAULT_DATE_FORMAT }
-        : cell
-    );
+    // A date with no format of its own gets a date format (`CellFormatTable.intern`), as this library's XLSX writer
+    // gives one. Without it the cell holds a serial number and says nothing about how to show it, so a date written
+    // to XLSB opened as `45306` — the value was right and unreadable.
+    const styleIndex = internStyle(formats, cell, { date: cell.value instanceof Date });
     const written = detachedFollower({ ...cell, styleIndex }, masters);
     // A dependent of a shared master withheld before it reached here loses its formula with nothing else to say so.
     // One that got the master's formula slid onto it reports for itself if that is refused, and an array member

@@ -35,6 +35,7 @@ import type {
   Protection,
   Style
 } from "@excel/types";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import { borderStyleName, borderStyleValue } from "@excel/xlsb/border";
 import { fillPatternName, fillPatternValue } from "@excel/xlsb/fill";
 import { SCHEME, UNDERLINE, VERTICAL_ALIGN, nameOf, underlineValue } from "@excel/xlsb/font";
@@ -257,8 +258,7 @@ export function encodeDxf(style: Partial<Style>, formatId: (code: string) => num
   unknownKeys("alignment", style.alignment, ALIGNMENT_KEYS);
 
   if (style.numFmt !== undefined) {
-    const code = typeof style.numFmt === "string" ? style.numFmt : style.numFmt.formatCode;
-    add(PROPERTY.numberFormatId, u16(formatId(code)));
+    add(PROPERTY.numberFormatId, u16(formatId(numFmtCode(style.numFmt))));
   }
 
   flag(PROPERTY.locked, style.protection?.locked);

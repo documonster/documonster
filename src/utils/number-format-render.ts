@@ -16,7 +16,13 @@
  */
 
 import { partsToSerial, serialToParts, serialToWeekday, utcDateToParts } from "./excel-serial";
-import type { FormatCompareOp, FormatDatePart, FormatSection, FormatToken } from "./number-format";
+import type {
+  FormatCompareOp,
+  FormatDatePart,
+  FormatEraCalendar,
+  FormatSection,
+  FormatToken
+} from "./number-format";
 import { DAY_NAMES, MONTH_NAMES, parseNumberFormat } from "./number-format";
 
 export interface NumberFormatRenderOptions {
@@ -92,28 +98,122 @@ export function tryRenderNumberFormat(
   value: number | string | boolean,
   options: NumberFormatRenderOptions = {}
 ): string | undefined {
+  const marked = renderMarked(fmt, value, options);
+  return marked === undefined ? undefined : withoutFill(marked.text);
+}
+
+/** `text` without its fill marks — a format has at most a few, and most none. */
+function withoutFill(text: string): string {
+  return text.includes(FILL_MARK) ? text.split(FILL_MARK).join("") : text;
+}
+
+/** Rendered text, and where a `*x` in its format repeats `x` to fill the cell. */
+export interface NumberFormatLayout {
+  /** The text, without the fill — what {@link renderNumberFormat} returns. */
+  readonly text: string;
+  /**
+   * The fill: `char` is repeated at offset `at` of `text` until the text is as wide as the cell. Only something
+   * that knows the cell's width can expand it, so a plain text keeps none.
+   */
+  readonly fill?: { readonly char: string; readonly at: number };
+}
+
+/** {@link renderNumberFormat}, with where its format fills the cell (`*x`), for a renderer that knows its width. */
+export function renderNumberFormatLayout(
+  fmt: string,
+  value: number | string | boolean,
+  options: NumberFormatRenderOptions = {}
+): NumberFormatLayout {
+  const marked = renderMarked(fmt, value, options);
+  if (marked === undefined) {
+    return { text: NOT_DISPLAYABLE };
+  }
+  const char = marked.section?.fill;
+  // Placed where the format put it, and so found before the text its `@` inserts.
+  const at = char === undefined ? -1 : markedFillOffset(marked.section!, marked.text);
+  const text = withoutFill(marked.text);
+  return char === undefined || at === -1 ? { text } : { text, fill: { char, at } };
+}
+
+/**
+ * Where a section's `*x` stands in the text it renders. U+FFFF is a noncharacter: no format writes one, so a mark
+ * in the output is the format's — save in text a cell's value brings in through `@`, which
+ * {@link markedFillOffset} steps over.
+ */
+const FILL_MARK = "\uFFFF";
+
+/**
+ * The offset of `section`'s fill in its marked output, counted without the marks: the first mark the format itself
+ * placed. Only a text section can insert a value's own text (`@`), so only there can a mark be the value's.
+ */
+function markedFillOffset(section: FormatSection, marked: string): number {
+  let firstFill = -1;
+  let firstText = -1;
+  section.tokens.forEach((token, k) => {
+    if (token.kind === "fill" && firstFill === -1) {
+      firstFill = k;
+    } else if (token.kind === "text" && firstText === -1) {
+      firstText = k;
+    }
+  });
+  if (firstText === -1 || firstFill < firstText) {
+    return marked.indexOf(FILL_MARK);
+  }
+  // The fill follows the value's text: its mark is the last one, since a section has one fill.
+  return withoutFill(marked.slice(0, marked.lastIndexOf(FILL_MARK))).length;
+}
+
+const THAI_ZERO = 0x0e50;
+
+/** ASCII digits as Thai digits (๐–๙). */
+function toThaiDigits(text: string): string {
+  return text.replace(/[0-9]/g, d => String.fromCharCode(THAI_ZERO + d.charCodeAt(0) - 48));
+}
+
+/**
+ * The rendered text with each fill marked by {@link FILL_MARK}, and the section it was rendered through; `undefined`
+ * for no display.
+ */
+function renderMarked(
+  fmt: string,
+  value: number | string | boolean,
+  options: NumberFormatRenderOptions
+): { readonly text: string; readonly section?: FormatSection } | undefined {
   if (typeof value === "boolean") {
-    return value ? "TRUE" : "FALSE";
+    return { text: value ? "TRUE" : "FALSE" };
   }
   const parsed = parseNumberFormat(fmt.trim() === "" ? "General" : fmt);
   if (typeof value === "string") {
-    return parsed.textSection ? renderTextSection(parsed.textSection.tokens, value) : value;
+    const section = parsed.textSection;
+    return section ? { text: renderTextSection(section.tokens, value), section } : { text: value };
   }
   if (!Number.isFinite(value)) {
-    return String(value);
+    return { text: String(value) };
   }
 
   const sections = parsed.numberSections;
   if (sections.length === 0) {
     // A text-only format such as `"n="@` says nothing about numbers, which are shown as General.
-    return formatGeneral(value);
+    return { text: formatGeneral(value) };
   }
   const choice = chooseSection(sections, value);
   if (choice === undefined) {
     return undefined;
   }
   const { section, signed } = choice;
-  const shown = signed ? value : Math.abs(value);
+  const text = renderSection(section, signed ? value : Math.abs(value), value, options);
+  if (text === undefined) {
+    return undefined;
+  }
+  return { text: section.thaiDigits ? toThaiDigits(text) : text, section };
+}
+
+function renderSection(
+  section: FormatSection,
+  shown: number,
+  value: number,
+  options: NumberFormatRenderOptions
+): string | undefined {
   if (section.hasGeneral) {
     return renderGeneralSection(section.tokens, shown);
   }
@@ -240,8 +340,10 @@ function plainText(token: FormatToken): string {
       return "/";
     case "exponent":
       return (token.upper ? "E" : "e") + token.sign;
+    case "fill":
+      return FILL_MARK;
     default:
-      // fill, colour, condition, other brackets, and codes with no meaning here.
+      // colour, condition, other brackets, and codes with no meaning here.
       return "";
   }
 }
@@ -253,7 +355,8 @@ function plainText(token: FormatToken): string {
 function renderTextSection(tokens: readonly FormatToken[], text: string): string {
   let out = "";
   for (const token of tokens) {
-    out += token.kind === "text" ? text : plainText(token);
+    // A text has no digits for `t` to change, so there it is the letter it was written as.
+    out += token.kind === "text" ? text : token.kind === "thaiDigits" ? "t" : plainText(token);
   }
   return out;
 }
@@ -875,17 +978,21 @@ function renderDateSection(
       case "date":
         calendarShown ||=
           token.part !== "hour" && token.part !== "minute" && token.part !== "second";
-        out += datePart(
-          token.part,
-          token.width,
-          parts.year,
-          parts.month,
-          parts.day,
-          weekday,
-          shownHour,
-          minute,
-          second
-        );
+        out +=
+          token.part === "eraYear" || token.part === "eraName"
+            ? eraPart(token.part, token.width, token.calendar, parts)
+            : datePart(
+                token.part,
+                token.width,
+                parts.year,
+                parts.month,
+                parts.day,
+                weekday,
+                shownHour,
+                minute,
+                second,
+                token.thai === true
+              );
         out += token.part === "second" ? fractionOf(token.fraction) : "";
         break;
       case "elapsed": {
@@ -902,6 +1009,10 @@ function renderDateSection(
       }
       case "ampm": {
         const pm = hour >= 12;
+        if (token.labels !== undefined) {
+          out += token.labels[pm ? 1 : 0];
+          break;
+        }
         const text = token.short ? (pm ? "P" : "A") : pm ? "PM" : "AM";
         out += token.lower ? text.toLowerCase() : text;
         break;
@@ -913,6 +1024,82 @@ function renderDateSection(
   return out;
 }
 
+/**
+ * Japan's eras since Meiji, newest first: the first day of each, and its name as `ggg`, `gg` and `g` print it.
+ * A table rather than `Intl`'s Japanese calendar, which has no one-character form for `gg` and is absent from a
+ * runtime built without full ICU data.
+ */
+const JAPANESE_ERAS: readonly {
+  readonly start: readonly [number, number, number];
+  readonly names: readonly [string, string, string];
+}[] = [
+  { start: [2019, 5, 1], names: ["R", "令", "令和"] },
+  { start: [1989, 1, 8], names: ["H", "平", "平成"] },
+  { start: [1926, 12, 25], names: ["S", "昭", "昭和"] },
+  { start: [1912, 7, 30], names: ["T", "大", "大正"] },
+  { start: [1868, 1, 1], names: ["M", "明", "明治"] }
+];
+
+/** The year the Republic of China counts from: 1912 is its year 1. */
+const ROC_EPOCH_YEAR = 1911;
+
+function eraPart(
+  part: "eraYear" | "eraName",
+  width: number,
+  calendar: FormatEraCalendar | undefined,
+  date: { readonly year: number; readonly month: number; readonly day: number }
+): string {
+  if (calendar === "roc") {
+    // Before 1912 the count runs backwards (民前, before the Republic) — shown without that word, as LibreOffice
+    // shows it, so 1911 and 1912 both read 1.
+    const year =
+      date.year > ROC_EPOCH_YEAR ? date.year - ROC_EPOCH_YEAR : ROC_EPOCH_YEAR + 1 - date.year;
+    return width >= 2 ? pad2(year) : String(year);
+  }
+  const key = date.year * 10000 + date.month * 100 + date.day;
+  const era =
+    JAPANESE_ERAS.find(({ start: [y, m, d] }) => key >= y * 10000 + m * 100 + d) ??
+    JAPANESE_ERAS[JAPANESE_ERAS.length - 1];
+  if (part === "eraName") {
+    return era.names[Math.min(width, 3) - 1];
+  }
+  const year = date.year - era.start[0] + 1;
+  return width >= 2 ? pad2(year) : String(year);
+}
+
+/** Thai month names, January first, in full and as `ดดด` abbreviates them. */
+const THAI_MONTH_NAMES: readonly string[] = [
+  "มกราคม",
+  "กุมภาพันธ์",
+  "มีนาคม",
+  "เมษายน",
+  "พฤษภาคม",
+  "มิถุนายน",
+  "กรกฎาคม",
+  "สิงหาคม",
+  "กันยายน",
+  "ตุลาคม",
+  "พฤศจิกายน",
+  "ธันวาคม"
+];
+const THAI_MONTH_ABBREVIATIONS: readonly string[] = [
+  "ม.ค.",
+  "ก.พ.",
+  "มี.ค.",
+  "เม.ย.",
+  "พ.ค.",
+  "มิ.ย.",
+  "ก.ค.",
+  "ส.ค.",
+  "ก.ย.",
+  "ต.ค.",
+  "พ.ย.",
+  "ธ.ค."
+];
+/** Thai weekday names, Sunday first, in full and abbreviated. */
+const THAI_DAY_NAMES: readonly string[] = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+const THAI_DAY_ABBREVIATIONS: readonly string[] = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
+
 function datePart(
   part: FormatDatePart,
   width: number,
@@ -922,7 +1109,8 @@ function datePart(
   weekday: number,
   hour: number,
   minute: number,
-  second: number
+  second: number,
+  thai = false
 ): string {
   switch (part) {
     case "year":
@@ -937,6 +1125,11 @@ function datePart(
       if (width === 2) {
         return pad2(month);
       }
+      if (thai) {
+        // As `mmm`, `mmmm` and `mmmmm`: abbreviated, in full, and its first letter.
+        const name = (width === 3 ? THAI_MONTH_ABBREVIATIONS : THAI_MONTH_NAMES)[month - 1];
+        return width === 5 ? name[0] : name;
+      }
       if (width === 3) {
         return MONTH_NAMES[month - 1].slice(0, 3);
       }
@@ -947,6 +1140,9 @@ function datePart(
       }
       if (width === 2) {
         return pad2(day);
+      }
+      if (thai) {
+        return (width === 3 ? THAI_DAY_ABBREVIATIONS : THAI_DAY_NAMES)[weekday];
       }
       return width === 3 ? DAY_NAMES[weekday].slice(0, 3) : DAY_NAMES[weekday];
     case "hour":

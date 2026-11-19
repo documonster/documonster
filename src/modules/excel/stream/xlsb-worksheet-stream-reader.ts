@@ -24,6 +24,8 @@ export interface XlsbWorksheetContext {
   readonly sharedStrings: readonly string[];
   /** Number formats by style index, so a serial wearing a date format becomes a `Date`. */
   readonly numberFormats?: readonly (string | undefined)[];
+  /** The built-in ids kept for want of a code, by style index — see `kept-num-fmt.ts`. */
+  readonly keptFormatIds?: readonly (number | undefined)[];
   /** `date1904`, from the workbook part. */
   readonly date1904?: boolean;
   /** The part path, for error messages that name where a malformed record was. */
@@ -66,6 +68,7 @@ class XlsbWorksheetReader extends WorksheetReader {
       {
         sharedStrings: context.sharedStrings,
         ...(context.numberFormats === undefined ? {} : { numberFormats: context.numberFormats }),
+        ...(context.keptFormatIds === undefined ? {} : { keptFormatIds: context.keptFormatIds }),
         ...(context.date1904 === undefined ? {} : { date1904: context.date1904 }),
         worksheet: this as never
       }

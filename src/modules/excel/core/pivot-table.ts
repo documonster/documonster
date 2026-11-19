@@ -30,6 +30,7 @@ import type { WorksheetData } from "@excel/core/worksheet-core";
 import { columnValues, findCell, getSheetName } from "@excel/core/worksheet-core";
 import { ExcelPivotTableError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import { isDateFmt, range } from "@utils/utils";
 
 // Re-export the pure OOXML data types/constants that were relocated to
@@ -89,8 +90,7 @@ export interface PivotTableSource {
 
 /** A cell's number format as a code, whichever of its two shapes it is stored in. */
 function formatCodeOf(cell: CellData | undefined): string | undefined {
-  const numFmt = cell === undefined ? undefined : cellNumFmt(cell);
-  return typeof numFmt === "string" ? numFmt : numFmt?.formatCode;
+  return numFmtCode(cell === undefined ? undefined : cellNumFmt(cell));
 }
 
 /** Extract the values array from a getRow result (RowData or `{ values }`). */

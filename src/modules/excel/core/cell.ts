@@ -44,10 +44,15 @@ import type {
   RichText
 } from "@excel/types";
 import type { DateFormatKind } from "@excel/utils/cell-format";
-import { dateFormatKind, getCellDisplayText } from "@excel/utils/cell-format";
+import { dateFormatKind, getCellDisplayLayout, getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache } from "@excel/utils/col-cache";
 import { copyPlain } from "@excel/utils/copy-plain";
-import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
+import { copyKeptValues, copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
+import { shownCodeOfKeptId } from "@excel/utils/display-locale";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
+import { withInheritedFacets } from "@excel/utils/inherited-format";
+import { keepNumFmtId, keptNumFmtId } from "@excel/utils/kept-num-fmt";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import { slideFormula } from "@excel/utils/shared-formula";
 import { isStoredOrdinaryFormula, markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import type { ExcelDateTimeParts } from "@utils/excel-serial";
@@ -58,6 +63,8 @@ import {
   serialToParts,
   utcDateToParts
 } from "@utils/excel-serial";
+import { excelNameKey } from "@utils/name-key";
+import type { NumberFormatLayout } from "@utils/number-format-render";
 import type { DeepReadonly } from "@utils/types";
 import { excelToDate } from "@utils/utils";
 
@@ -249,9 +256,18 @@ export function mergeCellStyle(
   if (styleName) {
     style.styleName = styleName;
   }
-  const numFmt = (rowStyle && rowStyle.numFmt) || (colStyle && colStyle.numFmt);
+  // A built-in format kept by its id is the owner's format as much as a code is — see `kept-num-fmt.ts` — so it
+  // takes the code's place in the order: the row's, then the column's.
+  const rowNumFmt = rowStyle && rowStyle.numFmt;
+  const rowKeptId = rowNumFmt ? undefined : keptNumFmtId(rowStyle);
+  const numFmt = rowNumFmt || (rowKeptId === undefined && colStyle && colStyle.numFmt);
   if (numFmt) {
     style.numFmt = numFmt;
+  } else {
+    const keptId = rowKeptId ?? keptNumFmtId(colStyle);
+    if (keptId !== undefined) {
+      keepNumFmtId(style, keptId);
+    }
   }
   // Object facets are taken from the owner's shared snapshot rather than deep-copied
   // per cell — see `style-sharing.ts`. Callers mark the cell `_sharedStyle`.
@@ -450,8 +466,19 @@ export function cellOwnStyle(c: CellData): Partial<Style> {
         style[key] = copyStyleFacet(key, facet) as never;
       }
     }
+    copyKeptValues(style);
   }
   return ownStyleContainer(c);
+}
+
+/**
+ * Give the cell the number format a read could name only by its built-in id — see `kept-num-fmt.ts`. It is the
+ * cell's own format, so a code it inherited from its row or column is replaced.
+ */
+export function cellKeepNumFmtId(c: CellData, id: number): void {
+  const style = ownStyleContainer(c);
+  delete style.numFmt;
+  keepNumFmtId(style, id);
 }
 
 /**
@@ -1103,8 +1130,7 @@ export function cellDateKind(c: CellData): DateFormatKind | undefined {
   if (cellGetDateParts(c) === undefined) {
     return undefined;
   }
-  const numFmt = c.style.numFmt;
-  return dateFormatKind(typeof numFmt === "string" ? numFmt : numFmt?.formatCode);
+  return dateFormatKind(numFmtCode(c.style.numFmt));
 }
 
 /**
@@ -1237,8 +1263,73 @@ export function cellText(c: CellData): string {
   return c._value.toString();
 }
 
-export function cellDisplayText(c: CellData): string {
-  return getCellDisplayText(cellView(c));
+/** The cell's text as it is shown in `locale` — see {@link cellShownStyle}. */
+export function cellDisplayText(c: CellData, locale?: ExcelDisplayLocale): string {
+  return getCellDisplayText(cellShownView(c, locale));
+}
+
+/** {@link cellDisplayText}, with where its number format fills the cell (`*x`), for a renderer that knows its width. */
+export function cellDisplayLayout(c: CellData, locale?: ExcelDisplayLocale): NumberFormatLayout {
+  return getCellDisplayLayout(cellShownView(c, locale));
+}
+
+/**
+ * The format the cell is shown in: its own facets, and for each it leaves out, its named style's — or, a cell of no
+ * named style, the workbook's default format's (`Workbook.getDefaultStyle`) — as the writers give it
+ * (`inherited-format.ts`). What display, measurement and export use; `Cell.findStyle` answers with the cell's own.
+ *
+ * Not the default font, which a renderer is given as its default rather than stamped on every cell: a caller's
+ * `defaultFontFamily` still applies where the workbook has none of its own.
+ *
+ * `locale` is whose display it is, for a number format the file leaves to the reader's locale (`display-locale.ts`).
+ */
+export function cellShownStyle(c: CellData, locale?: ExcelDisplayLocale): Partial<Style> {
+  return shownStyleOf(
+    c.style,
+    c.row?.worksheet?._workbook,
+    c._value.effectiveType === Types.Date,
+    locale
+  );
+}
+
+/**
+ * {@link cellShownStyle} for a style that is not a cell's own — the one a cell the sheet does not hold would have.
+ * `isDate` is whether the value shown is a date, which takes only a date's number format.
+ *
+ * A number format kept by its built-in id is shown with the code Excel in `locale` gives that id
+ * (`shownCodeOfKeptId`); the style the cell holds keeps the id, and that is what is written.
+ */
+export function shownStyleOf(
+  style: Partial<Style>,
+  workbook: object | undefined,
+  isDate = false,
+  locale?: ExcelDisplayLocale
+): Partial<Style> {
+  const holder = workbook as
+    | { _defaultStyle?: Partial<Style>; _cellStyles?: ReadonlyMap<string, Partial<Style>> }
+    | undefined;
+  const name = style.styleName;
+  // `findCellStyleEntry`'s lookup, which `workbook-core` cannot lend this module without a cycle.
+  const inherited =
+    (name === undefined ? undefined : holder?._cellStyles?.get(excelNameKey(name))) ??
+    holder?._defaultStyle;
+  const shown = inherited === undefined ? style : withInheritedFacets(style, inherited, isDate);
+  const keptId = shown.numFmt ? undefined : keptNumFmtId(shown);
+  const code = keptId === undefined ? undefined : shownCodeOfKeptId(keptId, locale);
+  return code === undefined ? shown : { ...shown, numFmt: code };
+}
+
+/** The number format the cell is shown in — see {@link cellShownStyle}. */
+export function cellShownNumFmt(
+  c: CellData,
+  locale?: ExcelDisplayLocale
+): string | NumFmt | undefined {
+  return cellShownStyle(c, locale).numFmt || undefined;
+}
+
+/** {@link cellView}, with the number format the cell is shown in — see {@link cellShownNumFmt}. */
+export function cellShownView(c: CellData, locale?: ExcelDisplayLocale): CellView {
+  return Object.defineProperty(cellView(c), "numFmt", { get: () => cellShownNumFmt(c, locale) });
 }
 
 const HTML_ESCAPE_MAP: Record<string, string> = {

@@ -156,9 +156,12 @@ export interface WorkbookReadReport {
   /**
    * Content that did not reach the workbook, as `Sheet!A1: reason` or `Sheet: reason`.
    *
-   * Empty for an XLSX read, which has no equivalent channel — not because nothing is ever lost there, but
-   * because that reader does not collect one. Saying so is better than implying a guarantee. A setting whose value is
-   * outside its vocabulary is not lost by either reader; see `unrecognizedValues`.
+   * A styles-part line names the part: `xl/styles.xml: cellXfs[3] names number format 170, which the styles part does
+   * not define: read as General`.
+   *
+   * An XLSX read lists only what that reader detects — today a format naming a custom number format the file does not
+   * define — so an empty list there is not a guarantee that nothing was lost. A setting whose value is outside its
+   * vocabulary is not lost by either reader; see `unrecognizedValues`.
    */
   readonly lost: readonly string[];
   /**
@@ -185,7 +188,9 @@ export interface WorkbookReadReport {
   /**
    * Settings the file states with a value outside what the setting takes, one entry each:
    * `{ sheet: "S", path: "pageSetup.orientation", value: "sideways" }` — the shape the
-   * `Workbook.discardUnrecognizedValues` filter receives, and the `{ path, value }` Word reports.
+   * `Workbook.discardUnrecognizedValues` filter receives, and the `{ path, value }` Word reports. A number format the
+   * file names only by a built-in id that has no one format code (5–8 are currencies, 41–44 accounting formats,
+   * 27–36 East Asian dates, all shown in the reader's locale) is one too: `{ sheet: "S", path: "A4.style.numFmt", value: "7" }`.
    *
    * Not losses, and that is why they are not in `lost`: each is kept as read — its field reads as absent — and written
    * back unchanged by an XLSX write while the field is absent; `Workbook.discardUnrecognizedValues` drops them. Both
@@ -530,14 +535,14 @@ export async function readWorkbookWithDiagnostics(
   }
   const workbook = await platform.read(wb, bytes ?? data, options);
   return {
-    // **An XLSX read reports no losses because that reader collects nothing, not because nothing can be lost.** So an empty
-    // report here means "not measured", which `WorkbookReadReport.lost` says in prose.
+    // **An XLSX read reports only the losses it detects, not every one there could be.** So an empty report here does not
+    // mean "nothing lost", which `WorkbookReadReport.lost` says in prose.
     //
     // It does *not* mean the reader truncates behind the caller's back: `maxRows` and `maxCols` throw
     // `ExcelLimitExceededError` rather than skipping, which their own documentation used to deny and their tests have
     // always required.
     workbook,
-    lost: [],
+    lost: workbook._readLost ?? [],
     unreadRecords: new Map(),
     undecodedFormulas: [],
     sharedFormulaCells: [],

@@ -44,12 +44,27 @@ function isMalformedContent(error: unknown): error is Error {
   );
 }
 
+/** The `context` of the error {@link cellContentError} builds, which is what {@link xlsxPartError} knows it by. */
+const CELL_CONTENT = "c";
+
+/**
+ * The error a worksheet's `<c>` reports for content it cannot read as what its type says — a number value that is not
+ * one, a second `<v>`. The cell does not know which part it is in; the part boundary ({@link xlsxPartError}) adds it.
+ */
+export function cellContentError(address: string, detail: string): XlsxParseError {
+  return new XlsxParseError(CELL_CONTENT, `cell ${address}: ${detail}`);
+}
+
+function isCellContentError(error: unknown): error is XlsxParseError {
+  return error instanceof XlsxParseError && error.context === CELL_CONTENT;
+}
+
 /**
  * The error an XLSX reader reports for `error` raised reading `part`: an `XlsxParseError` naming the part for a
- * position error or markup the XML parser refused, the original as its `cause`.
+ * position error, markup the XML parser refused or a cell it could not read, the original as its `cause`.
  */
 export function xlsxPartError(error: unknown, part: string): unknown {
-  return isMalformedContent(error)
+  return isMalformedContent(error) || isCellContentError(error)
     ? new XlsxParseError(part, `${part}: ${error.message}`, { cause: error })
     : error;
 }

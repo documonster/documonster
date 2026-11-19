@@ -785,6 +785,12 @@ function buildPageLayout(
   // only the winning border for drawing but preserve insets for both cells.
   resolveSharedBorders(cellGrid, rowPage.length, colGroup.length);
 
+  // Expanded once the borders are settled, since they narrow the cell, and before overflow is measured: a filled
+  // cell is exactly as wide as its text.
+  for (const cell of cells) {
+    expandFill(cell, fontManager, scaleFactor);
+  }
+
   // Compute text overflow widths for non-wrapped cells
   computeTextOverflows(
     cellGrid,
@@ -1938,6 +1944,7 @@ function buildLayoutCell(
 
   return {
     text,
+    ...(valueCell?.fill === undefined || text !== valueCell.text ? {} : { fill: valueCell.fill }),
     rect,
     fontFamily: fontProps.fontFamily,
     fontSize: scaledFontSize,
@@ -1966,6 +1973,41 @@ function buildLayoutCell(
       style.alignment?.textRotation === 255 ? "vertical" : (style.alignment?.textRotation ?? 0),
     textOverflowWidth: 0
   };
+}
+
+/**
+ * Repeat a cell's fill character (`*x` in its number format) until its text is as wide as the cell, as Excel does,
+ * and lay the text against the cell's right edge: whole characters cannot fill the width exactly, and Excel leaves
+ * what they cannot fill before the fill, so a currency sign stays at the left and the number at the right. A text
+ * wider than the cell gets no fill. Wrapped and rotated text has no one line to fill, and keeps none.
+ */
+function expandFill(cell: LayoutCell, fontManager: FontManager, scaleFactor: number): void {
+  const fill = cell.fill;
+  if (
+    fill === undefined ||
+    cell.wrapText ||
+    cell.richText ||
+    cell.textRotation !== 0 ||
+    cell.text.includes("\n")
+  ) {
+    return;
+  }
+  const resourceName = fontManager.resolveFont(cell.fontFamily, cell.bold, cell.italic);
+  const padding =
+    (2 * CELL_PADDING_H + cell.borderInsets.left + cell.borderInsets.right) * scaleFactor +
+    cell.indent * INDENT_WIDTH * scaleFactor;
+  const room =
+    cell.rect.width - padding - fontManager.measureText(cell.text, resourceName, cell.fontSize);
+  const charWidth = fontManager.measureText(fill.char, resourceName, cell.fontSize);
+  if (room < 0) {
+    return;
+  }
+  const count = charWidth > 0 ? Math.floor(room / charWidth) : 0;
+  if (count > 0) {
+    cell.text = cell.text.slice(0, fill.at) + fill.char.repeat(count) + cell.text.slice(fill.at);
+    fontManager.trackText(cell.text, resourceName);
+  }
+  cell.horizontalAlign = "right";
 }
 
 // =============================================================================

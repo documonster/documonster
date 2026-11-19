@@ -27,9 +27,13 @@
  *   `yyyy-mm-dd hh:mm` holds one of each and no format-wide flag can describe it.
  * - **Number codes**: `0 # ?`, `.`, `,`, `%`, `E+`/`E-`, `/` and `@`, and the word `General`.
  *
- * `e` and `g` (era years in East Asian locales) are deliberately literals: an unquoted word such
- * as `zero` in `0;-0;zero` must stay a word, and no locale this library renders uses them.
- * `b` (Buddhist year) is a code, as it was for the XLSX reader before this module existed.
+ * `e` and `g` are era codes only in a section that names a calendar that has eras — `[$-411]` Japanese,
+ * `[$-404]` Taiwanese — as the built-in East Asian formats do (`[$-411]ggge"年"`); elsewhere they are
+ * literals, so an unquoted word such as `zero` in `0;-0;zero` stays a word. `b` (Buddhist year) is a code,
+ * as it was for the XLSX reader before this module existed. The Thai codes of the built-in Thai formats are
+ * read too: `t` in front of a number layout (`t#,##0`) shows Thai digits, and ว ด ป ช น ท are day, month,
+ * Buddhist year, hour, minute and second, shown in Thai digits and Thai month names. `上午/下午` is the
+ * Chinese AM/PM marker.
  */
 
 /** English month names, January first: what `mmm`/`mmmm`/`mmmmm` print and what input parsing accepts. */
@@ -70,7 +74,14 @@ export type FormatDatePart =
   | "day"
   | "hour"
   | "minute"
-  | "second";
+  | "second"
+  /** `e`, `ee`: the year of the era (`[$-411]`) or of the Republic of China (`[$-404]`). */
+  | "eraYear"
+  /** `g`, `gg`, `ggg`: the era's name, `R` / `令` / `令和` (`[$-411]` only). */
+  | "eraName";
+
+/** The calendar an era code counts in, named by its section's locale tag. */
+export type FormatEraCalendar = "japanese" | "roc";
 
 /** One lexical element of a number-format section. */
 export type FormatToken =
@@ -88,8 +99,13 @@ export type FormatToken =
   | { readonly kind: "fill"; readonly char: string }
   | { readonly kind: "color"; readonly name: string }
   | { readonly kind: "condition"; readonly op: FormatCompareOp; readonly value: number }
-  /** `[$…]`: a currency symbol and/or locale id. `symbol` is the text before any `-`. */
-  | { readonly kind: "locale"; readonly symbol: string }
+  /**
+   * `[$…]`: a currency symbol and/or locale id. `symbol` is the text before any `-`; `lcid` the language id
+   * after it (`[$-411]` is 0x411, Japanese), without the calendar and numeral bits above the low 16.
+   */
+  | { readonly kind: "locale"; readonly symbol: string; readonly lcid: number | undefined }
+  /** `t` in front of a number layout (`t#,##0`): the section's digits are shown as Thai digits. */
+  | { readonly kind: "thaiDigits" }
   /** A bracket tag with no effect on the rendered text, such as `[DBNum1]`. */
   | { readonly kind: "bracket"; readonly text: string }
   /**
@@ -111,9 +127,21 @@ export type FormatToken =
       readonly part: FormatDatePart;
       readonly width: number;
       readonly fraction: number;
+      /** For an era code, the calendar it counts in. */
+      readonly calendar?: FormatEraCalendar;
+      /** Written with a Thai code (ว ด ป ช น ท): shown in Thai digits, a month in its Thai name. */
+      readonly thai?: true;
     }
-  /** `AM/PM` or `A/P`; `lower` when written in lower case, which is how Excel prints it back. */
-  | { readonly kind: "ampm"; readonly short: boolean; readonly lower: boolean }
+  /**
+   * `AM/PM` or `A/P`; `lower` when written in lower case, which is how Excel prints it back. `labels` is the
+   * morning and afternoon text of a marker written in another language (`上午/下午`).
+   */
+  | {
+      readonly kind: "ampm";
+      readonly short: boolean;
+      readonly lower: boolean;
+      readonly labels?: readonly [string, string];
+    }
   | { readonly kind: "digit"; readonly char: "0" | "#" | "?" }
   | { readonly kind: "decimal" }
   | { readonly kind: "thousands" }
@@ -141,6 +169,10 @@ export interface FormatSection {
   readonly hasGeneral: boolean;
   /** The section's condition, if it carries one. */
   readonly condition: { readonly op: FormatCompareOp; readonly value: number } | undefined;
+  /** Whether its digits are shown as Thai digits: a `t` code, or a Thai date code. */
+  readonly thaiDigits: boolean;
+  /** The character a `*x` fills the cell with, if the section has one. */
+  readonly fill: string | undefined;
 }
 
 /** A whole format: its sections, and which of them formats text. */
@@ -205,13 +237,37 @@ export function splitFormatSections(fmt: string): string[] {
 
 const COLOR_RE = /^(?:black|blue|cyan|green|magenta|red|white|yellow|color\s*\d+)$/i;
 const CONDITION_RE = /^(<>|<=|>=|=|<|>)\s*(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$/i;
-const ELAPSED_RE = /^(h+|m+|s+)$/i;
+const ELAPSED_RE = /^(h+|m+|s+|ช+|น+|ท+)$/i;
+
+/** The Thai date and time codes, and what each stands for. */
+const THAI_DATE_CODES: ReadonlyMap<string, FormatDatePart> = new Map([
+  ["ว", "day"],
+  ["ด", "month"],
+  ["ป", "buddhistYear"],
+  ["ช", "hour"],
+  ["น", "minute"],
+  ["ท", "second"]
+]);
+
+/** Whether `ch` is a Thai letter, vowel or tone mark — not a Thai digit, nor the baht sign. */
+function isThaiLetter(ch: string | undefined): boolean {
+  const code = ch?.charCodeAt(0) ?? 0;
+  return (code >= 0x0e01 && code <= 0x0e3a) || (code >= 0x0e40 && code <= 0x0e4e);
+}
+
+/** The Thai elapsed-time codes (`[ช]`), as the unit they count. */
+const THAI_ELAPSED_UNITS: Readonly<Record<string, "h" | "m" | "s">> = { ช: "h", น: "m", ท: "s" };
+
+/** The calendar with eras a locale id names: 0x411 Japanese, 0x404 Chinese (Taiwan). */
+function eraCalendarOf(lcid: number | undefined): FormatEraCalendar | undefined {
+  return lcid === 0x411 ? "japanese" : lcid === 0x404 ? "roc" : undefined;
+}
 
 function bracketToken(body: string): FormatToken {
   if (ELAPSED_RE.test(body)) {
     return {
       kind: "elapsed",
-      unit: body[0].toLowerCase() as "h" | "m" | "s",
+      unit: THAI_ELAPSED_UNITS[body[0]] ?? (body[0].toLowerCase() as "h" | "m" | "s"),
       width: body.length,
       fraction: 0
     };
@@ -222,7 +278,13 @@ function bracketToken(body: string): FormatToken {
   }
   if (body.startsWith("$")) {
     const dash = body.indexOf("-");
-    return { kind: "locale", symbol: body.slice(1, dash === -1 ? body.length : dash) };
+    const id = dash === -1 ? "" : body.slice(dash + 1);
+    return {
+      kind: "locale",
+      symbol: body.slice(1, dash === -1 ? body.length : dash),
+      // The low 16 bits are the language; the bits above them pick a calendar and numerals.
+      lcid: /^[0-9a-f]{1,8}$/i.test(id) ? Number.parseInt(id, 16) & 0xffff : undefined
+    };
   }
   if (COLOR_RE.test(body)) {
     return { kind: "color", name: body };
@@ -254,6 +316,8 @@ type RawToken = FormatToken | { readonly kind: "m"; readonly width: number };
  */
 export function tokenizeFormatSection(section: string): FormatToken[] {
   const raw: RawToken[] = [];
+  // The calendar a locale tag earlier in the section names, which makes `e` and `g` era codes.
+  let calendar: FormatEraCalendar | undefined;
   let i = 0;
   while (i < section.length) {
     const ch = section[i];
@@ -290,7 +354,11 @@ export function tokenizeFormatSection(section: string): FormatToken[] {
         raw.push({ kind: "literal", text: section.slice(i) });
         break;
       }
-      raw.push(bracketToken(section.slice(i + 1, end)));
+      const token = bracketToken(section.slice(i + 1, end));
+      if (token.kind === "locale") {
+        calendar = eraCalendarOf(token.lcid) ?? calendar;
+      }
+      raw.push(token);
       i = end + 1;
       continue;
     }
@@ -309,10 +377,44 @@ export function tokenizeFormatSection(section: string): FormatToken[] {
       i += 3;
       continue;
     }
+    if (section.startsWith("上午/下午", i)) {
+      raw.push({ kind: "ampm", short: false, lower: false, labels: ["上午", "下午"] });
+      i += 5;
+      continue;
+    }
     if (lower === "e" && (section[i + 1] === "+" || section[i + 1] === "-")) {
       raw.push({ kind: "exponent", sign: section[i + 1] as "+" | "-", upper: ch === "E" });
       i += 2;
       continue;
+    }
+    if ((lower === "e" && calendar !== undefined) || (lower === "g" && calendar === "japanese")) {
+      const width = runLength(section, i, lower);
+      raw.push({
+        kind: "date",
+        part: lower === "e" ? "eraYear" : "eraName",
+        width,
+        fraction: 0,
+        calendar
+      });
+      i += width;
+      continue;
+    }
+    // `t` leads a number layout (`t0`, `t#,##0`, `t"฿"#,##0`); anywhere else it is a letter.
+    if (ch === "t" && /^[0#?"]$/.test(section[i + 1] ?? "")) {
+      raw.push({ kind: "thaiDigits" });
+      i++;
+      continue;
+    }
+    const thaiPart = THAI_DATE_CODES.get(ch);
+    if (thaiPart !== undefined) {
+      const width = runLength(section, i, ch);
+      // A code stands apart from other Thai letters, as every built-in Thai format writes it (`ว/ด/ปปปป`); one inside
+      // a word is a letter of the word — the ท of an unquoted `บาท` (baht) is not a seconds code.
+      if (!isThaiLetter(section[i - 1]) && !isThaiLetter(section[i + width])) {
+        raw.push({ kind: "date", part: thaiPart, width, fraction: 0, thai: true });
+        i += width;
+        continue;
+      }
     }
     if (lower === "b" && (section[i + 1] === "1" || section[i + 1] === "2")) {
       // `B1`/`B2` switch calendars (Gregorian/Hijri); they print nothing.
@@ -486,6 +588,8 @@ function describeSection(source: string): FormatSection {
   let hasElapsed = false;
   let hasText = false;
   let hasGeneral = false;
+  let thaiDigits = false;
+  let fill: string | undefined;
   let condition: FormatSection["condition"];
   for (const token of tokens) {
     switch (token.kind) {
@@ -495,6 +599,14 @@ function describeSection(source: string): FormatSection {
         } else {
           hasDate = true;
         }
+        thaiDigits ||= token.thai === true;
+        break;
+      case "thaiDigits":
+        thaiDigits = true;
+        break;
+      case "fill":
+        // Excel takes one fill per section; the first is the one it keeps.
+        fill ??= token.char;
         break;
       case "ampm":
         hasTime = true;
@@ -513,7 +625,18 @@ function describeSection(source: string): FormatSection {
         break;
     }
   }
-  return { source, tokens, hasDate, hasTime, hasElapsed, hasText, hasGeneral, condition };
+  return {
+    source,
+    tokens,
+    hasDate,
+    hasTime,
+    hasElapsed,
+    hasText,
+    hasGeneral,
+    condition,
+    thaiDigits,
+    fill
+  };
 }
 
 /** Formats seen in a workbook are few and asked about very often; past this the cache restarts. */

@@ -104,13 +104,17 @@ import type {
   Protection,
   Style
 } from "@excel/types";
-import { argumentChecks } from "@excel/utils/arguments";
+import { argumentChecks, checkSchema } from "@excel/utils/arguments";
 import type { DateFormatKind } from "@excel/utils/cell-format";
 import { copyPlain } from "@excel/utils/copy-plain";
 import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
+import { DISPLAY_LOCALES } from "@excel/utils/display-locale";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
 import type { ExcelDateTimeParts } from "@utils/excel-serial";
 import { isRecordArgument } from "@utils/object";
+import { s } from "@utils/schema";
+import type { SchemaMatches } from "@utils/schema";
 
 /** @deprecated Use `Worksheet.Handle`. Removed in 1.0. */
 export type Sheet = WorksheetData;
@@ -567,10 +571,43 @@ export function getText(
   const cell = peek(ws, "Cell.getText", addr, col);
   return cell ? cellText(cell) : "";
 }
-/** Read a cell's display text by `"A1"` address or `{ row, col }`. */
+/** Options for {@link getDisplayText}. */
+export interface DisplayTextOptions {
+  /**
+   * Whose display it is: the form a built-in number format with no code of its own takes — the symbol of a
+   * currency, an East Asian date, Thai digits — as Excel in that locale shows it. A format with a code shows as its
+   * code says in every locale.
+   * @default "en-US"
+   */
+  locale?: ExcelDisplayLocale;
+}
+
+const displayTextOptionsSchema = s.object({
+  locale: s.member<ExcelDisplayLocale>(DISPLAY_LOCALES).optional()
+});
+const _displayTextOptionsMatch: SchemaMatches<typeof displayTextOptionsSchema, DisplayTextOptions> =
+  true;
+void _displayTextOptionsMatch;
+
+/**
+ * Read a cell's text as it is shown — its value through the number format it is shown in — by `"A1"` address or
+ * `{ row, col }`.
+ *
+ * A `*x` in the format, which repeats `x` to fill the cell, adds nothing here: the text has no width to fill. A PDF
+ * or Word export, which has one, expands it.
+ *
+ * @example
+ * ```ts
+ * import { Cell } from "documonster/excel";
+ *
+ * Cell.getDisplayText(sheet, "C1"); // "$3.50 " — a currency the file names only by its id
+ * Cell.getDisplayText(sheet, "C1", { locale: "zh-CN" }); // "¥3.50 "
+ * ```
+ */
 export function getDisplayText(
   ws: WorksheetData | StreamWorksheet,
-  addr: string | CellPosition
+  addr: string | CellPosition,
+  options?: DisplayTextOptions
 ): string;
 /** @deprecated Pass the cell as `{ row, col }`: `Cell.getDisplayText(ws, { row, col })`. Removed in 1.0. */
 export function getDisplayText(
@@ -581,10 +618,20 @@ export function getDisplayText(
 export function getDisplayText(
   ws: WorksheetData | StreamWorksheet,
   addr: string | CellPosition | number,
-  col?: number
+  colOrOptions?: number | DisplayTextOptions
 ): string {
-  const cell = peek(ws, "Cell.getDisplayText", addr, col);
-  return cell ? cellDisplayText(cell) : "";
+  const legacy = typeof addr === "number";
+  const options = legacy ? undefined : (colOrOptions as DisplayTextOptions | undefined);
+  if (!legacy && options !== undefined) {
+    checkSchema("Cell.getDisplayText", "options", displayTextOptionsSchema, options);
+  }
+  const cell = peek(
+    ws,
+    "Cell.getDisplayText",
+    addr,
+    legacy ? (colOrOptions as number | undefined) : undefined
+  );
+  return cell ? cellDisplayText(cell, options?.locale) : "";
 }
 /** Read a cell's value kind by `"A1"` address or `{ row, col }`. */
 export function getType(

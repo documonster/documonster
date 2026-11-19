@@ -1751,6 +1751,10 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
     const namedStyles = namedStyleMap(model.cellStyles as NamedStyleEntry[]);
     model.styles.registerNamedStyles(namedStyles);
   }
+  // After the named styles, which a default format may be based on; before any cell is given a style.
+  if ((model.defaultStyle || model.normalStyle) && model.styles.setDefaultStyle) {
+    model.styles.setDefaultStyle(model.defaultStyle, model.normalStyle);
+  }
   // Before any worksheet is prepared: every `addDxfStyle` must see the source table already in place.
   if (model.dxfs && model.styles.seedDxfs) {
     model.styles.seedDxfs(model.dxfs);

@@ -32,6 +32,14 @@
  */
 
 import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
+import { INHERITED_FACETS, inheritedNumberFormat } from "@excel/utils/inherited-format";
+import {
+  FIRST_CUSTOM_NUM_FMT_ID,
+  isBuiltInNumFmtId,
+  keepNumFmtId,
+  keptNumFmtId
+} from "@excel/utils/kept-num-fmt";
+import { numFmtCode } from "@excel/utils/num-fmt-code";
 import {
   ATTRIBUTE_MASK,
   encodeAlignmentAndProtection,
@@ -54,6 +62,7 @@ import { requireRecordSpec, recordSpec } from "@excel/xlsb/spec/records";
 import type { StyleFacets } from "@excel/xlsb/write/types";
 import { defaultNumFormats } from "@excel/xlsx/defaultnumformats";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { excelNameKey } from "@utils/name-key";
 
 /**
  * First format id available for a custom format.
@@ -105,6 +114,23 @@ export interface StyleTable {
    */
   readonly numberFormats: readonly (string | undefined)[];
   /**
+   * The built-in number-format id of each cell-format index whose id has no format code — see `kept-num-fmt.ts` —
+   * or `undefined`. Where it is set, {@link numberFormats} is `undefined`.
+   */
+  readonly keptFormatIds: readonly (number | undefined)[];
+  /**
+   * The Normal style's format — the first style XF — as what it sets beyond a cell with no format, or `undefined`.
+   * Index 0 of the cell formats is the default cell format, read through the per-index tables like any other.
+   */
+  readonly normalFormat?: Partial<Style>;
+  /**
+   * The named cell style each cell format is based on (its `ixfParent`), by cell-format index — `undefined` for one
+   * based on the Normal style.
+   */
+  readonly styleNames: readonly (string | undefined)[];
+  /** Each named style's format as what it sets beyond a cell with no format, by name. */
+  readonly namedFormats: ReadonlyMap<string, Partial<Style>>;
+  /**
    * Differential formats by `dxfId`, which is what a conditional-formatting rule refers to.
    *
    * Read because the rule survived a round trip and its *format* did not: `dxfId` indexed a table nothing
@@ -133,6 +159,11 @@ export interface StyleTable {
   readonly unmodelledFontFlags: number;
   /** Properties a `BrtDXF` carried that the model cannot hold, one entry per property, naming its `dxfId`. */
   readonly dxfUnread: readonly string[];
+  /**
+   * The formats naming a custom number format the part does not define, one line each — read as General, as the XLSX
+   * reader reads them (`StylesXform.listDanglingNumFmts`).
+   */
+  readonly danglingFormats: readonly string[];
   /**
    * The font at index 0 — the one every cell that names no font inherits.
    *
@@ -196,6 +227,7 @@ export function createStylesReader(part: string): {
   /** Style XFs, which `BrtStyle.ixf` indexes. A different collection from the cell XFs. */
   const styleXfs: {
     numberFormat?: string;
+    keptFormatId?: number;
     font?: Partial<Font>;
     fill?: Fill;
     border?: Partial<Borders>;
@@ -203,8 +235,51 @@ export function createStylesReader(part: string): {
     protection?: Partial<Protection>;
   }[] = [];
   const namedStyles: { name: string; ixf: number; builtinId?: number; hidden?: boolean }[] = [];
+  /** Each style XF's format as what it sets beyond a cell with no format — the first is the Normal style's. */
+  const styleXfFormats: (Partial<Style> | undefined)[] = [];
+  /** Each cell format's `ixfParent`. */
+  const cellParents: number[] = [];
+  /**
+   * The facets an XF holds beyond the defaults: each table's index 0 is the default, which a format does not need to
+   * be told about, and `readAlignment` / `readProtection` already leave theirs out.
+   */
+  const ownFacets = (payload: Uint8Array) => {
+    const iFont = new XlsbReader(payload, XF_FONT_OFFSET, part).readUint16();
+    const iFill = new XlsbReader(payload, XF_FILL_OFFSET, part).readUint16();
+    const iBorder =
+      payload.length >= XF_BORDER_OFFSET + 2
+        ? new XlsbReader(payload, XF_BORDER_OFFSET, part).readUint16()
+        : 0;
+    return {
+      font: iFont === 0 ? undefined : fontTable[iFont],
+      fill: iFill === 0 ? undefined : fillTable[iFill],
+      border: iBorder === 0 ? undefined : borderTable[iBorder],
+      alignment: readAlignment(payload),
+      protection: readProtection(payload)
+    };
+  };
+  /** A style XF's format, as what it sets beyond a cell with no format. */
+  const styleXfFormat = (
+    payload: Uint8Array,
+    numberFormat: string | undefined,
+    formatId: number
+  ): Partial<Style> | undefined => {
+    const style: Partial<Style> = {};
+    if (numberFormat !== undefined && numberFormat !== "General") {
+      style.numFmt = numberFormat;
+    } else if (numberFormat === undefined && isBuiltInNumFmtId(formatId)) {
+      keepNumFmtId(style, formatId);
+    }
+    for (const [facet, value] of Object.entries(ownFacets(payload))) {
+      if (value !== undefined) {
+        (style as Record<string, unknown>)[facet] = value;
+      }
+    }
+    return Object.keys(style).length === 0 ? undefined : style;
+  };
   let inStyleXfs = false;
   const numberFormats: (string | undefined)[] = [];
+  const keptFormatIds: (number | undefined)[] = [];
   const fonts: (Partial<Font> | undefined)[] = [];
   const fills: (Fill | undefined)[] = [];
   const borders: (Partial<Borders> | undefined)[] = [];
@@ -212,6 +287,19 @@ export function createStylesReader(part: string): {
   const protections: (Partial<Protection> | undefined)[] = [];
   let unmodelledFontFlags = 0;
   const dxfUnread: string[] = [];
+  const danglingFormats: string[] = [];
+  const noteDangling = (
+    collection: string,
+    index: number,
+    id: number,
+    format: string | undefined
+  ): void => {
+    if (format === undefined && id >= FIRST_CUSTOM_NUM_FMT_ID) {
+      danglingFormats.push(
+        `${collection}[${index}] names number format ${id}, which the styles part does not define: read as General`
+      );
+    }
+  };
   let inCellXfs = false;
 
   function add(record: Pick<BiffRecord, "id" | "payload">): void {
@@ -274,14 +362,19 @@ export function createStylesReader(part: string): {
           // A style XF, which a `BrtStyle` points at by index. Collected separately from the cell XFs
           // because the two collections are indexed independently — reading them into one list is what
           // would make a named style resolve to whichever cell format happened to sit at that position.
+          const formatId = new XlsbReader(record.payload, XF_FORMAT_OFFSET, part).readUint16();
+          const numberFormat = formatById(formatId);
+          noteDangling("cellStyleXfs", styleXfs.length, formatId, numberFormat);
+          styleXfFormats.push(styleXfFormat(record.payload, numberFormat, formatId));
           styleXfs.push({
             // The built-in fallback, which the cell XFs below have always had and this did not: a named style
             // whose format is one of the reserved codes carries no `BrtFmt`, and read without the fallback it
             // came back with no format at all. Latent while this library's writer emitted a `BrtFmt` for every
             // format including the built-ins — a bug the writer was hiding rather than one it lacked.
-            numberFormat: formatById(
-              new XlsbReader(record.payload, XF_FORMAT_OFFSET, part).readUint16()
-            ),
+            numberFormat,
+            ...(numberFormat === undefined && isBuiltInNumFmtId(formatId)
+              ? { keptFormatId: formatId }
+              : {}),
             font: fontTable[new XlsbReader(record.payload, XF_FONT_OFFSET, part).readUint16()],
             fill: fillTable[new XlsbReader(record.payload, XF_FILL_OFFSET, part).readUint16()],
             border:
@@ -296,8 +389,13 @@ export function createStylesReader(part: string): {
         if (!inCellXfs) {
           break;
         }
+        // `ixfParent`: the style XF the format is based on.
+        cellParents.push(
+          record.payload.length >= 2 ? new XlsbReader(record.payload, 0, part).readUint16() : 0
+        );
         if (record.payload.length < XF_FILL_OFFSET + 2) {
           numberFormats.push(undefined);
+          keptFormatIds.push(undefined);
           fonts.push(undefined);
           fills.push(undefined);
           borders.push(undefined);
@@ -307,23 +405,19 @@ export function createStylesReader(part: string): {
         }
         const id = new XlsbReader(record.payload, XF_FORMAT_OFFSET, part).readUint16();
         const format = formatById(id);
+        noteDangling("cellXfs", numberFormats.length, id, format);
         // `General` is normalised to "no format". Reporting the string instead would be more
         // literal and worse: every caller would have to compare against a magic value to answer
         // the only question they have — is there a format to apply — and the round trip through
         // `CellFormatTable`, whose index 0 *is* "no format", would stop being symmetric.
         numberFormats.push(format === "General" ? undefined : format);
-        // Index 0 of each table is the default, which a cell does not need to be told about.
-        const iFont = new XlsbReader(record.payload, XF_FONT_OFFSET, part).readUint16();
-        const iFill = new XlsbReader(record.payload, XF_FILL_OFFSET, part).readUint16();
-        const iBorder =
-          record.payload.length >= XF_BORDER_OFFSET + 2
-            ? new XlsbReader(record.payload, XF_BORDER_OFFSET, part).readUint16()
-            : 0;
-        fonts.push(iFont === 0 ? undefined : fontTable[iFont]);
-        fills.push(iFill === 0 ? undefined : fillTable[iFill]);
-        borders.push(iBorder === 0 ? undefined : borderTable[iBorder]);
-        alignments.push(readAlignment(record.payload));
-        protections.push(readProtection(record.payload));
+        keptFormatIds.push(format === undefined && isBuiltInNumFmtId(id) ? id : undefined);
+        const own = ownFacets(record.payload);
+        fonts.push(own.font);
+        fills.push(own.fill);
+        borders.push(own.border);
+        alignments.push(own.alignment);
+        protections.push(own.protection);
         break;
       }
       default:
@@ -334,6 +428,9 @@ export function createStylesReader(part: string): {
   function finish(): StyleTable {
     return {
       numberFormats,
+      keptFormatIds,
+      normalFormat: styleXfFormats[0],
+      ...namedStyleLinks(namedStyles, styleXfFormats, cellParents),
       dxfs,
       fonts,
       fills,
@@ -351,6 +448,7 @@ export function createStylesReader(part: string): {
           ...(xf.numberFormat === undefined || xf.numberFormat === "General"
             ? {}
             : { numFmt: xf.numberFormat }),
+          ...(xf.keptFormatId === undefined ? {} : { keptFormatId: xf.keptFormatId }),
           ...(xf.font === undefined ? {} : { font: xf.font }),
           ...(xf.fill === undefined ? {} : { fill: xf.fill }),
           ...(xf.border === undefined ? {} : { border: xf.border }),
@@ -362,6 +460,7 @@ export function createStylesReader(part: string): {
       protections,
       unmodelledFontFlags,
       dxfUnread,
+      danglingFormats,
       fontTable,
       ...(fontTable[0] === undefined ? {} : { defaultFont: fontTable[0] })
     };
@@ -376,20 +475,38 @@ export function createStylesReader(part: string): {
  * Cells, rows and columns reference their format identically, so they interned it identically — three
  * copies of the same five-field object literal. This is the one place that list lives now.
  */
-export function internStyle(table: CellFormatTable, owner: StyleFacets): number {
-  return table.intern({
-    numberFormat: owner.numberFormat,
-    font: owner.font,
-    fill: owner.fill,
-    border: owner.border,
-    alignment: owner.alignment,
-    protection: owner.protection
-  });
+export function internStyle(
+  table: CellFormatTable,
+  owner: StyleFacets,
+  options?: { readonly date?: boolean }
+): number {
+  return table.intern(
+    {
+      numberFormat: owner.numberFormat,
+      keptFormatId: owner.keptFormatId,
+      styleName: owner.styleName,
+      font: owner.font,
+      fill: owner.fill,
+      border: owner.border,
+      alignment: owner.alignment,
+      protection: owner.protection
+    },
+    options
+  );
 }
 
 /** The formatting a single cell asks for. Any subset may be present. */
 export interface InternedFormat {
   readonly numberFormat?: string | undefined;
+  /** A built-in number-format id with no format code, written as it is; ignored beside a {@link numberFormat}. */
+  readonly keptFormatId?: number | undefined;
+  /** The named cell style the format is based on, which it takes what it leaves out from. */
+  readonly styleName?: string | undefined;
+  /**
+   * The style XF the format is based on — 0, the Normal style, or a named style's — once interned. Written as the
+   * cell XF's `ixfParent`.
+   */
+  readonly parent?: number | undefined;
   readonly font?: Partial<Font> | undefined;
   readonly fill?: Fill | undefined;
   readonly border?: Partial<Borders> | undefined;
@@ -414,6 +531,18 @@ export interface InternedFormat {
 export class CellFormatTable {
   /** One entry per cell-format index. Index 0 is the default everything. */
   private readonly xfs: InternedFormat[] = [{}];
+  /** The facets of index 0 when {@link setDefaults} gave it some, which a format leaving one out has. */
+  private defaultSets: InternedFormat | undefined;
+  /**
+   * The facets the Normal style sets when {@link setDefaults} gave it some: every cell format's parent, so a plain one
+   * of those — or of {@link defaultSets} — is a facet of its own and not "no format".
+   */
+  private normalSets: InternedFormat | undefined;
+  /** The named styles {@link setDefaults} was given, by `excelNameKey`: their style XF, and their facets. */
+  private readonly namedSets = new Map<
+    string,
+    { readonly parent: number; readonly facets: InternedFormat }
+  >();
   private readonly indexByKey = new Map<string, number>();
 
   /** Interned fonts and fills, in the order they will be written. Index 0 is the default. */
@@ -425,45 +554,175 @@ export class CellFormatTable {
   private readonly borders: (Partial<Borders> | undefined)[] = [undefined];
   private readonly borderIndexByKey = new Map<string, number>();
 
-  /** Index for a cell format, adding it if new. An empty format maps to 0. */
-  intern(format: InternedFormat): number {
-    const numberFormat =
-      format.numberFormat === "General" ? undefined : (format.numberFormat ?? undefined);
-    const font = isEmptyObject(format.font) ? undefined : format.font;
-    const fill = format.fill;
-    const border = isEmptyObject(format.border) ? undefined : format.border;
-    const alignment = isEmptyObject(format.alignment) ? undefined : format.alignment;
-    const protection = isEmptyObject(format.protection) ? undefined : format.protection;
-    if (
-      numberFormat === undefined &&
-      font === undefined &&
-      fill === undefined &&
-      border === undefined &&
-      alignment === undefined &&
-      protection === undefined
-    ) {
+  /**
+   * Index for a cell format, adding it if new. An empty format maps to 0. A date's format with no number format of its
+   * own is a date format: the default's when that is one, as the XLSX writer gives it, else `mm-dd-yy` — without one, a
+   * date opens as `45306`.
+   */
+  intern(format: InternedFormat, options?: { readonly date?: boolean }): number {
+    const normalised = this.normalise(
+      options?.date && format.numberFormat === undefined && format.keptFormatId === undefined
+        ? { ...format, ...this.dateFormat(this.namedFor(format.styleName)?.facets) }
+        : format
+    );
+    if (normalised === undefined) {
       return 0;
     }
-
-    // Keys are structural. `JSON.stringify` is stable enough here because every value comes from
-    // the same builder in the same field order, and a key collision would only cost a duplicate
-    // entry rather than a wrong one.
-    const key = JSON.stringify([
-      numberFormat ?? null,
-      font ?? null,
-      fill ?? null,
-      border ?? null,
-      alignment ?? null,
-      protection ?? null
-    ]);
+    const { entry, key } = normalised;
     const existing = this.indexByKey.get(key);
     if (existing !== undefined) {
       return existing;
     }
     const index = this.xfs.length;
-    this.xfs.push({ numberFormat, font, fill, border, alignment, protection });
+    this.xfs.push(entry);
     this.indexByKey.set(key, index);
+    this.internFacets(entry);
+    return index;
+  }
 
+  /**
+   * Take the formats a read found for index 0 — the format of a cell written with no format of its own, the default
+   * cell format (see `StylesXform.getDefaultStyleModel`) — and for the Normal style, every cell format's parent. Only a
+   * cell with no format of its own is index 0: one that states the same facets is a format of its own, as it reads,
+   * and a plain facet either sets (General, no alignment) is not "no format". Before any format is interned.
+   */
+  setDefaults(
+    cell: InternedFormat | undefined,
+    normal: InternedFormat | undefined,
+    /** The named styles, in the order their style XFs are written: the first is style XF 1. */
+    named: readonly (InternedFormat & { readonly name: string })[] = []
+  ): void {
+    if (this.xfs.length > 1) {
+      return;
+    }
+    this.normalSets = normal === undefined ? undefined : this.normalise(normal)?.entry;
+    named.forEach((style, index) => {
+      const key = excelNameKey(style.name);
+      if (!this.namedSets.has(key)) {
+        this.namedSets.set(key, { parent: index + 1, facets: this.normalise(style)?.entry ?? {} });
+      }
+    });
+    const normalised = cell === undefined ? undefined : this.normalise(cell);
+    if (normalised !== undefined) {
+      this.xfs[0] = normalised.entry;
+      this.internFacets(normalised.entry);
+      this.defaultSets = normalised.entry;
+    }
+  }
+
+  /** The number format a date takes when it has none of its own — see {@link intern}. */
+  private dateFormat(
+    named: InternedFormat | undefined
+  ): Pick<InternedFormat, "numberFormat" | "keptFormatId"> {
+    const inherited = named ?? this.defaultSets;
+    const taken = inheritedNumberFormat(
+      inherited && { code: inherited.numberFormat, keptId: inherited.keptFormatId },
+      true
+    );
+    return taken === undefined
+      ? { numberFormat: DEFAULT_DATE_FORMAT }
+      : { numberFormat: taken.code, keptFormatId: taken.keptId };
+  }
+
+  /** The named style `name` names, among those {@link setDefaults} was given. */
+  private namedFor(
+    name: string | undefined
+  ): { readonly parent: number; readonly facets: InternedFormat } | undefined {
+    return name === undefined ? undefined : this.namedSets.get(excelNameKey(name));
+  }
+
+  /**
+   * `format` as an entry of the table, or `undefined` for "no format" — index 0. A format takes what it leaves out from
+   * the one it is based on: its named style's, else the default cell format's (`inherited-format.ts`, as the XLSX
+   * writer does).
+   */
+  private normalise(format: InternedFormat): { entry: InternedFormat; key: string } | undefined {
+    const named = this.namedFor(format.styleName);
+    // What the format inherits, and what its parent style XF holds: a named style is a root format, so what it leaves
+    // out is plain, where a format based on the Normal style has the default's.
+    const inherited = named?.facets ?? this.defaultSets;
+    const parentHolds = named?.facets ?? this.defaultSets ?? this.normalSets;
+    const normal = named === undefined ? this.normalSets : undefined;
+    const numberFormat =
+      format.numberFormat === "General" &&
+      parentHolds?.numberFormat === undefined &&
+      parentHolds?.keptFormatId === undefined &&
+      normal?.numberFormat === undefined &&
+      normal?.keptFormatId === undefined
+        ? undefined
+        : (format.numberFormat ?? undefined);
+    const keptFormatId =
+      format.numberFormat === undefined ? (format.keptFormatId ?? undefined) : undefined;
+    // An empty facet is "no format", unless what the format inherits sets that facet: then it is the plain one.
+    const keepPlain = <K extends "font" | "border" | "alignment" | "protection">(
+      facet: K
+    ): InternedFormat[K] => {
+      const value = format[facet];
+      return value === undefined ||
+        (isEmptyObject(value) &&
+          parentHolds?.[facet] === undefined &&
+          normal?.[facet] === undefined)
+        ? undefined
+        : value;
+    };
+    const entry: { -readonly [K in keyof InternedFormat]: InternedFormat[K] } = {
+      numberFormat,
+      keptFormatId,
+      font: keepPlain("font"),
+      fill: format.fill,
+      border: keepPlain("border"),
+      alignment: keepPlain("alignment"),
+      protection: keepPlain("protection")
+    };
+    const own =
+      entry.numberFormat !== undefined ||
+      entry.keptFormatId !== undefined ||
+      INHERITED_FACETS.some(facet => entry[facet] !== undefined);
+    if (!own && named === undefined) {
+      return undefined;
+    }
+    if (inherited !== undefined) {
+      if (entry.numberFormat === undefined && entry.keptFormatId === undefined) {
+        const taken = inheritedNumberFormat(
+          { code: inherited.numberFormat, keptId: inherited.keptFormatId },
+          false
+        );
+        entry.numberFormat = taken?.code;
+        entry.keptFormatId = taken?.keptId;
+      }
+      for (const facet of INHERITED_FACETS) {
+        if (entry[facet] === undefined) {
+          (entry as Record<string, unknown>)[facet] = inherited[facet];
+        }
+      }
+    }
+    if (named !== undefined) {
+      entry.parent = named.parent;
+    }
+    return this.keyed(entry);
+  }
+
+  private keyed(entry: InternedFormat): { entry: InternedFormat; key: string } {
+    const { numberFormat, keptFormatId, font, fill, border, alignment, protection, parent } = entry;
+    // Keys are structural. `JSON.stringify` is stable enough here because every value comes from
+    // the same builder in the same field order, and a key collision would only cost a duplicate
+    // entry rather than a wrong one.
+    const key = JSON.stringify([
+      numberFormat ?? keptFormatId ?? null,
+      font ?? null,
+      fill ?? null,
+      border ?? null,
+      alignment ?? null,
+      protection ?? null,
+      parent ?? 0
+    ]);
+    return {
+      entry: { numberFormat, keptFormatId, font, fill, border, alignment, protection, parent },
+      key
+    };
+  }
+
+  private internFacets({ font, fill, border }: InternedFormat): void {
     if (font !== undefined) {
       this.internInto(this.fonts, this.fontIndexByKey, font);
     }
@@ -473,7 +732,6 @@ export class CellFormatTable {
     if (border !== undefined) {
       this.internInto(this.borders, this.borderIndexByKey, border);
     }
-    return index;
   }
 
   /** True when nothing but the default format was used, so no styles part is needed. */
@@ -566,7 +824,9 @@ export function writeStyles(
   table: CellFormatTable,
   bookDefaultFont?: Partial<Font>,
   namedStyles: readonly NamedStyleLike[] = [],
-  dxfs: readonly Partial<Style>[] = []
+  dxfs: readonly Partial<Style>[] = [],
+  /** The Normal style's format, when it is not the plain one; its facets must already be in `table`. */
+  normal?: InternedFormat
 ): Uint8Array {
   const records: { id: number; payload?: Uint8Array }[] = [];
   const record = (name: string, payload?: Uint8Array): void => {
@@ -579,10 +839,16 @@ export function writeStyles(
   // Custom formats, numbered from the first id the built-ins leave free.
   const custom = [...table.entries.entries()].filter(
     (entry): entry is [number, InternedFormat & { numberFormat: string }] =>
-      entry[0] > 0 && entry[1].numberFormat !== undefined
+      entry[1].numberFormat !== undefined
   );
   const formatIdByIndex = new Map<number, number>();
   const idByFormat = new Map<string, number>();
+  // A built-in id kept because it has no code is its own identifier, and needs no `BrtFmt`.
+  table.entries.forEach((entry, index) => {
+    if (entry.keptFormatId !== undefined) {
+      formatIdByIndex.set(index, entry.keptFormatId);
+    }
+  });
   for (const [index, entry] of custom) {
     // Two cells with the same format string but different fonts are two XFs and one `BrtFmt`.
     // A built-in code resolves to its reserved identifier and contributes no `BrtFmt`.
@@ -615,10 +881,14 @@ export function writeStyles(
     declare(named.numFmt);
   }
   for (const dxf of dxfs) {
-    declare(typeof dxf.numFmt === "string" ? dxf.numFmt : dxf.numFmt?.formatCode);
+    declare(numFmtCode(dxf.numFmt));
   }
   const formatIdOf = (code: string): number =>
     code === "General" ? 0 : (BUILT_IN_FORMAT_IDS.get(code) ?? idByFormat.get(code) ?? 0);
+  const formatIdOfFacets = (facets: InternedFormat | undefined): number =>
+    facets?.numberFormat !== undefined
+      ? formatIdOf(facets.numberFormat)
+      : (facets?.keptFormatId ?? 0);
   // Omitted when there is nothing in it. Excel writes no `BrtBeginFmts` at all for a workbook with only
   // built-in number formats — verified across eight styles parts it produced — while this wrote an empty
   // collection. The same distinction as `BrtBeginColInfos`, which is noted in the record table for the same
@@ -677,8 +947,39 @@ export function writeStyles(
   // use, which is why this runs after them: a named style that bolds its text shares the bold font
   // record with any cell that does, rather than adding a second.
   record("BrtBeginCellStyleXFs", count(1 + namedStyles.length));
-  record("BrtXF", cellFormat({ parent: 0xffff, formatId: 0, fontIndex: 0, fillIndex: 0 }));
-  for (const named of namedStyles) {
+  // Every cell format's parent, so what each says it overrides is measured against it.
+  const normalIndices = {
+    formatId: formatIdOfFacets(normal),
+    fontIndex: table.fontIndex(normal?.font),
+    fillIndex: table.fillIndex(normal?.fill),
+    borderIndex: table.borderIndex(normal?.border)
+  };
+  record(
+    "BrtXF",
+    cellFormat({
+      parent: 0xffff,
+      ...normalIndices,
+      alignment: normal?.alignment,
+      protection: normal?.protection
+    })
+  );
+  // Each style XF's indices, by its position: what a cell XF based on it is measured against (`cellFormat`).
+  const styleXfIndices = [
+    normalIndices,
+    ...namedStyles.map(named => ({
+      // Built-in first, then this part's own `BrtFmt` table — the same resolution the cell formats use.
+      // Looking only in `idByFormat` left a named style whose format is a reserved code pointing at
+      // identifier 0, which is `General`: the style kept its font and lost its number format.
+      formatId:
+        named.numFmt === undefined
+          ? (keptNumFmtId(named) ?? 0)
+          : (BUILT_IN_FORMAT_IDS.get(named.numFmt) ?? idByFormat.get(named.numFmt) ?? 0),
+      fontIndex: table.fontIndex(named.font),
+      fillIndex: table.fillIndex(named.fill),
+      borderIndex: table.borderIndex(named.border)
+    }))
+  ];
+  namedStyles.forEach((named, index) => {
     record(
       "BrtXF",
       cellFormat({
@@ -693,24 +994,15 @@ export function writeStyles(
         // symptom was in the Styles that index them, which is why reading the message literally led nowhere for
         // several rounds.
         //
-        // A cell XF is the opposite case and keeps `parent: 0`: it genuinely inherits from a style XF, and 0 is
-        // `Normal`.
+        // A cell XF is the opposite case: it genuinely inherits from a style XF — 0, `Normal`, or the named style
+        // it names (`InternedFormat.parent`).
         parent: 0xffff,
-        // Built-in first, then this part's own `BrtFmt` table — the same resolution the cell formats use.
-        // Looking only in `idByFormat` left a named style whose format is a reserved code pointing at
-        // identifier 0, which is `General`: the style kept its font and lost its number format.
-        formatId:
-          named.numFmt === undefined
-            ? 0
-            : (BUILT_IN_FORMAT_IDS.get(named.numFmt) ?? idByFormat.get(named.numFmt) ?? 0),
-        fontIndex: table.fontIndex(named.font),
-        fillIndex: table.fillIndex(named.fill),
-        borderIndex: table.borderIndex(named.border),
+        ...styleXfIndices[index + 1]!,
         alignment: named.alignment,
         protection: named.protection
       })
     );
-  }
+  });
   record("BrtEndCellStyleXFs");
 
   record("BrtBeginCellXFs", count(table.entries.length));
@@ -718,8 +1010,9 @@ export function writeStyles(
     record(
       "BrtXF",
       cellFormat({
-        parent: 0,
+        parent: entry.parent ?? 0,
         formatId: formatIdByIndex.get(index) ?? 0,
+        parentIndices: styleXfIndices[entry.parent ?? 0] ?? normalIndices,
         fontIndex: table.fontIndex(entry.font),
         fillIndex: table.fillIndex(entry.fill),
         borderIndex: table.borderIndex(entry.border),
@@ -780,6 +1073,16 @@ function cellFormat(options: {
   borderIndex?: number;
   alignment?: Partial<Alignment> | undefined;
   protection?: Partial<Protection> | undefined;
+  /**
+   * The parent's own indices, for a cell format: a facet held differently from it is one the format overrides, even
+   * at index 0 — General, the first font — as [MS-OI29500] §18.8.45 has `cellXfs` say. Absent for a root format.
+   */
+  parentIndices?: {
+    readonly formatId: number;
+    readonly fontIndex: number;
+    readonly fillIndex: number;
+    readonly borderIndex: number;
+  };
 }): Uint8Array {
   // `xfGrbitAtr` says which attributes this format overrides rather than inheriting from its
   // parent. Excel sets it, and it is not decorative: in `issues.xlsb` bit 0 appears on exactly
@@ -787,16 +1090,18 @@ function cellFormat(options: {
   // field was identified. Writing zero here while setting the fields it describes would produce a
   // format whose own mask contradicts it.
   let overrides = 0;
-  if (options.formatId !== 0) {
+  const parent = options.parentIndices;
+  const borderIndex = options.borderIndex ?? 0;
+  if (options.formatId !== 0 || (parent !== undefined && options.formatId !== parent.formatId)) {
     overrides |= ATTRIBUTE_MASK.numberFormat;
   }
-  if (options.fontIndex !== 0) {
+  if (options.fontIndex !== 0 || (parent !== undefined && options.fontIndex !== parent.fontIndex)) {
     overrides |= ATTRIBUTE_MASK.font;
   }
-  if (options.fillIndex !== 0) {
+  if (options.fillIndex !== 0 || (parent !== undefined && options.fillIndex !== parent.fillIndex)) {
     overrides |= ATTRIBUTE_MASK.fill;
   }
-  if ((options.borderIndex ?? 0) !== 0) {
+  if (borderIndex !== 0 || (parent !== undefined && borderIndex !== parent.borderIndex)) {
     overrides |= ATTRIBUTE_MASK.border;
   }
   if (options.alignment !== undefined) {
@@ -868,6 +1173,27 @@ function namedStyle(named: NamedStyleLike, xfIndex: number): Uint8Array {
   ]);
 }
 
+/**
+ * Which named style each cell format is based on, and each named style's format. A cell format's `ixfParent` indexes
+ * the style XFs a `BrtStyle` names; the Normal style (built-in 0) is every format's base and names none.
+ */
+function namedStyleLinks(
+  namedStyles: readonly { name: string; ixf: number; builtinId?: number }[],
+  styleXfFormats: readonly (Partial<Style> | undefined)[],
+  cellParents: readonly number[]
+): Pick<StyleTable, "styleNames" | "namedFormats"> {
+  const nameByXf = new Map<number, string>();
+  const namedFormats = new Map<string, Partial<Style>>();
+  for (const named of namedStyles) {
+    if (named.builtinId === 0 || nameByXf.has(named.ixf)) {
+      continue;
+    }
+    nameByXf.set(named.ixf, named.name);
+    namedFormats.set(excelNameKey(named.name), styleXfFormats[named.ixf] ?? {});
+  }
+  return { styleNames: cellParents.map(parent => nameByXf.get(parent)), namedFormats };
+}
+
 /** Read a `BrtStyle`. Returns the name and the style-XF index it points at. */
 function readNamedStyle(
   payload: Uint8Array,
@@ -909,6 +1235,8 @@ export interface NamedStyleLike {
   readonly alignment?: Partial<Alignment>;
   readonly protection?: Partial<Protection>;
   readonly numFmt?: string;
+  /** On a read, a built-in number-format id with no code — see `kept-num-fmt.ts`. */
+  readonly keptFormatId?: number;
   readonly builtinId?: number;
   readonly hidden?: boolean;
   /**

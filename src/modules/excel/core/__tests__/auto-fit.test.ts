@@ -512,6 +512,38 @@ describe("autoFitRows", () => {
     autoFitRows(ws);
   });
 
+  // Measured in Excel for Mac (under en-US, ja-JP, zh-CN and th-TH): in a wrapped six-character column, text wraps to
+  // several lines and everything else stays on one — a number, a date, a boolean or an error that does not fit is
+  // shown as `###`, not broken. So a row's height does not depend on the locale a number is shown in.
+  it("wraps only text in a wrapped cell", () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "test");
+    Column.setWidth(ws, "A", 6);
+    const values = [
+      "a long piece of text that wraps",
+      123456789012,
+      new Date(Date.UTC(2023, 2, 15)),
+      true,
+      { error: "#DIV/0!" },
+      { formula: "2+3", result: 123456789012 },
+      { formula: '"a long piece of "&"text"', result: "a long piece of text that wraps" }
+    ] as const;
+    values.forEach((value, i) => {
+      Cell.setValue(ws, { row: i + 1, col: 1 }, value);
+      Cell.setAlignment(ws, { row: i + 1, col: 1 }, { wrapText: true });
+    });
+    Cell.setNumFmt(ws, "A2", '0" units of something long"');
+    Row.autoFit(ws, { start: 1, end: values.length });
+
+    const oneLine = Row.getHeight(ws, 2)!;
+    expect(oneLine).toBe(15);
+    for (const row of [3, 4, 5, 6]) {
+      expect(Row.getHeight(ws, row), `row ${row}`).toBe(oneLine);
+    }
+    expect(Row.getHeight(ws, 1)).toBeGreaterThan(oneLine * 3);
+    expect(Row.getHeight(ws, 7)).toBe(Row.getHeight(ws, 1));
+  });
+
   it("returns this for chaining", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "test");

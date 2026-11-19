@@ -37,10 +37,11 @@ import type { WorksheetData } from "@excel/core/worksheet";
 import { rowSetModel } from "@excel/core/worksheet-core";
 import { streamBiffRecordBatches } from "@excel/stream/xlsb-record-stream";
 import { encodeCol } from "@excel/utils/address";
+import { showsDate } from "@excel/utils/kept-num-fmt";
 import { XlsbReader } from "@excel/xlsb/binary";
 import { errorTextOf } from "@excel/xlsb/error-values";
 import type { BinaryReader } from "@utils/binary";
-import { excelToDate, isDateFmt } from "@utils/utils";
+import { excelToDate } from "@utils/utils";
 
 /** The sheet's last column, zero-based. `encodeCol` refuses anything past it, and so does this reader. */
 const MAX_COLUMN_INDEX = 16_383;
@@ -51,6 +52,8 @@ export interface XlsbRowContext {
   readonly sharedStrings: readonly string[];
   /** Number formats by style index, so a serial wearing a date format becomes a `Date`. */
   readonly numberFormats?: readonly (string | undefined)[];
+  /** The built-in ids kept for want of a code, by style index — a date in the reader's locale is one. */
+  readonly keptFormatIds?: readonly (number | undefined)[];
   /** `date1904`, which shifts every serial by four years and a day. */
   readonly date1904?: boolean;
   /** The sheet a row belongs to; the core row factory stores it as a back-pointer. */
@@ -181,18 +184,21 @@ function decodeCell(
   // `iStyleRef` is 24 bits followed by a flags byte — read as a `u32` and masked, which is what the buffered reader
   // does and the only reading that survives a non-zero flags byte.
   const styleIndex = reader.readUint32() & 0x00ffffff;
-  const numberFormat = context.numberFormats?.[styleIndex];
+  const isDate = showsDate(
+    context.numberFormats?.[styleIndex],
+    context.keptFormatIds?.[styleIndex]
+  );
   switch (name) {
     case "BrtCellBlank":
       return { column, value: null, styleIndex };
     case "BrtCellRk":
       return {
         column,
-        value: dated(decodeRk(reader.readUint32()), numberFormat, context),
+        value: dated(decodeRk(reader.readUint32()), isDate, context),
         styleIndex
       };
     case "BrtCellReal":
-      return { column, value: dated(reader.readFloat64(), numberFormat, context), styleIndex };
+      return { column, value: dated(reader.readFloat64(), isDate, context), styleIndex };
     case "BrtCellBool":
       return { column, value: reader.readUint8() !== 0, styleIndex };
     case "BrtCellIsst":
@@ -209,7 +215,7 @@ function decodeCell(
       return text === undefined ? undefined : { column, value: text, styleIndex };
     }
     case "BrtFmlaNum":
-      return { column, value: dated(reader.readFloat64(), numberFormat, context), styleIndex };
+      return { column, value: dated(reader.readFloat64(), isDate, context), styleIndex };
     case "BrtFmlaBool":
       return { column, value: reader.readUint8() !== 0, styleIndex };
     case "BrtFmlaString":
@@ -254,19 +260,15 @@ function readWideString(reader: BinaryReader): string {
 }
 
 /**
- * A serial wearing a date format is a date — through `isDateFmt`, the same rule every other reader applies.
+ * A serial wearing a date format is a date — through `showsDate`, the same rule every other reader applies.
  *
  * This used to carry its own detector and its own epoch expression, and both differed from the buffered reader's,
  * so the same workbook read back differently depending on which container it arrived in and whether the caller
  * streamed it — the one thing two readers of the same document must not do, as `readXlsbInto` says in as many words.
  * There is now one tokenizer for number formats (`@utils/number-format`), shared with display and `TEXT`.
  */
-function dated(
-  value: number,
-  numberFormat: string | undefined,
-  context: XlsbRowContext
-): number | Date {
-  return isDateFmt(numberFormat) ? excelToDate(value, context.date1904) : value;
+function dated(value: number, isDate: boolean, context: XlsbRowContext): number | Date {
+  return isDate ? excelToDate(value, context.date1904) : value;
 }
 
 /** The assembled row, through the core factory so it is the same shape the XML path yields. */

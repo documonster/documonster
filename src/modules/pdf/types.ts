@@ -102,12 +102,24 @@ export interface PdfCellData {
   value: unknown;
   /** Pre-computed display text */
   text: string;
+  /**
+   * Where the text's number format fills the cell (`*x` in Excel): `char` is repeated at offset `at` of `text`
+   * until the text is as wide as the cell, which then lays it against its right edge. Ignored for wrapped or
+   * rotated text.
+   */
+  fill?: PdfCellFill;
   style?: Partial<PdfCellStyle>;
   hyperlink?: string;
   /** Formula result (for formula cells) */
   result?: unknown;
   /** Column number (1-based) */
   col: number;
+}
+
+/** A character repeated at an offset of a cell's text until it fills the cell — see {@link PdfCellData.fill}. */
+export interface PdfCellFill {
+  readonly char: string;
+  readonly at: number;
 }
 
 /** A row in the PDF input model. */
@@ -1082,7 +1094,8 @@ export interface PdfExportOptions extends PdfDocumentOptions {
 
   /**
    * Default font family for cells without an explicit font.
-   * @default "Helvetica"
+   * @default `Pdf.fromExcel`: the workbook's default font (`Workbook.getDefaultFont`), in which Excel shows such a
+   * cell; `"Helvetica"` where it has none.
    */
   defaultFontFamily?: string;
 
@@ -1090,7 +1103,7 @@ export interface PdfExportOptions extends PdfDocumentOptions {
    * Default font size in **points** for cells without an explicit font size (`Pdf.fromDocx`'s
    * `defaultFontSize` is points too; Word's `WordHtml.toDocx` / `WordMarkdown.toDocx` take
    * half-points).
-   * @default 11
+   * @default `Pdf.fromExcel`: the workbook's default font's size; `11` where it has none.
    */
   defaultFontSize?: number;
 
@@ -1458,6 +1471,8 @@ export interface PdfLayoutRect {
 export interface LayoutCell {
   /** Cell text content */
   text: string;
+  /** The fill of the cell's text (`PdfCellData.fill`), expanded into `text` once the cell's width is known. */
+  fill?: PdfCellFill;
   /** Rectangle in page coordinates (PDF points, origin bottom-left) */
   rect: PdfLayoutRect;
   /** Font family resolved for this cell */

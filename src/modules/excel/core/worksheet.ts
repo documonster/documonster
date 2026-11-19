@@ -41,7 +41,7 @@ import {
   cellSetValue,
   cellType,
   cellUnmerge,
-  cellView,
+  cellShownView,
   checkCellValue
 } from "@excel/core/cell";
 import type { ColumnData, ColumnModel, ColumnDefn, ColumnView } from "@excel/core/column";
@@ -183,6 +183,7 @@ import { getCellDisplayText } from "@excel/utils/cell-format";
 import type { DecodedRange } from "@excel/utils/col-cache";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 import { isExternalImage } from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
 import type { LineEdit } from "@excel/utils/reference-rewrite";
@@ -2502,6 +2503,13 @@ export interface AutoFitColumnOptions {
    * @default false — hidden rows are ignored, as Excel's own AutoFit does.
    */
   includeHiddenRows?: boolean;
+  /**
+   * Whose display the column is fitted to: the form a built-in number format with no code of its own takes — the symbol
+   * of a currency, an East Asian date, Thai digits — as Excel in that locale shows it. A format with a code shows as
+   * its code says in every locale.
+   * @default "en-US"
+   */
+  locale?: ExcelDisplayLocale;
 }
 
 /**
@@ -2674,7 +2682,7 @@ function _autoFitColumnImpl(
       return;
     }
 
-    let textWidthPx = getCellTextWidthPx(cellView(cell));
+    let textWidthPx = getCellTextWidthPx(cellShownView(cell, options?.locale));
 
     // Account for indent: each level adds approximately 3 character widths
     const indent = cellAlignment(cell)?.indent;
@@ -2730,7 +2738,8 @@ function _autoFitRowImpl(ws: WorksheetData, rowNumber: number): void {
       merge?.left ?? col,
       merge?.right ?? col
     );
-    const heightPt = getCellHeightPt(cellView(cell), mdw, columnWidthPx);
+    // No display locale: only text wraps (`getCellHeightPt`), and no local form changes a text's words.
+    const heightPt = getCellHeightPt(cellShownView(cell), mdw, columnWidthPx);
     if (heightPt > maxHeightPt) {
       maxHeightPt = heightPt;
     }
@@ -2830,7 +2839,7 @@ export function toJSON(
       return readValue(row, col);
     }
     const cell = findCell(ws, row, col);
-    return cell ? getCellDisplayText(cellView(cell), o.dateFormat).trim() : null;
+    return cell ? getCellDisplayText(cellShownView(cell, o.locale), o.dateFormat).trim() : null;
   };
 
   const headerOpt = o.header;
@@ -3434,6 +3443,13 @@ export interface SheetToJsonOptions {
   blankRows?: boolean;
   /** Override format for date values (only applies when raw: false) */
   dateFormat?: string;
+  /**
+   * With `raw: false`, whose display it is: the form a built-in number format with no code of its own takes — the
+   * symbol of a currency, an East Asian date, Thai digits — as Excel in that locale shows it. A format with a code
+   * shows as its code says in every locale.
+   * @default "en-US"
+   */
+  locale?: ExcelDisplayLocale;
 }
 
 export interface AddJsonOptions {

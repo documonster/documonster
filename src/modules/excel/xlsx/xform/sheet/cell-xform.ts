@@ -1,20 +1,19 @@
 import { Enums } from "@excel/core/enums";
 import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/core/range";
 import { ExcelInvalidValueTypeError, ExcelError } from "@excel/errors";
-import type { RichText } from "@excel/types";
+import type { RichText, Style } from "@excel/types";
 import { claimArrayRange, type ArrayRange } from "@excel/utils/array-ranges";
+import { cellContentError } from "@excel/utils/file-content-errors";
 import { fromFileFormula, hasUnnamedThisRow, toFileFormula } from "@excel/utils/future-functions";
+import { numberFormatOfStyle } from "@excel/utils/inherited-format";
+import { showsDate } from "@excel/utils/kept-num-fmt";
 import { slideFormula } from "@excel/utils/shared-formula";
 import { isStoredOrdinaryFormula, markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
-import {
-  dateToExcel,
-  isDateFmt,
-  excelToDate,
-  decodeOoxmlEscape,
-  parseOoxmlDate
-} from "@utils/utils";
+import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
+import { parseXsdBoolean, parseXsdFloat, parseXsdInt } from "@excel/xlsx/xform/xsd-values";
+import { dateToExcel, excelToDate, decodeOoxmlEscape, parseOoxmlDate } from "@utils/utils";
 import type { XmlAttributes } from "@xml/types";
 
 function getValueType(v) {
@@ -43,6 +42,57 @@ function getValueType(v) {
     return Enums.ValueType.Error;
   }
   throw new ExcelInvalidValueTypeError(typeof v, "Could not understand type of value");
+}
+
+/**
+ * A number cell's `<v>`, or a formula's cached number: an `xsd:double`, refused when it is not one or is not finite.
+ *
+ * Not `parseFloat`, which reads the longest number at the front of the text and ignores the rest — `49,99` read as
+ * `49`, `0x10` as `0` — and so turned a malformed value into a different, plausible one. A value that underflows
+ * (`1e-400`) is a valid `xsd:double` and reads as the nearest double, `0`.
+ */
+function parseNumberValue(address: string, text: string): number {
+  const value = parseXsdFloat(text);
+  if (value === undefined) {
+    throw cellContentError(address, `<v>${text}</v> is not a number`);
+  }
+  return value;
+}
+
+/** A `t="s"` cell's `<v>`: an index into the shared strings — see {@link parseNumberValue}. */
+function parseSharedStringIndex(address: string, text: string): number {
+  const index = parseXsdInt(text);
+  if (index === undefined || index < 0) {
+    throw cellContentError(address, `<v>${text}</v> is not a shared string index`);
+  }
+  return index;
+}
+
+/**
+ * A `t="b"` cell's `<v>`, or a formula's cached boolean: `1` or `0` — or `true` / `false`, the other spelling of an
+ * `xsd:boolean`. It was read as "not zero", so `false` read as `true`, and so did any text at all.
+ */
+function parseBooleanValue(address: string, text: string): boolean {
+  const value = parseXsdBoolean(text);
+  if (value === undefined) {
+    throw cellContentError(address, `<v>${text}</v> is not a boolean`);
+  }
+  return value;
+}
+
+/** A `t="d"` cell's `<v>`, or a formula's cached date: a date its reader can read, refused rather than an invalid `Date`. */
+function parseDateValue(address: string, text: string): Date {
+  const value = parseOoxmlDate(text);
+  if (Number.isNaN(value.getTime())) {
+    throw cellContentError(address, `<v>${text}</v> is not a date`);
+  }
+  return value;
+}
+
+/** Whether a cell's format shows its number as a date — see `showsDate`. */
+function formatShowsDate(style: Partial<Style>): boolean {
+  const { code, keptId } = numberFormatOfStyle(style);
+  return showsDate(code, keptId);
 }
 
 function getEffectiveCellType(cell) {
@@ -181,16 +231,29 @@ export function overlappedArrayRange(model: object): ArrayRange | undefined {
 
 class CellXform extends BaseXform {
   declare private richTextXform: RichTextXform;
+  /** Reads a cell's `<is>`, while {@link parser} is it. */
+  declare private inlineStringXform: SharedStringXform;
   declare public parser: BaseXform | undefined;
   declare private t: string | undefined;
   declare private currentNode: string | undefined;
   /** Whether the cell has a `<v>` — an empty one (`<v/>`) is a value: the empty string of a `t="str"` cell. */
   declare private hasValueElement: boolean;
+  /** Whether the cell has an `<f>`. */
+  declare private hasFormulaElement: boolean;
+  /** What the cell's `<is>` holds, once it is read. */
+  declare private inlineString: string | { richText: RichText[] } | undefined;
+  /** Depth inside a child the cell does not model (`<extLst>`, a foreign element), whose subtree is skipped. */
+  declare private skipping: number;
 
   constructor() {
     super();
 
     this.richTextXform = new RichTextXform();
+    this.inlineStringXform = new SharedStringXform(undefined, {
+      tag: "is",
+      fail: detail => cellContentError(this.model.address, `its <is> ${detail}`)
+    });
+    this.skipping = 0;
   }
 
   get tag() {
@@ -601,6 +664,10 @@ class CellXform extends BaseXform {
       this.parser.parseOpen(node);
       return true;
     }
+    if (this.skipping > 0) {
+      this.skipping++;
+      return true;
+    }
     switch (node.name) {
       case "c":
         // The fields every cell ends up with are declared here. The model is kept as the loaded cell's value model, and
@@ -615,6 +682,8 @@ class CellXform extends BaseXform {
         this.t = node.attributes.t;
         this.currentNode = undefined;
         this.hasValueElement = false;
+        this.hasFormulaElement = false;
+        this.inlineString = undefined;
         if (node.attributes.s) {
           this.model.styleId = parseInt(node.attributes.s, 10);
         }
@@ -624,6 +693,13 @@ class CellXform extends BaseXform {
         return true;
 
       case "f":
+        // A cell holds one formula and one value (`CT_Cell`: `f?`, `v?`, `is?`). An element's text may arrive in
+        // pieces, which are joined, so a second element would read as more of the first — `<v>12.5</v><v>99</v>` as
+        // `12.599` — and is refused instead.
+        if (this.hasFormulaElement) {
+          throw cellContentError(this.model.address, "has more than one <f>");
+        }
+        this.hasFormulaElement = true;
         this.currentNode = "f";
         this.model.si = node.attributes.si;
         this.model.shareType = node.attributes.t;
@@ -631,21 +707,28 @@ class CellXform extends BaseXform {
         return true;
 
       case "v":
+        if (this.hasValueElement) {
+          throw cellContentError(this.model.address, "has more than one <v>");
+        }
         this.currentNode = "v";
         this.hasValueElement = true;
         return true;
 
-      case "t":
-        this.currentNode = "t";
-        return true;
-
-      case "r":
-        this.parser = this.richTextXform;
+      case "is":
+        // A rich string, read as the shared strings' `<si>` is: its text used to be collected from every `<t>` below
+        // the cell, so a phonetic run's reading joined the string and ended the cell early.
+        if (this.inlineString !== undefined) {
+          throw cellContentError(this.model.address, "has more than one <is>");
+        }
+        this.parser = this.inlineStringXform;
         this.parser.parseOpen(node);
         return true;
 
       default:
-        return false;
+        // `<extLst>`, or an element from elsewhere: its subtree is skipped. Declining it left its closing tag to be read
+        // as the cell's own, which ended the cell early.
+        this.skipping = 1;
+        return true;
     }
   }
 
@@ -654,19 +737,15 @@ class CellXform extends BaseXform {
       this.parser.parseText(text);
       return;
     }
+    if (this.skipping > 0) {
+      return;
+    }
     switch (this.currentNode) {
       case "f":
         this.model.formula = this.model.formula ? this.model.formula + text : text;
         break;
       case "v":
-      case "t":
-        if (this.model.value && this.model.value.richText) {
-          this.model.value.richText.text = this.model.value.richText.text
-            ? this.model.value.richText.text + text
-            : text;
-        } else {
-          this.model.value = this.model.value ? this.model.value + text : text;
-        }
+        this.model.value = this.model.value ? this.model.value + text : text;
         break;
       default:
         break;
@@ -674,139 +753,116 @@ class CellXform extends BaseXform {
   }
 
   parseClose(name) {
-    switch (name) {
-      case "c": {
-        const { model } = this;
-        if (typeof model.formula === "string") {
-          // `_xlfn.ANCHORARRAY(A1)` is how the file spells the spill-range operator `A1#`.
-          model.formula = fromFileFormula(model.formula);
-        }
-        if (this.parser) {
-          // A run still open: the cell is being ended early, by a `<c>` nested in it (see `RowXform`). What the run
-          // already holds is kept, and it is closed so that the next cell does not start inside it.
-          const run = this.richTextXform.model;
-          if (
-            run?.text !== undefined &&
-            (model.value === undefined || typeof model.value === "object")
-          ) {
-            model.value = model.value ?? {};
-            model.value.richText = model.value.richText ?? [];
-            model.value.richText.push(run);
-          }
-          this.richTextXform.parser = undefined;
+    if (name !== "c") {
+      if (this.parser) {
+        if (!this.parser.parseClose(name)) {
+          this.inlineString = this.inlineStringXform.model;
           this.parser = undefined;
         }
+      } else if (this.skipping > 0) {
+        this.skipping--;
+      } else {
         this.currentNode = undefined;
-        // `<v/>` in a `t="str"` cell is the empty string — Excel's save of a formula whose result is `""`
-        // (`<c t="str"><f>""</f><v/></c>`), or of an array formula's cell holding one. No text event arrives for it.
-        if (this.t === "str" && this.hasValueElement && model.value === undefined) {
-          model.value = "";
-        }
-
-        // first guess on cell type
-        if (model.formula || model.shareType) {
-          model.type = Enums.ValueType.Formula;
-          if (model.value || (this.t === "str" && model.value === "")) {
-            if (this.t === "str") {
-              model.result = model.value;
-            } else if (this.t === "b") {
-              model.result = parseInt(model.value, 10) !== 0;
-            } else if (this.t === "e") {
-              model.result = { error: model.value };
-            } else if (this.t === "d") {
-              // A cached result is typed by `t` like a value: an ISO date, read as a value cell's is below.
-              model.result = parseOoxmlDate(model.value);
-            } else {
-              model.result = parseFloat(model.value);
-            }
-            model.value = undefined;
-          }
-        } else if (model.value !== undefined) {
-          switch (this.t) {
-            case "s":
-              model.type = Enums.ValueType.String;
-              model.value = parseInt(model.value, 10);
-              break;
-            case "str":
-              model.type = Enums.ValueType.String;
-              // Value already decoded by SAX parser — no xmlDecode needed
-              break;
-            case "inlineStr":
-              model.type = Enums.ValueType.String;
-              // Decode OOXML _xHHHH_ escapes for plain text inline strings.
-              // Rich text inline strings are already decoded via RichTextXform -> TextXform.
-              if (typeof model.value === "string" && model.value.includes("_x")) {
-                model.value = decodeOoxmlEscape(model.value);
-              }
-              break;
-            case "b":
-              model.type = Enums.ValueType.Boolean;
-              model.value = parseInt(model.value, 10) !== 0;
-              break;
-            case "e":
-              model.type = Enums.ValueType.Error;
-              model.value = { error: model.value };
-              break;
-            case "d":
-              // Strict OpenXML format stores dates as ISO strings with t="d"
-              // See: https://www.loc.gov/preservation/digital/formats/fdd/fdd000401.shtml
-              //
-              // Through `parseOoxmlDate`, not `new Date(...)`. An OOXML datetime carries no timezone —
-              // `2020-01-15T00:00:00` — and every JS engine reads an unsuffixed datetime as *local*, so this
-              // branch produced a different instant in every timezone and read the date a day early anywhere
-              // east of UTC. Every other read path in the library lands on UTC midnight; this one did not, so
-              // the same workbook read back differently depending on which of two spellings of a date cell the
-              // producer had chosen. `parseOoxmlDate` is the shared fix and already existed.
-              model.type = Enums.ValueType.Date;
-              model.value = parseOoxmlDate(model.value);
-              break;
-            default:
-              model.type = Enums.ValueType.Number;
-              model.value = parseFloat(model.value);
-              break;
-          }
-        } else if (model.styleId !== undefined) {
-          // `s="0"` is a style like any other: the default one, which a blank cell carries to stand apart from a
-          // styled row or column.
-          model.type = Enums.ValueType.Null;
-        } else {
-          model.type = Enums.ValueType.Merge;
-        }
-        return false;
       }
-
-      case "f":
-      case "v":
-      case "is":
-        this.currentNode = undefined;
-        return true;
-
-      case "t":
-        if (this.parser) {
-          this.parser.parseClose(name);
-          return true;
-        }
-        this.currentNode = undefined;
-        return true;
-
-      case "r":
-        this.model.value = this.model.value || {};
-        this.model.value.richText = this.model.value.richText ?? [];
-        // `this.parser` is guaranteed by parseOpen("r"), which instantiates
-        // a RichTextXform. A missing parser here means malformed XML that
-        // should surface as a parse error rather than silently swallow.
-        this.model.value.richText.push(this.parser!.model);
-        this.parser = undefined;
-        this.currentNode = undefined;
-        return true;
-
-      default:
-        if (this.parser) {
-          this.parser.parseClose(name);
-          return true;
-        }
-        return false;
+      return true;
     }
+
+    const { model } = this;
+    if (typeof model.formula === "string") {
+      // `_xlfn.ANCHORARRAY(A1)` is how the file spells the spill-range operator `A1#`.
+      model.formula = fromFileFormula(model.formula);
+    }
+    if (this.parser) {
+      // An `<is>` still open: the cell is being ended early, by a `<c>` nested in it (see `RowXform`). What it already
+      // holds is kept, and it is closed so that the next cell does not start inside it.
+      this.inlineString = this.inlineStringXform.endEarly();
+      this.parser = undefined;
+    }
+    this.skipping = 0;
+    this.currentNode = undefined;
+    // `<v/>` in a `t="str"` cell is the empty string — Excel's save of a formula whose result is `""`
+    // (`<c t="str"><f>""</f><v/></c>`), or of an array formula's cell holding one. No text event arrives for it.
+    if (this.t === "str" && this.hasValueElement && model.value === undefined) {
+      model.value = "";
+    }
+    // An inline string's value is in `<is>`, not `<v>` (ECMA-376 §18.18.11). A cell with an `<is>` and no `<v>` is
+    // read as one whatever its `t` says, which is the only reading its content has; one with both is read by its `t`.
+    const inline =
+      this.inlineString !== undefined && (this.t === "inlineStr" || !this.hasValueElement);
+
+    // first guess on cell type
+    if (model.formula || model.shareType) {
+      model.type = Enums.ValueType.Formula;
+      if (model.value || (this.t === "str" && model.value === "")) {
+        if (this.t === "str") {
+          model.result = model.value;
+        } else if (this.t === "b") {
+          model.result = parseBooleanValue(model.address, model.value);
+        } else if (this.t === "e") {
+          model.result = { error: model.value };
+        } else if (this.t === "d") {
+          // A cached result is typed by `t` like a value: an ISO date, read as a value cell's is below.
+          model.result = parseDateValue(model.address, model.value);
+        } else {
+          model.result = parseNumberValue(model.address, model.value);
+        }
+        model.value = undefined;
+      }
+    } else if (inline) {
+      // Already decoded: `TextXform` reads the `_xHHHH_` escapes.
+      model.type = Enums.ValueType.String;
+      model.value = this.inlineString;
+    } else if (model.value !== undefined) {
+      switch (this.t) {
+        case "s":
+          model.type = Enums.ValueType.String;
+          model.value = parseSharedStringIndex(model.address, model.value);
+          break;
+        case "str":
+          model.type = Enums.ValueType.String;
+          // Value already decoded by SAX parser — no xmlDecode needed
+          break;
+        case "inlineStr":
+          // An inline string written in `<v>` rather than `<is>`: its `_xHHHH_` escapes are decoded here.
+          model.type = Enums.ValueType.String;
+          if (model.value.includes("_x")) {
+            model.value = decodeOoxmlEscape(model.value);
+          }
+          break;
+        case "b":
+          model.type = Enums.ValueType.Boolean;
+          model.value = parseBooleanValue(model.address, model.value);
+          break;
+        case "e":
+          model.type = Enums.ValueType.Error;
+          model.value = { error: model.value };
+          break;
+        case "d":
+          // Strict OpenXML format stores dates as ISO strings with t="d"
+          // See: https://www.loc.gov/preservation/digital/formats/fdd/fdd000401.shtml
+          //
+          // Through `parseOoxmlDate`, not `new Date(...)`. An OOXML datetime carries no timezone —
+          // `2020-01-15T00:00:00` — and every JS engine reads an unsuffixed datetime as *local*, so this
+          // branch produced a different instant in every timezone and read the date a day early anywhere
+          // east of UTC. Every other read path in the library lands on UTC midnight; this one did not, so
+          // the same workbook read back differently depending on which of two spellings of a date cell the
+          // producer had chosen. `parseOoxmlDate` is the shared fix and already existed.
+          model.type = Enums.ValueType.Date;
+          model.value = parseDateValue(model.address, model.value);
+          break;
+        default:
+          model.type = Enums.ValueType.Number;
+          model.value = parseNumberValue(model.address, model.value);
+          break;
+      }
+    } else if (model.styleId !== undefined) {
+      // `s="0"` is a style like any other: the default one, which a blank cell carries to stand apart from a
+      // styled row or column.
+      model.type = Enums.ValueType.Null;
+    } else {
+      model.type = Enums.ValueType.Merge;
+    }
+    return false;
   }
 
   reconcile(model, options) {
@@ -815,6 +871,12 @@ class CellXform extends BaseXform {
     if (style) {
       model.style = style;
     }
+    // A cell with no `s` has the workbook's default format, `cellXfs[0]` (ECMA-376 §18.3.1.4). It is not copied onto
+    // the cell: a style with nothing of its own *is* the default format, as it is for a cell made since, and the writer
+    // writes the default back. It still decides what the value is — a serial number under a default date format is a
+    // date.
+    const format =
+      style || (model.styleId === undefined ? options.styles?.getDefaultStyleModel?.() : undefined);
     if (model.styleId !== undefined) {
       model.styleId = undefined;
     }
@@ -839,8 +901,9 @@ class CellXform extends BaseXform {
             const ssIndex = model.value;
             model.value = options.sharedStrings.getString(ssIndex);
             if (model.value === undefined) {
-              throw new ExcelError(
-                `Invalid shared string index ${ssIndex} in cell ${model.address}: the xlsx file appears to be corrupted`
+              throw cellContentError(
+                model.address,
+                `<v>${ssIndex}</v> names a shared string the shared strings do not have`
               );
             }
           }
@@ -851,7 +914,7 @@ class CellXform extends BaseXform {
         break;
 
       case Enums.ValueType.Number:
-        if (style && isDateFmt(style.numFmt)) {
+        if (format && formatShowsDate(format)) {
           model.type = Enums.ValueType.Date;
           model.value = excelToDate(model.value, options.date1904);
         }
@@ -863,8 +926,8 @@ class CellXform extends BaseXform {
         if (
           model.result !== undefined &&
           typeof model.result === "number" &&
-          style &&
-          isDateFmt(style.numFmt)
+          format &&
+          formatShowsDate(format)
         ) {
           model.result = excelToDate(model.result, options.date1904);
         }

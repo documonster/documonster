@@ -258,6 +258,10 @@ class RowXform extends BaseXform<RowModel> {
     this.parser = this.map[node.name];
     if (this.parser) {
       this.parser.parseOpen(node);
+      if (node.name === "c") {
+        // Placed before its content is read, so that a refusal of the content names the cell even when `r` is absent.
+        this.placeCell();
+      }
       return true;
     }
     // Something else inside the row (an `extLst`, a foreign element): its subtree is skipped. Returning false here
@@ -291,8 +295,8 @@ class RowXform extends BaseXform<RowModel> {
     return false;
   }
 
-  /** Place the cell the cell parser has just finished in the open row. */
-  private addCell(): void {
+  /** Give the cell the cell parser has just opened its address in the open row. */
+  private placeCell(): void {
     const cellModel = this.parser!.model;
     // See `cell-reference.ts`: a missing `r` follows the previous cell, a present one must name a cell of this row.
     const written = cellModel.address;
@@ -301,6 +305,11 @@ class RowXform extends BaseXform<RowModel> {
       // Absent, or spelled `$A$1`: the address is the one the cell was placed at.
       cellModel.address = colCache.encodeAddress(this.model!.number, this.lastCellCol);
     }
+  }
+
+  /** Place the cell the cell parser has just finished in the open row. */
+  private addCell(): void {
+    const cellModel = this.parser!.model;
     // **A styled cell with no value is collapsed rather than materialised.**
     //
     // `<c r="A9" s="3"/>` is what Excel writes for formatting applied past the data, one per cell — 62,400 of them

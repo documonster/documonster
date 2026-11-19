@@ -128,6 +128,20 @@ export interface WorkbookData {
   /** @deprecated Internal state, not part of the API. Removed from the published type in 1.0. */
   _defaultFont?: Partial<Font>;
   /**
+   * The default cell format (`cellXfs[0]`) and the Normal style's (`cellStyleXfs[0]`) a read found, each as what it
+   * sets beyond a cell with no format — see `StylesXform.getDefaultStyleModel`. Written back as those formats.
+   * @internal
+   */
+  _defaultStyle?: Partial<Style>;
+  /** @internal See {@link _defaultStyle}. */
+  _normalStyle?: Partial<Style>;
+  /**
+   * What the XLSX read that loaded this workbook found and could not carry into it, as `readWithDiagnostics` reports it
+   * in `lost`. Cleared by a model that did not come from a read.
+   * @internal
+   */
+  _readLost?: readonly string[];
+  /**
    * Workbook-level named cell styles (OOXML `cellStyle`), keyed by `excelNameKey(name)`: Excel compares cell style
    * names without regard to case, so `Brand Title` and `brand title` are one style. Each entry keeps its spelling in
    * `name`. Populated

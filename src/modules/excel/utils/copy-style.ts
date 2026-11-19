@@ -1,3 +1,5 @@
+import { UNRECOGNIZED_KEY } from "@utils/unrecognized-values";
+
 /**
  * A style-like bag copied generically by key. The `any` index signature is
  * intentional: this helper performs dynamic, key-driven deep copies
@@ -120,8 +122,29 @@ function copyStyle(style: StyleObject | null | undefined): StyleObject | null | 
       copied[key] = copyStyleFacet(key, style[key]);
     }
   }
+  copyKeptValues(copied);
 
   return copied;
 }
 
-export { copyStyle, copyStyleFacet };
+/**
+ * Give `style` its own copy of the values a read kept on it (`@utils/unrecognized-values`), which are as much the
+ * style's as its facets are. A style shares them with every copy taken by spreading it — the cells reading one xf
+ * share one — so a style handed to a caller, a copy or a live one, must own them, or an edit to it changes what the
+ * workbook reports and writes for every cell that shared them.
+ */
+function copyKeptValues(style: StyleObject): void {
+  const kept = style[UNRECOGNIZED_KEY];
+  if (kept && typeof kept === "object") {
+    style[UNRECOGNIZED_KEY] = Object.fromEntries(
+      Object.entries(kept as StyleObject).map(([field, entry]) => [
+        field,
+        entry && typeof entry === "object"
+          ? { ...entry, ...(entry.with ? { with: { ...entry.with } } : {}) }
+          : entry
+      ])
+    );
+  }
+}
+
+export { copyKeptValues, copyStyle, copyStyleFacet };

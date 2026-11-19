@@ -48,9 +48,12 @@ import {
   cellGetValue,
   cellHyperlink,
   cellResult,
+  cellShownNumFmt,
+  cellShownStyle,
   cellText,
   cellType,
-  mergeCellStyle
+  mergeCellStyle,
+  shownStyleOf
 } from "@excel/core/cell";
 import type { CellData } from "@excel/core/cell";
 import type { ChartsheetData } from "@excel/core/chartsheet";
@@ -68,7 +71,7 @@ import type { NoteData } from "@excel/core/note";
 import type { RowData } from "@excel/core/row";
 import { computeSparklineGeometry } from "@excel/core/sparkline";
 import type { SparklineGroup } from "@excel/core/sparkline";
-import { getChartsheets, getImage, getWorksheets } from "@excel/core/workbook";
+import { getChartsheets, getDefaultFont, getImage, getWorksheets } from "@excel/core/workbook";
 import { getWorksheet } from "@excel/core/workbook-core";
 // Use the browser base class so the public `excelToPdf(workbook)` signature is
 // callable from both the Node entry (where `Workbook` is the Node subclass —
@@ -103,8 +106,11 @@ import type {
   CellRichTextValue,
   HeaderFooter
 } from "@excel/types";
-import { formatCellValue } from "@excel/utils/cell-format";
+import { formatCellValueLayout } from "@excel/utils/cell-format";
+import { DISPLAY_LOCALES } from "@excel/utils/display-locale";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
+import { at } from "@pdf/core/arguments";
 import { PdfArgumentError } from "@pdf/errors";
 import { exportPdf } from "@pdf/render/pdf-exporter";
 import type {
@@ -136,6 +142,8 @@ import type {
   PdfCellTypeValue
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
+import type { NumberFormatLayout } from "@utils/number-format-render";
+import { check, s } from "@utils/schema";
 import { normalizeLoneCarriageReturns } from "@utils/text-measure";
 import { hexToRgb01 } from "@utils/theme-colors";
 import { emuToPx } from "@utils/units";
@@ -169,7 +177,19 @@ export interface ExcelToPdfOptions extends PdfExportOptions {
    * the engine into their bundle.
    */
   recalculate?: (workbook: Workbook) => void;
+  /**
+   * Whose display the cells are shown in: the form a built-in number format with no code of its own takes — the
+   * symbol of a currency, an East Asian date, Thai digits — as Excel in that locale shows it, as
+   * `Cell.getDisplayText` takes it. A format with a code shows as its code says in every locale.
+   * @default "en-US"
+   */
+  locale?: ExcelDisplayLocale;
 }
+
+/** `ExcelToPdfOptions.locale`, the one key `checkPdfExportOptions` does not know; every other key passes. */
+const localeOptionSchema = s.object({
+  locale: s.member<ExcelDisplayLocale>(DISPLAY_LOCALES).optional()
+});
 
 /**
  * Export an Excel Workbook directly to PDF.
@@ -186,6 +206,10 @@ export async function excelToPdf(
   workbook: Workbook,
   options?: ExcelToPdfOptions
 ): Promise<Uint8Array> {
+  // The option only this bridge can check, since only it may name Excel's locales — and before `recalculate`, which
+  // edits the workbook.
+  check(localeOptionSchema.optional(), options, at("Pdf.fromExcel", "options"));
+
   // Recalculate all formulas before conversion so that formula results
   // reflect the latest cell values (fixes stale cached results from XLSX).
   //
@@ -197,7 +221,27 @@ export async function excelToPdf(
   options?.recalculate?.(workbook);
 
   const pdfWorkbook = await excelWorkbookToPdf(workbook, options);
-  return exportPdf(pdfWorkbook, options, "Pdf.fromExcel");
+  return exportPdf(pdfWorkbook, withWorkbookFont(workbook, options), "Pdf.fromExcel");
+}
+
+/**
+ * `options` with the workbook's default font (`Workbook.getDefaultFont`) as the font of a cell with none of its own,
+ * where the caller names none: Excel shows such a cell in it. A workbook made here and given none keeps the
+ * renderer's default.
+ */
+function withWorkbookFont(
+  workbook: Workbook,
+  options: ExcelToPdfOptions | undefined
+): ExcelToPdfOptions | undefined {
+  const font = getDefaultFont(workbook);
+  if (font === undefined || (font.name === undefined && font.size === undefined)) {
+    return options;
+  }
+  return {
+    ...options,
+    defaultFontFamily: options?.defaultFontFamily ?? font.name,
+    defaultFontSize: options?.defaultFontSize ?? font.size
+  };
 }
 
 /**
@@ -420,9 +464,9 @@ export async function chartToPdf(
  * Chartsheets without an orderNo fall to the end, mirroring how Excel
  * treats sheets with missing tab positions.
  */
-async function excelWorkbookToPdf(
+export async function excelWorkbookToPdf(
   workbook: Workbook,
-  options?: PdfExportOptions
+  options?: ExcelToPdfOptions
 ): Promise<PdfWorkbook> {
   const worksheetResults = await Promise.all(
     getWorksheets(workbook).map(ws => convertSheet(ws, workbook, options))
@@ -455,7 +499,7 @@ async function excelWorkbookToPdf(
 async function convertSheet(
   ws: Worksheet,
   workbook: Workbook,
-  options?: PdfExportOptions
+  options?: ExcelToPdfOptions
 ): Promise<PdfSheetData> {
   const dimensions = getSheetDimensions(ws);
   const hasData = dimensions && dimensions.top > 0 && dimensions.left > 0;
@@ -527,34 +571,40 @@ async function convertSheet(
   }
 
   // Convert rows
+  //
+  // Which cells are drawn is decided by their own formatting, as the bounds were; how a drawn cell looks is the format
+  // it is shown in (`cellShownStyle`). A default format that shows on an empty cell — a fill, a border — shows on every
+  // cell the sheet does not hold, as it does in Excel, so then every cell inside the bounds is drawn.
   const rows = new Map<number, PdfRowData>();
   if (hasContent) {
+    const defaultShows = showsWhenEmpty(shownStyleOf({}, workbook));
     for (let r = bounds.top; r <= bounds.bottom; r++) {
       const row = findRow(ws, r);
-      if (!row) {
+      if (!row && !defaultShows) {
         continue;
       }
 
       const cells = new Map<number, PdfCellData>();
-      for (let c = 1; c <= row.cells.length; c++) {
-        const cell = row.cells[c - 1];
+      const last = Math.max(row?.cells.length ?? 0, defaultShows ? bounds.right : 0);
+      for (let c = 1; c <= last; c++) {
+        const cell = row?.cells[c - 1];
         if (cell) {
           const hasValue = cellType(cell) !== ValueType.Null && cellType(cell) !== ValueType.Merge;
-          if (hasValue || hasRenderableCellStyle(cell.style)) {
-            cells.set(c, convertCell(cell));
+          if (hasValue || hasRenderableCellStyle(cell.style) || defaultShows) {
+            cells.set(c, convertCell(cell, options?.locale));
           }
         } else {
-          const style = inheritedCellStyle(ws, row, c);
-          if (hasRenderableCellStyle(style)) {
-            cells.set(c, convertEmptyCell(c, style));
+          const own = inheritedCellStyle(ws, row, c);
+          if (hasRenderableCellStyle(own) || (defaultShows && c >= bounds.left)) {
+            cells.set(c, convertEmptyCell(c, shownStyleOf(own, workbook)));
           }
         }
       }
 
       rows.set(r, {
-        hidden: row.hidden || undefined,
-        height: row.height ?? undefined,
-        customHeight: row.customHeight || undefined,
+        hidden: row?.hidden || undefined,
+        height: row?.height ?? undefined,
+        customHeight: row?.customHeight || undefined,
         cells
       });
     }
@@ -1092,15 +1142,16 @@ function dirname(path: string): string {
 // Cell Conversion
 // =============================================================================
 
-function convertCell(cell: CellData): PdfCellData {
+function convertCell(cell: CellData, locale: ExcelDisplayLocale | undefined): PdfCellData {
   const type = mapValueType(cellType(cell));
-  const text = getCellDisplayText(cell);
-  const style = convertCellStyle(cell.style);
+  const { text, fill } = cellDisplayLayoutOf(cell, locale);
+  const style = convertCellStyle(cellShownStyle(cell, locale));
 
   return {
     type,
     value: convertCellValue(cell),
     text,
+    ...(fill === undefined ? {} : { fill }),
     style,
     hyperlink: cellHyperlink(cell) || undefined,
     result: cellResult(cell) ?? undefined,
@@ -1109,8 +1160,17 @@ function convertCell(cell: CellData): PdfCellData {
 }
 
 /** Resolve the style a cell would inherit if it were materialised. */
-function inheritedCellStyle(ws: Worksheet, row: RowData, col: number): Partial<Style> {
-  return mergeCellStyle(row.style, ws._columns[col - 1]?.style ?? {}, {});
+function inheritedCellStyle(ws: Worksheet, row: RowData | undefined, col: number): Partial<Style> {
+  return mergeCellStyle(row?.style ?? {}, ws._columns[col - 1]?.style ?? {}, {});
+}
+
+/** Whether a format shows on a cell with nothing in it: a fill, or a border. */
+function showsWhenEmpty(style: Partial<Style>): boolean {
+  return Boolean(
+    style.fill ||
+    (style.border &&
+      (style.border.top || style.border.right || style.border.bottom || style.border.left))
+  );
 }
 
 /** The renderer only includes style-only cells for visible formatting. */
@@ -1163,52 +1223,60 @@ function mapValueType(vt: number): PdfCellTypeValue {
 }
 
 /**
- * The text a cell contributes to the page.
+ * The text a cell contributes to the page, and where its number format fills the cell (`*x`).
  *
  * Line breaks are normalised on the way in — see
  * {@link normalizeLoneCarriageReturns}. This is the one place cell text enters the
  * PDF pipeline, so a lone CR is dealt with here rather than in each of the
- * thirteen places downstream that split on a newline.
+ * thirteen places downstream that split on a newline. It replaces one character
+ * with one, so a fill's offset stays where it was.
  */
-function getCellDisplayText(cell: CellData): string {
-  return normalizeLoneCarriageReturns(rawCellDisplayText(cell));
+function cellDisplayLayoutOf(
+  cell: CellData,
+  locale: ExcelDisplayLocale | undefined
+): NumberFormatLayout {
+  const layout = rawCellDisplayLayout(cell, locale);
+  return { ...layout, text: normalizeLoneCarriageReturns(layout.text) };
 }
 
 /**
  * Get display text for a cell, applying numFmt formatting.
  */
-function rawCellDisplayText(cell: CellData): string {
+function rawCellDisplayLayout(
+  cell: CellData,
+  locale: ExcelDisplayLocale | undefined
+): NumberFormatLayout {
   if (!cell) {
-    return "";
+    return { text: "" };
   }
 
   switch (cellType(cell)) {
     case ValueType.Null:
     case ValueType.Merge:
-      return "";
+      return { text: "" };
     case ValueType.RichText:
     case ValueType.Hyperlink:
-      return cellText(cell) ?? "";
+      return { text: cellText(cell) ?? "" };
     case ValueType.Error: {
       const errValue = cellGetValue(cell) as { error?: string } | undefined;
-      return errValue?.error ?? cellText(cell) ?? "";
+      return { text: errValue?.error ?? cellText(cell) ?? "" };
     }
     case ValueType.Formula: {
       const result = cellResult(cell);
       if (result !== undefined && result !== null) {
         if (typeof result === "object" && "error" in result) {
-          return result.error;
+          return { text: result.error };
         }
-        return formatCellValueSafe(result, cell.style?.numFmt, cellDate1904(cell));
+        return formatCellValueSafe(result, cellShownNumFmt(cell, locale), cellDate1904(cell));
       }
-      return cellText(cell) ?? "";
+      return { text: cellText(cell) ?? "" };
     }
     default: {
       const value = cellGetValue(cell);
       if (value === null || value === undefined) {
-        return "";
+        return { text: "" };
       }
-      return formatCellValueSafe(value, cell.style?.numFmt, cellDate1904(cell));
+      return formatCellValueSafe(value, cellShownNumFmt(cell, locale), cellDate1904(cell));
     }
   }
 }
@@ -1217,19 +1285,25 @@ function formatCellValueSafe(
   value: unknown,
   numFmt: string | { formatCode: string } | undefined,
   date1904: boolean
-): string {
+): NumberFormatLayout {
   // A cell without a number format is shown in "General", as Excel, `Cell.getDisplayText` and
   // `WordExcel.toDocx` show it. Rendering a date through `toLocaleDateString` here made the page
   // depend on the machine: a date cell read as 2024-03-10 printed 3/9/2024 west of UTC.
   const fmt = (typeof numFmt === "string" ? numFmt : numFmt?.formatCode) || "General";
-  if (typeof value === "number" || value instanceof Date || typeof value === "boolean") {
+  // Text too: a format's text section (`"Name: "@`) applies to it, as it does in Excel and `Cell.getDisplayText`.
+  if (
+    typeof value === "number" ||
+    value instanceof Date ||
+    typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
     try {
-      return formatCellValue(value, fmt, undefined, date1904);
+      return formatCellValueLayout(value, fmt, undefined, date1904);
     } catch {
       // Fall through to default
     }
   }
-  return String(value);
+  return { text: String(value) };
 }
 
 function convertCellValue(cell: CellData): unknown {

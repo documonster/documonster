@@ -107,6 +107,12 @@ export interface WorkbookModel {
   calcProperties: Partial<CalculationProperties>;
   /** Default font preserved from the original file for round-trip fidelity */
   defaultFont?: Partial<Font>;
+  /** @internal The default cell format preserved from the original file — see `WorkbookCore._defaultStyle`. */
+  defaultStyle?: Partial<Style>;
+  /** @internal The Normal style's format preserved from the original file. */
+  normalStyle?: Partial<Style>;
+  /** @internal What the read that produced this model could not carry into it — see `WorkbookCore._readLost`. */
+  readLost?: readonly string[];
   /** Workbook-level named cell styles (OOXML cellStyles), in definition order. */
   cellStyles?: NamedStyleEntry[];
   /** Differential formats (`<dxfs>`) as read, in index order — see `WorkbookCore._dxfs`. */
@@ -363,6 +369,8 @@ function buildWorkbookModel(wb: WorkbookData): WorkbookModel {
     pivotTables: wb.pivotTables,
     calcProperties: wb.calcProperties,
     defaultFont: wb._defaultFont,
+    defaultStyle: wb._defaultStyle,
+    normalStyle: wb._normalStyle,
     cellStyles: wb._cellStyles ? [...wb._cellStyles.values()] : undefined,
     dxfs: wb._dxfs,
     externalLinks: wb.externalLinks,

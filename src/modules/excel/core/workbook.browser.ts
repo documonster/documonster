@@ -36,7 +36,11 @@ import { createDefinedNames, definedNamesHasName } from "@excel/core/defined-nam
 import { withPivotChartSource } from "@excel/core/pivot-chart";
 import type { PivotTable } from "@excel/core/pivot-table";
 import { sheetNamesInTabOrder, withReferenceEdit } from "@excel/core/structural-edit";
-import { keptSettingsReport } from "@excel/core/unrecognized-values";
+import {
+  discardKeptWorkbookFormats,
+  discardKeptNumFmts,
+  keptSettingsReport
+} from "@excel/core/unrecognized-values";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
   addChartEntry,
@@ -582,11 +586,16 @@ export function addWorksheet(
 }
 
 /**
- * The sheet settings a read kept because they are outside their setting's vocabulary, as the workbook keeps them
- * **now** — each with its sheet, its path (`pageSetup.orientation`) and its text, in sheet order: what
- * `Workbook.readWithDiagnostics` reported as `unrecognizedValues`, less what an edit or
- * {@link discardUnrecognizedValues} has since replaced or dropped. The entries are those the discard filter is called
- * with. Copies.
+ * The values a read kept because they are outside their field's vocabulary, as the workbook keeps them **now** — each
+ * with its sheet, its path and its text, in sheet order: what `Workbook.readWithDiagnostics` reported as
+ * `unrecognizedValues`, less what an edit or {@link discardUnrecognizedValues} has since replaced or dropped. A sheet
+ * setting's path names the setting (`pageSetup.orientation`); a number format a read could name only by its built-in
+ * id (a currency or East Asian date format, which has no one format code) is listed by what holds it —
+ * `A4.style.numFmt`, `4:4.style.numFmt`, `B:B.style.numFmt`, or `A5:C9.style.numFmt` for a range of styled blank
+ * cells, and with no sheet `defaultStyle.numFmt` for the default cell format (see {@link getDefaultStyle}),
+ * `cellStyles["Normal"].numFmt` for the Normal style and `cellStyles["Currency"].numFmt` for a named one — with the id
+ * as its text. The
+ * entries are those the discard filter is called with. Copies.
  */
 export function listUnrecognizedValues(wb: WorkbookData): UnrecognizedValue[] {
   checkWorkbook(wb);
@@ -614,9 +623,9 @@ const _discardOptionsMatch: SchemaMatches<
 void _discardOptionsMatch;
 
 /**
- * Drop the sheet settings a read kept because they are outside their setting's vocabulary — what
- * `Workbook.readWithDiagnostics` lists as `unrecognizedValues` — so the workbook is written with each such setting as
- * it now reads. Returns how many there were.
+ * Drop the values a read kept because they are outside their field's vocabulary — what
+ * `Workbook.readWithDiagnostics` lists as `unrecognizedValues` — so the workbook is written with each such field as
+ * it now reads. Returns how many there were. A number format kept by its id is then written as General.
  *
  * Until then a kept value is written back as read while its field is absent; assigning the field takes over, but
  * clearing it again brings the kept text back. This is how to remove one instead — all of them, or with `filter` the
@@ -638,13 +647,17 @@ export function discardUnrecognizedValues(
     options
   );
   const filter = options?.filter;
-  let discarded = 0;
+  let discarded = discardKeptWorkbookFormats(wb, filter);
   for (const ws of getWorksheets(wb)) {
     const sheet = getSheetName(ws);
-    discarded += discardKeptSheetSettings(
-      ws,
-      filter === undefined ? undefined : setting => filter({ sheet, ...setting })
-    );
+    const sheetFilter =
+      filter === undefined
+        ? undefined
+        : (setting: { readonly path: string; readonly value: string }) =>
+            filter({ sheet, ...setting });
+    discarded += discardKeptSheetSettings(ws, sheetFilter);
+    // After the workbook's own: a default format dropped here is no longer one a sheet's would take.
+    discarded += discardKeptNumFmts(ws, sheetFilter, wb._defaultStyle);
   }
   return discarded;
 }

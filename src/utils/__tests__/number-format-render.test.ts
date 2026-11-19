@@ -1,4 +1,8 @@
-import { renderNumberFormat as render } from "@utils/number-format-render";
+import { isDateFmt } from "@utils/number-format";
+import {
+  renderNumberFormat as render,
+  renderNumberFormatLayout
+} from "@utils/number-format-render";
 import { describe, expect, it } from "vitest";
 
 /** 2024-01-15, a Monday, under the 1900 epoch. */
@@ -339,6 +343,98 @@ describe("renderNumberFormat", () => {
     it("shows booleans as TRUE and FALSE", () => {
       expect(render("0.00", true)).toBe("TRUE");
       expect(render("General", false)).toBe("FALSE");
+    });
+  });
+
+  // The codes of the built-in East Asian and Thai formats (ECMA-376 §18.8.30), checked against what LibreOffice
+  // shows for each in its own locale, and Excel for Mac where it agrees.
+  describe("East Asian and Thai codes", () => {
+    /** 2023-03-15 18:00. */
+    const MAR_15_2023_6PM = 45000.75;
+
+    it("shows 上午/下午 as the Chinese AM/PM marker", () => {
+      expect(render('上午/下午h"时"mm"分"', MAR_15_2023_6PM)).toBe("下午6时00分");
+      expect(render('上午/下午h"时"mm"分"', 45000.25)).toBe("上午6时00分");
+    });
+
+    it("counts e and g in the Japanese eras under [$-411]", () => {
+      expect(render("[$-411]ge.m.d", MAR_15_2023_6PM)).toBe("R5.3.15");
+      expect(render('[$-411]ggge"年"m"月"d"日"', MAR_15_2023_6PM)).toBe("令和5年3月15日");
+      // The last day of Heisei and the first of Reiwa.
+      expect(render("[$-411]gge", 43585)).toBe("平31");
+      expect(render("[$-411]gge", 43586)).toBe("令1");
+      expect(render("[$-411]ggge", 32874)).toBe("平成2");
+      expect(render("[$-411]ggee", 11000)).toBe("昭05");
+    });
+
+    it("counts e from 1912 under [$-404], the Republic of China's calendar", () => {
+      expect(render("[$-404]e/m/d", MAR_15_2023_6PM)).toBe("112/3/15");
+      expect(render('[$-404]e"年"m"月"d"日"', MAR_15_2023_6PM)).toBe("112年3月15日");
+    });
+
+    it("keeps e and g letters where no calendar with eras is named", () => {
+      expect(render("e/m/d", MAR_15_2023_6PM)).toBe("e/3/15");
+      expect(render("0;-0;zero", 0)).toBe("zero");
+    });
+
+    it("shows a t-led number in Thai digits, and leaves any other t a letter", () => {
+      expect(render("t#,##0.00", -1234.5)).toBe("-๑,๒๓๔.๕๐");
+      expect(render("t# ?/?", 45000.75)).toBe("๔๕๐๐๐ ๓/๔");
+      expect(render('t"฿"#,##0_);\\(t"฿"#,##0\\)', -1234.5)).toBe("(฿๑,๒๓๕)");
+      expect(render("0 kt", 5)).toBe("5 kt");
+      expect(render("0 tt", 5)).toBe("5 tt");
+    });
+
+    it("reads the Thai date codes in Thai digits, a month in its Thai name", () => {
+      expect(render("ว/ด/ปปปป", MAR_15_2023_6PM)).toBe("๑๕/๓/๒๕๖๖");
+      expect(render("ว-ดดด-ปป", MAR_15_2023_6PM)).toBe("๑๕-มี.ค.-๖๖");
+      expect(render("ช:นน:ทท", MAR_15_2023_6PM)).toBe("๑๘:๐๐:๐๐");
+      expect(render("[ช]:นน:ทท", MAR_15_2023_6PM)).toBe("๑๐๘๐๐๑๘:๐๐:๐๐");
+      expect(render("d/m/bb", MAR_15_2023_6PM)).toBe("15/3/66");
+    });
+
+    it("leaves a Thai code letter inside a Thai word a letter", () => {
+      // The ท of an unquoted บาท (baht) is not a seconds code: the format is a number format, not a date one.
+      expect(render("#,##0 บาท", 1234)).toBe("1,234 บาท");
+      expect(isDateFmt("#,##0 บาท")).toBe(false);
+      expect(isDateFmt("0 ท่าน")).toBe(false);
+      expect(isDateFmt("ว/ด/ปปปป")).toBe(true);
+    });
+  });
+
+  describe("renderNumberFormatLayout", () => {
+    const ACCOUNTING = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)';
+
+    it("says where a *x fill goes in the text, which it leaves out", () => {
+      expect(renderNumberFormatLayout(ACCOUNTING, -1234.5)).toEqual({
+        text: " $(1,234.50)",
+        fill: { char: " ", at: 2 }
+      });
+      expect(renderNumberFormatLayout("0*-", 42)).toEqual({
+        text: "42",
+        fill: { char: "-", at: 2 }
+      });
+      expect(renderNumberFormatLayout("@*.", "abc")).toEqual({
+        text: "abc",
+        fill: { char: ".", at: 3 }
+      });
+      expect(render(ACCOUNTING, -1234.5)).toBe(" $(1,234.50)");
+    });
+
+    it("counts a text value's own characters before the fill", () => {
+      expect(renderNumberFormatLayout("@*.", "a\uFFFFb")).toEqual({
+        text: "ab",
+        fill: { char: ".", at: 2 }
+      });
+      expect(renderNumberFormatLayout("*.@", "abc")).toEqual({
+        text: "abc",
+        fill: { char: ".", at: 0 }
+      });
+    });
+
+    it("has no fill for a section without one", () => {
+      expect(renderNumberFormatLayout(ACCOUNTING, "abc")).toEqual({ text: " abc " });
+      expect(renderNumberFormatLayout("0.00", 1)).toEqual({ text: "1.00" });
     });
   });
 });

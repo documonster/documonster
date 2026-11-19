@@ -72,6 +72,7 @@ import type {
   HeaderFooter,
   NamedStyle,
   PageSetup,
+  Style,
   WorkbookProtection,
   WorksheetProperties,
   WorksheetState,
@@ -79,7 +80,7 @@ import type {
 } from "@excel/types";
 import { argumentChecks, checkProtectCall, checkSchema } from "@excel/utils/arguments";
 import { copyPlain } from "@excel/utils/copy-plain";
-import { copyStyleFacet } from "@excel/utils/copy-style";
+import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
 import { splitPasswordOptions } from "@excel/utils/sheet-protection";
 import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
 import { checkStyleFacet } from "@excel/utils/style-checks";
@@ -253,6 +254,22 @@ export function setDefaultFont(
   }
   checkWorkbook(wb);
   coreSetDefaultFont(wb as WorkbookData, copy);
+}
+
+/**
+ * The workbook's default cell format — what a cell with no style of its own is shown in, `cellXfs[0]` of the file it
+ * was read from — as what it sets beyond General in the {@link getDefaultFont | default font}, or `undefined` when it
+ * sets nothing, as Excel's own does until the Normal style's number format, alignment or the like is changed. Such a
+ * cell reads as having no style (`Cell.findStyle` gives `{}`), as does one added since; this is the format both have,
+ * and it is written back. A streaming writer was not read from a file, and has none. A copy.
+ */
+export function getDefaultStyle(wb: WorkbookData | StreamWorkbook): Partial<Style> | undefined {
+  if (asStreamWorkbook(wb)) {
+    return undefined;
+  }
+  checkWorkbook(wb);
+  const style = (wb as WorkbookData)._defaultStyle;
+  return style === undefined ? undefined : (copyStyle(style) as Partial<Style>);
 }
 
 /**

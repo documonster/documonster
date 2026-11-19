@@ -492,7 +492,19 @@ export function getCellHeightPt(cell: MeasurableCell, mdw: number, columnWidthPx
     return 0;
   }
 
-  const effectiveColWidthPx = alignment?.wrapText ? columnWidthPx : undefined;
-
-  return calculateAutoFitHeight(displayText, font, alignment, effectiveColWidthPx);
+  // Only text wraps. A number, a date, a boolean or an error is one line however narrow its column — Excel shows
+  // `###` when it does not fit — so wrapping its display text made the row as tall as a paragraph (measured in Excel:
+  // 123456789012 in a wrapped six-character column fits a 15pt row, where this gave 75pt).
+  const wraps = alignment?.wrapText === true && WRAPPING_TYPES.has(cellType);
+  return wraps
+    ? calculateAutoFitHeight(displayText, font, alignment, columnWidthPx)
+    : calculateAutoFitHeight(displayText, font, undefined, undefined);
 }
+
+/** The value types a wrapped cell lays out over several lines: text. */
+const WRAPPING_TYPES: ReadonlySet<ValueType> = new Set([
+  ValueType.String,
+  ValueType.SharedString,
+  ValueType.Hyperlink,
+  ValueType.JSON
+]);

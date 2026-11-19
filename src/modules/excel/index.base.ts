@@ -204,6 +204,7 @@ export type {
   WorksheetViewNormal,
   WorksheetViewSplit
 } from "@excel/types";
+export type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 export type {
   AutoFilterCriteria,
   FreezePanesOptions,

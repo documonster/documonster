@@ -92,16 +92,16 @@ export function parseXsdInt(value: string | undefined): number | undefined {
  * (corrupt-source preservation is worse than loud rejection).
  */
 export function parseXsdFloat(value: string | undefined): number | undefined {
-  if (value === undefined) {
+  // Tested in place rather than on a trimmed copy, and read with `Number`: every number cell of a sheet comes through
+  // here, and the copy cost more than the test. `\s` is the set `trim` strips and `Number` skips, so nothing changes.
+  if (value === undefined || !XSD_DOUBLE.test(value)) {
     return undefined;
   }
-  const trimmed = value.trim();
-  if (trimmed === "" || !/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) {
-    return undefined;
-  }
-  const n = parseFloat(trimmed);
+  const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
 }
+
+const XSD_DOUBLE = /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/;
 
 /**
  * A numeric attribute of a setting the readers check against its vocabulary (see `sheet-settings-checks`): the

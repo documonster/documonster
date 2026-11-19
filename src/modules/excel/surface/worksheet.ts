@@ -55,6 +55,7 @@ import {
 import type {
   AddAoaOptions,
   AddJsonOptions,
+  AutoFitColumnOptions,
   FillFormulaOptions,
   ProtectSheetOptions,
   SheetToJsonOptions,
@@ -104,6 +105,8 @@ import {
   normalizeReference
 } from "@excel/utils/arguments";
 import { copyPlain } from "@excel/utils/copy-plain";
+import { DISPLAY_LOCALES } from "@excel/utils/display-locale";
+import type { ExcelDisplayLocale } from "@excel/utils/display-locale";
 import type { ValuesOptions } from "@excel/utils/numbered-values";
 import { splitPasswordOptions } from "@excel/utils/sheet-protection";
 import { sheetNameKey } from "@utils/name-key";
@@ -132,7 +135,8 @@ const toJsonOptionsSchema = s.object({
   raw: s.boolean().optional(),
   defaultValue: s.unknown<CellValue>().optional(),
   blankRows: s.boolean().optional(),
-  dateFormat: s.string().optional()
+  dateFormat: s.string().optional(),
+  locale: s.member<ExcelDisplayLocale>(DISPLAY_LOCALES).optional()
 });
 const _toJsonOptionsMatch: SchemaMatches<typeof toJsonOptionsSchema, SheetToJsonOptions> = true;
 void _toJsonOptionsMatch;
@@ -792,10 +796,46 @@ export const insertRow = coreInsertRow;
 export const insertRows = coreInsertRows;
 /** @deprecated Use `Row.duplicate`. Removed in 1.0. */
 export const duplicateRow = coreDuplicateRow;
+/**
+ * `locale`, which these forwards never took and `Column.autoFit` checks: refused with the module's argument error, not
+ * left to fail inside. The rest of their options pass as they always did.
+ */
+const autoFitLocaleSchema = s.object({
+  locale: s.member<ExcelDisplayLocale>(DISPLAY_LOCALES).optional()
+});
+
 /** @deprecated Use `Column.autoFit`. Removed in 1.0. */
-export const autoFitColumn = coreAutoFitColumn;
+export function autoFitColumn(
+  ws: WorksheetData,
+  col: number | string,
+  options?: AutoFitColumnOptions
+): WorksheetData {
+  checkSchema("Worksheet.autoFitColumn", "options", autoFitLocaleSchema.optional(), options);
+  return coreAutoFitColumn(ws, col, options);
+}
 /** @deprecated Use `Column.autoFit`. Removed in 1.0. */
-export const autoFitColumns = coreAutoFitColumns;
+export function autoFitColumns(ws: WorksheetData, options?: AutoFitColumnOptions): WorksheetData;
+/** @deprecated Use `Column.autoFit`. Removed in 1.0. */
+export function autoFitColumns(
+  ws: WorksheetData,
+  startCol?: number | string,
+  endCol?: number | string,
+  options?: AutoFitColumnOptions
+): WorksheetData;
+export function autoFitColumns(
+  ws: WorksheetData,
+  startColOrOptions?: number | string | AutoFitColumnOptions,
+  endCol?: number | string,
+  options?: AutoFitColumnOptions
+): WorksheetData {
+  // The options form is told from the range form as the core function tells it.
+  if (startColOrOptions === null || typeof startColOrOptions !== "object") {
+    checkSchema("Worksheet.autoFitColumns", "options", autoFitLocaleSchema.optional(), options);
+    return coreAutoFitColumns(ws, startColOrOptions, endCol, options);
+  }
+  checkSchema("Worksheet.autoFitColumns", "options", autoFitLocaleSchema, startColOrOptions);
+  return coreAutoFitColumns(ws, startColOrOptions);
+}
 /** @deprecated Use `Row.autoFit`. Removed in 1.0. */
 export const autoFitRow = coreAutoFitRow;
 /** @deprecated Use `Row.autoFit`. Removed in 1.0. */

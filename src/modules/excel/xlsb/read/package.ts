@@ -15,7 +15,7 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import { cellGetValue, cellSetNote } from "@excel/core/cell";
+import { cellGetValue, cellKeepNumFmtId, cellSetNote } from "@excel/core/cell";
 import { dataValidationAdd } from "@excel/core/data-validations";
 // The public cell surface, on purpose: setting a value through it is what keeps dimensions,
 // row materialisation and shared-string bookkeeping consistent.
@@ -51,11 +51,13 @@ import { ExcelPackageError, XlsbFormulaDecodeError, XlsbParseError } from "@exce
 import { getValue, setStyle, setValue } from "@excel/surface/cell";
 import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/surface/column";
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
-import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
+import type { Style } from "@excel/types";
 import { decodeCell, decodeRange, encodeCol } from "@excel/utils/address";
 import { containerReadError, containerReadLimits } from "@excel/utils/container-errors";
 import type { ContainerReadOptions } from "@excel/utils/container-errors";
 import { mediaFromDrawingAnchors } from "@excel/utils/drawing-utils";
+import { statePlainFacets } from "@excel/utils/inherited-format";
+import { keepNumFmtId, showsDate } from "@excel/utils/kept-num-fmt";
 import { OOXML_PATHS } from "@excel/utils/ooxml-paths";
 import {
   attrByLocalName,
@@ -98,7 +100,8 @@ import {
 import { pairCtrlProps } from "@excel/xlsx/xform/drawing/ctrl-prop-pairing";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { appendAll } from "@utils/array";
-import { excelToDate, isDateFmt } from "@utils/utils";
+import { excelNameKey } from "@utils/name-key";
+import { excelToDate } from "@utils/utils";
 import { XmlError } from "@xml/errors";
 
 /** What a read could not fully recover, for the caller to inspect. */
@@ -483,11 +486,15 @@ async function readInto(
   // Names compare without regard to case, as Excel compares them: of two that differ only in case the first is kept,
   // as Excel keeps it, and a custom style spelt like "normal" is the built-in.
   for (const named of styles?.namedStyles ?? []) {
-    const { name, ...facets } = named;
+    const { name, keptFormatId, ...facets } = named;
     if (isNormalCellStyleName(name) || findCellStyleEntry(workbook, name) !== undefined) {
       continue;
     }
     addCellStyle(workbook, name, facets as never);
+    if (keptFormatId !== undefined) {
+      // Beside the facets the setter takes, as for a cell's — see `keepOwnNumFmtId`.
+      keepNumFmtId(findCellStyleEntry(workbook, name)!, keptFormatId);
+    }
   }
   // The differential-format table at its source indices: a preserved `<colorFilter>` names its format by
   // position in it, and the rules resolved below hold these same objects. See `WorkbookCore._dxfs`.
@@ -496,7 +503,9 @@ async function readInto(
   }
   appendAll(
     lost,
-    (styles?.dxfUnread ?? []).map(entry => `xl/styles.bin: ${entry}`)
+    [...(styles?.dxfUnread ?? []), ...(styles?.danglingFormats ?? [])].map(
+      entry => `xl/styles.bin: ${entry}`
+    )
   );
   // Font index 0 is what an unstyled cell inherits, so it belongs to the workbook rather than to any
   // cell format. `writeStyles` reads it back from here; without it an XLSB round trip replaced the
@@ -504,6 +513,8 @@ async function readInto(
   if (styles?.defaultFont !== undefined) {
     workbook._defaultFont = styles.defaultFont;
   }
+  workbook._defaultStyle = defaultCellFormat(styles);
+  workbook._normalStyle = styles?.normalFormat;
 
   const unreadRecords = new Map<string, number>();
   const unknownRecords = new Map<number, number>();
@@ -912,6 +923,10 @@ async function readInto(
         if (style !== undefined) {
           setColumnStyle(worksheet, index, style);
         }
+        const keptId = keptFormatIdAt(styles, column.styleIndex);
+        if (keptId !== undefined) {
+          keepOwnNumFmtId(worksheetColumn(worksheet, index).style, keptId);
+        }
         // Hidden, grouped, collapsed and best-fit, plus whether the width was the author's. Only the width
         // and the style used to come back, so a hidden column returned as an ordinary one — and the next
         // write then had nothing to write, which is how "hidden column" stayed on the loss list while the
@@ -939,6 +954,10 @@ async function readInto(
       const style = styleAt(styles, index);
       if (style !== undefined) {
         setRowStyle(worksheet, row, style);
+      }
+      const keptId = keptFormatIdAt(styles, index);
+      if (keptId !== undefined) {
+        keepOwnNumFmtId(worksheetRow(worksheet, row).style, keptId);
       }
     }
 
@@ -1052,7 +1071,7 @@ async function readInto(
         lastRow: range.lastRow,
         firstColumn: range.firstColumn,
         lastColumn: range.lastColumn,
-        style: styleAt(styles, range.styleIndex) ?? {}
+        style: styleWithKeptFormat(styles, range.styleIndex)
       }))
     );
 
@@ -1509,7 +1528,7 @@ function applyCell(
     setValue(
       worksheet,
       address,
-      (asDateIfFormatted(cell.value, cell.numberFormat, date1904) ?? cell.value) as never
+      (asDateIfFormatted(cell.value, cell, styles, date1904) ?? cell.value) as never
     );
     applyCellFormat(worksheet, address, cell, styles);
     return;
@@ -1522,7 +1541,7 @@ function applyCell(
     // read from XLSB and written back lost the sharing and kept only the numbers.
     setValue(worksheet, address, {
       sharedFormula: `${encodeCol(cell.sharedFormulaOrigin.column)}${cell.sharedFormulaOrigin.row + 1}`,
-      result: asDateIfFormatted(cell.value, cell.numberFormat, date1904) ?? undefined
+      result: asDateIfFormatted(cell.value, cell, styles, date1904) ?? undefined
     } as never);
     markStoredOrdinaryFormula(getCell(worksheet, address)._value.model);
     applyCellFormat(worksheet, address, cell, styles);
@@ -1573,7 +1592,7 @@ function applyCell(
   if (cell.formula !== undefined) {
     setValue(worksheet, address, {
       formula: cell.formula,
-      result: asDateIfFormatted(cell.value, cell.numberFormat, date1904) ?? undefined,
+      result: asDateIfFormatted(cell.value, cell, styles, date1904) ?? undefined,
       ...formulaRange(cell)
     } as never);
     if (cell.shareType !== "array" && cell.isDynamicArray !== true) {
@@ -1588,7 +1607,7 @@ function applyCell(
     applyCellFormat(worksheet, address, cell, styles);
     return;
   }
-  setValue(worksheet, address, asDateIfFormatted(cell.value, cell.numberFormat, date1904));
+  setValue(worksheet, address, asDateIfFormatted(cell.value, cell, styles, date1904));
   applyCellFormat(worksheet, address, cell, styles);
 }
 
@@ -1596,19 +1615,26 @@ function applyCell(
  * A serial number wearing a date format is a date.
  *
  * BIFF12 stores a date as a number and says so only through the format, exactly as XLSX does —
- * so this uses the same `isDateFmt` and `excelToDate` the XLSX cell reader uses. A second
+ * so this uses the same `showsDate` and `excelToDate` the XLSX cell reader uses. A second
  * opinion about which formats mean "date" would make the same workbook read back differently
  * depending on which container it arrived in, which is the one thing two readers of the same
  * document must not do.
  */
 function asDateIfFormatted(
   value: string | number | boolean | null,
-  numberFormat: string | undefined,
+  cell: ReadCell,
+  styles: StyleTable | undefined,
   date1904: boolean
 ): string | number | boolean | Date | null {
-  return typeof value === "number" && numberFormat !== undefined && isDateFmt(numberFormat)
+  return typeof value === "number" && formatsDate(cell, styles)
     ? excelToDate(value, date1904)
     : value;
+}
+
+/** Whether the cell's number format shows a date: its code, or a built-in id kept for want of one (`kept-num-fmt.ts`). */
+function formatsDate(cell: ReadCell, styles: StyleTable | undefined): boolean {
+  // The default format's kept id included: it is the format a cell naming index 0 shows.
+  return showsDate(cell.numberFormat, styles?.keptFormatIds[cell.styleIndex]);
 }
 
 /**
@@ -1661,15 +1687,60 @@ function applyCellFormat(
   // The one real difference is where the number format comes from. `styleAt` reads it from the style table by index,
   // which is right for a row or a column; a *cell* carries an already-resolved `numberFormat` — the reader put it there —
   // and that takes precedence. `readStyles` normalises `General` to undefined, so presence is the only check needed.
+  if (cell.styleIndex === 0) {
+    // The default format — see `styleAt`.
+    return;
+  }
   const indexed = styleAt(styles, cell.styleIndex);
   const style = {
     ...indexed,
     ...(cell.numberFormat === undefined ? {} : { numFmt: cell.numberFormat })
   };
-  if (Object.keys(style).length === 0) {
-    return;
+  if (Object.keys(style).length > 0) {
+    setStyle(worksheet, address, style);
   }
-  setStyle(worksheet, address, style);
+  if (cell.numberFormat === undefined) {
+    const keptId = keptFormatIdAt(styles, cell.styleIndex);
+    if (keptId !== undefined) {
+      cellKeepNumFmtId(getCell(worksheet, address), keptId);
+    }
+  }
+}
+
+/**
+ * The built-in number-format id the cell format `index` names without a code — see `kept-num-fmt.ts` — or
+ * `undefined`. The public setters take a style's facets only, so a reader sets it beside them.
+ */
+function keptFormatIdAt(
+  styles: StyleTable | undefined,
+  index: number | undefined
+): number | undefined {
+  // Index 0's is the default format's — see `styleAt`.
+  return index === undefined || index === 0 ? undefined : styles?.keptFormatIds[index];
+}
+
+/** Make the kept `id` a row's or column's number format, in place of any code it had. */
+function keepOwnNumFmtId(style: Partial<Style>, id: number): void {
+  delete style.numFmt;
+  keepNumFmtId(style, id);
+}
+
+/** A styled blank range's style: {@link styleAt}, with the kept number-format id beside it. */
+function styleWithKeptFormat(styles: StyleTable | undefined, index: number): Partial<Style> {
+  return withKeptId(styleAt(styles, index), keptFormatIdAt(styles, index)) ?? {};
+}
+
+/** `style` with the built-in number-format `id` kept beside it, or `style` as it is when there is none. */
+function withKeptId(
+  style: Partial<Style> | undefined,
+  id: number | undefined
+): Partial<Style> | undefined {
+  if (id === undefined) {
+    return style;
+  }
+  const kept: Partial<Style> = { ...style };
+  keepNumFmtId(kept, id);
+  return kept;
 }
 
 /**
@@ -2207,36 +2278,69 @@ function readRelationshipsBySource(
  *
  * Shared by the row and the column paths, which reference their format the same way a cell does —
  * through an index into the same table.
+ *
+ * Index 0 is the workbook's default format, which a cell, row or column naming it does not have *of its own*: a style
+ * with nothing in it is the default format, as it is for a cell made since, and the writer writes the default back
+ * (`WorkbookCore._defaultStyle`). It still decides what a value is — see {@link formatsDate}.
  */
 function styleAt(
   styles: StyleTable | undefined,
   index: number | undefined
-):
-  | {
-      numFmt?: string;
-      font?: Partial<Font>;
-      fill?: Fill;
-      border?: Partial<Borders>;
-      alignment?: Partial<Alignment>;
-      protection?: Partial<Protection>;
-    }
-  | undefined {
+): ReturnType<typeof formatAt> {
+  return index === 0 ? undefined : formatAt(styles, index);
+}
+
+/** {@link styleAt}, index 0 included. */
+function formatAt(
+  styles: StyleTable | undefined,
+  index: number | undefined
+): Partial<Style> | undefined {
   // No check for index 0 here. `readStyles` already collapses a zero `iFmt`/`iFont`/`iFill` to
   // "no format", so a second copy of that policy in this function was unreachable — and two places
   // encoding one rule is how they come to disagree.
   if (styles === undefined || index === undefined) {
     return undefined;
   }
-  const style = {
+  const styleName = styles.styleNames[index];
+  const style: Partial<Style> = {
     ...(styles.numberFormats[index] === undefined ? {} : { numFmt: styles.numberFormats[index] }),
     ...(styles.fonts[index] === undefined ? {} : { font: styles.fonts[index] }),
     ...(styles.fills[index] === undefined ? {} : { fill: styles.fills[index] }),
     ...(styles.borders[index] === undefined ? {} : { border: styles.borders[index] }),
     ...(styles.alignments[index] === undefined ? {} : { alignment: styles.alignments[index] }),
-    ...(styles.protections[index] === undefined ? {} : { protection: styles.protections[index] })
+    ...(styles.protections[index] === undefined ? {} : { protection: styles.protections[index] }),
+    ...(styleName === undefined ? {} : { styleName })
   };
+  // A plain facet what the format is based on sets is stated — see `statePlainFacets`: its named style's, else the
+  // default's. The default's own facets are its own.
+  if (index !== 0) {
+    statePlainFacets(
+      style,
+      (styleName === undefined ? undefined : styles.namedFormats.get(excelNameKey(styleName))) ??
+        defaultCellFormat(styles),
+      { font: styles.defaultFont ?? {}, fill: { type: "pattern", pattern: "none" }, border: {} },
+      styles.keptFormatIds[index]
+    );
+  }
   return Object.keys(style).length === 0 ? undefined : style;
 }
+
+/**
+ * The default cell format (index 0) — what a cell written with no style has — as what it sets beyond a cell with no
+ * format, or `undefined`: see `StylesXform.getDefaultStyleModel`.
+ */
+function defaultCellFormat(styles: StyleTable | undefined): Partial<Style> | undefined {
+  if (styles === undefined) {
+    return undefined;
+  }
+  if (!defaultCellFormats.has(styles)) {
+    defaultCellFormats.set(styles, withKeptId(formatAt(styles, 0), styles.keptFormatIds[0]));
+  }
+  return defaultCellFormats.get(styles);
+}
+
+/** {@link defaultCellFormat}, once per styles part: every styled cell asks for it. */
+const defaultCellFormats = new WeakMap<StyleTable, Partial<Style> | undefined>();
 
 /**
  * A table's data rows, read off the cells already applied to the sheet.
