@@ -2916,7 +2916,7 @@ no whole-family bundle, so the file name names the module.
 <!-- x-release-please-start-version -->
 
 ```html
-<script src="https://unpkg.com/documonster@0.26.0/dist/iife/documonster.excel.iife.min.js"></script>
+<script src="https://unpkg.com/documonster@0.27.0/dist/iife/documonster.excel.iife.min.js"></script>
 <script>
   const { Workbook, Cell } = Documonster.Excel;
   const wb = Workbook.create();
