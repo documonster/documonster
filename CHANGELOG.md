@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.27.0](https://github.com/documonster/documonster/compare/v0.26.0...v0.27.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **excel:** a cell value that is not what its type says — a number `<v>` such as `49,99`, a shared-string index that is not one, more than one `<v>` — is refused with `XlsxParseError` rather than read as a different value. A number format the file names only by a built-in id with no code reads as `numFmt` absent (reported in `unrecognizedValues`) instead of General, which includes 41–44, which used to read as a Chinese code. A custom number-format id the file does not define reads as General and is no longer written back. Built-in id 47 is `mm:ss.0`, so `mmss.0` is now a custom format. A number formatted with a Thai date id 71–81 reads as a `Date`.
+
+### Features
+
+* **excel:** Read cell values and number formats strictly; display in a reader's locale ([729ff0c](https://github.com/documonster/documonster/commit/729ff0c14034e4437b4ecdef8af7ab3839982e82))
+
 ## [0.26.0](https://github.com/documonster/documonster/compare/v0.25.1...v0.26.0) (2026-11-15)
 
 
