@@ -1,8 +1,9 @@
 import process from "node:process";
 
 import { playwright } from "@vitest/browser-playwright";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
+import { BrowserProgressReporter } from "./scripts/lib/browser-progress-reporter.js";
 import { preferBrowserFilesPlugin } from "./src/utils/browser.js";
 
 /**
@@ -51,6 +52,11 @@ export default defineConfig({
   test: {
     globals: true,
     testTimeout: 30000,
+    // `scripts/run-browser-tests.ts` sets this when it watches a shard for a stall, and needs to hear when each file
+    // finishes. The defaults are kept as they are (`github-actions` included on CI).
+    reporters: process.env.BROWSER_PROGRESS_IPC
+      ? [...configDefaults.reporters, new BrowserProgressReporter()]
+      : [...configDefaults.reporters],
     // No `setupFiles`. There used to be one, and all it did was inject the
     // 1.5 MB Excel IIFE bundle so two smoke tests could read
     // `Documonster.Excel` off the global — which meant every one of the ~410

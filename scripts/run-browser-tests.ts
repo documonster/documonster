@@ -20,13 +20,24 @@
  * `TMPDIR`, because the check `statfs`es `TMPDIR` or `/tmp`, which is not a path there, and a failed check skips the
  * collection. It costs about 6 ms a file. Remove it when the Chromium bug is fixed.
  *
+ * **A stalled shard fails instead of hanging.** In WebKit on CI a tester iframe has stopped part-way through a shard —
+ * a different file each time, each of which passes on its own — while the browser stayed alive. Nothing in Vitest ends
+ * that: `testTimeout` runs inside the stopped iframe, and its heartbeat (vitest-dev/vitest#10956) only notices a browser
+ * that stops answering. The job then sat silent until its `timeout-minutes` cancelled it, with no error and no file
+ * named. So when no test file has finished for `BROWSER_STALL_TIMEOUT_MS`, the shard's process tree is killed, the
+ * files that never reported a result are listed, and the run fails. It is not retried: a stall is a failure to
+ * investigate, and a retry would turn it green. The default is 180 s for WebKit on CI, where it was seen — a shard takes
+ * under a minute there and its slowest file about 25 s — and off elsewhere; `0` turns it off.
+ *
  * Shards run sequentially: running them at once would put the same total in memory at the same time.
  * `--passWithNoTests` keeps a filtered run (`pnpm test:browser some-file`) from failing on the shards it leaves empty.
  */
-import { spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+
+import type { BrowserProgressMessage } from "./lib/browser-progress-reporter.ts";
 
 const SHARDS = 6;
 const VITEST = join(process.cwd(), "node_modules", "vitest", "vitest.mjs");
@@ -39,23 +50,129 @@ const env = {
   TMPDIR: process.env.TMPDIR ?? tmpdir()
 };
 
+function stallTimeoutMs(): number {
+  const raw = process.env.BROWSER_STALL_TIMEOUT_MS;
+  if (raw === undefined || raw === "") {
+    return process.env.CI && process.env.BROWSER_ENGINE === "webkit" ? 180_000 : 0;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    console.error(`BROWSER_STALL_TIMEOUT_MS must be a whole number of milliseconds, got ${raw}`);
+    process.exit(1);
+  }
+  return value;
+}
+
+const stallMs = stallTimeoutMs();
+
+/**
+ * Kill the shard and everything it started — Vitest, the browser and its helper processes. On POSIX the shard leads a
+ * process group of its own (`detached`), so one signal reaches all of it.
+ */
+function killTree(child: ChildProcess): void {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+  } else {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // The group is already gone.
+    }
+  }
+}
+
+interface ShardResult {
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly error?: Error;
+  readonly stalled: boolean;
+}
+
+function runShard(shard: number): Promise<ShardResult> {
+  const args = [
+    VITEST,
+    "run",
+    "--config",
+    "vitest.browser.config.ts",
+    `--shard=${shard}/${SHARDS}`,
+    "--passWithNoTests",
+    ...forwarded
+  ];
+  if (stallMs === 0) {
+    return new Promise(resolve => {
+      const child = spawn(process.execPath, args, { stdio: "inherit", env });
+      child.on("error", error => resolve({ status: null, signal: null, error, stalled: false }));
+      child.on("exit", (status, signal) => resolve({ status, signal, stalled: false }));
+    });
+  }
+
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, args, {
+      stdio: ["inherit", "inherit", "inherit", "ipc"],
+      env: { ...env, BROWSER_PROGRESS_IPC: "1" },
+      detached: process.platform !== "win32"
+    });
+    const pending = new Set<string>();
+    let total = 0;
+    let stalled = false;
+
+    // The shard is in a process group of its own, so the terminal's Ctrl-C no longer reaches it.
+    const forward = (signal: NodeJS.Signals) => {
+      killTree(child);
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    };
+    process.once("SIGINT", forward);
+    process.once("SIGTERM", forward);
+
+    const onStall = () => {
+      stalled = true;
+      const files = [...pending].map(file => `\n  - ${file}`).join("");
+      console.error(
+        `\n✗ browser tests, shard ${shard}/${SHARDS} stalled: no test file finished in ${stallMs / 1000}s ` +
+          `(${total - pending.size} of ${total} finished). ` +
+          (pending.size === 0
+            ? "Every file had reported; the run did not end."
+            : `Never reported a result:${files}`)
+      );
+      killTree(child);
+    };
+    let timer = setTimeout(onStall, stallMs);
+    const progress = () => {
+      clearTimeout(timer);
+      timer = setTimeout(onStall, stallMs);
+    };
+
+    child.on("message", (message: BrowserProgressMessage) => {
+      if (message.type === "queued") {
+        total++;
+        pending.add(message.file);
+      } else {
+        pending.delete(message.file);
+      }
+      progress();
+    });
+
+    const settle = (result: Omit<ShardResult, "stalled">) => {
+      clearTimeout(timer);
+      process.off("SIGINT", forward);
+      process.off("SIGTERM", forward);
+      resolve({ ...result, stalled });
+    };
+    child.on("error", error => settle({ status: null, signal: null, error }));
+    child.on("exit", (status, signal) => settle({ status, signal }));
+  });
+}
+
 let failed = false;
 for (let shard = 1; shard <= SHARDS; shard++) {
   console.log(`\n▶ browser tests, shard ${shard}/${SHARDS}`);
-  const result = spawnSync(
-    process.execPath,
-    [
-      VITEST,
-      "run",
-      "--config",
-      "vitest.browser.config.ts",
-      `--shard=${shard}/${SHARDS}`,
-      "--passWithNoTests",
-      ...forwarded
-    ],
-    { stdio: "inherit", env }
-  );
-  if (result.status !== 0) {
+  const result = await runShard(shard);
+  if (result.stalled) {
+    failed = true;
+  } else if (result.status !== 0) {
     // `error` is set when the shard never ran (Node not found, spawn refused); `status` is then null too.
     console.error(
       `✗ browser tests, shard ${shard}/${SHARDS} ${
