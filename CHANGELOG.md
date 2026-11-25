@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.28.0](https://github.com/documonster/documonster/compare/v0.27.0...v0.28.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* `MathGroupChar.verticalAlign` no longer accepts `"center"`, which `ST_TopBot` cannot express. `firstSliceAng` is refused for 3-D pie and of-pie charts, and giving an axis both `crosses` and `crossesAt` is refused. a table style's properties refuse what Word does not allow in one (row height, cell width, change records, `tblLook`, …), and a table's or cell's borders or margins refuse both names of one edge (`start` and `left`, `end` and `right`). a conditional format's or table column's `style.numFmt` read from XLSX is the format code string, not an `{ id, formatCode }` object. `tblPrEx` on a table row is a `TablePropertyExceptions`, and paragraph-mark revisions and `DocxUnrecognizedValue.writtenBack` are part of the Word model.
+
+### Bug Fixes
+
+* Write every part in its schema's order, and to what Office's own schema allows ([01274f0](https://github.com/documonster/documonster/commit/01274f0837cd2f896fb1c37987e7db00cce2f03a)), closes [#269](https://github.com/documonster/documonster/issues/269)
+
 ## [0.27.0](https://github.com/documonster/documonster/compare/v0.26.0...v0.27.0) (2026-11-19)
 
 
