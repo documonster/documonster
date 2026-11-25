@@ -39,6 +39,7 @@ const TYPES: Record<string, readonly string[]> = {
     "ST_VAnchor",
     "ST_TblWidth",
     "ST_TblLayoutType",
+    "ST_TblStyleOverrideType",
     "ST_HeightRule",
     "ST_VerticalJc",
     "ST_SectionMark",

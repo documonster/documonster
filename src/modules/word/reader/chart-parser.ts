@@ -818,22 +818,28 @@ function parseChartSeries(serEl: XmlElement, chartTag: string): ChartSeries | un
 
   // Error bars
   let errorBars: ChartErrorBars | undefined;
-  const errBarsEl = findChartChild(serEl, "errBars");
-  if (errBarsEl) {
-    const errBarTypeEl = findChartChild(errBarsEl, "errBarType");
-    const errValTypeEl = findChartChild(errBarsEl, "errValType");
-    const errDirEl = findChartChild(errBarsEl, "errDir");
-    const valEl2 = findChartChild(errBarsEl, "val");
-    const direction = (errDirEl?.attributes["val"] ?? "y") as ChartErrorBarDirection;
-    const errType = (errValTypeEl?.attributes["val"] ?? "fixedVal") as ChartErrorBarType;
-    const errValue = valEl2?.attributes["val"] ? parseFloat(valEl2.attributes["val"]) : undefined;
-    errorBars = {
-      direction,
-      type: errType,
-      ...(errValue !== undefined && Number.isFinite(errValue) && { value: errValue })
+  // The model is a view of what the part holds: the elements themselves are kept and written as read until the
+  // field changes (`chart-kept.ts`), with what the model does not hold — `errBarType`, `noEndCap` — intact.
+  const allErrBars = findAllChartChildren(serEl, "errBars");
+  const viewOf = (el: XmlElement) => {
+    const val = findChartChild(el, "val")?.attributes["val"];
+    const value = val !== undefined ? parseFloat(val) : undefined;
+    return {
+      direction: (findChartChild(el, "errDir")?.attributes["val"] ?? "y") as ChartErrorBarDirection,
+      type: (findChartChild(el, "errValType")?.attributes["val"] ??
+        "fixedVal") as ChartErrorBarType,
+      ...(value !== undefined && Number.isFinite(value) && { value })
     };
-    // Suppress unused variable warning for errBarTypeEl
-    void errBarTypeEl;
+  };
+  const [first, second] = allErrBars.map(viewOf);
+  if (first) {
+    // A scatter, bubble or area series has one per direction: two that differ only in it are what `both` is written as.
+    const both =
+      second !== undefined &&
+      new Set([first.direction, second.direction]).size === 2 &&
+      first.type === second.type &&
+      first.value === second.value;
+    errorBars = both ? { ...first, direction: "both" } : first;
   }
 
   return {

@@ -62,9 +62,11 @@ class DatabarExtXform extends CompositeXform {
       this.cfvoXform.render(xmlStream, cfvo);
     });
 
+    // `CT_DataBar` ([MS-XLSX] §5.4): cfvo, fillColor, borderColor, negativeFillColor, negativeBorderColor,
+    // axisColor. The negative fill was written after the negative border, which Excel repairs.
     this.borderColorXform.render(xmlStream, model.borderColor);
-    this.negativeBorderColorXform.render(xmlStream, model.negativeBorderColor);
     this.negativeFillColorXform.render(xmlStream, model.negativeFillColor);
+    this.negativeBorderColorXform.render(xmlStream, model.negativeBorderColor);
     this.axisColorXform.render(xmlStream, model.axisColor);
 
     xmlStream.closeNode();

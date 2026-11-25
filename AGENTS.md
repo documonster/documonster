@@ -1162,6 +1162,23 @@ name in the next. A new export that breaks a rule here needs a reason written be
   field, and the module's read report lists it. A vocabulary is the schema's, held to the
   ECMA-376 schemas by a test (`src/test/fixtures/ooxml-enumerations.ts`) — a narrow
   hand-written list otherwise surfaces only when a file from elsewhere carries the value.
+  An _element_ the schema has no place for where the file put it (a diagonal in a table's
+  borders, a change record inside a change record) cannot be written back anywhere valid:
+  it is kept the same way, marked `writtenBack: false`, reported, and left out of the write
+  — never typed, which would make a document that reads impossible to save.
+- **A write keeps the schema's order.** Most OOXML containers are an `xsd:sequence`, and Office repairs a part
+  whose children are out of order (issue #269). The order is never written by hand twice:
+  `scripts/extract-ooxml-sequences.ts` generates each module's content models from the ECMA-376 schemas and
+  Microsoft's published extension schemas (`x14:`, `w14:`, `w15:`, `wps:`)
+  (`excel/utils/ooxml-validator/ooxml-sequences.ts`, `word/writer/ooxml-sequences.ts`), the walk is shared
+  (`@xml/sequence-order`), and so are the chart rules both modules need (`@xml/ooxml-chart-order`). The XLSX
+  validator ranks every part it knows (`check-sequences.ts`, `check-chart.ts`); `word/writer/order-check.ts` does
+  the same for a document, and `element-order-corpus.node.test.ts` holds every committed `.docx`, written back, to
+  it. A Word writer emits a container's children through `emitInSchemaOrder`, which sorts them by the generated
+  model rather than by the order its `if`s are written in. XLSB's equivalent is its record grammar, copied
+  verbatim from MS-XLSB (`xlsb-validator/grammar.ts`) and ranked in every scope whose production is published.
+  A new container gets its type added to the script and its place in a tree. The XLSX xform tests compare child
+  order, not just content (`test-xform-helper.ts`).
 - **Names compare the way Office compares them.** Case-insensitive name matching uses
   `excelNameKey` (tables, columns, defined names) or `sheetNameKey` (sheet names, sheet
   references, `LET`/`LAMBDA` parameters) from `@utils/name-key`; never `toUpperCase()` or

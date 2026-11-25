@@ -36,9 +36,9 @@
         </c>
         </row>
     </sheetData>
+    <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
     <rowBreaks count="2" manualBreakCount="2">
         <brk id="2" max="2" min="0" man="1"/>
         <brk id="5" max="2" min="0" man="1"/>
     </rowBreaks>
-    <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
 </worksheet>

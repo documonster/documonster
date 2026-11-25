@@ -503,6 +503,17 @@ export async function writeXlsbPackage(
           .conditionalFormattings ?? []
     )
   );
+  // A table column's data format indexes the same table (`nDxfInsertRow`), so it is in it before the styles part is
+  // written — as the XLSX writer adds it with `addDxfStyle`.
+  for (const worksheet of worksheets) {
+    for (const table of tablesFromModel(worksheet)) {
+      for (const column of table.columns) {
+        if (column.style !== undefined) {
+          dxfIndex.addStyle(column.style);
+        }
+      }
+    }
+  }
   // Rule priorities are workbook-unique, and a streamed workbook's sheets have claimed theirs already.
   const nextCfPriority = options?.streamed?.cfPriorities ?? createCfPriorities();
   // `BrtBeginList.idList` must be unique across the whole workbook and at least 1, so it is counted here
@@ -1447,21 +1458,24 @@ export async function writeXlsbPackage(
     // is recorded; the record naming it is emitted by the worksheet writer, from the same list.
     part.tables.forEach((table, position) => {
       const sheet = sheetParts.indexOf(part);
-      const bytes = encodeTablePart(table, (text, column) => {
-        const where = `${table.name}[${column}]`;
-        try {
-          const encoded = encodeFormula(
-            text,
-            { ...formulaContext, sheetIndex: tabPositionOf(sheet) },
-            where
-          );
-          return encodeParsedFormula(encoded.rgce, encoded.extra);
-        } catch (cause) {
-          unsupported.push(
-            `${where}: calculated column formula${cause instanceof Error ? ` (${cause.message})` : ""}`
-          );
-          return undefined;
-        }
+      const bytes = encodeTablePart(table, {
+        calculatedColumnFormula: (text, column) => {
+          const where = `${table.name}[${column}]`;
+          try {
+            const encoded = encodeFormula(
+              text,
+              { ...formulaContext, sheetIndex: tabPositionOf(sheet) },
+              where
+            );
+            return encodeParsedFormula(encoded.rgce, encoded.extra);
+          } catch (cause) {
+            unsupported.push(
+              `${where}: calculated column formula${cause instanceof Error ? ` (${cause.message})` : ""}`
+            );
+            return undefined;
+          }
+        },
+        dxfIndexOf: dxfIndex.indexOf
       });
       const path = tablePathBySheet[sheet][position];
       if (bytes === undefined || path === undefined) {

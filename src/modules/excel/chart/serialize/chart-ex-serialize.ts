@@ -1216,7 +1216,12 @@ function hasStructuredLayoutProperties(lp: NonNullable<ChartExSeries["layoutPr"]
   ].some(value => value !== undefined);
 }
 
-function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string {
+/**
+ * A series' `<cx:dataLabels>`. Shared with the raw patcher (`xlsx/write/charts.ts`), which rewrites the element of a
+ * chart read from a file: it had a copy of its own that put the visibility before the number format and wrote the
+ * position as a `<cx:dataLabel pos>` child, both of which the schema refuses.
+ */
+export function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string {
   const parts: string[] = [];
   // Per Excel's own output, `pos` is an ATTRIBUTE on `<cx:dataLabels>`
   // itself, NOT a separate `<cx:dataLabel pos="..."/>` child element.
@@ -1225,6 +1230,17 @@ function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string 
   // surrounding chartEx part on load.
   const openAttr = dl.position ? ` pos="${dl.position}"` : "";
   parts.push(`          <cx:dataLabels${openAttr}>`);
+  // `CT_DataLabels` is a sequence — numFmt, spPr, txPr, visibility, separator — as Excel writes it. The format
+  // and shape properties came after the visibility, which the schema refuses and Excel reorders on save.
+  if (dl.numFmt) {
+    parts.push(`            <cx:numFmt formatCode="${escapeXmlAttr(dl.numFmt)}"/>`);
+  }
+  if (dl.spPr) {
+    parts.push(renderSpPr(dl.spPr, "            "));
+  }
+  if (dl.txPr) {
+    parts.push(renderTxPr(dl.txPr, "            ", "cx:txPr"));
+  }
   if (dl.visibility) {
     const v = dl.visibility;
     const attrs: string[] = [];
@@ -1248,15 +1264,6 @@ function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string 
   }
   if (dl.separator) {
     parts.push(`            <cx:separator>${escapeXml(dl.separator)}</cx:separator>`);
-  }
-  if (dl.numFmt) {
-    parts.push(`            <cx:numFmt formatCode="${escapeXmlAttr(dl.numFmt)}"/>`);
-  }
-  if (dl.spPr) {
-    parts.push(renderSpPr(dl.spPr, "            "));
-  }
-  if (dl.txPr) {
-    parts.push(renderTxPr(dl.txPr, "            ", "cx:txPr"));
   }
   parts.push("          </cx:dataLabels>");
   return parts.join("\n");

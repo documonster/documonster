@@ -12,7 +12,7 @@
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
-import { DocxTemplateError } from "../errors";
+import { DocxArgumentError, DocxTemplateError } from "../errors";
 import {
   Document,
   DocxError,
@@ -2285,10 +2285,10 @@ describe("Regression: pPrChange self-reference does not crash", () => {
         }
       ]
     };
-    // Should NOT crash
-    const buffer = await Io.toBuffer(doc);
-    const parsed = await Io.read(buffer);
-    expect(parsed.body.length).toBe(1);
+    // No stack overflow: the previous properties' own change record has no place in `w:pPrChange` (`CT_PPrBase`),
+    // so it is refused by name rather than followed.
+    await expect(Io.toBuffer(doc)).rejects.toThrow(DocxArgumentError);
+    await expect(Io.toBuffer(doc)).rejects.toThrow(/propertyChange/);
   });
 });
 

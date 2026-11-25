@@ -1064,8 +1064,11 @@ export function writeStyles(
  * every one of them a default, which is honest about what is being written rather than filling
  * them with plausible-looking values. `0x1010` in the flag word is what Excel writes there in
  * every cell format across the reference corpus.
+ *
+ * Exported for `scripts/generate-themed-xlsb.ts`, which builds its fixture's formats with it so they are the ones
+ * this writer produces.
  */
-function cellFormat(options: {
+export function cellFormat(options: {
   parent: number;
   formatId: number;
   fontIndex: number;

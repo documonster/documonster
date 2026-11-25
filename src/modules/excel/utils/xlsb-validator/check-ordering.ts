@@ -1,21 +1,23 @@
 /**
- * Ordering check: does each part have the root scope its name implies, and do the
- * records that must precede a scope actually do so?
- *
- * Narrow on purpose. The full record grammar of a `.bin` part is large, and encoding
- * all of it here would be a second implementation of the format with no reader to
- * keep it honest. What is checked is the small set of orderings whose violation
- * Excel rejects outright, and which a writer can plausibly get wrong:
+ * Ordering check: does each part have the root scope its name implies, and are its records where the record grammar
+ * puts them?
  *
  *  * a part must be wrapped in the scope its role requires — a worksheet in
  *    `BrtBeginSheet`, the shared strings in `BrtBeginSst`;
- *  * `BrtWsDim` declares the sheet's used range and must come before the cell data
- *    it describes;
+ *  * a part with a grammar (`grammar.ts`, MS-XLSB's productions copied verbatim) has the records of every scope it
+ *    can rank in the grammar's order; a part without one keeps the few `precedes` pairs its role lists;
  *  * a cell record has to be inside `BrtBeginSheetData`, and a row's cells after a
  *    `BrtRowHdr` — a cell emitted outside either has no row to belong to.
  */
 
 import type { FramedPart } from "@excel/utils/xlsb-validator/check-framing";
+import {
+  grammarScopes,
+  isDelimiterOnly,
+  isWrapper,
+  isWrapperEnd,
+  type XlsbGrammar
+} from "@excel/utils/xlsb-validator/grammar";
 import type { XlsbReporter } from "@excel/utils/xlsb-validator/reporter";
 import {
   CELL_RECORD_NAMES,
@@ -23,6 +25,7 @@ import {
   XLSB_PART_ROLES,
   type XlsbPartRole
 } from "@excel/utils/xlsb-validator/roles";
+import { MS_XLSB_RECORD_NAMES } from "@excel/xlsb/spec/record-names";
 import { recordSpec } from "@excel/xlsb/spec/records";
 
 export function checkOrdering(
@@ -34,7 +37,24 @@ export function checkOrdering(
   const names = framed.records.map(record => recordSpec(record.id)?.name);
 
   if (expectations.rootScope) {
-    const first = names.find(name => name !== undefined);
+    // Past any leading wrapper block: a part may open with one before its root — the table part's grammar is
+    // `[ACUID] BrtBeginList …`, and every Excel-authored table part carries that `BrtACBegin … BrtACEnd` — so
+    // the first record proper is the first one outside them. The scope check treats the wrappers the same way.
+    let wrapperDepth = 0;
+    const first = names.find(name => {
+      if (name === undefined) {
+        return false;
+      }
+      if (isWrapper(name)) {
+        wrapperDepth++;
+        return false;
+      }
+      if (isWrapperEnd(name)) {
+        wrapperDepth = Math.max(0, wrapperDepth - 1);
+        return false;
+      }
+      return wrapperDepth === 0;
+    });
     if (first !== expectations.rootScope) {
       reporter.error(
         "scope-missing-root",
@@ -73,6 +93,10 @@ export function checkOrdering(
         offset: framed.records[beforeIndex]!.offset
       });
     }
+  }
+
+  if (expectations.grammar) {
+    checkGrammarOrder(framed, expectations.grammar, reporter);
   }
 
   if (!expectations.cellsInSheetData) {
@@ -118,6 +142,89 @@ export function checkOrdering(
           { part: framed.part, offset: record.offset }
         );
       }
+    }
+  }
+}
+
+const SCOPES = new Map<XlsbGrammar, ReadonlyMap<string, ReadonlyMap<string, number>>>();
+
+/** One open scope: how its direct children are ranked (when the grammar knows), and how far they have got. */
+interface Frame {
+  readonly ranks: ReadonlyMap<string, number> | undefined;
+  /** A `BrtFRTBegin`/`BrtACBegin` wrapper, whose first record stands for it in the enclosing scope. */
+  readonly wrapper: boolean;
+  /** Whether the wrapper's first record has not been seen yet. */
+  pending: boolean;
+  maxRank: number;
+  maxName: string;
+}
+
+/**
+ * Rank the records of every scope by the part's grammar (`grammar.ts`): the root's children, and the children of
+ * each scope whose production is published (a view's pane before its selections, the supporting books before
+ * `BrtExternSheet`, …).
+ *
+ * Depth comes from record names, because the scope table knows only the scopes this library reads: `BrtBegin…`
+ * opens, `BrtEnd…` closes, and so do the two wrappers. A collection behind a wrapper is named, in the scope that
+ * holds it, by the record after the wrapper — of what a wrapper holds, the walk (`iterateInterpretableRecords`)
+ * passes on only the future records this library models, so that is all that is ranked there. A record a scope's
+ * grammar does not place is skipped rather than reported — it may be a newer feature's.
+ */
+function checkGrammarOrder(framed: FramedPart, grammar: XlsbGrammar, reporter: XlsbReporter): void {
+  let scopes = SCOPES.get(grammar);
+  if (!scopes) {
+    scopes = grammarScopes(grammar);
+    SCOPES.set(grammar, scopes);
+  }
+  const stack: Frame[] = [];
+  for (const record of framed.records) {
+    if (reporter.capped) {
+      return;
+    }
+    const name = MS_XLSB_RECORD_NAMES.get(record.id);
+    if (name === undefined) {
+      continue;
+    }
+    if (isDelimiterOnly(name)) {
+      stack.pop();
+      continue;
+    }
+    const top = stack[stack.length - 1];
+    // The scope this record is a child of, for ranking: a wrapper's first record belongs to the scope around it.
+    let owner: Frame | undefined;
+    if (top?.wrapper) {
+      if (top.pending) {
+        top.pending = false;
+        for (let i = stack.length - 1; i >= 0 && owner === undefined; i--) {
+          owner = stack[i]!.wrapper ? undefined : stack[i];
+        }
+      }
+    } else {
+      owner = top;
+    }
+    if (owner?.ranks) {
+      const rank = owner.ranks.get(name);
+      if (rank !== undefined) {
+        if (rank < owner.maxRank) {
+          reporter.error(
+            "ordering-out-of-place",
+            `${name} appears after ${owner.maxName}; the record grammar (${grammar.root}) places it earlier`,
+            { part: framed.part, offset: record.offset }
+          );
+        } else {
+          owner.maxRank = rank;
+          owner.maxName = name;
+        }
+      }
+    }
+    if (isWrapper(name) || /^[Bb]rtBegin/.test(name)) {
+      stack.push({
+        ranks: isWrapper(name) ? undefined : scopes.get(name),
+        wrapper: isWrapper(name),
+        pending: isWrapper(name),
+        maxRank: -1,
+        maxName: ""
+      });
     }
   }
 }

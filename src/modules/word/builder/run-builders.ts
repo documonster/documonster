@@ -1201,7 +1201,7 @@ export function mathGroupChar(
   options?: {
     char?: string;
     position?: "top" | "bottom";
-    verticalAlign?: "top" | "center" | "bottom";
+    verticalAlign?: "top" | "bottom";
   }
 ): MathContent {
   const where = "Build.mathGroupChar";

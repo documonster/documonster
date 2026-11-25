@@ -340,6 +340,17 @@ jobs:
         env:
           CI: true
 
+      # Microsoft's Open XML SDK validator is Office's schema, made executable: it refuses what Word repairs in
+      # silence and what Office documents it does not allow, so a Word document that merely opens proves little.
+      # Run over the files the step above wrote, rather than writing them again.
+      - name: Use .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Every document and workbook the examples write passes Office's schema
+        run: pnpm verify:openxml --require
+
   lint:
     needs: should-run
     timeout-minutes: 10

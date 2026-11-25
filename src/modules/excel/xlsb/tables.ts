@@ -107,14 +107,21 @@ export interface SheetTable {
   readonly id: number;
 }
 
-/** Serialise a whole `xl/tables/table{N}.bin`. */
-export function encodeTablePart(
-  table: SheetTable,
+/** What {@link encodeTablePart} needs from the workbook around the table. */
+export interface TablePartContext {
   /**
    * A calculated column's formula as the `CellParsedFormula` `BrtListCCFmla` carries, or `undefined` when it cannot
    * be encoded (the caller reports it). Without it no calculated column formula is written.
    */
-  calculatedColumnFormula?: (text: string, column: string) => Uint8Array | undefined
+  readonly calculatedColumnFormula?: (text: string, column: string) => Uint8Array | undefined;
+  /** The index of a column's data format in the workbook's differential formats. Without it none is written. */
+  readonly dxfIndexOf?: (style: unknown) => number;
+}
+
+/** Serialise a whole `xl/tables/table{N}.bin`. */
+export function encodeTablePart(
+  table: SheetTable,
+  { calculatedColumnFormula, dxfIndexOf }: TablePartContext = {}
 ): Uint8Array | undefined {
   const range = tryDecodeRange(table.ref);
   if (range === undefined || table.columns.length === 0) {
@@ -134,7 +141,16 @@ export function encodeTablePart(
     record("BrtBeginListCols", new BinaryWriter().writeUint32(table.columns.length).toUint8Array())
   );
   table.columns.forEach((column, index) => {
-    records.push(record("BrtBeginListCol", encodeListColumn(column, index + 1)));
+    records.push(
+      record(
+        "BrtBeginListCol",
+        encodeListColumn(
+          column,
+          index + 1,
+          column.style === undefined || dxfIndexOf === undefined ? NO_DXF : dxfIndexOf(column.style)
+        )
+      )
+    );
     // The calculated column's formula, inside the column's scope as Excel writes it: `fArray` clear, then the
     // formula. Excel refuses a `calculatedColumnFormula` that does not name its table, so the text goes through
     // `toFileFormula` with this table's name first.
@@ -315,15 +331,20 @@ function readListHeader(payload: Uint8Array, part: string): Omit<SheetTable, "co
 }
 
 /** `BrtBeginListCol`: 24 fixed bytes, then six strings. */
-function encodeListColumn(column: TableColumnProperties, id: number): Uint8Array {
+/**
+ * A `BrtBeginListCol`. `dataDxf` is the column's data format — `nDxfInsertRow`, which is the XLSX `dataDxfId`: in a
+ * workbook Excel saved both ways, `dataDxfId="1"` and `"0"` are `nDxfInsertRow` 1 and 0. It was always written as
+ * none, so a table column's format survived XLSX and not XLSB.
+ */
+function encodeListColumn(column: TableColumnProperties, id: number, dataDxf: number): Uint8Array {
   const totals = Math.max(0, TOTALS_FUNCTION.indexOf(column.totalsRowFunction ?? "none"));
   return concatUint8Arrays([
     new BinaryWriter()
       .writeUint32(id)
       .writeUint32(totals)
-      .writeUint32(NO_DXF)
-      .writeUint32(NO_DXF)
-      .writeUint32(NO_DXF)
+      .writeUint32(NO_DXF) // nDxfHdr
+      .writeUint32(dataDxf) // nDxfInsertRow
+      .writeUint32(NO_DXF) // nDxfAgg
       // `idqsif` MUST be 0 unless `lt` is LTEXTDATA.
       .writeUint32(0)
       .toUint8Array(),
@@ -345,12 +366,19 @@ function encodeListColumn(column: TableColumnProperties, id: number): Uint8Array
   ]);
 }
 
-function readListColumn(payload: Uint8Array, part: string): TableColumnProperties {
+/**
+ * A column as the table part has it: the model's column, and its data format's index (`nDxfInsertRow`) in the
+ * workbook's differential formats, which the package reader resolves to the column's `style` once the styles part is
+ * read — as it resolves a conditional format's — and drops.
+ */
+export type ReadTableColumn = TableColumnProperties & { readonly dataDxfId?: number };
+
+function readListColumn(payload: Uint8Array, part: string): ReadTableColumn {
   const reader = new XlsbReader(payload, 0, part);
   reader.readUint32(); // idField
   const totals = reader.readUint32();
   reader.readUint32(); // nDxfHdr
-  reader.readUint32(); // nDxfInsertRow
+  const dataDxf = reader.readUint32(); // nDxfInsertRow: the column's data format
   reader.readUint32(); // nDxfAgg
   reader.readUint32(); // idqsif
   const name = readNullableWideString(reader, part);
@@ -364,7 +392,8 @@ function readListColumn(payload: Uint8Array, part: string): TableColumnPropertie
     ...(totalsRowFunction === undefined || totalsRowFunction === "none"
       ? {}
       : { totalsRowFunction }),
-    ...(total === undefined ? {} : { totalsRowLabel: total })
+    ...(total === undefined ? {} : { totalsRowLabel: total }),
+    ...(dataDxf === NO_DXF ? {} : { dataDxfId: dataDxf })
   };
 }
 

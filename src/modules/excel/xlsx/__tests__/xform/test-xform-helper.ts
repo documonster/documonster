@@ -149,7 +149,8 @@ function parseXmlTree(xml: string): XmlNode | string | null {
 
 /**
  * Convert XML tree to a canonical form for comparison.
- * Sorts attributes and children by tag name for consistent comparison.
+ * Attributes are sorted, since their order carries no meaning. Child elements keep their order: OOXML declares
+ * almost every container as an `xsd:sequence`, and Excel refuses a part whose children are out of order.
  */
 function treeToCanonical(node: XmlNode | string | null): any {
   if (node === null) {
@@ -170,18 +171,10 @@ function treeToCanonical(node: XmlNode | string | null): any {
     }
   }
 
-  // Sort and canonicalize children
   if (node.children.length > 0) {
     const childNodes = node.children
       .map(c => treeToCanonical(c))
       .filter(c => c !== null && c !== "");
-
-    // Sort child elements by tag name (text nodes stay in place conceptually)
-    childNodes.sort((a, b) => {
-      const aTag = typeof a === "string" ? "" : a.tag;
-      const bTag = typeof b === "string" ? "" : b.tag;
-      return aTag.localeCompare(bTag);
-    });
 
     if (childNodes.length > 0) {
       result.children = childNodes;

@@ -68,6 +68,55 @@ describe("ooxml-validator / worksheet — child ordering", () => {
   });
 });
 
+describe("ooxml-validator / worksheet — nested sequence ordering", () => {
+  const nestedKinds = async (body: string) => {
+    const parts = baseParts();
+    parts["xl/worksheets/sheet1.xml"] = sheetXml(body);
+    const report = await validateXlsxBuffer(buildPackage(parts));
+    return report.problems.filter(p => p.kind === "part-child-out-of-order");
+  };
+
+  it("accepts sheetPr children in CT_SheetPr order", async () => {
+    expect(
+      await nestedKinds(
+        `<sheetPr><tabColor rgb="FFFF0000"/><outlinePr summaryBelow="0"/><pageSetUpPr fitToPage="1"/></sheetPr><sheetData/>`
+      )
+    ).toEqual([]);
+  });
+
+  it("flags pageSetUpPr before outlinePr (issue #269)", async () => {
+    const problems = await nestedKinds(
+      `<sheetPr><pageSetUpPr fitToPage="1"/><outlinePr summaryBelow="0"/></sheetPr><sheetData/>`
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain("<outlinePr> appears after <pageSetUpPr>");
+  });
+
+  it("flags headerFooter children out of CT_HeaderFooter order", async () => {
+    expect(
+      await nestedKinds(
+        `<sheetData/><headerFooter><oddFooter>a</oddFooter><oddHeader>b</oddHeader></headerFooter>`
+      )
+    ).toHaveLength(1);
+  });
+
+  it("flags a selection before the pane of a sheetView", async () => {
+    expect(
+      await nestedKinds(
+        `<sheetViews><sheetView workbookViewId="0"><selection activeCell="A1"/><pane ySplit="1"/></sheetView></sheetViews><sheetData/>`
+      )
+    ).toHaveLength(1);
+  });
+
+  it("does not hold an extLst cfRule to CT_CfRule", async () => {
+    expect(
+      await nestedKinds(
+        `<sheetData/><extLst><ext uri="x"><x14:conditionalFormattings xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:conditionalFormatting><x14:cfRule type="dataBar"><x14:dataBar/><formula>1</formula></x14:cfRule></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>`
+      )
+    ).toEqual([]);
+  });
+});
+
 describe("ooxml-validator / worksheet — cell ref consistency", () => {
   it("flags cell r= row that doesn't match enclosing row", async () => {
     const parts = baseParts();

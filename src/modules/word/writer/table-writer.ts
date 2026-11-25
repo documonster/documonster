@@ -6,13 +6,28 @@
  */
 
 import { WRITTEN, writtenToken } from "@word/core/argument-checks";
-import { atNode, unwritableNode, within, writableList } from "@word/core/node-path";
+import {
+  EDGE_NAMES,
+  NARROWER_PROPERTIES,
+  ROW_ONLY_PROPERTIES,
+  oneEdgeName
+} from "@word/core/change-records";
+import {
+  atNode,
+  refuseAbsentFields,
+  refuseTableDiagonals,
+  refuseTableOnlyProperties,
+  unwritableNode,
+  within,
+  writableList
+} from "@word/core/node-path";
 import type {
   BlockContentControl,
   Table,
   TableRow,
   TableCell,
   TableProperties,
+  TablePropertyExceptions,
   TableRowProperties,
   TableCellProperties,
   TableBorders,
@@ -24,8 +39,9 @@ import type {
 import { renderBorder, renderParagraph } from "@word/writer/paragraph-writer";
 import { renderRangeMarkers } from "@word/writer/range-marker-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
-import { writtenRevisionId } from "@word/writer/render-context";
+import { revisionAttributes } from "@word/writer/render-context";
 import { renderShading } from "@word/writer/run-writer";
+import { emitInSchemaOrder, type OrderedChild } from "@word/writer/schema-order";
 import { renderSdtProperties } from "@word/writer/sdt-writer";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
@@ -40,63 +56,66 @@ function renderTableWidth(xml: XmlSink, tagName: string, tw: TableWidth, at: str
   );
 }
 
-/** Render table borders. */
-function renderTableBorders(xml: XmlSink, tagName: string, borders: TableBorders): void {
+/** Render table borders (`w:tblBorders` or `w:tcBorders`), in their content model's order. */
+export function renderTableBorders(
+  xml: XmlSink,
+  tagName: "w:tblBorders" | "w:tcBorders",
+  borders: TableBorders
+): void {
+  if (tagName === "w:tblBorders") {
+    refuseTableDiagonals(borders);
+  }
+  refuseBothEdgeNames(borders);
   xml.openNode(tagName);
-  if (borders.top) {
-    renderBorder(xml, "w:top", borders.top);
-  }
-  if (borders.left) {
-    renderBorder(xml, "w:left", borders.left);
-  }
-  if (borders.bottom) {
-    renderBorder(xml, "w:bottom", borders.bottom);
-  }
-  if (borders.right) {
-    renderBorder(xml, "w:right", borders.right);
-  }
-  if (borders.insideH) {
-    renderBorder(xml, "w:insideH", borders.insideH);
-  }
-  if (borders.insideV) {
-    renderBorder(xml, "w:insideV", borders.insideV);
-  }
-  if (borders.start) {
-    renderBorder(xml, "w:start", borders.start);
-  }
-  if (borders.end) {
-    renderBorder(xml, "w:end", borders.end);
-  }
-  if (borders.tl2br) {
-    renderBorder(xml, "w:tl2br", borders.tl2br);
-  }
-  if (borders.tr2bl) {
-    renderBorder(xml, "w:tr2bl", borders.tr2bl);
-  }
+  const sides =
+    tagName === "w:tcBorders"
+      ? ([
+          "top",
+          "left",
+          "bottom",
+          "right",
+          "insideH",
+          "insideV",
+          "start",
+          "end",
+          "tl2br",
+          "tr2bl"
+        ] as const)
+      : (["top", "left", "bottom", "right", "insideH", "insideV", "start", "end"] as const);
+  emitInSchemaOrder(
+    tagName === "w:tcBorders" ? "w:CT_TcBorders" : "w:CT_TblBorders",
+    sides.map((side): OrderedChild => {
+      const border = borders[side];
+      return !!border && [`w:${side}`, () => renderBorder(xml, `w:${side}`, border)];
+    })
+  );
   xml.closeNode();
 }
 
-/** Render table cell margins. */
-function renderCellMargins(xml: XmlSink, tagName: string, margins: TableCellMargins): void {
+/** Refuse borders or margins naming one edge twice (`EDGE_NAMES`): Office's schema takes one name per edge. */
+function refuseBothEdgeNames(set: TableBorders | TableCellMargins): void {
+  for (const [first, second] of EDGE_NAMES) {
+    if (set[first] !== undefined && set[second] !== undefined) {
+      unwritableNode(second, oneEdgeName(first), set[second]);
+    }
+  }
+}
+
+/** Render table cell margins (`w:tblCellMar` or `w:tcMar`), in their content model's order. */
+function renderCellMargins(
+  xml: XmlSink,
+  tagName: "w:tblCellMar" | "w:tcMar",
+  margins: TableCellMargins
+): void {
+  refuseBothEdgeNames(margins);
   xml.openNode(tagName);
-  if (margins.top) {
-    renderTableWidth(xml, "w:top", margins.top, "top");
-  }
-  if (margins.left) {
-    renderTableWidth(xml, "w:left", margins.left, "left");
-  }
-  if (margins.bottom) {
-    renderTableWidth(xml, "w:bottom", margins.bottom, "bottom");
-  }
-  if (margins.right) {
-    renderTableWidth(xml, "w:right", margins.right, "right");
-  }
-  if (margins.start) {
-    renderTableWidth(xml, "w:start", margins.start, "start");
-  }
-  if (margins.end) {
-    renderTableWidth(xml, "w:end", margins.end, "end");
-  }
+  emitInSchemaOrder(
+    tagName === "w:tcMar" ? "w:CT_TcMar" : "w:CT_TblCellMar",
+    (["top", "left", "bottom", "right", "start", "end"] as const).map((side): OrderedChild => {
+      const width = margins[side];
+      return !!width && [`w:${side}`, () => renderTableWidth(xml, `w:${side}`, width, side)];
+    })
+  );
   xml.closeNode();
 }
 
@@ -190,346 +209,294 @@ function renderTableFloat(xml: XmlSink, float: TableFloat): void {
   xml.leafNode("w:tblpPr", attrs);
 }
 
-/** Render w:tblPr. */
-function renderTableProperties(
-  xml: XmlSink,
-  tPr: TableProperties,
-  insidePropertyChange = false
-): void {
+/**
+ * Render w:tblPr. `base` is `CT_TblPrBase` — a table style's, a conditional format's, or the previous properties in
+ * `w:tblPrChange` — which has no change record of its own.
+ */
+export function renderTableProperties(xml: XmlSink, tPr: TableProperties, base = false): void {
+  if (base) {
+    refuseAbsentFields(tPr, ["propertyChange"], NARROWER_PROPERTIES.baseTable);
+  }
   xml.openNode("w:tblPr");
-
-  if (tPr.style) {
-    xml.leafNode("w:tblStyle", { "w:val": tPr.style });
-  }
-
-  // Floating table must come before width
-  if (tPr.float) {
-    renderTableFloat(xml, tPr.float);
-    // w:tblOverlap is a separate sibling element
-    if (tPr.float.overlap) {
-      xml.leafNode("w:tblOverlap", { "w:val": tPr.float.overlap });
-    }
-  }
-
-  if (tPr.rowBandSize !== undefined) {
-    xml.leafNode("w:tblStyleRowBandSize", { "w:val": xmlValue(tPr.rowBandSize, "w:val") });
-  }
-
-  if (tPr.colBandSize !== undefined) {
-    xml.leafNode("w:tblStyleColBandSize", { "w:val": xmlValue(tPr.colBandSize, "w:val") });
-  }
-
-  if (tPr.width) {
-    renderTableWidth(xml, "w:tblW", tPr.width, "width");
-  }
-
   const alignment = writtenToken(tPr, "alignment", WRITTEN.tableAlignment, "alignment");
-  if (alignment !== undefined) {
-    xml.leafNode("w:jc", { "w:val": alignment });
-  }
-
-  if (tPr.cellSpacing) {
-    renderTableWidth(xml, "w:tblCellSpacing", tPr.cellSpacing, "cellSpacing");
-  }
-
-  if (tPr.indent !== undefined) {
-    xml.leafNode("w:tblInd", { "w:w": xmlValue(tPr.indent, "w:w"), "w:type": "dxa" });
-  }
-
-  if (tPr.borders) {
-    renderTableBorders(xml, "w:tblBorders", tPr.borders);
-  }
-
-  if (tPr.shading) {
-    within("shading", () => renderShading(xml, tPr.shading!));
-  }
-
   const layout = writtenToken(tPr, "layout", WRITTEN.tableLayout, "layout");
-  if (layout !== undefined) {
-    xml.leafNode("w:tblLayout", { "w:type": layout });
-  }
-
-  if (tPr.cellMargins) {
-    const margins = tPr.cellMargins;
-    within("cellMargins", () => renderCellMargins(xml, "w:tblCellMar", margins));
-  }
-
-  if (tPr.look) {
-    renderTableLook(xml, tPr.look);
-  }
-
-  if (tPr.visuallyRightToLeft) {
-    xml.leafNode("w:bidiVisual");
-  }
-
-  // Accessibility: caption and description
-  if (tPr.caption !== undefined) {
-    xml.leafNode("w:tblCaption", { "w:val": tPr.caption });
-  }
-  if (tPr.description !== undefined) {
-    xml.leafNode("w:tblDescription", { "w:val": tPr.description });
-  }
-
-  // Table property change (track changes) - must be last child
-  if (!insidePropertyChange && tPr.propertyChange) {
-    const rev = tPr.propertyChange.revision;
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
-      "w:author": rev.author
-    };
-    if (rev.date) {
-      attrs["w:date"] = rev.date;
-    }
-    xml.openNode("w:tblPrChange", attrs);
-    if (tPr.propertyChange.previousProperties) {
-      const previous = tPr.propertyChange.previousProperties;
-      within("propertyChange.previousProperties", () => renderTableProperties(xml, previous, true));
-    } else {
-      xml.openNode("w:tblPr");
-      xml.closeNode();
-    }
-    xml.closeNode();
-  }
-
+  emitInSchemaOrder("w:CT_TblPr", [
+    !!tPr.style && ["w:tblStyle", () => xml.leafNode("w:tblStyle", { "w:val": tPr.style! })],
+    !!tPr.float && ["w:tblpPr", () => renderTableFloat(xml, tPr.float!)],
+    // w:tblOverlap is a separate sibling element of w:tblpPr, not an attribute.
+    !!tPr.float?.overlap && [
+      "w:tblOverlap",
+      () => xml.leafNode("w:tblOverlap", { "w:val": tPr.float!.overlap! })
+    ],
+    !!tPr.visuallyRightToLeft && ["w:bidiVisual", () => xml.leafNode("w:bidiVisual")],
+    tPr.rowBandSize !== undefined && [
+      "w:tblStyleRowBandSize",
+      () => xml.leafNode("w:tblStyleRowBandSize", { "w:val": xmlValue(tPr.rowBandSize!, "w:val") })
+    ],
+    tPr.colBandSize !== undefined && [
+      "w:tblStyleColBandSize",
+      () => xml.leafNode("w:tblStyleColBandSize", { "w:val": xmlValue(tPr.colBandSize!, "w:val") })
+    ],
+    ...tablePropertiesExceptionChildren(xml, tPr, alignment, layout),
+    tPr.caption !== undefined && [
+      "w:tblCaption",
+      () => xml.leafNode("w:tblCaption", { "w:val": tPr.caption! })
+    ],
+    tPr.description !== undefined && [
+      "w:tblDescription",
+      () => xml.leafNode("w:tblDescription", { "w:val": tPr.description! })
+    ],
+    !base && !!tPr.propertyChange && ["w:tblPrChange", () => renderTablePropertyChange(xml, tPr)]
+  ]);
   xml.closeNode();
 }
 
-/** Render w:trPr. */
-function renderTableRowProperties(
+/**
+ * The children `w:tblPr` shares with `w:tblPrEx` (`CT_TblPrExBase`): width, justification, spacing, indent,
+ * borders, shading, layout, margins, look.
+ */
+function tablePropertiesExceptionChildren(
+  xml: XmlSink,
+  tPr: TablePropertyExceptions,
+  alignment: string | undefined,
+  layout: string | undefined
+): OrderedChild[] {
+  return [
+    !!tPr.width && ["w:tblW", () => renderTableWidth(xml, "w:tblW", tPr.width!, "width")],
+    alignment !== undefined && ["w:jc", () => xml.leafNode("w:jc", { "w:val": alignment })],
+    !!tPr.cellSpacing && [
+      "w:tblCellSpacing",
+      () => renderTableWidth(xml, "w:tblCellSpacing", tPr.cellSpacing!, "cellSpacing")
+    ],
+    tPr.indent !== undefined && [
+      "w:tblInd",
+      () => xml.leafNode("w:tblInd", { "w:w": xmlValue(tPr.indent!, "w:w"), "w:type": "dxa" })
+    ],
+    !!tPr.borders && [
+      "w:tblBorders",
+      () => within("borders", () => renderTableBorders(xml, "w:tblBorders", tPr.borders!))
+    ],
+    !!tPr.shading && ["w:shd", () => within("shading", () => renderShading(xml, tPr.shading!))],
+    layout !== undefined && [
+      "w:tblLayout",
+      () => xml.leafNode("w:tblLayout", { "w:type": layout })
+    ],
+    !!tPr.cellMargins && [
+      "w:tblCellMar",
+      () => within("cellMargins", () => renderCellMargins(xml, "w:tblCellMar", tPr.cellMargins!))
+    ],
+    !!tPr.look && ["w:tblLook", () => renderTableLook(xml, tPr.look!)]
+  ];
+}
+
+/** `w:tblPrChange`, holding the previous `w:tblPr`. */
+function renderTablePropertyChange(xml: XmlSink, tPr: TableProperties): void {
+  xml.openNode("w:tblPrChange", revisionAttributes(tPr.propertyChange!.revision));
+  if (tPr.propertyChange!.previousProperties) {
+    const previous = tPr.propertyChange!.previousProperties;
+    within("propertyChange.previousProperties", () => renderTableProperties(xml, previous, true));
+  } else {
+    xml.openNode("w:tblPr");
+    xml.closeNode();
+  }
+  xml.closeNode();
+}
+
+/** Render w:trPr — a row's, a table style's or a conditional format's — in `CT_TrPr` order. */
+export function renderTableRowProperties(
   xml: XmlSink,
   rPr: TableRowProperties,
   insidePropertyChange = false
 ): void {
+  if (insidePropertyChange) {
+    refuseAbsentFields(
+      rPr,
+      [...ROW_ONLY_PROPERTIES, "propertyChange"],
+      NARROWER_PROPERTIES.previousRow
+    );
+  }
   xml.openNode("w:trPr");
-
-  // Per ECMA-376 CT_TrPr schema order:
-  // cnfStyle → divId → gridBefore → gridAfter → wBefore → wAfter → cantSplit →
-  // trHeight → tblHeader → tblCellSpacing → jc → hidden → ins/del
-  if (rPr.cnfStyle) {
-    xml.leafNode("w:cnfStyle", { "w:val": rPr.cnfStyle });
-  }
-
-  if (rPr.gridBefore !== undefined) {
-    xml.leafNode("w:gridBefore", { "w:val": xmlValue(rPr.gridBefore, "w:val") });
-  }
-  if (rPr.gridAfter !== undefined) {
-    xml.leafNode("w:gridAfter", { "w:val": xmlValue(rPr.gridAfter, "w:val") });
-  }
-  if (rPr.widthBefore) {
-    renderTableWidth(xml, "w:wBefore", rPr.widthBefore, "widthBefore");
-  }
-  if (rPr.widthAfter) {
-    renderTableWidth(xml, "w:wAfter", rPr.widthAfter, "widthAfter");
-  }
-
-  if (rPr.cantSplit) {
-    xml.leafNode("w:cantSplit");
-  }
-
-  if (rPr.height) {
-    const attrs: Record<string, string> = { "w:val": xmlValue(rPr.height.value, "w:val") };
-    const rule = writtenToken(rPr.height, "rule", WRITTEN.rowHeightRule, "height.rule");
-    if (rule !== undefined) {
-      attrs["w:hRule"] = rule;
-    }
-    xml.leafNode("w:trHeight", attrs);
-  }
-
-  if (rPr.tableHeader) {
-    xml.leafNode("w:tblHeader");
-  }
-
-  if (rPr.cellSpacing) {
-    renderTableWidth(xml, "w:tblCellSpacing", rPr.cellSpacing, "cellSpacing");
-  }
-
-  if (rPr.hidden) {
-    xml.leafNode("w:hidden");
-  }
-
-  // Track changes: inserted row
-  if (rPr.inserted) {
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rPr.inserted.revision.id), "w:id"),
-      "w:author": rPr.inserted.revision.author
-    };
-    if (rPr.inserted.revision.date) {
-      attrs["w:date"] = rPr.inserted.revision.date;
-    }
-    xml.leafNode("w:ins", attrs);
-  }
-
-  // Track changes: deleted row
-  if (rPr.deleted) {
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rPr.deleted.revision.id), "w:id"),
-      "w:author": rPr.deleted.revision.author
-    };
-    if (rPr.deleted.revision.date) {
-      attrs["w:date"] = rPr.deleted.revision.date;
-    }
-    xml.leafNode("w:del", attrs);
-  }
-
-  // Row property change (track changes)
-  if (!insidePropertyChange && rPr.propertyChange) {
-    const rev = rPr.propertyChange.revision;
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
-      "w:author": rev.author
-    };
-    if (rev.date) {
-      attrs["w:date"] = rev.date;
-    }
-    xml.openNode("w:trPrChange", attrs);
-    if (rPr.propertyChange.previousProperties) {
-      const previous = rPr.propertyChange.previousProperties;
-      within("propertyChange.previousProperties", () =>
-        renderTableRowProperties(xml, previous, true)
-      );
-    } else {
-      xml.openNode("w:trPr");
-      xml.closeNode();
-    }
-    xml.closeNode();
-  }
-
+  const { height, propertyChange } = rPr;
+  emitInSchemaOrder("w:CT_TrPr", [
+    !!rPr.cnfStyle && ["w:cnfStyle", () => xml.leafNode("w:cnfStyle", { "w:val": rPr.cnfStyle! })],
+    rPr.gridBefore !== undefined && [
+      "w:gridBefore",
+      () => xml.leafNode("w:gridBefore", { "w:val": xmlValue(rPr.gridBefore!, "w:val") })
+    ],
+    rPr.gridAfter !== undefined && [
+      "w:gridAfter",
+      () => xml.leafNode("w:gridAfter", { "w:val": xmlValue(rPr.gridAfter!, "w:val") })
+    ],
+    !!rPr.widthBefore && [
+      "w:wBefore",
+      () => renderTableWidth(xml, "w:wBefore", rPr.widthBefore!, "widthBefore")
+    ],
+    !!rPr.widthAfter && [
+      "w:wAfter",
+      () => renderTableWidth(xml, "w:wAfter", rPr.widthAfter!, "widthAfter")
+    ],
+    !!rPr.cantSplit && ["w:cantSplit", () => xml.leafNode("w:cantSplit")],
+    !!height && [
+      "w:trHeight",
+      () => {
+        const attrs: Record<string, string> = { "w:val": xmlValue(height.value, "w:val") };
+        const rule = writtenToken(height, "rule", WRITTEN.rowHeightRule, "height.rule");
+        if (rule !== undefined) {
+          attrs["w:hRule"] = rule;
+        }
+        xml.leafNode("w:trHeight", attrs);
+      }
+    ],
+    !!rPr.tableHeader && ["w:tblHeader", () => xml.leafNode("w:tblHeader")],
+    !!rPr.cellSpacing && [
+      "w:tblCellSpacing",
+      () => renderTableWidth(xml, "w:tblCellSpacing", rPr.cellSpacing!, "cellSpacing")
+    ],
+    !!rPr.hidden && ["w:hidden", () => xml.leafNode("w:hidden")],
+    // Track changes: an inserted or deleted row.
+    !!rPr.inserted && [
+      "w:ins",
+      () => xml.leafNode("w:ins", revisionAttributes(rPr.inserted!.revision))
+    ],
+    !!rPr.deleted && [
+      "w:del",
+      () => xml.leafNode("w:del", revisionAttributes(rPr.deleted!.revision))
+    ],
+    !insidePropertyChange &&
+      !!propertyChange && [
+        "w:trPrChange",
+        () => {
+          xml.openNode("w:trPrChange", revisionAttributes(propertyChange.revision));
+          if (propertyChange.previousProperties) {
+            const previous = propertyChange.previousProperties;
+            within("propertyChange.previousProperties", () =>
+              renderTableRowProperties(xml, previous, true)
+            );
+          } else {
+            xml.openNode("w:trPr");
+            xml.closeNode();
+          }
+          xml.closeNode();
+        }
+      ]
+  ]);
   xml.closeNode();
 }
 
-/** Render w:tcPr. */
-function renderTableCellProperties(
+/** How {@link renderTableCellProperties} writes a `w:tcPr` that is not a table cell's own. */
+export interface CellPropertiesOptions {
+  /** A `w:tcPr` inside `w:tcPrChange`: no change record of its own. */
+  readonly insidePropertyChange?: boolean;
+  /**
+   * Write `<w:tcW w:w="0" w:type="auto"/>` when the properties have no width. A table cell needs it (see below);
+   * a style's `w:tcPr` does not, and writing one there would set every cell the style formats to auto width.
+   */
+  readonly widthPlaceholder?: boolean;
+}
+
+/** Render w:tcPr — a cell's, a table style's or a conditional format's — in `CT_TcPr` order. */
+export function renderTableCellProperties(
   xml: XmlSink,
   cPr: TableCellProperties,
-  insidePropertyChange = false
+  { insidePropertyChange = false, widthPlaceholder = true }: CellPropertiesOptions = {}
 ): void {
+  if (insidePropertyChange) {
+    refuseAbsentFields(cPr, ["propertyChange"], NARROWER_PROPERTIES.previousCell);
+  }
   xml.openNode("w:tcPr");
-
-  // Per CT_TcPr order: cnfStyle → tcW → gridSpan → hMerge → vMerge → tcBorders →
-  // shd → noWrap → tcMar → textDirection → tcFitText → vAlign → hideMark
-  if (cPr.cnfStyle) {
-    xml.leafNode("w:cnfStyle", { "w:val": cPr.cnfStyle });
-  }
-
-  if (cPr.width) {
-    renderTableWidth(xml, "w:tcW", cPr.width, "width");
-  } else {
-    // OOXML's CT_TcPr.tcW is technically optional, but Word treats a
-    // missing <w:tcW> as a hard schema violation: it triggers the
-    // "content unreadable" repair dialog and silently drops the table.
-    // Emit a w:type="auto" placeholder so Word lays the cell out using
-    // the table-level grid widths.
-    xml.leafNode("w:tcW", { "w:w": "0", "w:type": "auto" });
-  }
-
-  if (cPr.gridSpan !== undefined && cPr.gridSpan > 1) {
-    xml.leafNode("w:gridSpan", { "w:val": xmlValue(cPr.gridSpan, "w:val") });
-  }
-
-  if (cPr.verticalMerge !== undefined) {
-    if (cPr.verticalMerge === "restart") {
-      xml.leafNode("w:vMerge", { "w:val": "restart" });
-    } else {
-      xml.leafNode("w:vMerge");
-    }
-  }
-
-  if (cPr.borders) {
-    renderTableBorders(xml, "w:tcBorders", cPr.borders);
-  }
-
-  if (cPr.shading) {
-    within("shading", () => renderShading(xml, cPr.shading!));
-  }
-
-  if (cPr.noWrap) {
-    xml.leafNode("w:noWrap");
-  }
-
-  if (cPr.margins) {
-    const margins = cPr.margins;
-    within("margins", () => renderCellMargins(xml, "w:tcMar", margins));
-  }
-
   const textDirection = writtenToken(cPr, "textDirection", WRITTEN.textDirection, "textDirection");
-  if (textDirection !== undefined) {
-    xml.leafNode("w:textDirection", { "w:val": textDirection });
-  }
-
-  if (cPr.fitText) {
-    xml.leafNode("w:tcFitText");
-  }
-
   const verticalAlign = writtenToken(
     cPr,
     "verticalAlign",
     WRITTEN.cellVerticalAlign,
     "verticalAlign"
   );
-  if (verticalAlign !== undefined) {
-    xml.leafNode("w:vAlign", { "w:val": verticalAlign });
-  }
-
-  if (cPr.hideMark) {
-    xml.leafNode("w:hideMark");
-  }
-
-  // Cell-level revisions (cellIns/cellDel/cellMerge)
-  if (cPr.inserted) {
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(cPr.inserted.revision.id), "w:id"),
-      "w:author": cPr.inserted.revision.author
-    };
-    if (cPr.inserted.revision.date) {
-      attrs["w:date"] = cPr.inserted.revision.date;
-    }
-    xml.leafNode("w:cellIns", attrs);
-  }
-  if (cPr.deleted) {
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(cPr.deleted.revision.id), "w:id"),
-      "w:author": cPr.deleted.revision.author
-    };
-    if (cPr.deleted.revision.date) {
-      attrs["w:date"] = cPr.deleted.revision.date;
-    }
-    xml.leafNode("w:cellDel", attrs);
-  }
-  if (cPr.cellMerge) {
-    const attrs: Record<string, string> = {
-      "w:vMerge": cPr.cellMerge.vMerge,
-      "w:id": xmlValue(writtenRevisionId(cPr.cellMerge.revision.id), "w:id"),
-      "w:author": cPr.cellMerge.revision.author
-    };
-    if (cPr.cellMerge.revision.date) {
-      attrs["w:date"] = cPr.cellMerge.revision.date;
-    }
-    xml.leafNode("w:cellMerge", attrs);
-  }
-
-  // Cell property change (track changes)
-  if (!insidePropertyChange && cPr.propertyChange) {
-    const rev = cPr.propertyChange.revision;
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
-      "w:author": rev.author
-    };
-    if (rev.date) {
-      attrs["w:date"] = rev.date;
-    }
-    xml.openNode("w:tcPrChange", attrs);
-    if (cPr.propertyChange.previousProperties) {
-      const previous = cPr.propertyChange.previousProperties;
-      within("propertyChange.previousProperties", () =>
-        renderTableCellProperties(xml, previous, true)
-      );
-    } else {
-      xml.openNode("w:tcPr");
-      xml.closeNode();
-    }
-    xml.closeNode();
-  }
-
+  const { propertyChange } = cPr;
+  emitInSchemaOrder("w:CT_TcPr", [
+    !!cPr.cnfStyle && ["w:cnfStyle", () => xml.leafNode("w:cnfStyle", { "w:val": cPr.cnfStyle! })],
+    cPr.width
+      ? ["w:tcW", () => renderTableWidth(xml, "w:tcW", cPr.width!, "width")]
+      : // OOXML's CT_TcPr.tcW is technically optional, but Word treats a
+        // missing <w:tcW> as a hard schema violation: it triggers the
+        // "content unreadable" repair dialog and silently drops the table.
+        // Emit a w:type="auto" placeholder so Word lays the cell out using
+        // the table-level grid widths.
+        widthPlaceholder && [
+          "w:tcW",
+          () => xml.leafNode("w:tcW", { "w:w": "0", "w:type": "auto" })
+        ],
+    cPr.gridSpan !== undefined &&
+      cPr.gridSpan > 1 && [
+        "w:gridSpan",
+        () => xml.leafNode("w:gridSpan", { "w:val": xmlValue(cPr.gridSpan!, "w:val") })
+      ],
+    cPr.verticalMerge !== undefined && [
+      "w:vMerge",
+      () =>
+        xml.leafNode(
+          "w:vMerge",
+          cPr.verticalMerge === "restart" ? { "w:val": "restart" } : undefined
+        )
+    ],
+    !!cPr.borders && [
+      "w:tcBorders",
+      () => within("borders", () => renderTableBorders(xml, "w:tcBorders", cPr.borders!))
+    ],
+    !!cPr.shading && ["w:shd", () => within("shading", () => renderShading(xml, cPr.shading!))],
+    !!cPr.noWrap && ["w:noWrap", () => xml.leafNode("w:noWrap")],
+    !!cPr.margins && [
+      "w:tcMar",
+      () => within("margins", () => renderCellMargins(xml, "w:tcMar", cPr.margins!))
+    ],
+    textDirection !== undefined && [
+      "w:textDirection",
+      () => xml.leafNode("w:textDirection", { "w:val": textDirection })
+    ],
+    !!cPr.fitText && ["w:tcFitText", () => xml.leafNode("w:tcFitText")],
+    verticalAlign !== undefined && [
+      "w:vAlign",
+      () => xml.leafNode("w:vAlign", { "w:val": verticalAlign })
+    ],
+    !!cPr.hideMark && ["w:hideMark", () => xml.leafNode("w:hideMark")],
+    // Cell-level revisions (cellIns/cellDel/cellMerge): one `xsd:choice`.
+    !!cPr.inserted && [
+      "w:cellIns",
+      () => xml.leafNode("w:cellIns", revisionAttributes(cPr.inserted!.revision))
+    ],
+    !!cPr.deleted && [
+      "w:cellDel",
+      () => xml.leafNode("w:cellDel", revisionAttributes(cPr.deleted!.revision))
+    ],
+    !!cPr.cellMerge && [
+      "w:cellMerge",
+      () =>
+        xml.leafNode("w:cellMerge", {
+          "w:vMerge": cPr.cellMerge!.vMerge,
+          ...revisionAttributes(cPr.cellMerge!.revision)
+        })
+    ],
+    !insidePropertyChange &&
+      !!propertyChange && [
+        "w:tcPrChange",
+        () => {
+          xml.openNode("w:tcPrChange", revisionAttributes(propertyChange.revision));
+          if (propertyChange.previousProperties) {
+            const previous = propertyChange.previousProperties;
+            within("propertyChange.previousProperties", () =>
+              // No placeholder width: what rejecting the change restores is what the cell had.
+              renderTableCellProperties(xml, previous, {
+                insidePropertyChange: true,
+                widthPlaceholder: false
+              })
+            );
+          } else {
+            xml.openNode("w:tcPr");
+            xml.closeNode();
+          }
+          xml.closeNode();
+        }
+      ]
+  ]);
   xml.closeNode();
 }
 
@@ -671,40 +638,46 @@ function renderTableRow(xml: XmlSink, row: TableRow, helpers?: RenderHelpers): v
   xml.closeNode();
 }
 
-/** Render w:tblPrEx (table-level property exceptions applied to a row). */
-function renderTablePropertiesEx(xml: XmlSink, ex: TableProperties): void {
+/**
+ * Render w:tblPrEx, the table properties a row overrides (`CT_TblPrEx`) — or, `previous`, the ones a
+ * `w:tblPrExChange` holds (`CT_TblPrExBase`), which have no change record of their own.
+ */
+function renderTablePropertiesEx(
+  xml: XmlSink,
+  ex: TablePropertyExceptions,
+  previous = false
+): void {
+  refuseTableOnlyProperties(ex);
+  if (previous) {
+    refuseAbsentFields(ex, ["propertyChange"], NARROWER_PROPERTIES.previousExceptions);
+  }
+  const { propertyChange } = ex;
   xml.openNode("w:tblPrEx");
-  // Output the subset of tblPr that can appear in tblPrEx
-  if (ex.width) {
-    renderTableWidth(xml, "w:tblW", ex.width, "width");
-  }
-  const alignment = writtenToken(ex, "alignment", WRITTEN.tableAlignment, "alignment");
-  if (alignment !== undefined) {
-    xml.leafNode("w:jc", { "w:val": alignment });
-  }
-  if (ex.cellSpacing) {
-    renderTableWidth(xml, "w:tblCellSpacing", ex.cellSpacing, "cellSpacing");
-  }
-  if (ex.indent !== undefined) {
-    xml.leafNode("w:tblInd", { "w:w": xmlValue(ex.indent, "w:w"), "w:type": "dxa" });
-  }
-  if (ex.borders) {
-    renderTableBorders(xml, "w:tblBorders", ex.borders);
-  }
-  if (ex.shading) {
-    within("shading", () => renderShading(xml, ex.shading!));
-  }
-  const layout = writtenToken(ex, "layout", WRITTEN.tableLayout, "layout");
-  if (layout !== undefined) {
-    xml.leafNode("w:tblLayout", { "w:type": layout });
-  }
-  if (ex.cellMargins) {
-    const margins = ex.cellMargins;
-    within("cellMargins", () => renderCellMargins(xml, "w:tblCellMar", margins));
-  }
-  if (ex.look) {
-    renderTableLook(xml, ex.look);
-  }
+  emitInSchemaOrder(previous ? "w:CT_TblPrExBase" : "w:CT_TblPrEx", [
+    ...tablePropertiesExceptionChildren(
+      xml,
+      ex,
+      writtenToken(ex, "alignment", WRITTEN.tableAlignment, "alignment"),
+      writtenToken(ex, "layout", WRITTEN.tableLayout, "layout")
+    ),
+    !previous &&
+      !!propertyChange && [
+        "w:tblPrExChange",
+        () => {
+          xml.openNode("w:tblPrExChange", revisionAttributes(propertyChange.revision));
+          if (propertyChange.previousProperties) {
+            const before = propertyChange.previousProperties;
+            within("propertyChange.previousProperties", () =>
+              renderTablePropertiesEx(xml, before, true)
+            );
+          } else {
+            xml.openNode("w:tblPrEx");
+            xml.closeNode();
+          }
+          xml.closeNode();
+        }
+      ]
+  ]);
   xml.closeNode();
 }
 
@@ -720,10 +693,10 @@ export function renderTable(xml: XmlSink, table: Table, helpers?: RenderHelpers)
   renderRangeMarkers(xml, table.rangeMarkersBefore, helpers);
   xml.openNode("w:tbl");
 
-  if (table.properties) {
-    const properties = table.properties;
-    within("properties", () => renderTableProperties(xml, properties));
-  }
+  // `CT_Tbl` requires `w:tblPr`, even with nothing in it: a table without properties was written without the element,
+  // which the schema refuses.
+  const properties = table.properties ?? {};
+  within("properties", () => renderTableProperties(xml, properties));
 
   // Column grid. ECMA-376 §17.4.49 requires <w:tblGrid> with at least one
   // <w:gridCol>. When the caller did not supply explicit column widths we

@@ -184,7 +184,7 @@ function parseLevel(lvlEl: XmlElement): NumberingLevel {
   }
   const pPrEl = findChildNs(lvlEl, "pPr");
   if (pPrEl) {
-    level.paragraphProperties = parseParagraphProperties(pPrEl);
+    level.paragraphProperties = parseParagraphProperties(pPrEl, { scope: "general" });
   }
   const rPrEl = findChildNs(lvlEl, "rPr");
   if (rPrEl) {

@@ -30,6 +30,7 @@ import {
   checkRelationships,
   checkRootRelationships
 } from "@excel/utils/ooxml-validator/check-relationships";
+import { checkSequences } from "@excel/utils/ooxml-validator/check-sequences";
 import { checkStructure, checkXmlWellFormed } from "@excel/utils/ooxml-validator/check-structure";
 import { checkStyles } from "@excel/utils/ooxml-validator/check-styles";
 import { checkTables } from "@excel/utils/ooxml-validator/check-table";
@@ -81,6 +82,7 @@ export async function validateXlsxBuffer(
     checkWorksheetControlWiring = true,
     checkChartStructure = true,
     checkStylesIntegrity = true,
+    checkElementOrder = true,
     maxProblems,
     includeWarnings = false
   } = options;
@@ -124,6 +126,10 @@ export async function validateXlsxBuffer(
 
   if (checkStylesIntegrity) {
     checkStyles(ctx);
+  }
+
+  if (checkElementOrder) {
+    checkSequences(ctx);
   }
 
   const stats = computeStats(entries);

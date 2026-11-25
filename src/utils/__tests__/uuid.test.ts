@@ -5,7 +5,7 @@
  * `globalThis.crypto`.
  */
 
-import { uuidV4 } from "@utils/uuid";
+import { uuidV4, newGuid } from "@utils/uuid";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -71,5 +71,18 @@ describe("uuidV4", () => {
       vi.stubGlobal("crypto", {});
       expect(uuidV4()).toMatch(V4);
     });
+  });
+});
+
+/** `newGuid` — `ST_Guid`: braced, upper-case hex, as every OOXML part that names one writes it. */
+describe("newGuid", () => {
+  it("is a braced, upper-case v4 UUID", () => {
+    expect(newGuid()).toMatch(
+      /^\{[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}\}$/
+    );
+  });
+
+  it("differs across calls", () => {
+    expect(newGuid()).not.toBe(newGuid());
   });
 });

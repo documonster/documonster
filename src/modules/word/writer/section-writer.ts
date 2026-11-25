@@ -13,7 +13,8 @@ import {
   DEFAULT_COLUMN_SPACE
 } from "@word/constants";
 import { WRITTEN, writtenToken } from "@word/core/argument-checks";
-import { within } from "@word/core/node-path";
+import { NARROWER_PROPERTIES, SECTION_ONLY_PROPERTIES } from "@word/core/change-records";
+import { within, refuseAbsentFields } from "@word/core/node-path";
 import type {
   SectionProperties,
   SectionColumns,
@@ -22,7 +23,7 @@ import type {
   FootnoteProperties,
   EndnoteProperties
 } from "@word/types";
-import { writtenRevisionId } from "@word/writer/render-context";
+import { revisionAttributes } from "@word/writer/render-context";
 import { renderBorderElement } from "@word/writer/run-writer";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
@@ -125,6 +126,13 @@ export function renderSectionProperties(
   sect: SectionProperties,
   insidePropertyChange = false
 ): void {
+  if (insidePropertyChange) {
+    refuseAbsentFields(
+      sect,
+      [...SECTION_ONLY_PROPERTIES, "propertyChange"],
+      NARROWER_PROPERTIES.previousSection
+    );
+  }
   xml.openNode("w:sectPr");
 
   // NOTE: Child element ordering below is dictated by the OOXML schema
@@ -300,15 +308,7 @@ export function renderSectionProperties(
 
   // Section property change (track changes)
   if (!insidePropertyChange && sect.propertyChange) {
-    const rev = sect.propertyChange.revision;
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
-      "w:author": rev.author
-    };
-    if (rev.date) {
-      attrs["w:date"] = rev.date;
-    }
-    xml.openNode("w:sectPrChange", attrs);
+    xml.openNode("w:sectPrChange", revisionAttributes(sect.propertyChange.revision));
     if (sect.propertyChange.previousProperties) {
       const previous = sect.propertyChange.previousProperties;
       within("propertyChange.previousProperties", () =>

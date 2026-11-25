@@ -22,11 +22,9 @@ interface DxfModel {
   fill?: Fill;
   font?: Partial<Font>;
   /**
-   * Either the format code (what the writer is handed) or the parsed
-   * `{ id, formatCode }` pair (what {@link DxfXform.parseClose} produces when a
-   * `dxf` is read back from a file). {@link DxfXform.render} accepts both —
-   * before that it stringified the object into `formatCode="[object Object]"`,
-   * corrupting the number format of every conditional format on re-save.
+   * The format code. Read from a file it is always the code, as `Style.numFmt` promises and the XLSB reader gives
+   * it; written, it may also be the `{ id, formatCode }` pair a caller is allowed to set, which
+   * {@link DxfXform.render} reduces to its code — the id is the written table's to allocate.
    */
   numFmt?: string | NumFmt;
   numFmtId?: number;
@@ -151,7 +149,7 @@ class DxfXform extends BaseXform {
         border: this.map.border.model,
         fill: this.map.fill.model,
         font: this.map.font.model,
-        numFmt: this.map.numFmt.model,
+        numFmt: readNumFmtCode(this.map.numFmt.model as Partial<NumFmt> | undefined),
         protection: this.map.protection.model
       };
       const extensions = this.map.extLst.model as string | undefined;
@@ -264,3 +262,22 @@ class DxfEntryXform extends BaseXform {
 }
 
 export { DxfEntryXform, DxfXform };
+
+/**
+ * A `<dxf>`'s `<numFmt>` as the model holds a number format: its code. It used to be the element's `{ id, formatCode }`
+ * pair, so a conditional format's or a table column's format read from XLSX was an object where `Style.numFmt` says a
+ * read gives the code — and where the same format read from XLSB was the code. The id is not kept: it belongs to the
+ * table the file was written with, and the writer allocates its own from the code. A `<numFmt>` without the code it
+ * requires falls back to the built-in format its id names.
+ */
+function readNumFmtCode(numFmt: Partial<NumFmt> | undefined): string | undefined {
+  if (numFmt === undefined) {
+    return undefined;
+  }
+  return (
+    numFmt.formatCode ??
+    (numFmt.id === undefined || Number.isNaN(numFmt.id)
+      ? undefined
+      : NumFmtXform.getDefaultFmtCode(numFmt.id))
+  );
+}

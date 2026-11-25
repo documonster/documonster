@@ -36,7 +36,7 @@ const expectations = [
         }
       ]
     },
-    xml: '<si><r><rPr><b/><color theme="1"/><family val="2"/><scheme val="minor"/><sz val="11"/><rFont val="Calibri"/></rPr><t>Bold,</t></r></si>',
+    xml: '<si><r><rPr><b/><sz val="11"/><color theme="1"/><rFont val="Calibri"/><family val="2"/><scheme val="minor"/></rPr><t>Bold,</t></r></si>',
     parsedModel: {
       richText: [
         {

@@ -28,6 +28,7 @@
 import {
   DEFAULT_SPARKLINE_COLORS,
   DEFAULT_SPARKLINE_EMPTY_CELLS,
+  sparklineDataFormula,
   type SparklineColor
 } from "@excel/core/sparkline";
 import type { Color } from "@excel/types";
@@ -290,7 +291,7 @@ function encodeSparkline(
     // The formula MUST be a single `PtgArea3d` (or `PtgRef3d`), which is what a *sheet-qualified* range
     // parses to. An unqualified `A1:C1` becomes a plain `PtgArea` and is not a form this record accepts,
     // so the sheet name is added when the model leaves it off.
-    const qualified = data.includes("!") ? data : `'${sheetName.replace(/'/g, "''")}'!${data}`;
+    const qualified = sparklineDataFormula(data, sheetName);
     // A data range is a reference, as a defined name's definition is: `3b …`, the reference class.
     const tokens = encodePtg(
       parse(tokenize(qualified)),

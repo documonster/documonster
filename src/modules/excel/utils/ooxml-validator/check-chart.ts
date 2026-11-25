@@ -31,6 +31,10 @@
 
 import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
 import {
+  OOXML_SEQUENCES,
+  type OoxmlSequenceType
+} from "@excel/utils/ooxml-validator/ooxml-sequences";
+import {
   attrByLocalName,
   collectDescendantsLocal,
   findChildLocal,
@@ -39,6 +43,13 @@ import {
   localName,
   matchesLocal
 } from "@excel/utils/ooxml-validator/xml-utils";
+import {
+  CHART_ORDER_RULES,
+  CHART_SERIES_ORDER_RULES,
+  type ChartOrderRule,
+  type ChartSeriesOrderRule
+} from "@xml/ooxml-chart-order";
+import { sequenceRanks } from "@xml/sequence-order";
 import type { XmlElement } from "@xml/types";
 
 const CHART_PATH_RE = /^xl\/charts\/chart\d+\.xml$/;
@@ -83,644 +94,40 @@ function checkClassicChart(ctx: ValidationContext, path: string): void {
 // Classic chart ECMA-376 schema conformance
 // -----------------------------------------------------------------------------
 
-/**
- * ECMA-376 Part 1 § 21.2.x complex types encode each chart element's
- * child sequence as `<xsd:sequence>`. OOXML readers (Excel being the
- * strictest) reject — or silently repair — elements whose children
- * appear in the wrong order. The tables below capture the canonical
- * order for every element the writer emits.
- *
- * Elements inside an `<xsd:choice maxOccurs="unbounded">` group can
- * legally appear in any order relative to siblings in the same group;
- * such groups are collapsed to a single logical "bucket" in
- * {@link ClassicOrderRule.choiceGroups}. `c:plotArea` is the one
- * place where this matters (chart-type elements and axis elements
- * each form a choice group).
- */
-interface ClassicOrderRule {
-  /** Parent element local name (namespace prefix stripped). */
-  parent: string;
-  /** Canonical child sequence, local names only. */
-  order: string[];
-  /**
-   * Sets of child names that form an `<xsd:choice>` group — their
-   * relative order inside the parent is unconstrained. Each tag in a
-   * group maps to the same rank when comparing positions.
-   */
-  choiceGroups?: string[][];
-  /**
-   * Whether `order` is the *complete* set of permitted children, so a child outside it is an error rather
-   * than something to skip.
-   *
-   * Off by default, and deliberately opt-in: the order check must stay tolerant of extension elements and of
-   * children this table has not enumerated, or it would report a healthy file. But for a type whose content
-   * model is short and closed, silence is the wrong answer — a `<c:overlay>` inside `<c:dispUnitsLbl>` ranked
-   * -1, was skipped as "not in the table", and shipped in a file Excel repaired while this validator reported
-   * zero problems.
-   */
-  closed?: boolean;
+/** The slot of `CT_PlotArea` holding `member` — its chart-type choice or its axis choice. */
+function plotAreaChoice(member: string): readonly string[] {
+  return OOXML_SEQUENCES["c:CT_PlotArea"].find(slot =>
+    (slot as readonly string[]).includes(member)
+  )!;
 }
 
-const CT_CHART_TYPE_TAGS = [
-  "areaChart",
-  "area3DChart",
-  "lineChart",
-  "line3DChart",
-  "stockChart",
-  "radarChart",
-  "scatterChart",
-  "pieChart",
-  "pie3DChart",
-  "doughnutChart",
-  "barChart",
-  "bar3DChart",
-  "ofPieChart",
-  "surfaceChart",
-  "surface3DChart",
-  "bubbleChart"
-];
+const CT_CHART_TYPE_TAGS = plotAreaChoice("barChart");
 
-const CT_AXIS_TAGS = ["catAx", "valAx", "dateAx", "serAx"];
+const CT_AXIS_TAGS = plotAreaChoice("catAx");
 
-const CLASSIC_ORDER_RULES: ClassicOrderRule[] = [
-  // CT_ChartSpace (§21.2.2.29)
-  {
-    parent: "chartSpace",
-    order: [
-      "lang",
-      "roundedCorners",
-      "style",
-      "clrMapOvr",
-      "pivotSource",
-      "protection",
-      "chart",
-      "spPr",
-      "txPr",
-      "externalData",
-      "printSettings",
-      "userShapes",
-      "extLst"
-    ]
-  },
-  // CT_Chart (§21.2.2.27)
-  {
-    parent: "chart",
-    order: [
-      "title",
-      "autoTitleDeleted",
-      "pivotFmts",
-      "view3D",
-      "floor",
-      "sideWall",
-      "backWall",
-      "plotArea",
-      "legend",
-      "plotVisOnly",
-      "dispBlanksAs",
-      "showDLblsOverMax",
-      "extLst"
-    ]
-  },
-  // CT_PlotArea (§21.2.2.145). Two `<xsd:choice maxOccurs="unbounded">`
-  // groups — chart-type elements and axis elements — collapse into
-  // bucket placeholders.
-  {
-    parent: "plotArea",
-    order: ["layout", "__CHART_TYPES__", "__AXES__", "dTable", "spPr", "extLst"],
-    choiceGroups: [CT_CHART_TYPE_TAGS, CT_AXIS_TAGS]
-  },
-  // CT_DLbls (§21.2.2.49) — the biggest historical offender.
-  // Separator MUST come before showLeaderLines / leaderLines.
-  {
-    parent: "dLbls",
-    order: [
-      "dLbl",
-      "delete",
-      "numFmt",
-      "spPr",
-      "txPr",
-      "dLblPos",
-      "showLegendKey",
-      "showVal",
-      "showCatName",
-      "showSerName",
-      "showPercent",
-      "showBubbleSize",
-      "separator",
-      "showLeaderLines",
-      "leaderLines",
-      "extLst"
-    ]
-  },
-  // CT_DLbl (§21.2.2.47). The `delete` branch is mutually exclusive
-  // with the display-flag branch but we allow the tag here for
-  // ordering purposes; the choice violation is caught separately by
-  // `checkClassicDLblChoice` below.
-  {
-    parent: "dLbl",
-    order: [
-      "idx",
-      "delete",
-      "layout",
-      "tx",
-      "numFmt",
-      "spPr",
-      "txPr",
-      "dLblPos",
-      "showLegendKey",
-      "showVal",
-      "showCatName",
-      "showSerName",
-      "showPercent",
-      "showBubbleSize",
-      "separator",
-      "extLst"
-    ]
-  },
-  // CT_Scaling (§21.2.2.195). `max` precedes `min`.
-  { parent: "scaling", order: ["logBase", "orientation", "max", "min", "extLst"] },
-  // CT_CatAx (§21.2.2.25)
-  {
-    parent: "catAx",
-    order: [
-      "axId",
-      "scaling",
-      "delete",
-      "axPos",
-      "majorGridlines",
-      "minorGridlines",
-      "title",
-      "numFmt",
-      "majorTickMark",
-      "minorTickMark",
-      "tickLblPos",
-      "spPr",
-      "txPr",
-      "crossAx",
-      "crosses",
-      "crossesAt",
-      "auto",
-      "lblAlgn",
-      "lblOffset",
-      "tickLblSkip",
-      "tickMarkSkip",
-      "noMultiLvlLbl",
-      "extLst"
-    ]
-  },
-  // CT_ValAx (§21.2.2.226)
-  {
-    parent: "valAx",
-    order: [
-      "axId",
-      "scaling",
-      "delete",
-      "axPos",
-      "majorGridlines",
-      "minorGridlines",
-      "title",
-      "numFmt",
-      "majorTickMark",
-      "minorTickMark",
-      "tickLblPos",
-      "spPr",
-      "txPr",
-      "crossAx",
-      "crosses",
-      "crossesAt",
-      "crossBetween",
-      "majorUnit",
-      "minorUnit",
-      "dispUnits",
-      "extLst"
-    ]
-  },
-  // CT_DateAx (§21.2.2.39)
-  {
-    parent: "dateAx",
-    order: [
-      "axId",
-      "scaling",
-      "delete",
-      "axPos",
-      "majorGridlines",
-      "minorGridlines",
-      "title",
-      "numFmt",
-      "majorTickMark",
-      "minorTickMark",
-      "tickLblPos",
-      "spPr",
-      "txPr",
-      "crossAx",
-      "crosses",
-      "crossesAt",
-      "auto",
-      "lblOffset",
-      "baseTimeUnit",
-      "majorUnit",
-      "majorTimeUnit",
-      "minorUnit",
-      "minorTimeUnit",
-      "extLst"
-    ]
-  },
-  // CT_SerAx (§21.2.2.175)
-  {
-    parent: "serAx",
-    order: [
-      "axId",
-      "scaling",
-      "delete",
-      "axPos",
-      "majorGridlines",
-      "minorGridlines",
-      "title",
-      "numFmt",
-      "majorTickMark",
-      "minorTickMark",
-      "tickLblPos",
-      "spPr",
-      "txPr",
-      "crossAx",
-      "crosses",
-      "crossesAt",
-      "tickLblSkip",
-      "tickMarkSkip",
-      "extLst"
-    ]
-  },
-  // CT_Trendline (§21.2.2.211)
-  {
-    parent: "trendline",
-    order: [
-      "name",
-      "spPr",
-      "trendlineType",
-      "order",
-      "period",
-      "forward",
-      "backward",
-      "intercept",
-      "dispRSqr",
-      "dispEq",
-      "trendlineLbl",
-      "extLst"
-    ]
-  },
-  // CT_ErrBars (§21.2.2.55)
-  {
-    parent: "errBars",
-    order: [
-      "errDir",
-      "errBarType",
-      "errValType",
-      "noEndCap",
-      "plus",
-      "minus",
-      "val",
-      "spPr",
-      "extLst"
-    ]
-  },
-  // CT_View3D (§21.2.2.228)
-  {
-    parent: "view3D",
-    order: ["rotX", "hPercent", "rotY", "depthPercent", "rAngAx", "perspective", "extLst"]
-  },
-  // CT_Legend (§21.2.2.93)
-  {
-    parent: "legend",
-    order: ["legendPos", "legendEntry", "layout", "overlay", "spPr", "txPr", "extLst"]
-  },
-  // CT_Title (§21.2.2.210)
-  { parent: "title", order: ["tx", "layout", "overlay", "spPr", "txPr", "extLst"] },
+/** The chart rules, with their types as this module's generated table spells them. */
+const CLASSIC_ORDER_RULES = CHART_ORDER_RULES as readonly (ChartOrderRule & {
+  type: OoxmlSequenceType;
+})[];
 
-  // CT_DispUnitsLbl (§21.2.2.49). **Not CT_Title**, though it is easy to render as one: the sequence is
-  // `layout` before `tx` — the reverse of a title's — and there is no `overlay` and no `extLst`. Closed,
-  // because those two absences are the whole point of listing it.
-  { parent: "dispUnitsLbl", order: ["layout", "tx", "spPr", "txPr"], closed: true },
+const SERIES_ORDER_RULES = CHART_SERIES_ORDER_RULES as readonly (ChartSeriesOrderRule & {
+  type: OoxmlSequenceType;
+})[];
 
-  // ---------------------------------------------------------------------------
-  // Chart-type elements (§21.2.2.4 — §21.2.2.198). Each plotArea
-  // child must list its children in the canonical sequence. Excel
-  // tolerates many mis-orderings but LibreOffice strict mode
-  // rejects them; third-party OOXML validators (Microsoft's SDK,
-  // Calligra, xmllint + XSD) refuse too.
-  // ---------------------------------------------------------------------------
-  // CT_AreaChart (§21.2.2.5)
-  {
-    parent: "areaChart",
-    order: ["grouping", "varyColors", "ser", "dLbls", "dropLines", "axId", "extLst"]
-  },
-  // CT_Area3DChart (§21.2.2.4)
-  {
-    parent: "area3DChart",
-    order: ["grouping", "varyColors", "ser", "dLbls", "dropLines", "gapDepth", "axId", "extLst"]
-  },
-  // CT_BarChart (§21.2.2.16)
-  {
-    parent: "barChart",
-    order: [
-      "barDir",
-      "grouping",
-      "varyColors",
-      "ser",
-      "dLbls",
-      "gapWidth",
-      "overlap",
-      "serLines",
-      "axId",
-      "extLst"
-    ]
-  },
-  // CT_Bar3DChart (§21.2.2.15)
-  {
-    parent: "bar3DChart",
-    order: [
-      "barDir",
-      "grouping",
-      "varyColors",
-      "ser",
-      "dLbls",
-      "gapWidth",
-      "gapDepth",
-      "shape",
-      "axId",
-      "extLst"
-    ]
-  },
-  // CT_LineChart (§21.2.2.97)
-  {
-    parent: "lineChart",
-    order: [
-      "grouping",
-      "varyColors",
-      "ser",
-      "dLbls",
-      "dropLines",
-      "hiLowLines",
-      "upDownBars",
-      "marker",
-      "smooth",
-      "axId",
-      "extLst"
-    ]
-  },
-  // CT_Line3DChart (§21.2.2.96)
-  {
-    parent: "line3DChart",
-    order: ["grouping", "varyColors", "ser", "dLbls", "dropLines", "gapDepth", "axId", "extLst"]
-  },
-  // CT_PieChart (§21.2.2.141)
-  { parent: "pieChart", order: ["varyColors", "ser", "dLbls", "firstSliceAng", "extLst"] },
-  // CT_Pie3DChart (§21.2.2.140) — no firstSliceAng, no holeSize.
-  { parent: "pie3DChart", order: ["varyColors", "ser", "dLbls", "extLst"] },
-  // CT_DoughnutChart (§21.2.2.50)
-  {
-    parent: "doughnutChart",
-    order: ["varyColors", "ser", "dLbls", "firstSliceAng", "holeSize", "extLst"]
-  },
-  // CT_OfPieChart (§21.2.2.126)
-  {
-    parent: "ofPieChart",
-    order: [
-      "ofPieType",
-      "varyColors",
-      "ser",
-      "dLbls",
-      "gapWidth",
-      "splitType",
-      "splitPos",
-      "custSplit",
-      "secondPieSize",
-      "serLines",
-      "extLst"
-    ]
-  },
-  // CT_ScatterChart (§21.2.2.161)
-  {
-    parent: "scatterChart",
-    order: ["scatterStyle", "varyColors", "ser", "dLbls", "axId", "extLst"]
-  },
-  // CT_BubbleChart (§21.2.2.20)
-  {
-    parent: "bubbleChart",
-    order: [
-      "varyColors",
-      "ser",
-      "dLbls",
-      "bubble3D",
-      "bubbleScale",
-      "showNegBubbles",
-      "sizeRepresents",
-      "axId",
-      "extLst"
-    ]
-  },
-  // CT_RadarChart (§21.2.2.153)
-  {
-    parent: "radarChart",
-    order: ["radarStyle", "varyColors", "ser", "dLbls", "axId", "extLst"]
-  },
-  // CT_StockChart (§21.2.2.198)
-  {
-    parent: "stockChart",
-    order: ["ser", "dLbls", "dropLines", "hiLowLines", "upDownBars", "axId", "extLst"]
-  },
-  // CT_SurfaceChart (§21.2.2.193) / CT_Surface3DChart
-  { parent: "surfaceChart", order: ["wireframe", "ser", "bandFmts", "axId", "extLst"] },
-  { parent: "surface3DChart", order: ["wireframe", "ser", "bandFmts", "axId", "extLst"] },
+/** Each content model's positions by child local name. */
+const RANKS = sequenceRanks(OOXML_SEQUENCES);
 
-  // ---------------------------------------------------------------------------
-  // Auxiliary complex types (§21.2.2.x). Sequences that appear
-  // throughout the chart graph — getting them out of order is a
-  // common bug source (and historically Excel tolerates it while
-  // LibreOffice strict refuses the file).
-  // ---------------------------------------------------------------------------
-  // CT_DPt (§21.2.2.52)
-  {
-    parent: "dPt",
-    order: [
-      "idx",
-      "invertIfNegative",
-      "marker",
-      "bubble3D",
-      "explosion",
-      "spPr",
-      "pictureOptions",
-      "extLst"
-    ]
-  },
-  // CT_Marker (§21.2.2.106)
-  { parent: "marker", order: ["symbol", "size", "spPr", "extLst"] },
-  // CT_UpDownBars (§21.2.2.218)
-  { parent: "upDownBars", order: ["gapWidth", "upBars", "downBars", "extLst"] },
-  // CT_NumRef / CT_StrRef / CT_MultiLvlStrRef (§21.2.2.121 / .189 / .113)
-  { parent: "numRef", order: ["f", "numCache", "extLst"] },
-  { parent: "strRef", order: ["f", "strCache", "extLst"] },
-  { parent: "multiLvlStrRef", order: ["f", "multiLvlStrCache", "extLst"] },
-  // CT_NumData / CT_StrData (§21.2.2.122 / .188)
-  { parent: "numCache", order: ["formatCode", "ptCount", "pt", "extLst"] },
-  { parent: "strCache", order: ["ptCount", "pt", "extLst"] },
-  { parent: "multiLvlStrCache", order: ["ptCount", "lvl", "extLst"] },
-  // CT_NumLit / CT_StrLit
-  { parent: "numLit", order: ["formatCode", "ptCount", "pt", "extLst"] },
-  { parent: "strLit", order: ["ptCount", "pt", "extLst"] },
-  // CT_Pt (§21.2.2.146): v element; idx is an attribute.
-  { parent: "pt", order: ["v"] },
-  // CT_Layout (§21.2.2.88) / CT_ManualLayout (§21.2.2.105)
-  { parent: "layout", order: ["manualLayout", "extLst"] },
-  {
-    parent: "manualLayout",
-    order: ["layoutTarget", "xMode", "yMode", "wMode", "hMode", "x", "y", "w", "h", "extLst"]
-  },
-  // CT_DTable (§21.2.2.54)
-  {
-    parent: "dTable",
-    order: ["showHorzBorder", "showVertBorder", "showOutline", "showKeys", "spPr", "txPr", "extLst"]
-  },
-  // CT_BandFormats (§21.2.2.12) / CT_BandFormat (§21.2.2.11)
-  { parent: "bandFmts", order: ["bandFmt"] },
-  { parent: "bandFmt", order: ["idx", "spPr"] },
-  // CT_TrendlineLbl (§21.2.2.212) — layout? tx? numFmt? spPr? txPr? extLst?
-  {
-    parent: "trendlineLbl",
-    order: ["layout", "tx", "numFmt", "spPr", "txPr", "extLst"]
-  },
-  // CT_PictureOptions (§21.2.2.144)
-  {
-    parent: "pictureOptions",
-    order: ["applyToFront", "applyToSides", "applyToEnd", "pictureFormat", "pictureStackUnit"]
-  }
-];
-
-/**
- * Series (`c:ser`) child order depends on which chart-type element
- * encloses it. The same tag maps to CT_BarSer / CT_LineSer /
- * CT_PieSer / CT_AreaSer / CT_ScatterSer / CT_BubbleSer / CT_RadarSer
- * / CT_SurfaceSer, each with its own sequence.
- */
-interface ContextualSeriesOrderRule {
-  /** Chart-type parents this rule applies to. */
-  chartTypes: readonly string[];
-  /** Canonical child order for `c:ser` under these parents. */
-  order: readonly string[];
+function ranksOf(type: OoxmlSequenceType): ReadonlyMap<string, number> {
+  return RANKS.get(type)!;
 }
 
-const SERIES_ORDER_RULES: ContextualSeriesOrderRule[] = [
-  // CT_BarSer (§21.2.2.17)
-  {
-    chartTypes: ["barChart", "bar3DChart"],
-    order: [
-      "idx",
-      "order",
-      "tx",
-      "spPr",
-      "invertIfNegative",
-      "pictureOptions",
-      "dPt",
-      "dLbls",
-      "trendline",
-      "errBars",
-      "cat",
-      "val",
-      "shape",
-      "extLst"
-    ]
-  },
-  // CT_LineSer (§21.2.2.99) — line3D uses same structure.
-  {
-    chartTypes: ["lineChart", "line3DChart", "stockChart"],
-    order: [
-      "idx",
-      "order",
-      "tx",
-      "spPr",
-      "marker",
-      "dPt",
-      "dLbls",
-      "trendline",
-      "errBars",
-      "cat",
-      "val",
-      "smooth",
-      "extLst"
-    ]
-  },
-  // CT_PieSer (§21.2.2.149) — pie / pie3D / doughnut / ofPie share.
-  {
-    chartTypes: ["pieChart", "pie3DChart", "doughnutChart", "ofPieChart"],
-    order: ["idx", "order", "tx", "spPr", "explosion", "dPt", "dLbls", "cat", "val", "extLst"]
-  },
-  // CT_AreaSer (§21.2.2.3)
-  {
-    chartTypes: ["areaChart", "area3DChart"],
-    order: [
-      "idx",
-      "order",
-      "tx",
-      "spPr",
-      "pictureOptions",
-      "dPt",
-      "dLbls",
-      "trendline",
-      "errBars",
-      "cat",
-      "val",
-      "extLst"
-    ]
-  },
-  // CT_ScatterSer (§21.2.2.167)
-  {
-    chartTypes: ["scatterChart"],
-    order: [
-      "idx",
-      "order",
-      "tx",
-      "spPr",
-      "marker",
-      "dPt",
-      "dLbls",
-      "trendline",
-      "errBars",
-      "xVal",
-      "yVal",
-      "smooth",
-      "extLst"
-    ]
-  },
-  // CT_BubbleSer (§21.2.2.19)
-  {
-    chartTypes: ["bubbleChart"],
-    order: [
-      "idx",
-      "order",
-      "tx",
-      "spPr",
-      "invertIfNegative",
-      "dPt",
-      "dLbls",
-      "trendline",
-      "errBars",
-      "xVal",
-      "yVal",
-      "bubbleSize",
-      "bubble3D",
-      "extLst"
-    ]
-  },
-  // CT_RadarSer (§21.2.2.153)
-  {
-    chartTypes: ["radarChart"],
-    order: ["idx", "order", "tx", "spPr", "marker", "dPt", "dLbls", "cat", "val", "extLst"]
-  },
-  // CT_SurfaceSer (§21.2.2.191)
-  {
-    chartTypes: ["surfaceChart", "surface3DChart"],
-    order: ["idx", "order", "tx", "spPr", "cat", "val", "extLst"]
-  }
-];
+function prefixOf(type: OoxmlSequenceType): string {
+  return type.slice(0, type.indexOf(":"));
+}
+
+function schemaName(type: OoxmlSequenceType): string {
+  return type.slice(type.indexOf(":") + 1);
+}
 
 /**
  * Required / maximum occurrence counts for specific parent/child
@@ -964,29 +371,17 @@ function checkClassicChildOrder(ctx: ValidationContext, path: string, root: XmlE
         return;
       }
       const children = parent.children.filter(c => c.type === "element") as XmlElement[];
-      const rankOf = (tag: string): number => {
-        if (rule.choiceGroups) {
-          for (let i = 0; i < rule.choiceGroups.length; i++) {
-            if (rule.choiceGroups[i].includes(tag)) {
-              // Every tag in the same choice group maps to the same
-              // virtual bucket ("__CHART_TYPES__" / "__AXES__") so
-              // they compare equal in sibling-order checks.
-              return rule.order.indexOf(`__${i === 0 ? "CHART_TYPES" : "AXES"}__`);
-            }
-          }
-        }
-        return rule.order.indexOf(tag);
-      };
+      const ranks = ranksOf(rule.type);
       let lastRank = -1;
       let lastTag = "";
       for (const child of children) {
         const name = localName(child.name);
-        const rank = rankOf(name);
+        const rank = ranks.get(name) ?? -1;
         if (rank < 0) {
           if (rule.closed === true) {
             ctx.reporter.error(
               "chart-child-not-permitted",
-              `${path}: <c:${rule.parent}> child <c:${name}> is not permitted — CT_${capitalise(rule.parent)} allows only ${rule.order.map(tag => `<c:${tag}>`).join(", ")}.`,
+              `${path}: <${prefixOf(rule.type)}:${rule.parent}> child <${prefixOf(rule.type)}:${name}> is not permitted — ${schemaName(rule.type)} allows only ${[...ranks.keys()].map(tag => `<${prefixOf(rule.type)}:${tag}>`).join(", ")}.`,
               path
             );
           }
@@ -995,7 +390,7 @@ function checkClassicChildOrder(ctx: ValidationContext, path: string, root: XmlE
         if (rank < lastRank) {
           ctx.reporter.error(
             "chart-child-out-of-order",
-            `${path}: <c:${rule.parent}> child <c:${name}> appears after <c:${lastTag}> — ECMA-376 requires it before per CT_${capitalise(rule.parent)}.`,
+            `${path}: <${prefixOf(rule.type)}:${rule.parent}> child <${prefixOf(rule.type)}:${name}> appears after <${prefixOf(rule.type)}:${lastTag}> — ECMA-376 requires it before per ${schemaName(rule.type)}.`,
             path
           );
         }
@@ -1131,10 +526,6 @@ function checkClassicDLblChoice(ctx: ValidationContext, path: string, root: XmlE
       );
     }
   }
-}
-
-function capitalise(s: string): string {
-  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // -----------------------------------------------------------------------------
@@ -1895,18 +1286,19 @@ function checkSeriesChildOrder(ctx: ValidationContext, path: string, root: XmlEl
             return;
           }
           const children = series.children.filter(c => c.type === "element") as XmlElement[];
+          const ranks = ranksOf(rule.type);
           let lastRank = -1;
           let lastTag = "";
           for (const child of children) {
             const name = localName(child.name);
-            const rank = rule.order.indexOf(name);
+            const rank = ranks.get(name) ?? -1;
             if (rank < 0) {
               continue;
             }
             if (rank < lastRank) {
               ctx.reporter.error(
                 "chart-child-out-of-order",
-                `${path}: <c:ser> inside <c:${chartType}> has <c:${name}> after <c:${lastTag}>; CT_${seriesTypeNameFor(chartType)}Ser requires <c:${name}> earlier in the sequence.`,
+                `${path}: <c:ser> inside <c:${chartType}> has <c:${name}> after <c:${lastTag}>; ${schemaName(rule.type)} requires <c:${name}> earlier in the sequence.`,
                 path
               );
             }
@@ -1919,35 +1311,6 @@ function checkSeriesChildOrder(ctx: ValidationContext, path: string, root: XmlEl
       }
     }
   }
-}
-
-/** Map a chart-type tag to the series content-type short name. */
-function seriesTypeNameFor(chartType: string): string {
-  if (chartType.startsWith("bar")) {
-    return "Bar";
-  }
-  if (chartType.startsWith("line") || chartType === "stockChart") {
-    return "Line";
-  }
-  if (chartType.startsWith("pie") || chartType === "doughnutChart" || chartType === "ofPieChart") {
-    return "Pie";
-  }
-  if (chartType.startsWith("area")) {
-    return "Area";
-  }
-  if (chartType === "scatterChart") {
-    return "Scatter";
-  }
-  if (chartType === "bubbleChart") {
-    return "Bubble";
-  }
-  if (chartType === "radarChart") {
-    return "Radar";
-  }
-  if (chartType.startsWith("surface")) {
-    return "Surface";
-  }
-  return chartType;
 }
 
 // -----------------------------------------------------------------------------
@@ -2142,11 +1505,13 @@ function checkTxChoice(ctx: ValidationContext, path: string, root: XmlElement): 
  * violation; a child outside this set is probably a vendor
  * extension we should leave alone.
  */
-const ALL_KNOWN_SERIES_CHILDREN = new Set<string>(SERIES_ORDER_RULES.flatMap(r => r.order));
+const ALL_KNOWN_SERIES_CHILDREN = new Set<string>(
+  SERIES_ORDER_RULES.flatMap(r => OOXML_SEQUENCES[r.type].flat())
+);
 
 function checkSeriesChildWhitelist(ctx: ValidationContext, path: string, root: XmlElement): void {
   for (const rule of SERIES_ORDER_RULES) {
-    const allowed = new Set(rule.order);
+    const allowed = new Set<string>(OOXML_SEQUENCES[rule.type].flat());
     for (const chartType of rule.chartTypes) {
       for (const group of collectDescendantsLocal(root, chartType)) {
         for (const series of findChildrenLocal(group, "ser")) {
@@ -2164,7 +1529,7 @@ function checkSeriesChildWhitelist(ctx: ValidationContext, path: string, root: X
             if (!allowed.has(name)) {
               ctx.reporter.error(
                 "chart-forbidden-child",
-                `${path}: <c:ser> inside <c:${chartType}> contains <c:${name}>, which is not in CT_${seriesTypeNameFor(chartType)}Ser's schema.`,
+                `${path}: <c:ser> inside <c:${chartType}> contains <c:${name}>, which is not in ${schemaName(rule.type)}'s schema.`,
                 path
               );
             }

@@ -24,6 +24,7 @@
 
 import { decodeCol, decodeRow } from "@excel/utils/address";
 import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import { OOXML_SEQUENCES } from "@excel/utils/ooxml-validator/ooxml-sequences";
 import { posixBasename } from "@excel/utils/ooxml-validator/path-utils";
 import type { OoxmlProblemKind } from "@excel/utils/ooxml-validator/types";
 import {
@@ -43,8 +44,8 @@ import type { XmlElement } from "@xml/types";
 // -----------------------------------------------------------------------------
 
 /**
- * Canonical order of `<worksheet>` direct children. The index of each
- * child name within this array is its "rank"; any child with a smaller
+ * Canonical order of `<worksheet>` direct children, from the schema (`ooxml-sequences.ts`). Every slot of
+ * `CT_Worksheet` holds one element, so a name's index is its "rank"; any child with a smaller
  * rank seen after a child with a larger rank is out of order.
  *
  * Names are local names (no namespace prefix). Elements allowed to
@@ -52,47 +53,7 @@ import type { XmlElement } from "@xml/types";
  * the same rank — two consecutive `cols` blocks is fine, but a `cols`
  * after `sheetData` is not.
  */
-const WORKSHEET_CHILD_ORDER: readonly string[] = [
-  "sheetPr",
-  "dimension",
-  "sheetViews",
-  "sheetFormatPr",
-  "cols",
-  "sheetData",
-  "sheetCalcPr",
-  "sheetProtection",
-  "protectedRanges",
-  "scenarios",
-  "autoFilter",
-  "sortState",
-  "dataConsolidate",
-  "customSheetViews",
-  "mergeCells",
-  "phoneticPr",
-  "conditionalFormatting",
-  "dataValidations",
-  "hyperlinks",
-  "printOptions",
-  "pageMargins",
-  "pageSetup",
-  "headerFooter",
-  "rowBreaks",
-  "colBreaks",
-  "customProperties",
-  "cellWatches",
-  "ignoredErrors",
-  "smartTags",
-  "drawing",
-  "legacyDrawing",
-  "legacyDrawingHF",
-  "drawingHF",
-  "picture",
-  "oleObjects",
-  "controls",
-  "webPublishItems",
-  "tableParts",
-  "extLst"
-] as const;
+const WORKSHEET_CHILD_ORDER: readonly string[] = OOXML_SEQUENCES["x:CT_Worksheet"].flat();
 
 const WORKSHEET_CHILD_RANK = new Map(
   WORKSHEET_CHILD_ORDER.map((name, idx) => [name, idx] as const)

@@ -17,6 +17,7 @@
  * - Assembling a glossary to attach via `doc.glossary`
  */
 
+import { newGuid } from "@utils/uuid";
 import {
   checkHandle,
   checkNodeArray,
@@ -26,7 +27,6 @@ import {
   invalidArgument
 } from "@word/core/argument-checks";
 import { GALLERY_TO_OOXML } from "@word/core/glossary-galleries";
-import { generateGuid } from "@word/core/internal-utils";
 import type {
   BodyContent,
   BuildingBlock,
@@ -94,7 +94,7 @@ export function createBuildingBlock(
     description: options?.description,
     content,
     sectionProperties: options?.sectionProperties,
-    guid: generateGuid()
+    guid: newGuid()
   };
 }
 

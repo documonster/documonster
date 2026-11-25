@@ -39,15 +39,18 @@ import type {
   DocumentTheme,
   ThemeFont,
   WebSettings,
-  PersonInfo
+  PersonInfo,
+  CompatFlag
 } from "@word/types";
 import { separatorReferenceIds } from "@word/writer/note-separators";
 import {
   createPreservedEmitter,
   preservedElements,
   schemaOrder,
+  wordprocessingNames,
   withPreservedNamespaces
 } from "@word/writer/preserved-xml";
+import { SEQUENCE_RANKS } from "@word/writer/schema-order";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
@@ -82,8 +85,12 @@ function renderSettingsNoteProperties(
 // Settings
 // =============================================================================
 
-/** CT_Settings, as far as the writer or a preserved element can need it. */
-const SETTINGS_ORDER = schemaOrder([
+/**
+ * CT_Settings, as far as the writer or a preserved element can need it. Written out rather than taken from
+ * `ooxml-sequences.ts` because it spans namespaces (`m:mathPr`, `sl:schemaLibrary`) and keeps one element the
+ * schema does not have; `schema-order.test.ts` holds the rest of it to the schema.
+ */
+export const SETTINGS_ELEMENTS: readonly string[] = [
   "w:writeProtection",
   "w:view",
   "w:zoom",
@@ -184,7 +191,9 @@ const SETTINGS_ORDER = schemaOrder([
   "w:doNotEmbedSmartTags",
   "w:decimalSymbol",
   "w:listSeparator"
-]);
+];
+
+const SETTINGS_ORDER = schemaOrder(SETTINGS_ELEMENTS);
 
 /**
  * Render word/settings.xml. Elements are written in CT_Settings order, with
@@ -408,9 +417,11 @@ export function renderSettings(
   preserved.upTo("w:compat");
   xml.openNode("w:compat");
 
-  // Legacy compat flags (w:useFELayout, etc.) come before compatSettings
+  // Legacy compat flags (w:useFELayout, etc.) come before compatSettings, in `CT_Compat`'s order — they were
+  // written in the model's, and the schema refuses `doNotExpandShiftReturn` before
+  // `useSingleBorderforContiguousCells`.
   if (settings?.compatFlags) {
-    for (const flag of settings.compatFlags) {
+    for (const flag of inCompatOrder(settings.compatFlags)) {
       const attrs: Record<string, string> = {};
       if (flag.val !== undefined) {
         attrs["w:val"] = flag.val;
@@ -504,20 +515,8 @@ export function renderSettings(
 // Font Table
 // =============================================================================
 
-/** CT_Font's children. */
-const FONT_ORDER = schemaOrder([
-  "w:altName",
-  "w:panose1",
-  "w:charset",
-  "w:family",
-  "w:notTrueType",
-  "w:pitch",
-  "w:sig",
-  "w:embedRegular",
-  "w:embedBold",
-  "w:embedItalic",
-  "w:embedBoldItalic"
-]);
+/** CT_Font's children, from the schema. */
+const FONT_ORDER = schemaOrder(wordprocessingNames("w:CT_Font"));
 
 /** Render word/fontTable.xml. */
 export function renderFontTable(
@@ -1202,4 +1201,19 @@ function hashAlgorithmToSid(algorithm: string): string {
   // Either spelling of a SHA name, and every name the reader gives, maps back to
   // its id: `"SHA256"` was written as SHA-1, and a hash read as `MD5` was too.
   return sidOfHashAlgorithm(algorithm) ?? "4"; // A name with no id: SHA-1, as before.
+}
+
+/**
+ * `flags` in `CT_Compat`'s order. A flag the schema does not name — kept from a file — stays after the flag it
+ * followed, as an element no model ranks does elsewhere, rather than being refused.
+ */
+function inCompatOrder(flags: readonly CompatFlag[]): CompatFlag[] {
+  const ranks = SEQUENCE_RANKS.get("w:CT_Compat")!;
+  let previous = -1;
+  const ranked = flags.map((flag, index) => {
+    previous = ranks.get(flag.name) ?? previous;
+    return { flag, index, rank: previous };
+  });
+  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+  return ranked.map(({ flag }) => flag);
 }

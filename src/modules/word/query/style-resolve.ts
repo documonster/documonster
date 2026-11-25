@@ -351,7 +351,8 @@ function getMatchingTableConditions(
   const colBand = Math.max(1, Math.trunc(bandSize?.column ?? 1));
 
   // Build a set of applicable condition types based on position and tblLook.
-  const applicable = new Set<TableStyleConditionType>();
+  // The whole table's format applies to every cell, below every other condition.
+  const applicable = new Set<TableStyleConditionType>(["wholeTable"]);
 
   // Banding (lowest priority among conditions)
   if (bandRow) {
@@ -415,6 +416,7 @@ function getMatchingTableConditions(
   // Filter and sort conditions by specificity order:
   // banding < first/last row/col < corner cells
   const priorityOrder: readonly TableStyleConditionType[] = [
+    "wholeTable",
     "oddRowBanding",
     "evenRowBanding",
     "oddColumnBanding",

@@ -15,6 +15,11 @@
  * it already has for telling a caller about a read (`Validation.validate` for Word, `readWithDiagnostics` for Excel),
  * so a vocabulary that is too narrow shows up as a report rather than as missing data.
  *
+ * One kind of entry is not written back: an element the schema has no place for where the file put it (a diagonal in a
+ * table's borders, a change record inside one), marked `writtenBack: false`. Typing it would make a document that
+ * reads impossible to save, and dropping it on read would lose it without a word; kept, it is reported like any
+ * other, and the write leaves it out because there is nowhere valid to put it.
+ *
  * The entries are ordinary own properties of plain data, so a spread, `structuredClone` or JSON copy keeps them with
  * the object, and replacing the object drops them with it.
  */
@@ -36,6 +41,11 @@ export interface UnrecognizedValue {
    * its style is the one set aside — kept so they are written back with it.
    */
   readonly with?: Readonly<Record<string, string>>;
+  /**
+   * `false` for an element the schema has no place for where it was found: `value` is its markup, kept so a read
+   * can report it, and the writer leaves it out.
+   */
+  readonly writtenBack?: false;
 }
 
 /** The set-aside values on one object, by the name of the field each would have filled. */
@@ -60,6 +70,9 @@ export function setAsideValue(
   }
   if (options.with !== undefined) {
     (kept as { with?: unknown }).with = options.with;
+  }
+  if (options.writtenBack === false) {
+    (kept as { writtenBack?: unknown }).writtenBack = false;
   }
   target[UNRECOGNIZED_KEY] = { ...entries(holder), [field]: kept };
 }
@@ -88,16 +101,16 @@ export function unrecognizedValue(holder: object | undefined, field: string): st
 /** Every set-aside value still in effect on `holder`, by field. */
 export function listUnrecognizedValues(
   holder: object | undefined
-): { readonly field: string; readonly value: string }[] {
+): { readonly field: string; readonly value: string; readonly writtenBack?: false }[] {
   const all = entries(holder);
   if (all === undefined) {
     return [];
   }
-  const found: { field: string; value: string }[] = [];
+  const found: { field: string; value: string; writtenBack?: false }[] = [];
   for (const field of Object.keys(all)) {
-    const value = unrecognizedValue(holder, field);
-    if (value !== undefined) {
-      found.push({ field, value });
+    const kept = unrecognizedEntry(holder, field);
+    if (kept !== undefined) {
+      found.push({ field, value: kept.value, ...notWrittenBack(kept) });
     }
   }
   return found;
@@ -111,11 +124,15 @@ export function listUnrecognizedValues(
 export function findUnrecognizedValues(
   root: unknown,
   rootPath = ""
-): { readonly path: string; readonly value: string }[] {
-  const found: { path: string; value: string }[] = [];
+): { readonly path: string; readonly value: string; readonly writtenBack?: false }[] {
+  const found: { path: string; value: string; writtenBack?: false }[] = [];
   walkHolders(root, rootPath, (holder, path) => {
-    for (const { field, value } of listUnrecognizedValues(holder)) {
-      found.push({ path: path ? `${path}.${field}` : field, value });
+    for (const { field, value, writtenBack } of listUnrecognizedValues(holder)) {
+      found.push({
+        path: path ? `${path}.${field}` : field,
+        value,
+        ...notWrittenBack({ writtenBack })
+      });
     }
   });
   return found;
@@ -127,6 +144,8 @@ export interface KeptValue {
   readonly path: string;
   /** The text the file had. */
   readonly value: string;
+  /** `false` for an element a write leaves out — see {@link UnrecognizedValue.writtenBack}; absent otherwise. */
+  readonly writtenBack?: false;
 }
 
 /**
@@ -152,7 +171,10 @@ export function discardUnrecognizedValues(
     const remaining: Record<string, UnrecognizedValue> = {};
     for (const [field, kept] of Object.entries(all)) {
       const fieldPath = path ? `${path}.${field}` : field;
-      if (filter === undefined || filter({ path: fieldPath, value: kept.value })) {
+      if (
+        filter === undefined ||
+        filter({ path: fieldPath, value: kept.value, ...notWrittenBack(kept) })
+      ) {
         if (unrecognizedValue(holder, field) !== undefined) {
           discarded++;
         }
@@ -167,6 +189,11 @@ export function discardUnrecognizedValues(
     }
   });
   return discarded;
+}
+
+/** `{ writtenBack: false }` for an entry a write leaves out, and nothing otherwise — so a listing that has none keeps its shape. */
+function notWrittenBack(kept: { readonly writtenBack?: false }): { writtenBack?: false } {
+  return kept.writtenBack === false ? { writtenBack: false } : {};
 }
 
 /** Visit every plain object under `root` once, with its path; arrays and `Map`s are descended into, bytes are not. */

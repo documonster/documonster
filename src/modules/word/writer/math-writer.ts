@@ -5,6 +5,7 @@
  */
 
 import { NS_M } from "@word/constants";
+import { DocxWriteError } from "@word/errors";
 import type {
   MathBlock,
   MathContent,
@@ -247,10 +248,10 @@ function renderMathGroupChar(xml: XmlSink, g: MathGroupChar): void {
       xml.leafNode("m:chr", { "m:val": g.char });
     }
     if (g.position) {
-      xml.leafNode("m:pos", { "m:val": g.position });
+      xml.leafNode("m:pos", { "m:val": stTopBot(g.position, "position") });
     }
     if (g.verticalAlign) {
-      xml.leafNode("m:vertJc", { "m:val": g.verticalAlign });
+      xml.leafNode("m:vertJc", { "m:val": stTopBot(g.verticalAlign, "verticalAlign") });
     }
     xml.closeNode();
   }
@@ -330,14 +331,15 @@ function renderMathDelimiter(xml: XmlSink, d: MathDelimiter): void {
   xml.openNode("m:d");
   if (d.beginChar || d.endChar || d.separatorChar) {
     xml.openNode("m:dPr");
+    // `CT_DPr` order: begChr, sepChr, endChr — the separator was written last.
     if (d.beginChar) {
       xml.leafNode("m:begChr", { "m:val": d.beginChar });
     }
-    if (d.endChar) {
-      xml.leafNode("m:endChr", { "m:val": d.endChar });
-    }
     if (d.separatorChar) {
       xml.leafNode("m:sepChr", { "m:val": d.separatorChar });
+    }
+    if (d.endChar) {
+      xml.leafNode("m:endChr", { "m:val": d.endChar });
     }
     xml.closeNode();
   }
@@ -446,7 +448,7 @@ function renderMathAccent(xml: XmlSink, acc: MathAccent): void {
 function renderMathBar(xml: XmlSink, bar: MathBar): void {
   xml.openNode("m:bar");
   xml.openNode("m:barPr");
-  xml.leafNode("m:pos", { "m:val": bar.position === "top" ? "top" : "bot" });
+  xml.leafNode("m:pos", { "m:val": stTopBot(bar.position, "position") });
   xml.closeNode();
   xml.openNode("m:e");
   renderMathContents(xml, bar.content);
@@ -502,4 +504,15 @@ export function renderMathBlock(xml: XmlSink, math: MathBlock): void {
   xml.closeNode();
   xml.closeNode();
   xml.closeNode();
+}
+
+/**
+ * A top-or-bottom field as `ST_TopBot` writes it: `top` or `bot`. `"bottom"` was written as it stands, which the
+ * schema refuses; a value outside the two is refused here rather than written.
+ */
+function stTopBot(value: string, field: string): "top" | "bot" {
+  if (value === "top" || value === "bottom") {
+    return value === "top" ? "top" : "bot";
+  }
+  throw new DocxWriteError(`${field} must be "top" or "bottom", got ${JSON.stringify(value)}`);
 }

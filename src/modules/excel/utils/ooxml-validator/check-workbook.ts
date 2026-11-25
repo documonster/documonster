@@ -17,6 +17,7 @@
  */
 
 import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import { OOXML_SEQUENCES } from "@excel/utils/ooxml-validator/ooxml-sequences";
 import {
   attrByLocalName,
   findChildLocal,
@@ -33,36 +34,16 @@ const INVALID_SHEET_NAME_CHARS = /[\\/?*[\]:]/;
 const SHEET_NAME_MAX_LEN = 31;
 
 /**
- * CT_Workbook child element sequence per ECMA-376 Part 1 §18.2.27.
+ * CT_Workbook child element sequence per ECMA-376 Part 1 §18.2.27, from the schema (`ooxml-sequences.ts`);
+ * every slot holds one element.
  *
  * Excel strictly enforces this order: any child appearing AFTER another
  * that should precede it causes the file to be rejected as corrupt
- * (no repair offered). The list below covers every element in the
- * standard sequence. Unknown / extension elements (mc:AlternateContent,
- * extLst, etc.) are ignored — they can appear anywhere without breaking
+ * (no repair offered). Unknown / extension elements (mc:AlternateContent,
+ * etc.) are ignored — they can appear anywhere without breaking
  * conformance.
  */
-const WORKBOOK_CHILD_ORDER: readonly string[] = [
-  "fileVersion",
-  "fileSharing",
-  "workbookPr",
-  "workbookProtection",
-  "bookViews",
-  "sheets",
-  "functionGroups",
-  "externalReferences",
-  "definedNames",
-  "calcPr",
-  "oleSize",
-  "customWorkbookViews",
-  "pivotCaches",
-  "smartTagPr",
-  "smartTagTypes",
-  "webPublishing",
-  "fileRecoveryPr",
-  "webPublishObjects",
-  "extLst"
-];
+const WORKBOOK_CHILD_ORDER: readonly string[] = OOXML_SEQUENCES["x:CT_Workbook"].flat();
 
 export function checkWorkbook(ctx: ValidationContext): void {
   if (!ctx.has(WORKBOOK_PATH) || !ctx.has(WORKBOOK_RELS_PATH)) {

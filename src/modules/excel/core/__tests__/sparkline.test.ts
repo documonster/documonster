@@ -55,7 +55,7 @@ describe("Sparkline data model", () => {
       markers: true,
       high: true
     });
-    const xml = renderSparklineGroups([g]);
+    const xml = renderSparklineGroups([g], "Sheet1");
     expect(xml).toContain("<x14:sparklineGroups");
     expect(xml).toContain("<x14:sparklineGroup");
     expect(xml).toContain('markers="1"');
@@ -107,7 +107,7 @@ describe("Sparkline data model", () => {
       minAxisType: "custom",
       maxAxisType: "custom"
     });
-    const xml = renderSparklineGroups([original]);
+    const xml = renderSparklineGroups([original], "Sheet1");
     const parsed = parseSparklineGroups(xml);
     expect(parsed).toHaveLength(1);
     const g = parsed[0];
@@ -122,9 +122,10 @@ describe("Sparkline data model", () => {
     expect(g.manualMin).toBe(0);
     expect(g.manualMax).toBe(100);
     expect(g.minAxisType).toBe("custom");
-    expect(g.colorSeries?.rgb).toBe("123456");
-    expect(g.colorHigh?.rgb).toBe("FF0000");
-    expect(g.colorLow?.rgb).toBe("0000FF");
+    // A six-digit colour is written opaque, so it reads back as the ARGB the file holds.
+    expect(g.colorSeries?.rgb).toBe("FF123456");
+    expect(g.colorHigh?.rgb).toBe("FFFF0000");
+    expect(g.colorLow?.rgb).toBe("FF0000FF");
   });
 });
 
@@ -330,7 +331,7 @@ describe("Sparkline edge cases", () => {
       high: true,
       low: true
     });
-    const xml = renderSparklineGroups([g1, g2]);
+    const xml = renderSparklineGroups([g1, g2], "Sheet1");
     expect(xml).toContain("<x14:sparklineGroups");
     // Should contain two sparklineGroup elements
     const groupMatches = xml.match(/<x14:sparklineGroup[\s>]/g);
@@ -390,7 +391,7 @@ describe("Sparkline edge cases", () => {
       low: false
     });
     // markers/high/low are falsy — should not appear in the XML
-    const xml = renderSparklineGroups([g]);
+    const xml = renderSparklineGroups([g], "Sheet1");
     expect(xml).not.toContain('markers="1"');
     expect(xml).not.toContain('high="1"');
     expect(xml).not.toContain('low="1"');
@@ -402,7 +403,7 @@ describe("Sparkline edge cases", () => {
       sparklines: [{ dataRef: "Sheet1!A1:F1", cellRef: "G1" }],
       displayEmptyCellsAs: "span"
     });
-    const xml = renderSparklineGroups([g]);
+    const xml = renderSparklineGroups([g], "Sheet1");
     expect(xml).toContain('displayEmptyCellsAs="span"');
     const parsed = parseSparklineGroups(xml);
     expect(parsed[0].displayEmptyCellsAs).toBe("span");
@@ -438,5 +439,31 @@ describe("Sparkline edge cases", () => {
     const buf = await Workbook.toBuffer(wb);
     expect(buf.byteLength).toBeGreaterThan(0);
     // Write pipeline should not throw for multiple sparkline groups
+  });
+});
+
+describe("a sparkline data range given without a sheet", () => {
+  it("is qualified with the sheet it is on when written, quoted as a formula needs", () => {
+    const g = buildSparklineGroup({
+      type: "line",
+      sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }]
+    });
+    expect(renderSparklineGroups([g], "Data")).toContain("<xm:f>Data!A1:F1</xm:f>");
+    expect(renderSparklineGroups([g], "My Sheet")).toContain(
+      "<xm:f>&apos;My Sheet&apos;!A1:F1</xm:f>"
+    );
+    expect(renderSparklineGroups([g], "It's")).toContain(
+      "<xm:f>&apos;It&apos;&apos;s&apos;!A1:F1</xm:f>"
+    );
+  });
+
+  it("is written as given when it already names one", () => {
+    const g = buildSparklineGroup({
+      type: "line",
+      sparklines: [{ dataRef: "'Other Sheet'!A1:F1", cellRef: "G1" }]
+    });
+    expect(renderSparklineGroups([g], "Data")).toContain(
+      "<xm:f>&apos;Other Sheet&apos;!A1:F1</xm:f>"
+    );
   });
 });

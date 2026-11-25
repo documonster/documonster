@@ -119,8 +119,9 @@ export { setCompatibilityMode } from "@word/query/compat";
 /**
  * The values `Document.read` kept because they are outside their field's vocabulary, as they are kept now — a field set
  * since takes its value off the list, `discardUnrecognizedValues` takes them off for good — each with the path
- * `Validation.validate` reports (`body[0].properties.alignment`) and the text the file had. Empty for a document no
- * reader made.
+ * `Validation.validate` reports (`body[0].properties.alignment`) and the text the file had. An element the schema has no
+ * place for where the file put it (a diagonal in a table's borders) is listed too, with `writtenBack: false`: it is
+ * reported, and a write leaves it out. Empty for a document no reader made.
  *
  * ```ts
  * for (const { path, value } of Document.listUnrecognizedValues(doc)) console.log(path, value);
@@ -128,7 +129,11 @@ export { setCompatibilityMode } from "@word/query/compat";
  */
 export function listUnrecognizedValues(doc: DocxDocument): DocxUnrecognizedValue[] {
   checkHandle(doc, "document", "doc", "Document.listUnrecognizedValues");
-  return findUnrecognizedValues(doc);
+  return findUnrecognizedValues(doc).map(({ path, value, writtenBack }) => ({
+    path,
+    value,
+    writtenBack: writtenBack !== false
+  }));
 }
 
 /**
@@ -136,7 +141,7 @@ export function listUnrecognizedValues(doc: DocxDocument): DocxUnrecognizedValue
  * reports as `"unrecognized-value"` — so the document is written with each such field as it now reads. Returns how
  * many there were.
  *
- * Until then a kept value is written back as read while its field is absent; assigning the field takes over, but
+ * Until then a kept value is written back as read while its field is absent (one with `writtenBack: false` never is); assigning the field takes over, but
  * clearing it again brings the kept text back. This is how to remove one instead — all of them, or with `filter` the
  * ones you choose:
  *
@@ -155,7 +160,13 @@ export function discardUnrecognizedValues(
     invalidArgument(where, "options.filter", "a function", options.filter);
   }
   ownTree(doc);
-  return discardUnrecognizedValuesUnder(doc, options?.filter);
+  const filter = options?.filter;
+  return discardUnrecognizedValuesUnder(
+    doc,
+    filter &&
+      (kept =>
+        filter({ path: kept.path, value: kept.value, writtenBack: kept.writtenBack !== false }))
+  );
 }
 // =============================================================================
 // Document Handle & Namespace
@@ -1342,7 +1353,9 @@ export function setDocDefaults(doc: DocxDocument, defaults: DocDefaults): void {
     );
   }
   checkRunProperties(defaults.runProperties, "defaults.runProperties", where);
-  checkParagraphProperties(defaults.paragraphProperties, "defaults.paragraphProperties", where);
+  checkParagraphProperties(defaults.paragraphProperties, "defaults.paragraphProperties", where, {
+    scope: "general"
+  });
   _w(doc).docDefaults = defaults;
 }
 

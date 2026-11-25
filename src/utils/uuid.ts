@@ -63,3 +63,13 @@ export function uuidV4(): string {
   }
   return bytesToUuidV4(bytes);
 }
+
+/**
+ * A new GUID as OOXML writes one — `ST_Guid`: braced, upper-case hex, `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`. One
+ * definition for every part that needs one (threaded comments and their persons, drawing creation ids, conditional
+ * format extension ids, a Word font key or building block): Excel and Word each had their own, and one call site wrote
+ * the hex in lower case, which `ST_Guid`'s pattern refuses.
+ */
+export function newGuid(): string {
+  return `{${uuidV4().toUpperCase()}}`;
+}

@@ -1,4 +1,5 @@
 import type { Color } from "@excel/types";
+import { opaqueArgb } from "@excel/utils/argb";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
@@ -21,9 +22,7 @@ class ColorXform extends BaseXform<Partial<Color>> {
     if (model) {
       xmlStream.openNode(this.name);
       if (model.argb) {
-        // `rgb` is `ST_UnsignedIntHex`, four bytes: a six-digit colour gives no alpha, and an opaque one is the only
-        // sensible reading — the reading the XLSB writer has always made (`xlsb/color.ts`), so both formats agree.
-        xmlStream.addAttribute("rgb", model.argb.length === 6 ? `FF${model.argb}` : model.argb);
+        xmlStream.addAttribute("rgb", opaqueArgb(model.argb));
       } else if (model.theme !== undefined) {
         xmlStream.addAttribute("theme", model.theme);
         if (model.tint !== undefined) {

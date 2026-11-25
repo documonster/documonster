@@ -91,7 +91,6 @@ import type {
 } from "@excel/types";
 import type {} from "@excel/utils/arguments";
 import { argumentChecks, checkSchema } from "@excel/utils/arguments";
-import { synthGuid } from "@excel/utils/guid";
 import { renameTablesInFormula } from "@excel/utils/reference-rewrite";
 import { splitPasswordOptions, verifySheetPassword } from "@excel/utils/sheet-protection";
 import { discardKeptSheetSettings } from "@excel/utils/sheet-settings-checks";
@@ -102,6 +101,7 @@ import { excelNameKey, sheetNameKey } from "@utils/name-key";
 import { isRecordArgument } from "@utils/object";
 import { s } from "@utils/schema";
 import type { SchemaMatches } from "@utils/schema";
+import { newGuid } from "@utils/uuid";
 
 // =============================================================================
 // Internal Types
@@ -1165,7 +1165,7 @@ export function registerPerson(
   if (existing) {
     return existing.id;
   }
-  const id = `{${synthGuid()}}`;
+  const id = newGuid();
   const entry: ThreadedCommentPerson = { id, displayName };
   if (userId !== undefined) {
     entry.userId = userId;

@@ -345,7 +345,8 @@ describe("Form Control Checkbox", () => {
       expect(ctrlPropContent).toContain('<?xml version="1.0"');
       expect(ctrlPropContent).toContain("formControlPr");
       expect(ctrlPropContent).toContain('objectType="CheckBox"');
-      expect(ctrlPropContent).toContain('checked="1"');
+      // `ST_Checked` is a word, as Excel writes it; the VML part keeps its number.
+      expect(ctrlPropContent).toContain('checked="Checked"');
       expect(ctrlPropContent).toContain('fmlaLink="$C$1"');
     });
 

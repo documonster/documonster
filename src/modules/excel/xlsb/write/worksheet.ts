@@ -536,27 +536,6 @@ export function worksheetEpilogueRecords(
   }
   records.push(record("BrtSheetProtection", sheetProtection(sheetProtectionSettings)));
 
-  // **After the sheet protection**, not before it. This sat between `BrtEndSheetData` and the protection, on
-  // the reasoning that a consumer reads the cells and then learns which are merged — true, and not the order
-  // Excel writes: it puts `BrtSheetProtection` first and the merge collection after it. Record order in this
-  // format has been load-bearing twice already in this module, so the two are aligned rather than argued about.
-  if (merges.length > 0) {
-    records.push(
-      record("BrtBeginMergeCells", new BinaryWriter().writeUint32(merges.length).toUint8Array())
-    );
-    for (const merge of merges) {
-      records.push(record("BrtMergeCell", encodeRange(merge)));
-    }
-    records.push(record("BrtEndMergeCells"));
-  }
-  // Between the protection and the print options, which is where `poi-hyperlink.xlsb` and
-  // `poi-testVarious.xlsb` both put it:
-  //
-  //   … BrtEndSheetData → BrtSheetProtection → BrtHLink → BrtPrintOptions → BrtMargins → BrtEndSheet
-  //
-  // One record per cell. Excel writes one per *range*, and the model holds one destination per cell, so
-  // recovering the author's ranges would mean inventing a grouping it does not record — a run of
-  // identical single-cell links displays identically.
   // After the sheet protection and before the data validations, which is the order XLSX uses — and the
   // record is a scope, so it needs its `End` even with nothing inside.
   //
@@ -594,6 +573,20 @@ export function worksheetEpilogueRecords(
       }
       records.push(record("BrtEndAFilter"));
     }
+  }
+
+  // **After the sheet protection and the auto filter**, which is the worksheet grammar's order (MS-XLSB
+  // §2.1.7.62: `… BrtSheetProtection … [AUTOFILTER] [SORTSTATE] [DCON] [USERSHVIEWS] [MERGECELLS] …`). This was
+  // once written before the protection, then moved after it to match Excel — and stayed ahead of the auto filter,
+  // because no reference workbook had both. The grammar settles what a sample could not.
+  if (merges.length > 0) {
+    records.push(
+      record("BrtBeginMergeCells", new BinaryWriter().writeUint32(merges.length).toUint8Array())
+    );
+    for (const merge of merges) {
+      records.push(record("BrtMergeCell", encodeRange(merge)));
+    }
+    records.push(record("BrtEndMergeCells"));
   }
 
   // Conditional formatting, **before** the data validations. The XLSX worksheet xform carries that
@@ -638,6 +631,12 @@ export function worksheetEpilogueRecords(
     records.push(record("BrtEndDVals"));
   }
 
+  // After the data validations and before the print options, as `WORKSHEET` has it and as
+  // `poi-hyperlink.xlsb` and `poi-testVarious.xlsb` both put it.
+  //
+  // One record per cell. Excel writes one per *range*, and the model holds one destination per cell, so
+  // recovering the author's ranges would mean inventing a grouping it does not record — a run of
+  // identical single-cell links displays identically.
   for (const link of hyperlinks) {
     records.push(
       record(
@@ -720,11 +719,6 @@ export function worksheetEpilogueRecords(
     records.push(record("BrtEndCellIgnoreECs"));
   }
 
-  // Sparklines, before the drawing. They are future records inside `BrtBeginSparklineGroups`, which the
-  // worksheet grammar places among the trailing collections — and the drawing records come last of all.
-
-  records.push(...sparklineRecords(sparklineGroups, formulaContext, sheetName));
-
   if (drawingRelationshipId !== undefined) {
     records.push(record("BrtDrawing", encodeDrawing(drawingRelationshipId)));
   }
@@ -745,7 +739,7 @@ export function worksheetEpilogueRecords(
     records.push(record("BrtBkHim", encodeDrawing(backgroundRelationshipId)));
   }
 
-  // **`BrtBeginListParts`, last before the end of the sheet — and this is observed, not inferred.** The oracle
+  // **`BrtBeginListParts`, after the drawings — and this is observed, not inferred.** The oracle
   // case `15-table-with-drawing` puts a table, a picture and a comment on one sheet so that all four part
   // pointers appear in a single stream, and Excel's own output for it is
   // `BrtPageSetup → BrtDrawing → BrtLegacyDrawing → BrtBeginListParts → BrtListPart → BrtEndListParts →
@@ -765,6 +759,11 @@ export function worksheetEpilogueRecords(
     }
     records.push(record("BrtEndListParts"));
   }
+  // Sparklines, **last** — after the drawings and the list parts. They are future records, and the worksheet
+  // grammar (MS-XLSB §2.1.7.62) collects every future-record collection in `FRTWORKSHEET`, which follows
+  // `[LISTPARTS]` and precedes only `BrtEndSheet`. They used to sit ahead of `BrtDrawing`, placed by inference
+  // from a reference workbook that had no drawing to be ahead of.
+  records.push(...sparklineRecords(sparklineGroups, formulaContext, sheetName));
   records.push(record("BrtEndSheet"));
   return records;
 }

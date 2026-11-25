@@ -256,6 +256,54 @@ describe("ordering", () => {
     ]);
     expect(kinds(styles, "xl/styles.bin")).toContain("ordering-out-of-place");
   });
+
+  describe("by the record grammar", () => {
+    const merges: BiffRecordFixture[] = [
+      ["BrtBeginMergeCells", new Uint8Array(4)],
+      ["BrtEndMergeCells"]
+    ];
+    const autoFilter: BiffRecordFixture[] = [
+      ["BrtBeginAFilter", encodeRange({ firstRow: 0, lastRow: 1, firstColumn: 0, lastColumn: 1 })],
+      ["BrtEndAFilter"]
+    ];
+    const sheet = (inner: readonly BiffRecordFixture[]): Uint8Array =>
+      biff([["BrtBeginSheet"], ...inner, ["BrtEndSheet"]]);
+    const misplaced = (bytes: Uint8Array): number =>
+      kinds(bytes).filter(kind => kind === "ordering-out-of-place").length;
+
+    it("reports an auto filter after the merges, and not before them", () => {
+      expect(misplaced(sheet([...merges, ...autoFilter]))).toBe(1);
+      expect(misplaced(sheet([...autoFilter, ...merges]))).toBe(0);
+    });
+
+    it("ranks a collection behind nested wrappers in the scope around them", () => {
+      // `BrtACBegin` holding `BrtFRTBegin`: the first record inside both is the sheet's child. Sparklines, because
+      // the walk withholds a wrapper's contents except for the future records this library models.
+      const wrapped: BiffRecordFixture[] = [
+        ["BrtACBegin", new Uint8Array(4)],
+        ["BrtFRTBegin", new Uint8Array(4)],
+        ["BrtBeginSparklineGroups"],
+        ["BrtEndSparklineGroups"],
+        ["BrtFRTEnd"],
+        ["BrtACEnd"]
+      ];
+      expect(misplaced(sheet([...wrapped, ...merges]))).toBe(1);
+      expect(misplaced(sheet([...merges, ...wrapped]))).toBe(0);
+    });
+
+    it("skips a record id the dictionary does not know, and keeps ranking past it", () => {
+      const unknown: BiffRecordFixture = [0x3fff, new Uint8Array(0)];
+      expect(misplaced(sheet([...merges, unknown, ...autoFilter]))).toBe(1);
+      expect(misplaced(sheet([...autoFilter, unknown, ...merges]))).toBe(0);
+    });
+
+    it("survives an End record with no scope open", () => {
+      const stray = biff([["BrtEndMergeCells"]]);
+      const bytes = new Uint8Array([...stray, ...sheet([...merges, ...autoFilter])]);
+      expect(() => kinds(bytes)).not.toThrow();
+      expect(misplaced(bytes)).toBe(1);
+    });
+  });
 });
 
 describe("coordinates", () => {

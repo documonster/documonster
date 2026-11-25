@@ -11,6 +11,8 @@
 
 import { toSvg } from "@draw/svg";
 import type { DrawList, DrawNode } from "@draw/types";
+import { opaqueArgb } from "@excel/utils/argb";
+import { quoteSheetName } from "@utils/sheet-name";
 import { parseCssColor } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
 import { CHART_THEME_PALETTE } from "@utils/theme-colors";
@@ -300,6 +302,7 @@ export const DEFAULT_SPARKLINE_COLORS = {
  */
 export const DEFAULT_SPARKLINE_EMPTY_CELLS = "gap" as const;
 
+/** An option's hex colour as a sparkline colour; a six-digit one is written opaque (`opaqueArgb`). */
 function hexToSparklineColor(hex: string): SparklineColor {
   return { rgb: hex.replace(/^#/, "").toUpperCase() };
 }
@@ -309,10 +312,21 @@ function hexToSparklineColor(hex: string): SparklineColor {
 // ============================================================================
 
 /**
- * Render all sparkline groups on a worksheet to an x14:sparklineGroups
- * XML fragment. Returns a string (empty if no groups).
+ * A sparkline's data range as a file stores it: qualified with the sheet the sparkline is on when the model leaves the
+ * sheet off. Excel accepts only a sheet-qualified reference there — an unqualified `A1:C1` in `xm:f` made it refuse
+ * the workbook and offer to repair it, and in XLSB it is not the `PtgArea3d` the record requires. A reference with
+ * a sheet always contains `!`, and one without never does.
  */
-export function renderSparklineGroups(groups: SparklineGroup[]): string {
+export function sparklineDataFormula(dataRef: string, sheetName: string): string {
+  return dataRef.includes("!") ? dataRef : `${quoteSheetName(sheetName)}!${dataRef}`;
+}
+
+/**
+ * Render all sparkline groups on a worksheet to an x14:sparklineGroups
+ * XML fragment. Returns a string (empty if no groups). `sheetName` is the sheet they are on, which qualifies a data
+ * range given without one ({@link sparklineDataFormula}).
+ */
+export function renderSparklineGroups(groups: SparklineGroup[], sheetName: string): string {
   if (!groups || groups.length === 0) {
     return "";
   }
@@ -321,13 +335,13 @@ export function renderSparklineGroups(groups: SparklineGroup[]): string {
     '<x14:sparklineGroups xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
   );
   for (const g of groups) {
-    parts.push(renderSparklineGroup(g));
+    parts.push(renderSparklineGroup(g, sheetName));
   }
   parts.push("</x14:sparklineGroups>");
   return parts.join("");
 }
 
-function renderSparklineGroup(g: SparklineGroup): string {
+function renderSparklineGroup(g: SparklineGroup, sheetName: string): string {
   const attrs: string[] = [];
   if (g.type !== undefined && g.type !== "line") {
     attrs.push(`type="${g.type}"`);
@@ -396,7 +410,7 @@ function renderSparklineGroup(g: SparklineGroup): string {
   parts.push("<x14:sparklines>");
   for (const s of g.sparklines) {
     parts.push("<x14:sparkline>");
-    parts.push(`<xm:f>${escapeXml(s.dataRef)}</xm:f>`);
+    parts.push(`<xm:f>${escapeXml(sparklineDataFormula(s.dataRef, sheetName))}</xm:f>`);
     parts.push(`<xm:sqref>${escapeXml(s.cellRef)}</xm:sqref>`);
     parts.push("</x14:sparkline>");
   }
@@ -420,7 +434,7 @@ const SPARKLINE_COLOR_ELEMENTS = [
 function sparklineColorAttrs(c: SparklineColor): string {
   const parts: string[] = [];
   if (c.rgb) {
-    parts.push(`rgb="${c.rgb}"`);
+    parts.push(`rgb="${opaqueArgb(c.rgb)}"`);
   }
   if (c.theme !== undefined) {
     parts.push(`theme="${c.theme}"`);

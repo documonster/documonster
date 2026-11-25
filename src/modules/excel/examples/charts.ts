@@ -1634,17 +1634,12 @@ async function main(): Promise<void> {
     }
   });
 
-  Cell.setValue(
-    features,
-    "A93",
-    "12.5 — pie with serLines (leader) + firstSliceAng + exploded point"
-  );
+  Cell.setValue(features, "A93", "12.5 — pie with serLines (leader) + exploded point");
   Cell.setStyle(features, "A93", { font: { bold: true } });
   Chart.place(features, "A94:L113", {
     type: "ofPie",
     ofPieType: "bar",
-    title: "Bar-of-pie — serLines + 45° start",
-    firstSliceAng: 45,
+    title: "Bar-of-pie — serLines",
     splitType: "percent",
     splitPos: 10,
     serLines: true,

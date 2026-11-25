@@ -84,7 +84,7 @@ import {
 import { recordSpec } from "@excel/xlsb/spec/records";
 import type { StyleTable } from "@excel/xlsb/styles";
 import { readStyles } from "@excel/xlsb/styles";
-import { readTablePart } from "@excel/xlsb/tables";
+import { type ReadTableColumn, readTablePart } from "@excel/xlsb/tables";
 import {
   collectOpaqueParts,
   groupOpaqueRelationshipsBySource,
@@ -1326,6 +1326,12 @@ async function readInto(
           // across two committed fixtures came back empty through XLSB and correct through XLSX.
           found.push({
             ...rest,
+            // A column's data format index resolved to the style it names and dropped, as a conditional format's is.
+            columns: rest.columns.map(column => {
+              const { dataDxfId, ...model } = column as ReadTableColumn;
+              const style = dataDxfId === undefined ? undefined : styles?.dxfs[dataDxfId];
+              return style === undefined ? model : { ...model, style };
+            }),
             rows: tableDataRows(
               worksheet,
               rest.ref,

@@ -10,6 +10,8 @@ import type { XmlSink } from "@xml/types";
 interface ExtLstModel {
   conditionalFormattings?: unknown;
   sparklineGroups?: SparklineGroup[];
+  /** The worksheet's name, which qualifies a sparkline data range given without a sheet. */
+  name?: string;
 }
 
 class ExtXform extends CompositeXform {
@@ -90,7 +92,7 @@ class SparklineExtXform {
     return Array.isArray(sparklineGroups) && sparklineGroups.length > 0;
   }
 
-  render(xmlStream: XmlSink, sparklineGroups: SparklineGroup[]): void {
+  render(xmlStream: XmlSink, sparklineGroups: SparklineGroup[], sheetName: string): void {
     if (!this.hasContent(sparklineGroups)) {
       return;
     }
@@ -111,7 +113,7 @@ class SparklineExtXform {
       uri: "{05C60535-1F16-4fd2-B633-F4F36F0B64E0}",
       "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
     });
-    xmlStream.writeRaw(renderSparklineGroups(sparklineGroups));
+    xmlStream.writeRaw(renderSparklineGroups(sparklineGroups, sheetName));
     xmlStream.closeNode();
   }
 
@@ -157,7 +159,7 @@ class ExtLstXform extends CompositeXform {
       this.ext.render(xmlStream, model);
     }
     if (this.sparklineExt.hasContent(model?.sparklineGroups)) {
-      this.sparklineExt.render(xmlStream, model.sparklineGroups!);
+      this.sparklineExt.render(xmlStream, model.sparklineGroups!, model.name ?? "");
     }
     xmlStream.closeNode();
   }

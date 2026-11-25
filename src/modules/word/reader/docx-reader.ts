@@ -15,7 +15,7 @@ import { isFlatOpc } from "@word/convert/flat-opc";
 import { WRITTEN, checkBytes, invalidArgument, readToken } from "@word/core/argument-checks";
 import { OOXML_TO_GALLERY } from "@word/core/glossary-galleries";
 import type { Mutable } from "@word/core/internal-utils";
-import { base64ToBytes, utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import { bareGuid, base64ToBytes, utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
 import { checkSchema, w } from "@word/core/option-schema";
 import {
   arrangeParagraphChildren,
@@ -109,13 +109,7 @@ import {
 } from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
 import { parseBoundContentPart } from "@word/reader/preserved-xml";
-import {
-  parseRowHeight,
-  parseRunProperties,
-  parseShading,
-  parseTableWidth,
-  parseRevisionInfo
-} from "@word/reader/properties-parsers";
+import { parseRunProperties, parseRevisionInfo } from "@word/reader/properties-parsers";
 import { parseRangeMarker, takeRangeMarker } from "@word/reader/range-markers";
 import type {
   ParsedRelationship,
@@ -131,9 +125,10 @@ import { parseCheckBox } from "@word/reader/sdt-helpers";
 import { preserveShapeMarkup } from "@word/reader/shape-markup";
 import { parseStyles } from "@word/reader/styles-parser";
 import {
-  parseTableBorders,
-  parseTableCellMargins,
-  parseTableProperties
+  parseTableCellProperties,
+  parseTableProperties,
+  parseTablePropertyExceptions,
+  parseTableRowProperties
 } from "@word/reader/table-properties-parsers";
 import { findWatermark, withoutWatermark } from "@word/reader/watermark-parser";
 import type { FoundWatermark } from "@word/reader/watermark-parser";
@@ -155,7 +150,6 @@ import type {
   TableRow,
   TableCell,
   TableRowProperties,
-  TableCellProperties,
   SectionProperties,
   HeaderDef,
   FooterDef,
@@ -963,7 +957,9 @@ function parseSdtProperties(sdtPrEl: XmlElement | undefined): Mutable<SdtPropert
       // Read from child elements (correct per schema)
       const titleEl = findChild(rsEl, "w15:sectionTitle");
       if (titleEl) {
-        const v = titleEl.attributes["w15:val"] ?? titleEl.attributes["val"];
+        // `w:val` as the schema has it; `w15:val` as this library wrote it before.
+        const v =
+          titleEl.attributes["w:val"] ?? titleEl.attributes["w15:val"] ?? titleEl.attributes["val"];
         if (v !== undefined) {
           rs.sectionTitle = v;
         }
@@ -2589,120 +2585,7 @@ function finishTableCell(
   controls: BlockContentControl[]
 ): TableCell {
   const tcPrEl = findChildNs(el, "tcPr");
-  let props: TableCellProperties | undefined;
-  if (tcPrEl) {
-    const p: Mutable<TableCellProperties> = {};
-    const wEl = findChildNs(tcPrEl, "tcW");
-    if (wEl) {
-      p.width = parseTableWidth(wEl);
-    }
-
-    const gsEl = findChildNs(tcPrEl, "gridSpan");
-    if (gsEl) {
-      p.gridSpan = attrInt(gsEl, "val");
-    }
-
-    const vmEl = findChildNs(tcPrEl, "vMerge");
-    if (vmEl) {
-      p.verticalMerge = (attrVal(vmEl, "val") ??
-        "continue") as TableCellProperties["verticalMerge"];
-    }
-
-    const bordersEl = findChildNs(tcPrEl, "tcBorders");
-    if (bordersEl) {
-      p.borders = parseTableBorders(bordersEl);
-    }
-
-    const shdEl = findChildNs(tcPrEl, "shd");
-    if (shdEl) {
-      p.shading = parseShading(shdEl);
-    }
-
-    const vAlignEl = findChildNs(tcPrEl, "vAlign");
-    if (vAlignEl) {
-      p.verticalAlign = readToken(
-        attrVal(vAlignEl, "val"),
-        WRITTEN.cellVerticalAlign,
-        p,
-        "verticalAlign"
-      ) as TableCellProperties["verticalAlign"];
-    }
-
-    if (findChildNs(tcPrEl, "noWrap")) {
-      p.noWrap = true;
-    }
-
-    const textDirEl = findChildNs(tcPrEl, "textDirection");
-    if (textDirEl) {
-      p.textDirection = readToken(
-        attrVal(textDirEl, "val"),
-        WRITTEN.textDirection,
-        p,
-        "textDirection"
-      ) as TableCellProperties["textDirection"];
-    }
-
-    const marginsEl = findChildNs(tcPrEl, "tcMar");
-    if (marginsEl) {
-      p.margins = parseTableCellMargins(marginsEl);
-    }
-
-    // Conditional formatting
-    const cnfEl = findChildNs(tcPrEl, "cnfStyle");
-    if (cnfEl) {
-      p.cnfStyle = attrVal(cnfEl, "val");
-    }
-
-    // Hide cell end-of-cell marker
-    if (findChildNs(tcPrEl, "hideMark")) {
-      p.hideMark = true;
-    }
-
-    // Fit text
-    if (findChildNs(tcPrEl, "tcFitText")) {
-      p.fitText = true;
-    }
-
-    // Cell-level revisions
-    const cellInsEl = findChildNs(tcPrEl, "cellIns");
-    if (cellInsEl) {
-      const rev = parseRevisionInfo(cellInsEl);
-      if (rev) {
-        p.inserted = { revision: rev };
-      }
-    }
-    const cellDelEl = findChildNs(tcPrEl, "cellDel");
-    if (cellDelEl) {
-      const rev = parseRevisionInfo(cellDelEl);
-      if (rev) {
-        p.deleted = { revision: rev };
-      }
-    }
-    const cellMergeEl = findChildNs(tcPrEl, "cellMerge");
-    if (cellMergeEl) {
-      const vMerge = attrVal(cellMergeEl, "vMerge");
-      const rev = parseRevisionInfo(cellMergeEl);
-      if (rev && (vMerge === "cont" || vMerge === "rest")) {
-        p.cellMerge = { vMerge, revision: rev };
-      }
-    }
-
-    // tcPrChange
-    const tcPrChangeEl = findChildNs(tcPrEl, "tcPrChange");
-    if (tcPrChangeEl) {
-      const rev = parseRevisionInfo(tcPrChangeEl);
-      if (rev) {
-        const prev = findChildNs(tcPrChangeEl, "tcPr");
-        p.propertyChange = { revision: rev };
-        if (prev) {
-          // Minimal: previousProperties won't recurse (avoid infinite recursion).
-          // Just capture the presence of the change marker here.
-        }
-      }
-    }
-
-    props = p;
-  }
+  const props = tcPrEl ? parseTableCellProperties(tcPrEl) : undefined;
 
   const cell: Mutable<TableCell> = {
     properties: props,
@@ -2760,71 +2643,10 @@ function finishTableRow(el: XmlElement, cells: TableCell[], markers: RangeMarker
   if (trPrEl || tblPrExEl) {
     const p: Mutable<TableRowProperties> = {};
     if (tblPrExEl) {
-      p.tblPrEx = parseTableProperties(tblPrExEl);
+      p.tblPrEx = parseTablePropertyExceptions(tblPrExEl);
     }
     if (trPrEl) {
-      const heightEl = findChildNs(trPrEl, "trHeight");
-      if (heightEl) {
-        p.height = parseRowHeight(heightEl);
-      }
-      if (findChildNs(trPrEl, "tblHeader")) {
-        p.tableHeader = true;
-      }
-      if (findChildNs(trPrEl, "cantSplit")) {
-        p.cantSplit = true;
-      }
-      if (findChildNs(trPrEl, "hidden")) {
-        p.hidden = true;
-      }
-      const csEl = findChildNs(trPrEl, "tblCellSpacing");
-      if (csEl) {
-        p.cellSpacing = parseTableWidth(csEl);
-      }
-      const insEl = findChildNs(trPrEl, "ins");
-      if (insEl) {
-        const rev = parseRevisionInfo(insEl);
-        if (rev) {
-          p.inserted = { revision: rev };
-        }
-      }
-      const delEl = findChildNs(trPrEl, "del");
-      if (delEl) {
-        const rev = parseRevisionInfo(delEl);
-        if (rev) {
-          p.deleted = { revision: rev };
-        }
-      }
-      const gbEl = findChildNs(trPrEl, "gridBefore");
-      if (gbEl) {
-        p.gridBefore = attrInt(gbEl, "val");
-      }
-      const gaEl = findChildNs(trPrEl, "gridAfter");
-      if (gaEl) {
-        p.gridAfter = attrInt(gaEl, "val");
-      }
-      const wbEl = findChildNs(trPrEl, "wBefore");
-      if (wbEl) {
-        p.widthBefore = parseTableWidth(wbEl);
-      }
-      const waEl = findChildNs(trPrEl, "wAfter");
-      if (waEl) {
-        p.widthAfter = parseTableWidth(waEl);
-      }
-      const cnfEl = findChildNs(trPrEl, "cnfStyle");
-      if (cnfEl) {
-        p.cnfStyle = attrVal(cnfEl, "val");
-      }
-      const trPrChangeEl = findChildNs(trPrEl, "trPrChange");
-      if (trPrChangeEl) {
-        const rev = parseRevisionInfo(trPrChangeEl);
-        if (rev) {
-          const prevTrPr = findChildNs(trPrChangeEl, "trPr");
-          p.propertyChange = {
-            revision: rev,
-            previousProperties: prevTrPr ? parseRowPrInner(prevTrPr) : undefined
-          };
-        }
-      }
+      Object.assign(p, parseTableRowProperties(trPrEl));
     }
     props = p;
   }
@@ -2834,22 +2656,6 @@ function finishTableRow(el: XmlElement, cells: TableCell[], markers: RangeMarker
     row.rangeMarkersAfter = markers;
   }
   return row;
-}
-
-/** Inner parse for row properties content (used by propertyChange recursion). */
-function parseRowPrInner(trPrEl: XmlElement): TableRowProperties {
-  const p: Mutable<TableRowProperties> = {};
-  const heightEl = findChildNs(trPrEl, "trHeight");
-  if (heightEl) {
-    p.height = parseRowHeight(heightEl);
-  }
-  if (findChildNs(trPrEl, "tblHeader")) {
-    p.tableHeader = true;
-  }
-  if (findChildNs(trPrEl, "cantSplit")) {
-    p.cantSplit = true;
-  }
-  return p;
 }
 
 /**
@@ -4424,7 +4230,7 @@ function readDocxEntries(
           const dsItemEl = propsDoc.root;
           const id = dsItemEl.attributes["ds:itemID"];
           if (id) {
-            itemId = id.replace(/[{}]/g, "");
+            itemId = bareGuid(id);
           }
           // Schema references
           const refs: string[] = [];

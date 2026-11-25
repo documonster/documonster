@@ -18,6 +18,7 @@ import type {
 import { EMU_PER_POINT } from "@word/units";
 import { renderParagraphProperties } from "@word/writer/paragraph-writer";
 import { renderRunProperties } from "@word/writer/run-writer";
+import { emitInSchemaOrder } from "@word/writer/schema-order";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
@@ -61,7 +62,7 @@ function renderLevel(xml: XmlSink, level: NumberingLevel): void {
 
   if (level.paragraphProperties) {
     const paragraph = level.paragraphProperties;
-    within("paragraphProperties", () => renderParagraphProperties(xml, paragraph));
+    within("paragraphProperties", () => renderParagraphProperties(xml, paragraph, "general"));
   }
 
   if (level.runProperties) {
@@ -131,18 +132,29 @@ export function renderNumbering(
       xml.openNode("w:abstractNum", {
         "w:abstractNumId": xmlValue(abs.abstractNumId, "w:abstractNumId")
       });
-      if (abs.multiLevelType) {
-        xml.leafNode("w:multiLevelType", { "w:val": abs.multiLevelType });
-      }
-      if (abs.numStyleLink) {
-        xml.leafNode("w:numStyleLink", { "w:val": abs.numStyleLink });
-      }
-      if (abs.styleLink) {
-        xml.leafNode("w:styleLink", { "w:val": abs.styleLink });
-      }
-      abs.levels.forEach((level, l) =>
-        within(`abstractNumberings[${a}].levels[${l}]`, () => renderLevel(xml, level))
-      );
+      const levels = abs.levels;
+      emitInSchemaOrder("w:CT_AbstractNum", [
+        !!abs.multiLevelType && [
+          "w:multiLevelType",
+          () => xml.leafNode("w:multiLevelType", { "w:val": abs.multiLevelType! })
+        ],
+        // `styleLink` before `numStyleLink`: this wrote them the other way round.
+        !!abs.styleLink && [
+          "w:styleLink",
+          () => xml.leafNode("w:styleLink", { "w:val": abs.styleLink! })
+        ],
+        !!abs.numStyleLink && [
+          "w:numStyleLink",
+          () => xml.leafNode("w:numStyleLink", { "w:val": abs.numStyleLink! })
+        ],
+        levels.length > 0 && [
+          "w:lvl",
+          () =>
+            levels.forEach((level, l) =>
+              within(`abstractNumberings[${a}].levels[${l}]`, () => renderLevel(xml, level))
+            )
+        ]
+      ]);
       xml.closeNode();
     });
   }

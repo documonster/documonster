@@ -3,11 +3,13 @@
  * Passed to all writer functions to provide shared state.
  */
 
+import { unrecognizedValue } from "@utils/unrecognized-values";
 import { xmlDecode } from "@utils/xml-encode";
 import { rebindRelationshipIds } from "@word/core/relationship-ids";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
-import type { PreservedLink } from "@word/types";
+import type { PreservedLink, RevisionInfo } from "@word/types";
+import { xmlValue } from "@xml/encode";
 
 /** ID generators for various document elements. */
 export interface IdGenerators {
@@ -352,6 +354,24 @@ export function writtenRevisionId(id: number): number {
 }
 
 /**
+ * The attributes of a revision mark (`w:ins`, `w:del`, `w:pPrChange`, `w:cellDel`, …), from its revision: the id
+ * claimed for this write, the author, and the date — or, where the reader set a date aside because it was not an
+ * `xsd:dateTime`, that text as it was read. Every mark that carries a `RevisionInfo` is written through it, so none
+ * of them drops a kept date; a move range's start and a comment carry their author and date themselves.
+ */
+export function revisionAttributes(revision: RevisionInfo): Record<string, string> {
+  const attrs: Record<string, string> = {
+    "w:id": xmlValue(writtenRevisionId(revision.id), "w:id"),
+    "w:author": revision.author
+  };
+  const date = revision.date ?? unrecognizedValue(revision, "date");
+  if (date !== undefined) {
+    attrs["w:date"] = date;
+  }
+  return attrs;
+}
+
+/**
  * Put `map` in effect unless a map already is — the outermost write owns the
  * id space, so content it renders through a context of its own (the glossary
  * document) still draws from it — and return what to hand
@@ -692,6 +712,11 @@ export interface RenderHelpers {
    * compatibility with callers that built helpers without a context.
    */
   readonly rawXmlPolicy?: "preserve" | "strip" | "reject";
+  /**
+   * The document's default run size (half-points), as `docDefaults` states it — what a run without a size of its
+   * own is set in. A ruby's required sizes are derived from it when the model leaves them out.
+   */
+  readonly defaultRunSize?: number;
 }
 
 /**
@@ -708,7 +733,8 @@ export function renderHelpersFor(ctx: DocxRenderContext): RenderHelpers {
     nextDocPrId: ctx.ids.nextDocPrId,
     bookmarkIds: ctx.bookmarkIds,
     permIds: ctx.permIds,
-    rawXmlPolicy: ctx.rawXmlPolicy
+    rawXmlPolicy: ctx.rawXmlPolicy,
+    ...(ctx.defaultRunSize === undefined ? {} : { defaultRunSize: ctx.defaultRunSize })
   };
 }
 
@@ -724,6 +750,8 @@ interface ReadonlyWeakMap<K extends WeakKey, V> {
 /** Render context passed to all writer functions. */
 export interface DocxRenderContext {
   /** Current part being rendered, fully qualified (e.g. `"/word/document.xml"`). */
+  /** See {@link RenderHelpers.defaultRunSize}. */
+  readonly defaultRunSize?: number;
   readonly partName: string;
   /** Security policy controlling raw XML, external targets, etc. */
   readonly securityPolicy: DocxSecurityPolicy;
@@ -841,6 +869,8 @@ export function createRenderContext(options?: {
   reservedPermIds?: Iterable<number>;
   /** Revision ids used by markup the writer will not renumber. */
   reservedRevisionIds?: Iterable<number>;
+  /** See {@link RenderHelpers.defaultRunSize}. */
+  defaultRunSize?: number;
 }): DocxRenderContext {
   const securityPolicy = options?.securityPolicy ?? DEFAULT_SECURITY_POLICY;
 
@@ -856,7 +886,8 @@ export function createRenderContext(options?: {
     altChunkRIds: options?.altChunkRIds ?? new WeakMap(),
     bookmarkIds: createBookmarkIdMap(options?.reservedBookmarkIds),
     permIds: createBookmarkIdMap(options?.reservedPermIds),
-    revisionIds: createRevisionIdMap(options?.reservedRevisionIds)
+    revisionIds: createRevisionIdMap(options?.reservedRevisionIds),
+    ...(options?.defaultRunSize === undefined ? {} : { defaultRunSize: options.defaultRunSize })
   };
 }
 

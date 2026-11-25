@@ -22,8 +22,8 @@ class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
 
     this.map = {
       tabColor: new ColorXform("tabColor"),
-      pageSetUpPr: new PageSetupPropertiesXform(),
-      outlinePr: new OutlinePropertiesXform()
+      outlinePr: new OutlinePropertiesXform(),
+      pageSetUpPr: new PageSetupPropertiesXform()
     };
   }
 
@@ -46,9 +46,10 @@ class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
 
     if (hasTabColor || hasPageSetup || hasOutline) {
       xmlStream.openNode("sheetPr");
+      // CT_SheetPr is a sequence: tabColor, outlinePr, pageSetUpPr. Excel repairs a part with them out of order.
       this.map.tabColor.render(xmlStream, model.tabColor);
-      this.map.pageSetUpPr.render(xmlStream, model.pageSetup);
       this.map.outlinePr.render(xmlStream, model.outlineProperties);
+      this.map.pageSetUpPr.render(xmlStream, model.pageSetup);
       xmlStream.closeNode();
     }
   }

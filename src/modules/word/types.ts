@@ -955,6 +955,20 @@ export interface RunPropertyChange {
   readonly revision: RevisionInfo;
   /** Previous run properties. */
   readonly previousProperties?: RunProperties;
+  /**
+   * A paragraph mark's own revisions as they stood before the change (`CT_ParaRPrOriginal`) — only on the change of a
+   * paragraph's `markRunProperties`; an ordinary run's previous properties have none. Rejecting the change does not
+   * bring them back: the mark's current revisions are revisions of their own, listed and settled separately.
+   */
+  readonly previousMarkRevisions?: ParagraphMarkRevisions;
+}
+
+/** A paragraph mark's insertion, deletion and move (`w:ins`, `w:del`, `w:moveFrom`, `w:moveTo` in its `w:rPr`). */
+export interface ParagraphMarkRevisions {
+  readonly insertion?: RevisionInfo;
+  readonly deletion?: RevisionInfo;
+  readonly moveFrom?: RevisionInfo;
+  readonly moveTo?: RevisionInfo;
 }
 
 /** Section property change revision. */
@@ -1244,10 +1258,20 @@ export interface ParagraphProperties {
   readonly frame?: ParagraphFrame;
   /** Paragraph property change revision (track changes). */
   readonly propertyChange?: ParagraphPropertyChange;
-  /** Paragraph insertion revision (the paragraph mark itself was inserted). */
+  /**
+   * The paragraph mark was inserted (`w:pPr/w:rPr/w:ins`): this paragraph was split from the next. Rejecting it joins
+   * them again.
+   */
   readonly paragraphInsertion?: RevisionInfo;
-  /** Paragraph deletion revision (the paragraph mark itself was deleted). */
+  /**
+   * The paragraph mark was deleted (`w:pPr/w:rPr/w:del`): this paragraph is to be joined with the next. Accepting it
+   * joins them.
+   */
   readonly paragraphDeletion?: RevisionInfo;
+  /** The paragraph mark was moved away from here (`w:pPr/w:rPr/w:moveFrom`); settled as a deletion is. */
+  readonly paragraphMoveFrom?: RevisionInfo;
+  /** The paragraph mark was moved here (`w:pPr/w:rPr/w:moveTo`); settled as an insertion is. */
+  readonly paragraphMoveTo?: RevisionInfo;
   /** Suppress auto-hyphens. */
   readonly suppressAutoHyphens?: boolean;
   /** Conditional formatting style mask (w:cnfStyle). */
@@ -1657,6 +1681,43 @@ export interface TableProperties {
   readonly propertyChange?: TablePropertyChange;
 }
 
+/**
+ * A row's table property exceptions (`w:tblPrEx`, `CT_TblPrEx`): the table properties a row may override for itself.
+ * The schema allows these nine and a change record — not a style, floating position, banding, caption or direction,
+ * which belong to the whole table.
+ */
+export interface TablePropertyExceptions {
+  /** Table width. */
+  readonly width?: TableWidth;
+  /** Table alignment. */
+  readonly alignment?: Alignment;
+  /** Cell spacing. */
+  readonly cellSpacing?: TableWidth;
+  /** Table indent in twips. */
+  readonly indent?: Twips;
+  /** Table borders. */
+  readonly borders?: TableBorders;
+  /** Background shading. */
+  readonly shading?: Shading;
+  /** Table layout. */
+  readonly layout?: TableLayout;
+  /** Cell margins. */
+  readonly cellMargins?: TableCellMargins;
+  /** Table look (conditional formatting). */
+  readonly look?: TableLook;
+  /** Property exceptions change revision (`w:tblPrExChange`, track changes). */
+  readonly propertyChange?: TablePropertyExceptionsChange;
+}
+
+/**
+ * A change to a row's table property exceptions (`w:tblPrExChange`). The previous exceptions are `CT_TblPrExBase`:
+ * they have no change record of their own.
+ */
+export interface TablePropertyExceptionsChange {
+  readonly revision: RevisionInfo;
+  readonly previousProperties?: Omit<TablePropertyExceptions, "propertyChange">;
+}
+
 /** Table row height rule. */
 export type RowHeightRule = "auto" | "atLeast" | "exact";
 
@@ -1688,8 +1749,8 @@ export interface TableRowProperties {
   readonly cnfStyle?: string;
   /** Table row property change revision (track changes). */
   readonly propertyChange?: TableRowPropertyChange;
-  /** Row-level table property exceptions (w:tblPrEx) — override of table props. */
-  readonly tblPrEx?: TableProperties;
+  /** Row-level table property exceptions (`w:tblPrEx`): the table properties this row overrides. */
+  readonly tblPrEx?: TablePropertyExceptions;
 }
 
 /** Vertical alignment in a cell. */
@@ -2061,10 +2122,13 @@ export interface MathGroupChar {
   readonly base: readonly MathContent[];
   /** The group character (e.g. "{" or "⏞"). */
   readonly char?: string;
-  /** Position: top or bottom. */
+  /** Position: top or bottom (`m:pos`). */
   readonly position?: "top" | "bottom";
-  /** Vertical alignment. */
-  readonly verticalAlign?: "top" | "center" | "bottom";
+  /**
+   * Vertical justification (`m:vertJc`): whether the top or the bottom of the group character is aligned with the
+   * baseline. `ST_TopBot` has no centre, so `"center"`, which this field used to offer, could not be written.
+   */
+  readonly verticalAlign?: "top" | "bottom";
 }
 
 /** Math border box (m:borderBox) — a box around the expression with optional borders. */
@@ -2780,17 +2844,25 @@ export interface ImageWatermark {
 
 /**
  * A value `Document.read` kept because it is outside its field's vocabulary (`<w:jc w:val="bogus"/>`): the field reads as
- * absent and the text is written back until something sets the field. `Document.listUnrecognizedValues` lists them,
- * `Document.discardUnrecognizedValues` drops them — the same shape as Excel's `UnrecognizedValue`, without the sheet.
+ * absent and the text is written back until something sets the field — or, for an element the schema has no place
+ * for where it was found, kept only to be reported (`writtenBack: false`). `Document.listUnrecognizedValues` lists them,
+ * `Document.discardUnrecognizedValues` drops them — Excel's `UnrecognizedValue` without the sheet, plus `writtenBack`.
  */
 export interface DocxUnrecognizedValue {
   /**
    * The path to the field from the document root, as `Validation.validate` reports it:
-   * `body[0].properties.alignment`, `headers["rId7"].content.children[0]…`.
+   * `body[0].properties.alignment`, `headers["rId7"].content.children[0]…`. An element with no model field to stand
+   * for (`writtenBack: false`) ends in its element's name: `body[0].rows[0].properties.tblPrEx.tblStyle`.
    */
   readonly path: string;
-  /** The text the file had. */
+  /** The text the file had — for an element (`writtenBack: false`), its markup. */
   readonly value: string;
+  /**
+   * Whether a write puts it back. `false` for an element the schema has no place for where the file put it — a
+   * diagonal in a table's borders (`CT_TblBorders` has none), a change record on a style's table properties or
+   * inside another change record: listed so a read reports it, and left out of the written file.
+   */
+  readonly writtenBack: boolean;
 }
 
 /** Options for `Document.discardUnrecognizedValues`. */
@@ -3162,8 +3234,12 @@ export interface ChartExSeriesData {
 /** Style type. */
 export type StyleType = "paragraph" | "character" | "table" | "numbering";
 
-/** Table style conditional format type. */
+/**
+ * Table style conditional format type: which cells it formats. Named for what it means; the file's `w:type` token
+ * (`ST_TblStyleOverrideType`: `band1Horz`, `firstCol`, `nwCell`, …) is translated on read and write.
+ */
 export type TableStyleConditionType =
+  | "wholeTable"
   | "firstRow"
   | "lastRow"
   | "firstColumn"

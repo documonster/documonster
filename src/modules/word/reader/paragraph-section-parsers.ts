@@ -6,7 +6,9 @@
  * embed section properties); they're co-located here.
  */
 
+import { setAsideValue } from "@utils/unrecognized-values";
 import { WRITTEN, readToken } from "@word/core/argument-checks";
+import { PARAGRAPH_MARK_REVISIONS, type ParagraphPropertiesScope } from "@word/core/change-records";
 import type { Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
@@ -14,7 +16,8 @@ import {
   boolToggle,
   findChildNs,
   findChildrenNs,
-  parseNoteProperties
+  parseNoteProperties,
+  serializeElement
 } from "@word/reader/parse-utils";
 import {
   parseBorder,
@@ -42,7 +45,17 @@ import type { XmlElement } from "@xml/types";
 // Paragraph Properties
 // =============================================================================
 
-function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
+/**
+ * A `w:pPr`, read as `scope` says it is. A style's, a default's or a numbering level's (`general`, `CT_PPrGeneral`)
+ * holds no mark (`w:rPr`, with the mark's insertion and deletion) or section; a change record's previous properties
+ * (`previous`, `CT_PPrBase`) no change record either. One found where it has no place is set aside as not written
+ * back rather than typed — see `@word/core/change-records`.
+ */
+function parseParagraphProperties(
+  pPrEl: XmlElement,
+  { scope = "paragraph" }: { readonly scope?: ParagraphPropertiesScope } = {}
+): ParagraphProperties {
+  const withMark = scope === "paragraph";
   const pPr: Mutable<ParagraphProperties> = {};
 
   const pStyleEl = findChildNs(pPrEl, "pStyle");
@@ -335,11 +348,17 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
 
   const rPrEl = findChildNs(pPrEl, "rPr");
   if (rPrEl) {
-    pPr.markRunProperties = parseRunProperties(rPrEl);
+    if (withMark) {
+      pPr.markRunProperties = parseRunProperties(rPrEl, { mark: true });
+    } else {
+      setAsideValue(pPr, "markRunProperties", serializeElement(rPrEl), { writtenBack: false });
+    }
   }
 
   const sectPrEl = findChildNs(pPrEl, "sectPr");
-  if (sectPrEl) {
+  if (sectPrEl && !withMark) {
+    setAsideValue(pPr, "sectionProperties", serializeElement(sectPrEl), { writtenBack: false });
+  } else if (sectPrEl) {
     pPr.sectionProperties = parseSectionProperties(sectPrEl);
   }
 
@@ -351,32 +370,31 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
 
   // Paragraph property change
   const pPrChangeEl = findChildNs(pPrEl, "pPrChange");
-  if (pPrChangeEl) {
+  if (pPrChangeEl && scope === "previous") {
+    setAsideValue(pPr, "propertyChange", serializeElement(pPrChangeEl), { writtenBack: false });
+  } else if (pPrChangeEl) {
     const rev = parseRevisionInfo(pPrChangeEl);
     if (rev) {
       const prevPPrEl = findChildNs(pPrChangeEl, "pPr");
       pPr.propertyChange = {
         revision: rev,
-        previousProperties: prevPPrEl ? parseParagraphProperties(prevPPrEl) : undefined
+        previousProperties: prevPPrEl
+          ? parseParagraphProperties(prevPPrEl, { scope: "previous" })
+          : undefined
       };
     }
   }
 
   // Paragraph mark insertion/deletion (w:pPr > w:rPr > w:ins/w:del)
   const rPrInPPr = findChildNs(pPrEl, "rPr");
-  if (rPrInPPr) {
-    const insEl = findChildNs(rPrInPPr, "ins");
-    if (insEl) {
-      const rev = parseRevisionInfo(insEl);
+  if (rPrInPPr && withMark) {
+    // The mark's own revisions (`CT_ParaRPr`). Its move used to be dropped: Word writes one for a paragraph moved
+    // with track changes on.
+    for (const { element, field } of PARAGRAPH_MARK_REVISIONS) {
+      const el = findChildNs(rPrInPPr, element);
+      const rev = el ? parseRevisionInfo(el) : undefined;
       if (rev) {
-        pPr.paragraphInsertion = rev;
-      }
-    }
-    const delEl = findChildNs(rPrInPPr, "del");
-    if (delEl) {
-      const rev = parseRevisionInfo(delEl);
-      if (rev) {
-        pPr.paragraphDeletion = rev;
+        pPr[field] = rev;
       }
     }
   }
@@ -388,7 +406,15 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
 // Section Properties
 // =============================================================================
 
-function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
+/**
+ * A `w:sectPr`. Inside `w:sectPrChange` (`withChange: false`) it is `CT_SectPrBase`, which has no header or footer
+ * reference and no change record: one found there is set aside as not written back rather than typed, because the
+ * writer has nowhere valid to put it.
+ */
+function parseSectionProperties(
+  sectPrEl: XmlElement,
+  { withChange = true } = {}
+): SectionProperties {
   const sect: Mutable<SectionProperties> = {};
 
   const pgSzEl = findChildNs(sectPrEl, "pgSz");
@@ -613,9 +639,21 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
       | undefined;
   }
 
+  if (!withChange) {
+    for (const [field, element] of [
+      ["headers", "headerReference"],
+      ["footers", "footerReference"]
+    ] as const) {
+      const refs = findChildrenNs(sectPrEl, element);
+      if (refs.length > 0) {
+        setAsideValue(sect, field, refs.map(serializeElement).join(""), { writtenBack: false });
+      }
+    }
+  }
+
   // Headers/Footers refs
   const headerRefs: HeaderFooterRef[] = [];
-  for (const hRef of findChildrenNs(sectPrEl, "headerReference")) {
+  for (const hRef of withChange ? findChildrenNs(sectPrEl, "headerReference") : []) {
     headerRefs.push({
       type: (attrVal(hRef, "type") ?? "default") as HeaderFooterRef["type"],
       rId: hRef.attributes["r:id"] ?? ""
@@ -626,7 +664,7 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
   }
 
   const footerRefs: HeaderFooterRef[] = [];
-  for (const fRef of findChildrenNs(sectPrEl, "footerReference")) {
+  for (const fRef of withChange ? findChildrenNs(sectPrEl, "footerReference") : []) {
     footerRefs.push({
       type: (attrVal(fRef, "type") ?? "default") as HeaderFooterRef["type"],
       rId: fRef.attributes["r:id"] ?? ""
@@ -638,13 +676,17 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
 
   // sectPrChange (track changes for section properties)
   const sectPrChangeEl = findChildNs(sectPrEl, "sectPrChange");
-  if (sectPrChangeEl) {
+  if (sectPrChangeEl && !withChange) {
+    setAsideValue(sect, "propertyChange", serializeElement(sectPrChangeEl), { writtenBack: false });
+  } else if (sectPrChangeEl) {
     const rev = parseRevisionInfo(sectPrChangeEl);
     if (rev) {
       const prevSectPrEl = findChildNs(sectPrChangeEl, "sectPr");
       const change: SectionPropertyChange = {
         revision: rev,
-        previousProperties: prevSectPrEl ? parseSectionProperties(prevSectPrEl) : undefined
+        previousProperties: prevSectPrEl
+          ? parseSectionProperties(prevSectPrEl, { withChange: false })
+          : undefined
       };
       sect.propertyChange = change;
     }

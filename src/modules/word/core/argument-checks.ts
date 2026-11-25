@@ -19,8 +19,22 @@
 
 import { describeValue } from "@utils/describe-value";
 import { isRecordArgument } from "@utils/object";
-import type { SchemaMatches } from "@utils/schema";
+import type { IsExact, SchemaMatches } from "@utils/schema";
 import { setAsideValue, unrecognizedValue } from "@utils/unrecognized-values";
+import { TABLE_STYLE_CONDITION_TOKENS } from "@word/constants";
+import {
+  absentFrom,
+  EDGE_NAMES,
+  NARROWER_PROPERTIES,
+  oneEdgeName,
+  PARAGRAPH_MARK_REVISIONS,
+  PARAGRAPH_ONLY_PROPERTIES,
+  type ParagraphPropertiesScope,
+  ROW_ONLY_PROPERTIES,
+  SECTION_ONLY_PROPERTIES,
+  type TableStyleProperties,
+  tableStyleExcludedFields
+} from "@word/core/change-records";
 import { checkSchema, w } from "@word/core/option-schema";
 import { DocxArgumentError } from "@word/errors";
 import { HASH_ALGORITHM_NAMES } from "@word/security/hash-names";
@@ -78,7 +92,10 @@ import type {
   TabStopType,
   TableCellProperties,
   TableLayout,
+  TableBorders,
   TableProperties,
+  TablePropertyExceptions,
+  TableStyleConditionType,
   TableRowProperties,
   TableWidth,
   TextDirection,
@@ -336,6 +353,10 @@ const TABLE_WIDTH_TYPES = members<TableWidth["type"]>()(["auto", "dxa", "pct", "
 
 const TABLE_LAYOUTS = members<TableLayout>()(["fixed", "autofit"]);
 
+const TABLE_STYLE_CONDITION_TYPES = members<TableStyleConditionType>()(
+  Object.keys(TABLE_STYLE_CONDITION_TOKENS) as TableStyleConditionType[]
+);
+
 const ROW_HEIGHT_RULES = members<RowHeightRule>()(["auto", "atLeast", "exact"]);
 
 const VERTICAL_MERGES = members<VerticalMerge>()(["restart", "continue"]);
@@ -474,6 +495,11 @@ export function checkString(
 const XSD_DATE_TIME =
   /^-?\d{4,}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-](0\d|1[0-4]):[0-5]\d)?$/;
 
+/** Whether `value` is an `xsd:dateTime` Word reads as a date — what {@link checkDateTime} accepts, and the reader types. */
+export function isDateTime(value: string): boolean {
+  return XSD_DATE_TIME.test(value) && !Number.isNaN(Date.parse(value));
+}
+
 /** A string Word reads as a date: an `xsd:dateTime`, such as `new Date().toISOString()` gives. */
 export function checkDateTime(
   value: unknown,
@@ -484,7 +510,7 @@ export function checkDateTime(
   if (value === undefined && options.optional) {
     return;
   }
-  if (typeof value !== "string" || !XSD_DATE_TIME.test(value) || Number.isNaN(Date.parse(value))) {
+  if (typeof value !== "string" || !isDateTime(value)) {
     invalidArgument(where, field, 'an xsd:dateTime such as "2024-01-31T09:30:00Z"', value);
   }
 }
@@ -907,12 +933,20 @@ export function checkShading(value: unknown, field: string, where: string): void
  * Check run (character) properties. `field` is the path of the record in the
  * caller's arguments, e.g. `properties` or `properties.run`.
  */
-export function checkRunProperties(value: unknown, field: string, where: string): void {
+export function checkRunProperties(
+  value: unknown,
+  field: string,
+  where: string,
+  { previous = false, mark = false } = {}
+): void {
   if (value === undefined) {
     return;
   }
   checkRecord(value, field, where);
   const r = value as RunProperties;
+  if (previous) {
+    refuseNarrower(r, ["propertyChange"], field, where, NARROWER_PROPERTIES.previousRun);
+  }
   const at = (name: string): string => `${field}.${name}`;
 
   if (r.font !== undefined && typeof r.font !== "string") {
@@ -993,11 +1027,49 @@ export function checkRunProperties(value: unknown, field: string, where: string)
   if (r.propertyChange !== undefined) {
     checkRecord(r.propertyChange, at("propertyChange"), where);
     checkRevision(r.propertyChange.revision, at("propertyChange.revision"), where);
+    const marks = r.propertyChange.previousMarkRevisions;
+    if (marks !== undefined && !mark) {
+      // Only a paragraph mark's change record (`CT_ParaRPrOriginal`) holds the mark's revisions.
+      refuseNarrower(
+        r.propertyChange,
+        ["previousMarkRevisions"],
+        at("propertyChange"),
+        where,
+        NARROWER_PROPERTIES.previousRun
+      );
+    } else if (marks !== undefined) {
+      checkRecord(marks, at("propertyChange.previousMarkRevisions"), where);
+      for (const { previous: key } of PARAGRAPH_MARK_REVISIONS) {
+        if (marks[key] !== undefined) {
+          checkRevision(marks[key], at(`propertyChange.previousMarkRevisions.${key}`), where);
+        }
+      }
+    }
     checkRunProperties(
       r.propertyChange.previousProperties,
       at("propertyChange.previousProperties"),
-      where
+      where,
+      { previous: true }
     );
+  }
+}
+
+/**
+ * Refuse any of `fields` on `holder` — properties of a narrower schema type than the model's
+ * (`@word/core/change-records`) — with the writer's wording, so a builder refuses what the writer would.
+ */
+function refuseNarrower(
+  holder: object,
+  fields: readonly string[],
+  field: string,
+  where: string,
+  properties: string
+): void {
+  for (const name of fields) {
+    const value = (holder as Record<string, unknown>)[name];
+    if (value !== undefined) {
+      invalidArgument(where, `${field}.${name}`, absentFrom(properties), value);
+    }
   }
 }
 
@@ -1024,13 +1096,45 @@ function checkFrame(value: unknown, field: string, where: string): void {
  * Check paragraph properties; `run` — the text form's run properties
  * (`textParagraph`, `Document.addParagraph`) — is checked when present.
  */
-export function checkParagraphProperties(value: unknown, field: string, where: string): void {
+export function checkParagraphProperties(
+  value: unknown,
+  field: string,
+  where: string,
+  { scope = "paragraph" }: { readonly scope?: ParagraphPropertiesScope } = {}
+): void {
   if (value === undefined) {
     return;
   }
   checkRecord(value, field, where);
   const p = value as ParagraphProperties & { run?: unknown };
   const at = (name: string): string => `${field}.${name}`;
+  if (scope === "general") {
+    refuseNarrower(
+      p,
+      PARAGRAPH_ONLY_PROPERTIES,
+      field,
+      where,
+      NARROWER_PROPERTIES.generalParagraph
+    );
+  } else if (scope === "previous") {
+    refuseNarrower(
+      p,
+      [...PARAGRAPH_ONLY_PROPERTIES, "propertyChange"],
+      field,
+      where,
+      NARROWER_PROPERTIES.previousParagraph
+    );
+  }
+  if (p.propertyChange !== undefined) {
+    checkRecord(p.propertyChange, at("propertyChange"), where);
+    checkRevision(p.propertyChange.revision, at("propertyChange.revision"), where);
+    checkParagraphProperties(
+      p.propertyChange.previousProperties,
+      at("propertyChange.previousProperties"),
+      where,
+      { scope: "previous" }
+    );
+  }
 
   checkString(p.style, at("style"), where, optional);
   checkOneOf(p.alignment, ALIGNMENTS, at("alignment"), where, optional);
@@ -1077,14 +1181,13 @@ export function checkParagraphProperties(value: unknown, field: string, where: s
   }
   checkOneOf(p.textAlignment, TEXT_ALIGNMENTS, at("textAlignment"), where, optional);
   checkOneOf(p.textDirection, TEXT_DIRECTIONS, at("textDirection"), where, optional);
-  checkRunProperties(p.markRunProperties, at("markRunProperties"), where);
+  checkRunProperties(p.markRunProperties, at("markRunProperties"), where, { mark: true });
   checkRunProperties(p.run, at("run"), where);
   checkSectionProperties(p.sectionProperties, at("sectionProperties"), where);
-  if (p.paragraphInsertion !== undefined) {
-    checkRevision(p.paragraphInsertion, at("paragraphInsertion"), where);
-  }
-  if (p.paragraphDeletion !== undefined) {
-    checkRevision(p.paragraphDeletion, at("paragraphDeletion"), where);
+  for (const { field: key } of PARAGRAPH_MARK_REVISIONS) {
+    if (p[key] !== undefined) {
+      checkRevision(p[key], at(key), where);
+    }
   }
 }
 
@@ -1103,6 +1206,19 @@ export function checkTableWidth(
   checkInteger(w.value, `${field}.value`, where);
 }
 
+/** Refuse a table's or a cell's borders or margins naming one edge twice ({@link EDGE_NAMES}). */
+function refuseBothEdgeNames(value: unknown, field: string, where: string): void {
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  const set = value as Record<string, unknown>;
+  for (const [first, second] of EDGE_NAMES) {
+    if (set[first] !== undefined && set[second] !== undefined) {
+      invalidArgument(where, `${field}.${second}`, oneEdgeName(first), set[second]);
+    }
+  }
+}
+
 function checkCellMargins(value: unknown, field: string, where: string): void {
   if (value === undefined) {
     return;
@@ -1113,37 +1229,148 @@ function checkCellMargins(value: unknown, field: string, where: string): void {
   }
 }
 
-export function checkTableProperties(value: unknown, field: string, where: string): void {
+/** What a table's borders must be, for an argument or a model check: a diagonal is a cell's, never a table's. */
+export const TABLE_DIAGONAL_EXPECTED =
+  "absent: a table has no diagonal border — set it on a cell's borders";
+
+/**
+ * A diagonal on a table's borders, as `[side, border]`. `CT_TblBorders` has none — `tl2br` and `tr2bl` are
+ * `CT_TcBorders`' — so one there has nowhere valid to be written.
+ */
+export function tableDiagonal(
+  borders: TableBorders | undefined
+): readonly ["tl2br" | "tr2bl", Border] | undefined {
+  for (const side of ["tl2br", "tr2bl"] as const) {
+    const border = borders?.[side];
+    if (border !== undefined) {
+      return [side, border];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The table properties a row's exceptions (`w:tblPrEx`, `CT_TblPrEx`) have no place for: they are the whole table's.
+ * The model used to type a row's exceptions as a table's properties, so these were accepted there and then dropped by
+ * the writer without a word.
+ */
+export const TABLE_ONLY_PROPERTIES = [
+  "style",
+  "float",
+  "rowBandSize",
+  "colBandSize",
+  "visuallyRightToLeft",
+  "caption",
+  "description"
+] as const;
+
+// The list is the difference of the two types, and cannot drift from it: a field added to a table's properties must
+// either be added to a row's exceptions or be listed here.
+const _tableOnlyMatches: IsExact<
+  (typeof TABLE_ONLY_PROPERTIES)[number],
+  Exclude<keyof TableProperties, keyof TablePropertyExceptions>
+> = true;
+
+export const TABLE_ONLY_EXPECTED =
+  "absent: a row's table property exceptions cannot override a property of the whole table";
+
+/** A whole-table property on a row's exceptions, as `[field, value]` — see {@link TABLE_ONLY_PROPERTIES}. */
+export function tableOnlyProperty(exceptions: object): readonly [string, unknown] | undefined {
+  for (const field of TABLE_ONLY_PROPERTIES) {
+    const value = (exceptions as Record<string, unknown>)[field];
+    if (value !== undefined) {
+      return [field, value];
+    }
+  }
+  return undefined;
+}
+
+/** What a table's properties and a row's exceptions share (`CT_TblPrExBase`), checked the same way for both. */
+function checkSharedTableProperties(
+  t: TablePropertyExceptions,
+  at: (name: string) => string,
+  where: string
+): void {
+  checkTableWidth(t.width, at("width"), where, optional);
+  checkBorderSet(t.borders, at("borders"), where);
+  refuseBothEdgeNames(t.borders, at("borders"), where);
+  const diagonal = tableDiagonal(t.borders as TableBorders | undefined);
+  if (diagonal !== undefined) {
+    invalidArgument(where, `${at("borders")}.${diagonal[0]}`, TABLE_DIAGONAL_EXPECTED, diagonal[1]);
+  }
+  checkOneOf(t.layout, TABLE_LAYOUTS, at("layout"), where, optional);
+  checkCellMargins(t.cellMargins, at("cellMargins"), where);
+  refuseBothEdgeNames(t.cellMargins, at("cellMargins"), where);
+  checkTableAlignment(t.alignment, at("alignment"), where);
+  twips(t.indent, at("indent"), where);
+  checkTableWidth(t.cellSpacing, at("cellSpacing"), where, optional);
+  if (t.shading !== undefined) {
+    checkShading(t.shading, at("shading"), where);
+  }
+}
+
+export function checkTableProperties(
+  value: unknown,
+  field: string,
+  where: string,
+  { base = false } = {}
+): void {
   if (value === undefined) {
     return;
   }
   checkRecord(value, field, where);
   const t = value as TableProperties;
   const at = (name: string): string => `${field}.${name}`;
+  if (base) {
+    refuseNarrower(t, ["propertyChange"], field, where, NARROWER_PROPERTIES.baseTable);
+  } else if (t.propertyChange !== undefined) {
+    checkRecord(t.propertyChange, at("propertyChange"), where);
+    checkRevision(t.propertyChange.revision, at("propertyChange.revision"), where);
+    checkTableProperties(
+      t.propertyChange.previousProperties,
+      at("propertyChange.previousProperties"),
+      where,
+      { base: true }
+    );
+  }
   checkString(t.style, at("style"), where, optional);
-  checkTableWidth(t.width, at("width"), where, optional);
-  checkBorderSet(t.borders, at("borders"), where);
-  checkOneOf(t.layout, TABLE_LAYOUTS, at("layout"), where, optional);
-  checkCellMargins(t.cellMargins, at("cellMargins"), where);
-  checkTableAlignment(t.alignment, at("alignment"), where);
-  twips(t.indent, at("indent"), where);
+  checkSharedTableProperties(t, at, where);
   checkInteger(t.rowBandSize, at("rowBandSize"), where, unsigned);
   checkInteger(t.colBandSize, at("colBandSize"), where, unsigned);
-  checkTableWidth(t.cellSpacing, at("cellSpacing"), where, optional);
-  if (t.shading !== undefined) {
-    checkShading(t.shading, at("shading"), where);
-  }
   checkString(t.caption, at("caption"), where, optional);
   checkString(t.description, at("description"), where, optional);
 }
 
-export function checkTableRowProperties(value: unknown, field: string, where: string): void {
+export function checkTableRowProperties(
+  value: unknown,
+  field: string,
+  where: string,
+  { previous = false } = {}
+): void {
   if (value === undefined) {
     return;
   }
   checkRecord(value, field, where);
   const r = value as TableRowProperties;
   const at = (name: string): string => `${field}.${name}`;
+  if (previous) {
+    refuseNarrower(
+      r,
+      [...ROW_ONLY_PROPERTIES, "propertyChange"],
+      field,
+      where,
+      NARROWER_PROPERTIES.previousRow
+    );
+  } else if (r.propertyChange !== undefined) {
+    checkRecord(r.propertyChange, at("propertyChange"), where);
+    checkRevision(r.propertyChange.revision, at("propertyChange.revision"), where);
+    checkTableRowProperties(
+      r.propertyChange.previousProperties,
+      at("propertyChange.previousProperties"),
+      where,
+      { previous: true }
+    );
+  }
   if (r.height !== undefined) {
     checkRecord(r.height, at("height"), where);
     checkInteger(r.height.value, at("height.value"), where, { min: 0 });
@@ -1154,35 +1381,115 @@ export function checkTableRowProperties(value: unknown, field: string, where: st
   checkInteger(r.gridAfter, at("gridAfter"), where, unsigned);
   checkTableWidth(r.widthBefore, at("widthBefore"), where, optional);
   checkTableWidth(r.widthAfter, at("widthAfter"), where, optional);
-  checkTableProperties(r.tblPrEx, at("tblPrEx"), where);
+  checkTablePropertyExceptions(r.tblPrEx, at("tblPrEx"), where);
 }
 
-export function checkTableCellProperties(value: unknown, field: string, where: string): void {
+/**
+ * A row's table property exceptions: the shared table properties, none of the whole table's, and a change record
+ * whose previous exceptions (`previous`, `CT_TblPrExBase`) have none of their own.
+ */
+export function checkTablePropertyExceptions(
+  value: unknown,
+  field: string,
+  where: string,
+  { previous = false } = {}
+): void {
+  if (value === undefined) {
+    return;
+  }
+  checkRecord(value, field, where);
+  const t = value as TablePropertyExceptions;
+  const at = (name: string): string => `${field}.${name}`;
+  const tableOnly = tableOnlyProperty(t);
+  if (tableOnly !== undefined) {
+    invalidArgument(where, at(tableOnly[0]), TABLE_ONLY_EXPECTED, tableOnly[1]);
+  }
+  checkSharedTableProperties(t, at, where);
+  if (t.propertyChange === undefined) {
+    return;
+  }
+  if (previous) {
+    refuseNarrower(t, ["propertyChange"], field, where, NARROWER_PROPERTIES.previousExceptions);
+  }
+  checkRecord(t.propertyChange, at("propertyChange"), where);
+  checkRevision(t.propertyChange.revision, at("propertyChange.revision"), where);
+  checkTablePropertyExceptions(
+    t.propertyChange.previousProperties,
+    at("propertyChange.previousProperties"),
+    where,
+    { previous: true }
+  );
+}
+
+export function checkTableCellProperties(
+  value: unknown,
+  field: string,
+  where: string,
+  { previous = false } = {}
+): void {
   if (value === undefined) {
     return;
   }
   checkRecord(value, field, where);
   const c = value as TableCellProperties;
   const at = (name: string): string => `${field}.${name}`;
+  if (previous) {
+    refuseNarrower(c, ["propertyChange"], field, where, NARROWER_PROPERTIES.previousCell);
+  } else if (c.propertyChange !== undefined) {
+    checkRecord(c.propertyChange, at("propertyChange"), where);
+    checkRevision(c.propertyChange.revision, at("propertyChange.revision"), where);
+    checkTableCellProperties(
+      c.propertyChange.previousProperties,
+      at("propertyChange.previousProperties"),
+      where,
+      { previous: true }
+    );
+  }
   checkTableWidth(c.width, at("width"), where, optional);
   checkInteger(c.gridSpan, at("gridSpan"), where, { optional: true, min: 1 });
   checkInteger(c.rowSpan, at("rowSpan"), where, { optional: true, min: 1 });
   checkOneOf(c.verticalMerge, VERTICAL_MERGES, at("verticalMerge"), where, optional);
   checkBorderSet(c.borders, at("borders"), where);
+  refuseBothEdgeNames(c.borders, at("borders"), where);
   if (c.shading !== undefined) {
     checkShading(c.shading, at("shading"), where);
   }
   checkOneOf(c.verticalAlign, VERTICAL_CELL_ALIGNS, at("verticalAlign"), where, optional);
   checkOneOf(c.textDirection, TEXT_DIRECTIONS, at("textDirection"), where, optional);
   checkCellMargins(c.margins, at("margins"), where);
+  refuseBothEdgeNames(c.margins, at("margins"), where);
 }
 
-export function checkSectionProperties(value: unknown, field: string, where: string): void {
+export function checkSectionProperties(
+  value: unknown,
+  field: string,
+  where: string,
+  { previous = false } = {}
+): void {
   if (value === undefined) {
     return;
   }
   checkRecord(value, field, where);
   const s = value as SectionProperties;
+  if (previous) {
+    refuseNarrower(
+      s,
+      [...SECTION_ONLY_PROPERTIES, "propertyChange"],
+      field,
+      where,
+      NARROWER_PROPERTIES.previousSection
+    );
+  } else if (s.propertyChange !== undefined) {
+    const at = (name: string): string => `${field}.${name}`;
+    checkRecord(s.propertyChange, at("propertyChange"), where);
+    checkRevision(s.propertyChange.revision, at("propertyChange.revision"), where);
+    checkSectionProperties(
+      s.propertyChange.previousProperties,
+      at("propertyChange.previousProperties"),
+      where,
+      { previous: true }
+    );
+  }
   const at = (name: string): string => `${field}.${name}`;
   if (s.pageSize !== undefined) {
     checkRecord(s.pageSize, at("pageSize"), where);
@@ -1651,6 +1958,24 @@ export function checkPositionalTab(value: unknown, field: string, where: string)
 const STYLE_TYPES = members<StyleType>()(["paragraph", "character", "table", "numbering"]);
 
 /** A style definition as `Document.addStyle` takes it. */
+/** Refuse what Word does not allow in a table style's properties of `kind` (`TABLE_STYLE_EXCLUDED`). */
+function refuseTableStyleExcluded(
+  properties: object | undefined,
+  field: string,
+  where: string,
+  kind: TableStyleProperties
+): void {
+  if (properties !== undefined) {
+    refuseNarrower(
+      properties,
+      tableStyleExcludedFields(kind),
+      field,
+      where,
+      NARROWER_PROPERTIES[kind]
+    );
+  }
+}
+
 export function checkStyleDef(value: unknown, field: string, where: string): void {
   checkRecord(value, field, where);
   const s = value as StyleDef;
@@ -1666,9 +1991,51 @@ export function checkStyleDef(value: unknown, field: string, where: string): voi
   }
   checkInteger(s.uiPriority, at("uiPriority"), where, unsigned);
   checkInteger(s.outlineLevel, at("outlineLevel"), where, { optional: true, min: 0, max: 9 });
-  checkParagraphProperties(s.paragraphProperties, at("paragraphProperties"), where);
+  checkParagraphProperties(s.paragraphProperties, at("paragraphProperties"), where, {
+    scope: "general"
+  });
   checkRunProperties(s.runProperties, at("runProperties"), where);
-  checkTableProperties(s.tableProperties, at("tableProperties"), where);
+  checkTableProperties(s.tableProperties, at("tableProperties"), where, { base: true });
+  // What Word does not allow in a table style (`TABLE_STYLE_EXCLUDED`), refused as the writer refuses it.
+  refuseTableStyleExcluded(s.tableProperties, at("tableProperties"), where, "styleTable");
+  if (s.tableStyleConditions !== undefined) {
+    if (!Array.isArray(s.tableStyleConditions)) {
+      invalidArgument(where, at("tableStyleConditions"), "an array", s.tableStyleConditions);
+    }
+    s.tableStyleConditions.forEach((condition, i) => {
+      const c = `${at("tableStyleConditions")}[${i}]`;
+      checkRecord(condition, c, where);
+      checkOneOf(condition.type, TABLE_STYLE_CONDITION_TYPES, `${c}.type`, where);
+      // `CT_TblStylePr`: `CT_PPrGeneral`, `CT_RPr`, `CT_TblPrBase`, `CT_TrPr`, `CT_TcPr`.
+      checkParagraphProperties(condition.paragraphProperties, `${c}.paragraphProperties`, where, {
+        scope: "general"
+      });
+      checkRunProperties(condition.runProperties, `${c}.runProperties`, where);
+      checkTableProperties(condition.tableProperties, `${c}.tableProperties`, where, {
+        base: true
+      });
+      refuseTableStyleExcluded(
+        condition.tableProperties,
+        `${c}.tableProperties`,
+        where,
+        "conditionTable"
+      );
+      checkTableRowProperties(condition.rowProperties, `${c}.rowProperties`, where);
+      refuseTableStyleExcluded(
+        condition.rowProperties,
+        `${c}.rowProperties`,
+        where,
+        "conditionRow"
+      );
+      checkTableCellProperties(condition.cellProperties, `${c}.cellProperties`, where);
+      refuseTableStyleExcluded(
+        condition.cellProperties,
+        `${c}.cellProperties`,
+        where,
+        "conditionCell"
+      );
+    });
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -1759,7 +2126,6 @@ const MATH_FRACTION_TYPES = members<NonNullable<MathFraction["fractionType"]>>()
 const MATH_POSITIONS = members<MathBar["position"]>()(["top", "bottom"]);
 const MATH_VERTICAL_ALIGNS = members<NonNullable<MathGroupChar["verticalAlign"]>>()([
   "top",
-  "center",
   "bottom"
 ]);
 const MATH_LIMIT_TYPES = members<MathLimit["limitType"]>()(["upper", "lower"]);

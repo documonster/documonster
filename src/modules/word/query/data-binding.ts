@@ -12,6 +12,7 @@ import {
   checkString,
   namedValueField
 } from "@word/core/argument-checks";
+import { storeItemKey } from "@word/core/internal-utils";
 import { markDerived } from "@word/core/ownership";
 import {
   arrangeParagraphChildren,
@@ -66,11 +67,11 @@ export function resolveDataBindings(
   const xmlStore = new Map<string, string>();
   if (entries) {
     for (const [key, value] of entries) {
-      xmlStore.set(key.toLowerCase(), value as string);
+      xmlStore.set(storeItemKey(key), value as string);
     }
   } else if (doc.customXmlParts) {
     for (const part of doc.customXmlParts) {
-      xmlStore.set(part.itemId.toLowerCase(), part.xmlContent);
+      xmlStore.set(storeItemKey(part.itemId), part.xmlContent);
     }
   }
 
@@ -147,8 +148,7 @@ function resolveSdtBinding(sdt: StructuredDocumentTag, xmlStore: Map<string, str
 
     // Build parent xpath for resolving child element values
     const parentXpath = binding.xpath;
-    const storeId = binding.storeItemId.replace(/[{}]/g, "").toLowerCase();
-    const xmlContent = xmlStore.get(storeId) ?? xmlStore.get(`{${storeId}}`);
+    const xmlContent = xmlStore.get(storeItemKey(binding.storeItemId));
 
     const ranges = repeatedRanges(template);
     for (let itemIdx = 0; itemIdx < values.length; itemIdx++) {
@@ -398,8 +398,7 @@ function matchesSegment(
 }
 
 function loadStoreRoot(binding: SdtDataBinding, xmlStore: Map<string, string>): StoreRoot | null {
-  const storeId = binding.storeItemId.replace(/[{}]/g, "").toLowerCase();
-  const xmlContent = xmlStore.get(storeId) ?? xmlStore.get(`{${storeId}}`);
+  const xmlContent = xmlStore.get(storeItemKey(binding.storeItemId));
   if (!xmlContent) {
     return null;
   }

@@ -25,18 +25,6 @@ interface CtrlPropModel {
 }
 
 class CtrlPropXform extends BaseXform<FormCheckboxModel> {
-  private _checkedToXmlValue(checked: FormCheckboxModel["checked"]): string {
-    switch (checked) {
-      case "Checked":
-        return "1";
-      case "Mixed":
-        return "2";
-      case "Unchecked":
-      default:
-        return "0";
-    }
-  }
-
   get tag(): string {
     return "formControlPr";
   }
@@ -47,10 +35,13 @@ class CtrlPropXform extends BaseXform<FormCheckboxModel> {
     const attrs: Record<string, string> = {
       xmlns: "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main",
       objectType: "CheckBox",
-      // Excel tends to serialize this as numeric state (0/1/2), matching VML x:Checked.
-      checked: this._checkedToXmlValue(renderModel.checked),
       lockText: "1"
     };
+    // `ST_Checked` is a word, unlike VML's `x:Checked` number: `checked="1"` broke the schema. Excel writes
+    // `Checked` or `Mixed` and leaves the default, `Unchecked`, out (a workbook resaved by Excel 16 shows both).
+    if (renderModel.checked === "Checked" || renderModel.checked === "Mixed") {
+      attrs.checked = renderModel.checked;
+    }
 
     // Add linked cell reference
     if (renderModel.link) {

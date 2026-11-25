@@ -16,6 +16,7 @@ import { findUnrecognizedValues } from "@utils/unrecognized-values";
 import { checkHandle } from "@word/core/argument-checks";
 import { indexImagesByKey } from "@word/core/image-keys";
 import { EXTENSION_MEDIA_TYPE_MAP, KNOWN_IMAGE_MEDIA_TYPES } from "@word/core/image-media";
+import { storeItemKey } from "@word/core/internal-utils";
 import { checkSchema, w } from "@word/core/option-schema";
 import { isRangeMarker } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
@@ -1676,8 +1677,7 @@ function validateCustomXmlPartItemIds(
   const itemIds = new Set<string>();
   for (let i = 0; i < customXmlParts.length; i++) {
     const part = customXmlParts[i]!;
-    // Normalize itemId by stripping braces and lowercasing for comparison
-    const normalizedId = part.itemId.replace(/[{}]/g, "").toLowerCase();
+    const normalizedId = storeItemKey(part.itemId);
     if (itemIds.has(normalizedId)) {
       addIssue(
         "error",
@@ -1704,10 +1704,12 @@ function validateUnrecognizedValues(
   doc: DocxDocument,
   addIssue: (s: ValidationSeverity, m: string, p: string, r: string) => void
 ): void {
-  for (const { path, value } of findUnrecognizedValues(doc)) {
+  for (const { path, value, writtenBack } of findUnrecognizedValues(doc)) {
     addIssue(
       "warning",
-      `${JSON.stringify(value)} is not a value this field takes; it was kept as read and is written back unchanged`,
+      writtenBack !== false
+        ? `${JSON.stringify(value)} is not a value this field takes; it was kept as read and is written back unchanged`
+        : `${value} has no place here in the schema; it was kept to be reported, and is not written back`,
       path,
       "unrecognized-value"
     );

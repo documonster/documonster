@@ -184,19 +184,15 @@ function parseMathContent(el: XmlElement): MathContent[] {
           if (chrEl) {
             g.char = mathAttrVal(chrEl, "val");
           }
-          const posEl = findMathChild(prEl, "pos");
-          if (posEl) {
-            const v = mathAttrVal(posEl, "val");
-            if (v === "top" || v === "bottom") {
-              g.position = v;
-            }
+          // Both are `ST_TopBot` — `top` or `bot`, which the model calls "bottom". The file's `bot` was not
+          // recognised, so a group character under its base read as one above it.
+          const position = topBot(findMathChild(prEl, "pos"));
+          if (position) {
+            g.position = position;
           }
-          const vjcEl = findMathChild(prEl, "vertJc");
-          if (vjcEl) {
-            const v = mathAttrVal(vjcEl, "val");
-            if (v === "top" || v === "center" || v === "bottom") {
-              g.verticalAlign = v;
-            }
+          const verticalAlign = topBot(findMathChild(prEl, "vertJc"));
+          if (verticalAlign) {
+            g.verticalAlign = verticalAlign;
           }
         }
         result.push(g);
@@ -396,16 +392,7 @@ function parseMathContent(el: XmlElement): MathContent[] {
       case "bar": {
         const barPrEl = findMathChild(child, "barPr");
         const e = findMathChild(child, "e");
-        let position: "top" | "bottom" = "top";
-        if (barPrEl) {
-          const pos = findMathChild(barPrEl, "pos");
-          if (pos) {
-            const v = pos.attributes["m:val"] ?? pos.attributes["val"];
-            if (v === "bot") {
-              position = "bottom";
-            }
-          }
-        }
+        const position = (barPrEl && topBot(findMathChild(barPrEl, "pos"))) ?? "top";
         result.push({
           type: "mathBar",
           position,
@@ -453,3 +440,9 @@ function parseMathBlock(oMathParaEl: XmlElement): MathBlock {
 }
 
 export { parseMathContent, parseMathBlock };
+
+/** An `ST_TopBot` element's value in the model's words — `bot` is "bottom" — or `undefined` when absent or other. */
+function topBot(el: XmlElement | undefined): "top" | "bottom" | undefined {
+  const v = el && mathAttrVal(el, "val");
+  return v === "top" ? "top" : v === "bot" ? "bottom" : undefined;
+}

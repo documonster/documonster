@@ -5,6 +5,30 @@
  * for the OOXML WordprocessingML format.
  */
 
+import type { TableStyleConditionType } from "@word/types";
+
+/**
+ * A table style conditional format's `type`, by the `w:type` token (`ST_TblStyleOverrideType`) it is written as. The
+ * model names a condition for what it formats; the reader used to put the file's token in the field instead, so a
+ * style read from a file had `band1Horz` where the model has `oddRowBanding`, and style resolution — which matches
+ * the model's names — never applied its banding, first or last column or corner formats.
+ */
+export const TABLE_STYLE_CONDITION_TOKENS = {
+  wholeTable: "wholeTable",
+  firstRow: "firstRow",
+  lastRow: "lastRow",
+  firstColumn: "firstCol",
+  lastColumn: "lastCol",
+  oddRowBanding: "band1Horz",
+  evenRowBanding: "band2Horz",
+  oddColumnBanding: "band1Vert",
+  evenColumnBanding: "band2Vert",
+  topLeftCell: "nwCell",
+  topRightCell: "neCell",
+  bottomLeftCell: "swCell",
+  bottomRightCell: "seCell"
+} as const satisfies Readonly<Record<TableStyleConditionType, string>>;
+
 // =============================================================================
 // XML Namespaces (Transitional — ECMA-376 Part 4)
 // =============================================================================

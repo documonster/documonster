@@ -4,6 +4,7 @@
  * as read, so nothing is lost — but the field reads as absent, and that is a bug this test exists to catch.
  */
 import { OOXML_ENUMERATIONS } from "@test/fixtures/ooxml-enumerations";
+import { TABLE_STYLE_CONDITION_TOKENS } from "@word/constants";
 import { WRITTEN } from "@word/core/argument-checks";
 import { describe, expect, it } from "vitest";
 
@@ -64,6 +65,12 @@ describe("the vocabularies the Word writers enforce are the schema's", () => {
   it.each(Object.entries(SCHEMA))("%s", (name, [type, extra = []]) => {
     const vocabulary = WRITTEN[name as keyof typeof WRITTEN];
     expect([...vocabulary].sort()).toEqual([...type, ...extra].sort());
+  });
+
+  it("a table style condition is written as one of ST_TblStyleOverrideType, each by one name", () => {
+    expect(Object.values(TABLE_STYLE_CONDITION_TOKENS).sort()).toEqual(
+      [...wml.ST_TblStyleOverrideType].sort()
+    );
   });
 
   it("ST_HAnchor and ST_VAnchor are one vocabulary", () => {

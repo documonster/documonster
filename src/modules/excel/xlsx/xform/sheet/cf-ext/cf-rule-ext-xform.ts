@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { DatabarExtXform } from "@excel/xlsx/xform/sheet/cf-ext/databar-ext-xform";
 import { IconSetExtXform } from "@excel/xlsx/xform/sheet/cf-ext/icon-set-ext-xform";
-import { uuidV4 } from "@utils/uuid";
+import { newGuid } from "@utils/uuid";
 import type { ParseOpenTag } from "@xml/types";
 
 const extIcons = {
@@ -47,7 +47,7 @@ class CfRuleExtXform extends CompositeXform {
    */
   static prepareRule(rule) {
     if (CfRuleExtXform.isExt(rule) && !rule.x14Id) {
-      rule.x14Id = `{${uuidV4()}}`.toUpperCase();
+      rule.x14Id = newGuid();
     }
   }
 
@@ -85,7 +85,7 @@ class CfRuleExtXform extends CompositeXform {
     xmlStream.openNode(this.tag, {
       type: "iconSet",
       priority: model.priority,
-      id: model.x14Id ?? `{${uuidV4()}}`
+      id: model.x14Id ?? newGuid()
     });
 
     this.iconSetXform.render(xmlStream, model);

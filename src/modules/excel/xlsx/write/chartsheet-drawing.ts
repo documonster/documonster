@@ -1,7 +1,7 @@
 /**
  * The drawing that places a chart across a whole chartsheet, shared by the XLSX and XLSB writers.
  */
-import { uuidV4 } from "@utils/uuid";
+import { newGuid } from "@utils/uuid";
 import { xmlEncodeAttr } from "@xml/encode";
 
 /**
@@ -56,7 +56,7 @@ export function renderChartsheetDrawingXml(options: {
   const escName = xmlEncodeAttr(chartName);
   const escRId = xmlEncodeAttr(chartRId);
   const cNvPrExtLst = isChartEx
-    ? `<a:extLst><a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="{${uuidV4().toUpperCase()}}"/></a:ext></a:extLst>`
+    ? `<a:extLst><a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="${newGuid()}"/></a:ext></a:extLst>`
     : "";
   const graphicFrame =
     `<xdr:graphicFrame macro="">` +

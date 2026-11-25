@@ -23,7 +23,7 @@
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
-import { uuidV4 } from "@utils/uuid";
+import { newGuid } from "@utils/uuid";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
@@ -124,7 +124,7 @@ class GraphicFrameXform extends BaseXform {
       xmlStream.openNode("a:ext", { uri: CREATION_ID_EXT_URI });
       xmlStream.leafNode("a16:creationId", {
         "xmlns:a16": "http://schemas.microsoft.com/office/drawing/2014/main",
-        id: `{${uuidV4().toUpperCase()}}`
+        id: newGuid()
       });
       xmlStream.closeNode(); // a:ext
       xmlStream.closeNode(); // a:extLst

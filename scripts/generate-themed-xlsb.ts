@@ -36,6 +36,7 @@ import { MANDATORY_FILL_PATTERNS, mandatoryFill } from "@excel/xlsb/fill";
 import { defaultFont } from "@excel/xlsb/font";
 import { encodeMargins, encodePageSetup, encodeSheetFormatInfo } from "@excel/xlsb/page-setup";
 import { encodeSheetProperties } from "@excel/xlsb/sheet-properties";
+import { cellFormat } from "@excel/xlsb/styles";
 import { biff, rowHeader } from "@test/biff-fixture";
 
 // A binary workbook carrying parts this library does not model: a theme and an image, each
@@ -136,10 +137,12 @@ a.add(
     ["BrtBorder", new Uint8Array(51)],
     ["BrtEndBorders"],
     ["BrtBeginCellStyleXFs", new Uint8Array([1, 0, 0, 0])],
-    ["BrtXF", new Uint8Array(16)],
+    // A style XF is a root: `ixfParent` 0xFFFF. Sixteen zero bytes declared style XF 0 its own parent, which the
+    // validator refuses and Excel answers by removing the workbook's named styles.
+    ["BrtXF", cellFormat({ parent: 0xffff, formatId: 0, fontIndex: 0, fillIndex: 0 })],
     ["BrtEndCellStyleXFs"],
     ["BrtBeginCellXFs", new Uint8Array([1, 0, 0, 0])],
-    ["BrtXF", new Uint8Array(16)],
+    ["BrtXF", cellFormat({ parent: 0, formatId: 0, fontIndex: 0, fillIndex: 0 })],
     ["BrtEndCellXFs"],
     ["BrtEndStyleSheet"]
   ])

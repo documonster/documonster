@@ -6,7 +6,6 @@
  * implementations of base64, UUID, UTF-16LE encoding, and XML helpers.
  */
 
-import { uuidV4 } from "@utils/uuid";
 import { DocxError } from "@word/errors";
 
 // =============================================================================
@@ -73,17 +72,25 @@ export function base64ToBytes(s: string): Uint8Array {
 // =============================================================================
 
 /**
- * Generate a GUID in braced format: "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}".
- * Used by font obfuscation (w:fontKey) and building blocks.
- *
- * Delegates to {@link uuidV4} rather than assembling a third copy of the v4 bit
- * masking here. These ids identify rather than protect — a `w:fontKey` is
- * stored in the document in plain text — so a non-cryptographic tier is
- * acceptable. Keys, salts and verifiers use {@link randomBytes}, which throws
- * when Web Crypto is missing.
+ * A GUID without its braces — the form the model holds a custom XML part's `itemId` in, as the reader leaves it.
+ * A binding's `storeItemId` carries the braces; one function strips them for every comparison and every write, so
+ * that a part and the bindings to it match whichever form each was given in.
  */
-export function generateGuid(): string {
-  return `{${uuidV4()}}`;
+export function bareGuid(id: string): string {
+  return id.replace(/[{}]/g, "");
+}
+
+/** The key a store item is matched by: its GUID bare, and case-insensitive, as a GUID is. */
+export function storeItemKey(id: string): string {
+  return bareGuid(id).toLowerCase();
+}
+
+/**
+ * A custom XML part's `itemId` as `ds:itemID` stores it: one pair of braces. The same braced string given to a part
+ * and to its bindings was written `{{…}}`, which fails `ST_Guid`.
+ */
+export function braceItemId(itemId: string): string {
+  return `{${bareGuid(itemId)}}`;
 }
 
 // =============================================================================

@@ -49,7 +49,7 @@ const expectations = [
       firstHeader: "&CHome",
       firstFooter: "&CHome"
     },
-    xml: '<headerFooter differentFirst="1"><oddFooter>&amp;CDocumonster</oddFooter><firstFooter>&amp;CHome</firstFooter><oddHeader>&amp;CDocumonster</oddHeader><firstHeader>&amp;CHome</firstHeader></headerFooter>',
+    xml: '<headerFooter differentFirst="1"><oddHeader>&amp;CDocumonster</oddHeader><oddFooter>&amp;CDocumonster</oddFooter><firstHeader>&amp;CHome</firstHeader><firstFooter>&amp;CHome</firstFooter></headerFooter>',
     parsedModel: {
       differentFirst: true,
       oddHeader: "&CDocumonster",

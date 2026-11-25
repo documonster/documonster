@@ -5,23 +5,29 @@
  * and table style conditional formats.
  */
 
-import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
-import { within } from "@word/core/node-path";
-import type {
-  DocDefaults,
-  PreservedXml,
-  StyleDef,
-  TableStyleConditionalFormat,
-  TableBorders
-} from "@word/types";
+import { NS_W, NS_R, STD_DOC_ATTRIBUTES, TABLE_STYLE_CONDITION_TOKENS } from "@word/constants";
+import {
+  NARROWER_PROPERTIES,
+  type TableStyleProperties,
+  tableStyleExcludedFields
+} from "@word/core/change-records";
+import { refuseAbsentFields, unwritableNode, within } from "@word/core/node-path";
+import type { DocDefaults, PreservedXml, StyleDef, TableStyleConditionalFormat } from "@word/types";
 import { renderParagraphProperties } from "@word/writer/paragraph-writer";
 import {
   createPreservedEmitter,
   preservedElements,
   schemaOrder,
+  wordprocessingNames,
   withPreservedNamespaces
 } from "@word/writer/preserved-xml";
-import { renderRunProperties, renderShading } from "@word/writer/run-writer";
+import { renderRunProperties } from "@word/writer/run-writer";
+import { emitInSchemaOrder } from "@word/writer/schema-order";
+import {
+  renderTableCellProperties,
+  renderTableProperties,
+  renderTableRowProperties
+} from "@word/writer/table-writer";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
@@ -39,7 +45,9 @@ function renderDocDefaults(xml: XmlSink, defaults: DocDefaults): void {
   if (defaults.paragraphProperties) {
     xml.openNode("w:pPrDefault");
     const paragraph = defaults.paragraphProperties;
-    within("docDefaults.paragraphProperties", () => renderParagraphProperties(xml, paragraph));
+    within("docDefaults.paragraphProperties", () =>
+      renderParagraphProperties(xml, paragraph, "general")
+    );
     xml.closeNode();
   }
 
@@ -47,134 +55,74 @@ function renderDocDefaults(xml: XmlSink, defaults: DocDefaults): void {
 }
 
 /** Map table style condition type to OOXML value. */
-const CONDITION_TYPE_MAP: Record<string, string> = {
-  firstRow: "firstRow",
-  lastRow: "lastRow",
-  firstColumn: "firstCol",
-  lastColumn: "lastCol",
-  oddRowBanding: "band1Horz",
-  evenRowBanding: "band2Horz",
-  oddColumnBanding: "band1Vert",
-  evenColumnBanding: "band2Vert",
-  topLeftCell: "nwCell",
-  topRightCell: "neCell",
-  bottomLeftCell: "swCell",
-  bottomRightCell: "seCell"
-};
-
-/** Render table style conditional format (w:tblStylePr). */
-function renderTableStyleCondition(xml: XmlSink, condition: TableStyleConditionalFormat): void {
-  const typeVal = CONDITION_TYPE_MAP[condition.type] ?? condition.type;
-  xml.openNode("w:tblStylePr", { "w:type": typeVal });
-
-  if (condition.paragraphProperties) {
-    const paragraph = condition.paragraphProperties;
-    within("paragraphProperties", () => renderParagraphProperties(xml, paragraph));
-  }
-  if (condition.runProperties) {
-    const run = condition.runProperties;
-    within("runProperties", () => renderRunProperties(xml, run));
-  }
-  if (condition.tableProperties) {
-    xml.openNode("w:tblPr");
-    // Simplified table props for conditional format
-    if (condition.tableProperties.borders) {
-      renderTableBordersInStyle(xml, condition.tableProperties.borders);
-    }
-    xml.closeNode();
-  }
-  if (condition.cellProperties) {
-    xml.openNode("w:tcPr");
-    if (condition.cellProperties.shading) {
-      const shading = condition.cellProperties.shading;
-      within("cellProperties.shading", () => renderShading(xml, shading));
-    }
-    if (condition.cellProperties.borders) {
-      renderCellBordersInStyle(xml, condition.cellProperties.borders);
-    }
-    xml.closeNode();
-  }
-
-  xml.closeNode();
-}
-
 /**
- * Render cell borders inside a style definition (w:tcBorders).
- * Cell-level border container is `w:tcBorders`, not `w:tblBorders` — using
- * the wrong wrapper produces invalid styles.xml that Word silently ignores.
+ * Render table style conditional format (w:tblStylePr).
+ *
+ * Its table, row and cell properties are written by the table writer — they are the same `TableProperties`,
+ * `TableRowProperties` and `TableCellProperties` a table carries. This used to have a reduced copy of each: the
+ * table's carried only its borders and the row's was not written at all, so a conditional format read from a file
+ * lost its shading, margins and row height on the way back; and its borders dropped `themeColor`, `shadow` and
+ * `frame`, and invented a size and a colour the model did not have.
  */
-function renderCellBordersInStyle(xml: XmlSink, borders: TableBorders): void {
-  xml.openNode("w:tcBorders");
-  for (const side of [
-    "top",
-    "left",
-    "bottom",
-    "right",
-    "insideH",
-    "insideV",
-    "start",
-    "end",
-    "tl2br",
-    "tr2bl"
-  ] as const) {
-    const b = borders[side];
-    if (b) {
-      xml.leafNode(`w:${side}`, {
-        "w:val": b.style,
-        "w:sz": xmlValue(b.size ?? 4, "w:sz"),
-        "w:space": xmlValue(Math.max(0, Math.round(b.space ?? 0)), "w:space"),
-        "w:color": b.color ?? "auto"
-      });
-    }
-  }
+function renderTableStyleCondition(xml: XmlSink, condition: TableStyleConditionalFormat): void {
+  const typeVal = Object.hasOwn(TABLE_STYLE_CONDITION_TOKENS, condition.type)
+    ? TABLE_STYLE_CONDITION_TOKENS[condition.type]
+    : unwritableNode(
+        "type",
+        `one of ${Object.keys(TABLE_STYLE_CONDITION_TOKENS)
+          .map(name => JSON.stringify(name))
+          .join(", ")}`,
+        condition.type
+      );
+  xml.openNode("w:tblStylePr", { "w:type": typeVal });
+  const { paragraphProperties, runProperties, tableProperties, rowProperties, cellProperties } =
+    condition;
+  emitInSchemaOrder("w:CT_TblStylePr", [
+    !!paragraphProperties && [
+      "w:pPr",
+      () =>
+        within("paragraphProperties", () =>
+          renderParagraphProperties(xml, paragraphProperties, "general")
+        )
+    ],
+    !!runProperties && [
+      "w:rPr",
+      () => within("runProperties", () => renderRunProperties(xml, runProperties))
+    ],
+    // What Word does not allow in a table style is refused (`TABLE_STYLE_EXCLUDED`).
+    !!tableProperties && [
+      "w:tblPr",
+      () =>
+        within("tableProperties", () => {
+          refuseExcluded(tableProperties, "conditionTable");
+          renderTableProperties(xml, tableProperties, true);
+        })
+    ],
+    !!rowProperties && [
+      "w:trPr",
+      () =>
+        within("rowProperties", () => {
+          refuseExcluded(rowProperties, "conditionRow");
+          renderTableRowProperties(xml, rowProperties);
+        })
+    ],
+    !!cellProperties && [
+      "w:tcPr",
+      () =>
+        within("cellProperties", () => {
+          refuseExcluded(cellProperties, "conditionCell");
+          renderTableCellProperties(xml, cellProperties, { widthPlaceholder: false });
+        })
+    ]
+  ]);
   xml.closeNode();
 }
 
-/** Render table borders inside a style definition. */
-function renderTableBordersInStyle(xml: XmlSink, borders: TableBorders): void {
-  xml.openNode("w:tblBorders");
-  for (const side of ["top", "left", "bottom", "right", "insideH", "insideV"] as const) {
-    const b = borders[side];
-    if (b) {
-      xml.leafNode(`w:${side}`, {
-        "w:val": b.style,
-        "w:sz": xmlValue(b.size ?? 4, "w:sz"),
-        "w:space": xmlValue(Math.max(0, Math.round(b.space ?? 0)), "w:space"),
-        "w:color": b.color ?? "auto"
-      });
-    }
-  }
-  xml.closeNode();
-}
+/** CT_Style's children, from the schema. */
+const STYLE_ORDER = schemaOrder(wordprocessingNames("w:CT_Style"));
 
-/** CT_Style's children. */
-const STYLE_ORDER = schemaOrder([
-  "w:name",
-  "w:aliases",
-  "w:basedOn",
-  "w:next",
-  "w:link",
-  "w:autoRedefine",
-  "w:hidden",
-  "w:uiPriority",
-  "w:semiHidden",
-  "w:unhideWhenUsed",
-  "w:qFormat",
-  "w:locked",
-  "w:personal",
-  "w:personalCompose",
-  "w:personalReply",
-  "w:rsid",
-  "w:pPr",
-  "w:rPr",
-  "w:tblPr",
-  "w:trPr",
-  "w:tcPr",
-  "w:tblStylePr"
-]);
-
-/** CT_Styles' children. */
-const STYLES_ORDER = schemaOrder(["w:docDefaults", "w:latentStyles", "w:style"]);
+/** CT_Styles' children, from the schema. */
+const STYLES_ORDER = schemaOrder(wordprocessingNames("w:CT_Styles"));
 
 type RawXmlPolicy = "preserve" | "strip" | "reject" | undefined;
 
@@ -248,7 +196,9 @@ function renderStyle(xml: XmlSink, style: StyleDef, rawXmlPolicy: RawXmlPolicy):
       : style.paragraphProperties;
   if (paragraphProperties) {
     preserved.upTo("w:pPr");
-    within("paragraphProperties", () => renderParagraphProperties(xml, paragraphProperties));
+    within("paragraphProperties", () =>
+      renderParagraphProperties(xml, paragraphProperties, "general")
+    );
   }
 
   if (style.runProperties) {
@@ -260,93 +210,11 @@ function renderStyle(xml: XmlSink, style: StyleDef, rawXmlPolicy: RawXmlPolicy):
   // For table styles
   if (style.tableProperties) {
     preserved.upTo("w:tblPr");
-    xml.openNode("w:tblPr");
-    // Per CT_TblPrBase order, band sizes precede w:tblW.
-    if (style.tableProperties.rowBandSize !== undefined) {
-      xml.leafNode("w:tblStyleRowBandSize", {
-        "w:val": xmlValue(style.tableProperties.rowBandSize, "w:val")
-      });
-    }
-    if (style.tableProperties.colBandSize !== undefined) {
-      xml.leafNode("w:tblStyleColBandSize", {
-        "w:val": xmlValue(style.tableProperties.colBandSize, "w:val")
-      });
-    }
-    if (style.tableProperties.width) {
-      xml.leafNode("w:tblW", {
-        "w:w": xmlValue(style.tableProperties.width.value, "w:w"),
-        "w:type": style.tableProperties.width.type
-      });
-    }
-    if (style.tableProperties.alignment) {
-      xml.leafNode("w:jc", { "w:val": style.tableProperties.alignment });
-    }
-    if (style.tableProperties.indent !== undefined) {
-      xml.leafNode("w:tblInd", {
-        "w:w": xmlValue(style.tableProperties.indent, "w:w"),
-        "w:type": "dxa"
-      });
-    }
-    if (style.tableProperties.layout) {
-      xml.leafNode("w:tblLayout", { "w:type": style.tableProperties.layout });
-    }
-    if (style.tableProperties.borders) {
-      renderTableBordersInStyle(xml, style.tableProperties.borders);
-    }
-    if (style.tableProperties.cellMargins) {
-      xml.openNode("w:tblCellMar");
-      for (const side of ["top", "left", "bottom", "right"] as const) {
-        const m = style.tableProperties.cellMargins[side];
-        if (m) {
-          xml.leafNode(`w:${side}`, { "w:w": xmlValue(m.value, "w:w"), "w:type": m.type });
-        }
-      }
-      xml.closeNode();
-    }
-    if (style.tableProperties.cellSpacing) {
-      xml.leafNode("w:tblCellSpacing", {
-        "w:w": xmlValue(style.tableProperties.cellSpacing.value, "w:w"),
-        "w:type": style.tableProperties.cellSpacing.type
-      });
-    }
-    if (style.tableProperties.shading) {
-      const shd = style.tableProperties.shading;
-      const shdAttrs: Record<string, string> = {
-        "w:val": shd.pattern ?? "clear",
-        "w:fill": shd.fill ?? "auto"
-      };
-      if (shd.color) {
-        shdAttrs["w:color"] = shd.color;
-      }
-      xml.leafNode("w:shd", shdAttrs);
-    }
-    if (style.tableProperties.look) {
-      const look = style.tableProperties.look;
-      const lookAttrs: Record<string, string> = {};
-      if (look.firstRow !== undefined) {
-        lookAttrs["w:firstRow"] = look.firstRow ? "1" : "0";
-      }
-      if (look.lastRow !== undefined) {
-        lookAttrs["w:lastRow"] = look.lastRow ? "1" : "0";
-      }
-      if (look.firstColumn !== undefined) {
-        lookAttrs["w:firstColumn"] = look.firstColumn ? "1" : "0";
-      }
-      if (look.lastColumn !== undefined) {
-        lookAttrs["w:lastColumn"] = look.lastColumn ? "1" : "0";
-      }
-      if (look.noHBand !== undefined) {
-        lookAttrs["w:noHBand"] = look.noHBand ? "1" : "0";
-      }
-      if (look.noVBand !== undefined) {
-        lookAttrs["w:noVBand"] = look.noVBand ? "1" : "0";
-      }
-      xml.leafNode("w:tblLook", lookAttrs);
-    }
-    if (style.tableProperties.visuallyRightToLeft) {
-      xml.leafNode("w:bidiVisual");
-    }
-    xml.closeNode();
+    const tableProperties = style.tableProperties;
+    within("tableProperties", () => {
+      refuseExcluded(tableProperties, "styleTable");
+      renderTableProperties(xml, tableProperties, true);
+    });
   }
 
   // Table style conditional formats
@@ -397,4 +265,9 @@ export function renderStyles(
 
   preserved.rest();
   xml.closeNode();
+}
+
+/** Refuse what Word does not allow in a table style's properties of `kind`. */
+function refuseExcluded(properties: object, kind: TableStyleProperties): void {
+  refuseAbsentFields(properties, tableStyleExcludedFields(kind), NARROWER_PROPERTIES[kind]);
 }

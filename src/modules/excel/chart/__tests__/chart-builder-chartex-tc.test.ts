@@ -552,7 +552,11 @@ describe("ChartEx modern chart types", () => {
     // specific numeric values depend on the seed (100000000+).
     const seriesAxisIds = [...xml.matchAll(/<cx:axisId val="(\d+)"\/>/g)].map(m => m[1]);
     expect(seriesAxisIds.length).toBe(1);
-    expect(xml).toContain('<cx:dataLabel pos="outEnd"/>');
+    // The position is the element's attribute, and the number format comes before the visibility (`CT_DataLabels`).
+    expect(xml).toMatch(
+      /<cx:dataLabels pos="outEnd">\s*<cx:numFmt formatCode="#,##0"\/>\s*<cx:visibility /
+    );
+    expect(xml).not.toContain("<cx:dataLabel ");
     expect(xml).toContain('<cx:dataPt idx="1">');
     expect(xml).toContain('formatCode="#,##0"');
     expect(xml).toContain('max="100"');

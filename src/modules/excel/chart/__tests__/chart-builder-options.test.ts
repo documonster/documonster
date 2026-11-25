@@ -191,15 +191,17 @@ describe("extended axis options", () => {
     expect(catAx.tickMarkSkip).toBe(3);
   });
 
-  it("crosses and crossesAt on axis", () => {
-    const m = ChartClassic.createModel({
-      type: "bar",
-      series: [baseSeries("S1")],
-      valueAxis: { crosses: "min", crossesAt: 100 }
-    });
-    const valAx = pa(m).axes.find(a => a.axisType === "val")!;
-    expect(valAx.crosses).toBe("min");
-    expect(valAx.crossesAt).toBe(100);
+  it("crosses and crossesAt are alternatives, as the schema's choice is", () => {
+    const at = (valueAxis: object) =>
+      pa(
+        ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")], valueAxis })
+      ).axes.find(a => a.axisType === "val")!;
+    // A value replaces the named position every axis is created with, and a position replaces a value.
+    expect(at({ crossesAt: 100 })).toMatchObject({ crossesAt: 100 });
+    expect(at({ crossesAt: 100 }).crosses).toBeUndefined();
+    expect(at({ crosses: "min" })).toMatchObject({ crosses: "min" });
+    expect(at({ crosses: "min" }).crossesAt).toBeUndefined();
+    expect(() => at({ crosses: "min", crossesAt: 100 })).toThrow(/alternatives/);
   });
 
   it("displayUnits on value axis", () => {

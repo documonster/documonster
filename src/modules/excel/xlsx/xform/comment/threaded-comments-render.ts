@@ -17,7 +17,7 @@
  */
 
 import type { ThreadedComment, ThreadedCommentPerson } from "@excel/types";
-import { synthGuid } from "@excel/utils/guid";
+import { newGuid } from "@utils/uuid";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 
 const TC_NAMESPACE = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
@@ -42,7 +42,7 @@ export function renderThreadedComments(
   parts.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
   parts.push(`<ThreadedComments xmlns="${TC_NAMESPACE}">`);
   for (const { ref, comment: c } of entries) {
-    const id = c.id ?? `{${synthGuid()}}`;
+    const id = c.id ?? newGuid();
     const attrs: string[] = [`ref="${escapeAttr(ref)}"`];
     if (c.date) {
       attrs.push(`dT="${escapeAttr(c.date)}"`);
@@ -77,7 +77,7 @@ export function renderThreadedComments(
         }
         const mAttrs: string[] = [
           `mentionpersonId="${escapeAttr(m.mentionPersonId)}"`,
-          `mentionId="${escapeAttr(m.mentionId ?? `{${synthGuid()}}`)}"`,
+          `mentionId="${escapeAttr(m.mentionId ?? newGuid())}"`,
           `startIndex="${m.startIndex}"`,
           `length="${m.length}"`
         ];

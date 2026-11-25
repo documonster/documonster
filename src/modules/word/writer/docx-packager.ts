@@ -22,7 +22,7 @@ import {
 } from "@word/core/image-keys";
 import { assertWritableImage, imagePartOverride } from "@word/core/image-media";
 import type { Mutable } from "@word/core/internal-utils";
-import { sanitizeMediaFileName, sanitizeUrl } from "@word/core/internal-utils";
+import { braceItemId, sanitizeMediaFileName, sanitizeUrl } from "@word/core/internal-utils";
 import { atNode, checkWritableDocument } from "@word/core/node-path";
 import { getFileExt, getPartRelsPath, resolvePartPath } from "@word/core/opc-paths";
 import { isRun } from "@word/core/text-utils";
@@ -1467,7 +1467,10 @@ async function _packageDocxInner(
     altChunkRIds,
     ids: createIdGenerators({
       sdtId: scanMaxSdtId(doc) + 1
-    })
+    }),
+    ...(doc.docDefaults?.runProperties?.size === undefined
+      ? {}
+      : { defaultRunSize: doc.docDefaults.runProperties.size })
   });
   // Every revision id written from here to the first await — every part, the
   // styles and numbering included — is claimed from this package's map. The
@@ -1606,7 +1609,7 @@ async function _packageDocxInner(
       const propsXml = renderXml(xml => {
         xml.openXml(STD_DOC_ATTRIBUTES);
         xml.openNode("ds:datastoreItem", {
-          "ds:itemID": `{${part.itemId}}`,
+          "ds:itemID": braceItemId(part.itemId),
           "xmlns:ds": "http://schemas.openxmlformats.org/officeDocument/2006/customXml"
         });
         if (part.schemaReferences && part.schemaReferences.length > 0) {

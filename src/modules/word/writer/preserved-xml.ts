@@ -9,6 +9,7 @@
 import { NS_A, NS_M, NS_W } from "@word/constants";
 import { DocxRawXmlPolicyError } from "@word/errors";
 import type { PreservedXml } from "@word/types";
+import { OOXML_SEQUENCES, type OoxmlSequenceType } from "@word/writer/ooxml-sequences";
 import type { XmlSink } from "@xml/types";
 
 type RawXmlPolicy = "preserve" | "strip" | "reject" | undefined;
@@ -22,6 +23,14 @@ const ORDER_PREFIXES: Readonly<Record<string, string>> = {
   sl: NS_SL,
   a: NS_A
 };
+
+/**
+ * A WordprocessingML content model's children, as `w:`-qualified names in schema order — for a type whose children
+ * are all in that namespace. The order is the generated one (`ooxml-sequences.ts`), not a hand-written copy of it.
+ */
+export function wordprocessingNames(type: OoxmlSequenceType): string[] {
+  return OOXML_SEQUENCES[type].flat().map(name => `w:${name}`);
+}
 
 /**
  * A schema sequence, as qualified names in the canonical prefixes, turned into

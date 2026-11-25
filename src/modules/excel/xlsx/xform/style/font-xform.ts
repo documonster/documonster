@@ -50,11 +50,12 @@ class FontXform extends BaseXform {
     this.options = options || FontXform.OPTIONS;
     const writeFalse = this.options.differential === true;
 
-    // Define properties in render order (Excel's expected order)
+    // Render order: Excel's, which the Open XML SDK holds a font to. ECMA-376 makes `CT_Font` (and a run's
+    // `CT_RPrElt`) a repeating choice, so any order is the standard's; this one is also Excel's — `u` before the
+    // size, `charset` before `scheme` — where `scheme` was written before `charset` and the validator refused it.
     const fontProperties = [
       { tag: "b", prop: "bold", xform: new BooleanXform({ tag: "b", attr: "val", writeFalse }) },
       { tag: "i", prop: "italic", xform: new BooleanXform({ tag: "i", attr: "val", writeFalse }) },
-      { tag: "u", prop: "underline", xform: new UnderlineXform() },
       {
         tag: "strike",
         prop: "strike",
@@ -80,6 +81,12 @@ class FontXform extends BaseXform {
         prop: "shadow",
         xform: new BooleanXform({ tag: "shadow", attr: "val", writeFalse })
       },
+      { tag: "u", prop: "underline", xform: new UnderlineXform() },
+      {
+        tag: "vertAlign",
+        prop: "vertAlign",
+        xform: new StringXform({ tag: "vertAlign", attr: "val" })
+      },
       { tag: "sz", prop: "size", xform: new IntegerXform({ tag: "sz", attr: "val" }) },
       { tag: "color", prop: "color", xform: new ColorXform() },
       {
@@ -88,7 +95,6 @@ class FontXform extends BaseXform {
         xform: new StringXform({ tag: this.options.fontNameTag, attr: "val" })
       },
       { tag: "family", prop: "family", xform: new IntegerXform({ tag: "family", attr: "val" }) },
-      { tag: "scheme", prop: "scheme", xform: new StringXform({ tag: "scheme", attr: "val" }) },
       // `0` is ANSI_CHARSET, a value like any other: dropping it left the font without one, and the next write
       // inferred 134 for a Chinese face name the file had declared Western.
       {
@@ -96,11 +102,7 @@ class FontXform extends BaseXform {
         prop: "charset",
         xform: new IntegerXform({ tag: "charset", attr: "val", writeZero: true })
       },
-      {
-        tag: "vertAlign",
-        prop: "vertAlign",
-        xform: new StringXform({ tag: "vertAlign", attr: "val" })
-      }
+      { tag: "scheme", prop: "scheme", xform: new StringXform({ tag: "scheme", attr: "val" }) }
     ];
 
     // Build map and renderOrder from single source of truth

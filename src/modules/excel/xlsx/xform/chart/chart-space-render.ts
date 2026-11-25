@@ -760,7 +760,8 @@ export function renderPieChart(xml: XmlSink, g: PieChartGroup): void {
   if (g.dataLabels) {
     renderDataLabels(xml, g.dataLabels);
   }
-  if (g.firstSliceAng !== undefined) {
+  // `CT_Pie3DChart` has no first-slice angle; a 3-D pie is turned with `view3D`'s `rotY`.
+  if (g.firstSliceAng !== undefined && g.type === "pie") {
     xml.leafNode("c:firstSliceAng", { val: xmlValue(g.firstSliceAng, "val") });
   }
 }
@@ -1981,11 +1982,12 @@ export function renderAxis(xml: XmlSink, ax: ChartAxis): void {
   if (typeof ax.crossAx === "number" && Number.isFinite(ax.crossAx)) {
     xml.leafNode("c:crossAx", { val: xmlValue(ax.crossAx, "val") });
   }
-  if (ax.crosses) {
-    xml.leafNode("c:crosses", { val: ax.crosses });
-  }
+  // `crosses` and `crossesAt` are one choice; a model holding both (edited, or built before they were made
+  // alternatives) writes the value, the more specific of the two.
   if (ax.crossesAt !== undefined) {
     xml.leafNode("c:crossesAt", { val: xmlValue(ax.crossesAt, "val") });
+  } else if (ax.crosses) {
+    xml.leafNode("c:crosses", { val: ax.crosses });
   }
 
   // Type-specific properties

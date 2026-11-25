@@ -109,6 +109,7 @@ export type {
   SmartTagAttribute,
   ParagraphPropertyChange,
   RunPropertyChange,
+  ParagraphMarkRevisions,
   SectionPropertyChange,
   TableRowRevision,
 
@@ -150,6 +151,8 @@ export type {
   TableLook,
   TableFloat,
   TableProperties,
+  TablePropertyExceptions,
+  TablePropertyExceptionsChange,
   RowHeightRule,
   TableRowProperties,
   VerticalCellAlign,

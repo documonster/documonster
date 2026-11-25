@@ -10,6 +10,10 @@ interface TableColumnModel {
   totalsRowFunction?: string;
   totalsRowFormula?: string;
   calculatedColumnFormula?: string;
+  /**
+   * The column's data-area format, as an index into the differential formats: the file's `dataDxfId`. It was read and
+   * written as `dxfId`, which `CT_TableColumn` does not have, so Excel ignored the format a column was given.
+   */
   dxfId?: string;
 }
 
@@ -45,7 +49,7 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
       totalsRowLabel: model.totalsRowLabel ? encodeOoxmlAttr(model.totalsRowLabel) : undefined,
       // Excel doesn't output totalsRowFunction when value is 'none'
       totalsRowFunction: model.totalsRowFunction === "none" ? undefined : model.totalsRowFunction,
-      dxfId: model.dxfId
+      dataDxfId: model.dxfId
     };
   }
 
@@ -97,7 +101,7 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
           ? decodeOoxmlEscape(attributes.totalsRowLabel)
           : undefined,
         totalsRowFunction: attributes.totalsRowFunction,
-        dxfId: attributes.dxfId
+        dxfId: attributes.dataDxfId
       };
       return true;
     }

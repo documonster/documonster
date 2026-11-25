@@ -614,13 +614,9 @@ describe("WorkbookWriter", () => {
       expect(cf2.rules.length).toBeGreaterThan(0);
       cf2.rules.forEach(rule => {
         const numFmt = rule.style?.numFmt;
-        expect(numFmt).toBeDefined();
-        // After reading from file, numFmt is always a NumFmt object (not string)
-        expect(typeof numFmt).toBe("object");
-        if (typeof numFmt === "object" && numFmt !== null) {
-          expect(numFmt.id).toBeTypeOf("number");
-          expect(numFmt.formatCode).toBeTypeOf("string");
-        }
+        // Read from a file, a number format is its code — as `Style.numFmt` promises, and as XLSB reads it.
+        expect(numFmt).toBeTypeOf("string");
+        expect(numFmt).not.toBe("");
       });
     });
   });

@@ -53,6 +53,7 @@
       <xdr:row>2</xdr:row>
       <xdr:rowOff>90000</xdr:rowOff>
     </xdr:from>
+    <xdr:ext cx="952500" cy="1905000"/>
     <xdr:pic>
       <xdr:nvPicPr>
         <xdr:cNvPr id="2" name="Picture 2">
@@ -83,6 +84,5 @@
       </xdr:spPr>
     </xdr:pic>
     <xdr:clientData/>
-    <xdr:ext cx="952500" cy="1905000"/>
   </xdr:oneCellAnchor>
 </xdr:wsDr>

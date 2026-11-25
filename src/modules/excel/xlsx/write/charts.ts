@@ -34,6 +34,7 @@ import type {
 import {
   renderChartEx,
   renderChartExLegendXml,
+  renderDataLabels,
   rewriteChartExDataRefsToDefinedNames
 } from "@excel/chart/serialize/chart-ex-serialize";
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
@@ -3132,7 +3133,7 @@ function patchRawChartExSeriesBlock(
     patched = patchGenericChild(
       patched,
       "cx:dataLabels",
-      buildRawChartExDataLabelsXml(series.dataLabels),
+      series.dataLabels ? renderDataLabels(series.dataLabels) : "",
       afterDataLabels,
       "cx:series"
     );
@@ -3427,47 +3428,6 @@ function hasStructuredChartExLayoutProperties(layoutPr: any): boolean {
     layoutPr.regionLabels,
     layoutPr.geoMappingLevel
   ].some(value => value !== undefined);
-}
-
-function buildRawChartExDataLabelsXml(dataLabels: any): string {
-  if (!dataLabels) {
-    return "";
-  }
-  const parts = ["<cx:dataLabels>"];
-  if (dataLabels.visibility) {
-    const attrs = [
-      dataLabels.visibility.seriesName !== undefined
-        ? `seriesName="${dataLabels.visibility.seriesName ? "1" : "0"}"`
-        : undefined,
-      dataLabels.visibility.categoryName !== undefined
-        ? `categoryName="${dataLabels.visibility.categoryName ? "1" : "0"}"`
-        : undefined,
-      dataLabels.visibility.value !== undefined
-        ? `value="${dataLabels.visibility.value ? "1" : "0"}"`
-        : undefined,
-      dataLabels.visibility.numFmt !== undefined
-        ? `numFmt="${dataLabels.visibility.numFmt ? "1" : "0"}"`
-        : undefined
-    ].filter((attr): attr is string => !!attr);
-    parts.push(`<cx:visibility ${attrs.join(" ")}/>`);
-  }
-  if (dataLabels.position) {
-    parts.push(`<cx:dataLabel pos="${escapeAttr(dataLabels.position)}"/>`);
-  }
-  if (dataLabels.separator) {
-    parts.push(`<cx:separator>${escapeXml(String(dataLabels.separator))}</cx:separator>`);
-  }
-  if (dataLabels.numFmt) {
-    parts.push(`<cx:numFmt formatCode="${escapeAttr(String(dataLabels.numFmt))}"/>`);
-  }
-  if (dataLabels.spPr) {
-    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "cx") ?? "");
-  }
-  if (dataLabels.txPr) {
-    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "cx") ?? "");
-  }
-  parts.push("</cx:dataLabels>");
-  return parts.join("");
 }
 
 function patchRawChartExAxes(

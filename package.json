@@ -346,6 +346,8 @@
     "verify:install": "node scripts/verify-installed-package.cjs",
     "verify:layers": "node scripts/verify-layers.ts",
     "verify:libreoffice": "node --import @oxc-node/core/register scripts/verify-libreoffice.ts",
+    "verify:office": "node --import @oxc-node/core/register scripts/verify-office.ts",
+    "verify:openxml": "node --import @oxc-node/core/register scripts/verify-openxml.ts",
     "verify:packages": "node scripts/verify-package-imports.ts",
     "verify:public-types": "node scripts/verify-public-types.ts",
     "verify:browser-floor": "node scripts/verify-browser-floor.ts",

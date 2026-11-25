@@ -5,7 +5,13 @@
  */
 
 import { WRITTEN, writtenToken } from "@word/core/argument-checks";
-import { unwritableNode, within, writableList } from "@word/core/node-path";
+import {
+  PARAGRAPH_ONLY_PROPERTIES,
+  type ParagraphPropertiesScope,
+  NARROWER_PROPERTIES,
+  PARAGRAPH_MARK_REVISIONS
+} from "@word/core/change-records";
+import { refuseAbsentFields, unwritableNode, within, writableList } from "@word/core/node-path";
 import { hyperlinkContent, isRangeMarker, isRun, isSpanMarker } from "@word/core/text-utils";
 import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
@@ -33,7 +39,7 @@ import {
   renderRangeMarkers
 } from "@word/writer/range-marker-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
-import { prepareRawMarkup, writtenRevisionId } from "@word/writer/render-context";
+import { prepareRawMarkup, revisionAttributes } from "@word/writer/render-context";
 import {
   renderBorderElement,
   renderRun,
@@ -42,6 +48,7 @@ import {
   renderRunPropertiesContents,
   renderShading
 } from "@word/writer/run-writer";
+import { emitInSchemaOrder, type OrderedChild } from "@word/writer/schema-order";
 import { renderSectionProperties } from "@word/writer/section-writer";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
@@ -144,254 +151,208 @@ function renderFrame(xml: XmlSink, frame: ParagraphFrame): void {
   xml.leafNode("w:framePr", attrs);
 }
 
-/** Render w:pPr (paragraph properties). */
+/**
+ * Render w:pPr (paragraph properties), its children in `CT_PPr` order (`emitInSchemaOrder`). A style's, a default's or a
+ * numbering level's (`general`) and a change record's previous ones (`previous`) are narrower types without the mark
+ * or the section, and the previous ones without a change record: one set there is refused, not dropped.
+ */
 export function renderParagraphProperties(
   xml: XmlSink,
   pPr: ParagraphProperties,
-  insidePropertyChange = false
+  scope: ParagraphPropertiesScope = "paragraph"
 ): void {
+  if (scope === "general") {
+    refuseAbsentFields(pPr, PARAGRAPH_ONLY_PROPERTIES, NARROWER_PROPERTIES.generalParagraph);
+  } else if (scope === "previous") {
+    refuseAbsentFields(
+      pPr,
+      [...PARAGRAPH_ONLY_PROPERTIES, "propertyChange"],
+      NARROWER_PROPERTIES.previousParagraph
+    );
+  }
   xml.openNode("w:pPr");
 
-  if (pPr.style) {
-    xml.leafNode("w:pStyle", { "w:val": pPr.style });
-  }
-
-  if (pPr.keepNext) {
-    xml.leafNode("w:keepNext");
-  }
-  if (pPr.keepLines) {
-    xml.leafNode("w:keepLines");
-  }
-  if (pPr.pageBreakBefore) {
-    xml.leafNode("w:pageBreakBefore");
-  }
-
-  // Frame
-  if (pPr.frame) {
-    const frame = pPr.frame;
-    within("frame", () => renderFrame(xml, frame));
-  }
-
-  if (pPr.widowControl !== undefined) {
-    xml.leafNode("w:widowControl", !pPr.widowControl ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.suppressLineNumbers) {
-    xml.leafNode("w:suppressLineNumbers");
-  }
-
-  if (pPr.borders) {
-    const borders = pPr.borders;
-    within("borders", () => renderParagraphBorders(xml, borders));
-  }
-
-  if (pPr.shading) {
-    const shading = pPr.shading;
-    within("shading", () => renderShading(xml, shading));
-  }
-
-  if (pPr.suppressAutoHyphens) {
-    xml.leafNode("w:suppressAutoHyphens");
-  }
-
-  if (pPr.tabs && pPr.tabs.length > 0) {
-    const tabs = pPr.tabs;
-    within("tabs", () => renderTabs(xml, tabs));
-  }
-
-  if (pPr.spacing) {
-    const attrs: Record<string, string> = {};
-    if (pPr.spacing.before !== undefined) {
-      attrs["w:before"] = xmlValue(pPr.spacing.before, "w:before");
-    }
-    if (pPr.spacing.after !== undefined) {
-      attrs["w:after"] = xmlValue(pPr.spacing.after, "w:after");
-    }
-    if (pPr.spacing.line !== undefined) {
-      attrs["w:line"] = xmlValue(pPr.spacing.line, "w:line");
-    }
-    const lineRule = writtenToken(pPr.spacing, "lineRule", WRITTEN.lineRule, "spacing.lineRule");
-    if (lineRule !== undefined) {
-      attrs["w:lineRule"] = lineRule;
-    }
-    if (pPr.spacing.beforeAutoSpacing) {
-      attrs["w:beforeAutospacing"] = "1";
-    }
-    if (pPr.spacing.afterAutoSpacing) {
-      attrs["w:afterAutospacing"] = "1";
-    }
-    xml.leafNode("w:spacing", attrs);
-  }
-
-  if (pPr.indent) {
-    const attrs: Record<string, string> = {};
-    if (pPr.indent.left !== undefined) {
-      attrs["w:left"] = xmlValue(pPr.indent.left, "w:left");
-    }
-    if (pPr.indent.right !== undefined) {
-      attrs["w:right"] = xmlValue(pPr.indent.right, "w:right");
-    }
-    if (pPr.indent.hanging !== undefined) {
-      attrs["w:hanging"] = xmlValue(pPr.indent.hanging, "w:hanging");
-    }
-    if (pPr.indent.firstLine !== undefined) {
-      attrs["w:firstLine"] = xmlValue(pPr.indent.firstLine, "w:firstLine");
-    }
-    if (pPr.indent.start !== undefined) {
-      attrs["w:start"] = xmlValue(pPr.indent.start, "w:start");
-    }
-    if (pPr.indent.end !== undefined) {
-      attrs["w:end"] = xmlValue(pPr.indent.end, "w:end");
-    }
-    xml.leafNode("w:ind", attrs);
-  }
-
-  if (pPr.contextualSpacing) {
-    xml.leafNode("w:contextualSpacing");
-  }
-
-  if (pPr.mirrorIndents) {
-    xml.leafNode("w:mirrorIndents");
-  }
+  const onOff = (name: string, value: boolean | undefined): OrderedChild =>
+    value !== undefined && [name, () => xml.leafNode(name, !value ? { "w:val": "0" } : undefined)];
+  const flag = (name: string, value: boolean | undefined): OrderedChild =>
+    !!value && [name, () => xml.leafNode(name)];
 
   const alignment = writtenToken(pPr, "alignment", WRITTEN.alignment, "alignment");
-  if (alignment !== undefined) {
-    xml.leafNode("w:jc", { "w:val": alignment });
-  }
-
   const textAlignment = writtenToken(pPr, "textAlignment", WRITTEN.textAlignment, "textAlignment");
-  if (textAlignment !== undefined) {
-    xml.leafNode("w:textAlignment", { "w:val": textAlignment });
-  }
-
-  if (pPr.outlineLevel !== undefined) {
-    xml.leafNode("w:outlineLvl", { "w:val": xmlValue(pPr.outlineLevel, "w:val") });
-  }
-
-  if (pPr.numbering) {
-    xml.openNode("w:numPr");
-    xml.leafNode("w:ilvl", { "w:val": xmlValue(pPr.numbering.level ?? 0, "w:val") });
-    xml.leafNode("w:numId", { "w:val": xmlValue(pPr.numbering.numId, "w:val") });
-    xml.closeNode();
-  }
-
-  if (pPr.bidi) {
-    xml.leafNode("w:bidi");
-  }
-
-  if (pPr.wordWrap !== undefined) {
-    xml.leafNode("w:wordWrap", !pPr.wordWrap ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.overflowPunctuation !== undefined) {
-    xml.leafNode("w:overflowPunct", !pPr.overflowPunctuation ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.topLinePunctuation !== undefined) {
-    xml.leafNode("w:topLinePunct", !pPr.topLinePunctuation ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.kinsoku !== undefined) {
-    xml.leafNode("w:kinsoku", !pPr.kinsoku ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.autoSpaceEastAsianText !== undefined) {
-    xml.leafNode("w:autoSpaceDE", !pPr.autoSpaceEastAsianText ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.autoSpaceEastAsianDigit !== undefined) {
-    xml.leafNode("w:autoSpaceDN", !pPr.autoSpaceEastAsianDigit ? { "w:val": "0" } : undefined);
-  }
-
-  if (pPr.snapToGrid !== undefined) {
-    xml.leafNode("w:snapToGrid", !pPr.snapToGrid ? { "w:val": "0" } : undefined);
-  }
-
   const textDirection = writtenToken(pPr, "textDirection", WRITTEN.textDirection, "textDirection");
-  if (textDirection !== undefined) {
-    xml.leafNode("w:textDirection", { "w:val": textDirection });
-  }
+  const hasMarkRevision = PARAGRAPH_MARK_REVISIONS.some(({ field }) => pPr[field] !== undefined);
 
-  // A thematic break is drawn as a bottom border. Only synthesise one when the
-  // paragraph has no borders of its own: `w:pPr` permits a single `w:pBdr`, and
-  // emitting a second produced invalid XML whose duplicate element made readers
-  // drop the paragraph's real border settings.
-  if (pPr.thematicBreak && !pPr.borders) {
-    xml.openNode("w:pBdr");
-    xml.leafNode("w:bottom", {
-      "w:val": "single",
-      "w:sz": "6",
-      "w:space": "1",
-      "w:color": "auto"
-    });
-    xml.closeNode();
-  }
-
-  if (pPr.sectionProperties) {
-    const section = pPr.sectionProperties;
-    within("sectionProperties", () => renderSectionProperties(xml, section));
-  }
-
-  // Conditional formatting style mask (must come before rPr per schema)
-  if (pPr.cnfStyle) {
-    xml.leafNode("w:cnfStyle", { "w:val": pPr.cnfStyle });
-  }
-
-  // Paragraph property change revision — NOT recursed into when rendering previousProperties
-  if (!insidePropertyChange && pPr.propertyChange) {
-    xml.openNode("w:pPrChange", {
-      "w:id": xmlValue(writtenRevisionId(pPr.propertyChange.revision.id), "w:id"),
-      "w:author": pPr.propertyChange.revision.author,
-      ...(pPr.propertyChange.revision.date ? { "w:date": pPr.propertyChange.revision.date } : {})
-    });
-    if (pPr.propertyChange.previousProperties) {
-      const previous = pPr.propertyChange.previousProperties;
-      within("propertyChange.previousProperties", () =>
-        renderParagraphProperties(xml, previous, true)
-      );
-    }
-    xml.closeNode();
-  }
-
-  // Paragraph mark properties (w:rPr inside w:pPr).
-  //
-  // ECMA-376 17.3.1.27 (CT_PPrBase) only allows ONE `w:rPr` child here. We
-  // therefore merge `paragraphInsertion` / `paragraphDeletion` (track-changes
-  // markers for the paragraph mark) into the same `w:rPr` as
-  // `markRunProperties`. Inside this single w:rPr, the schema requires
-  // w:ins/w:del/w:moveFrom/w:moveTo to come BEFORE the run-property children
-  // (per CT_ParaRPr).
-  const hasInsDel = !!(pPr.paragraphInsertion || pPr.paragraphDeletion);
-  if (hasInsDel || pPr.markRunProperties) {
-    xml.openNode("w:rPr");
-    if (pPr.paragraphInsertion) {
-      const insAttrs: Record<string, string> = {
-        "w:id": xmlValue(writtenRevisionId(pPr.paragraphInsertion.id), "w:id"),
-        "w:author": pPr.paragraphInsertion.author
-      };
-      if (pPr.paragraphInsertion.date) {
-        insAttrs["w:date"] = pPr.paragraphInsertion.date;
+  emitInSchemaOrder("w:CT_PPr", [
+    !!pPr.style && ["w:pStyle", () => xml.leafNode("w:pStyle", { "w:val": pPr.style! })],
+    flag("w:keepNext", pPr.keepNext),
+    flag("w:keepLines", pPr.keepLines),
+    flag("w:pageBreakBefore", pPr.pageBreakBefore),
+    !!pPr.frame && ["w:framePr", () => within("frame", () => renderFrame(xml, pPr.frame!))],
+    onOff("w:widowControl", pPr.widowControl),
+    !!pPr.numbering && [
+      "w:numPr",
+      () => {
+        xml.openNode("w:numPr");
+        xml.leafNode("w:ilvl", { "w:val": xmlValue(pPr.numbering!.level ?? 0, "w:val") });
+        xml.leafNode("w:numId", { "w:val": xmlValue(pPr.numbering!.numId, "w:val") });
+        xml.closeNode();
       }
-      xml.leafNode("w:ins", insAttrs);
-    }
-    if (pPr.paragraphDeletion) {
-      const delAttrs: Record<string, string> = {
-        "w:id": xmlValue(writtenRevisionId(pPr.paragraphDeletion.id), "w:id"),
-        "w:author": pPr.paragraphDeletion.author
-      };
-      if (pPr.paragraphDeletion.date) {
-        delAttrs["w:date"] = pPr.paragraphDeletion.date;
-      }
-      xml.leafNode("w:del", delAttrs);
-    }
-    if (pPr.markRunProperties) {
-      const mark = pPr.markRunProperties;
-      within("markRunProperties", () => renderRunPropertiesContents(xml, mark));
-    }
-    xml.closeNode(); // w:rPr
-  }
+    ],
+    flag("w:suppressLineNumbers", pPr.suppressLineNumbers),
+    !!pPr.borders && [
+      "w:pBdr",
+      () => within("borders", () => renderParagraphBorders(xml, pPr.borders!))
+    ],
+    // A thematic break is drawn as a bottom border. Only synthesise one when the
+    // paragraph has no borders of its own: `w:pPr` permits a single `w:pBdr`, and
+    // emitting a second produced invalid XML whose duplicate element made readers
+    // drop the paragraph's real border settings.
+    !!pPr.thematicBreak &&
+      !pPr.borders && [
+        "w:pBdr",
+        () => {
+          xml.openNode("w:pBdr");
+          xml.leafNode("w:bottom", {
+            "w:val": "single",
+            "w:sz": "6",
+            "w:space": "1",
+            "w:color": "auto"
+          });
+          xml.closeNode();
+        }
+      ],
+    !!pPr.shading && ["w:shd", () => within("shading", () => renderShading(xml, pPr.shading!))],
+    !!pPr.tabs &&
+      pPr.tabs.length > 0 && ["w:tabs", () => within("tabs", () => renderTabs(xml, pPr.tabs!))],
+    flag("w:suppressAutoHyphens", pPr.suppressAutoHyphens),
+    onOff("w:kinsoku", pPr.kinsoku),
+    onOff("w:wordWrap", pPr.wordWrap),
+    onOff("w:overflowPunct", pPr.overflowPunctuation),
+    onOff("w:topLinePunct", pPr.topLinePunctuation),
+    onOff("w:autoSpaceDE", pPr.autoSpaceEastAsianText),
+    onOff("w:autoSpaceDN", pPr.autoSpaceEastAsianDigit),
+    flag("w:bidi", pPr.bidi),
+    onOff("w:snapToGrid", pPr.snapToGrid),
+    !!pPr.spacing && ["w:spacing", () => renderSpacing(xml, pPr.spacing!)],
+    !!pPr.indent && ["w:ind", () => renderIndent(xml, pPr.indent!)],
+    flag("w:contextualSpacing", pPr.contextualSpacing),
+    flag("w:mirrorIndents", pPr.mirrorIndents),
+    alignment !== undefined && ["w:jc", () => xml.leafNode("w:jc", { "w:val": alignment })],
+    textDirection !== undefined && [
+      "w:textDirection",
+      () => xml.leafNode("w:textDirection", { "w:val": textDirection })
+    ],
+    textAlignment !== undefined && [
+      "w:textAlignment",
+      () => xml.leafNode("w:textAlignment", { "w:val": textAlignment })
+    ],
+    pPr.outlineLevel !== undefined && [
+      "w:outlineLvl",
+      () => xml.leafNode("w:outlineLvl", { "w:val": xmlValue(pPr.outlineLevel!, "w:val") })
+    ],
+    !!pPr.cnfStyle && ["w:cnfStyle", () => xml.leafNode("w:cnfStyle", { "w:val": pPr.cnfStyle! })],
+    // Paragraph mark properties (w:rPr inside w:pPr).
+    //
+    // ECMA-376 17.3.1.27 (CT_PPrBase) only allows ONE `w:rPr` child here. We
+    // therefore merge the mark's revisions (`paragraphInsertion`, `paragraphDeletion`,
+    // `paragraphMoveFrom`, `paragraphMoveTo`) into the same `w:rPr` as
+    // `markRunProperties`. Inside this single w:rPr, the schema requires
+    // w:ins/w:del/w:moveFrom/w:moveTo to come BEFORE the run-property children
+    // (per CT_ParaRPr).
+    (hasMarkRevision || !!pPr.markRunProperties) && [
+      "w:rPr",
+      () => renderParagraphMarkProperties(xml, pPr)
+    ],
+    !!pPr.sectionProperties && [
+      "w:sectPr",
+      () => within("sectionProperties", () => renderSectionProperties(xml, pPr.sectionProperties!))
+    ],
+    // Paragraph property change revision — NOT recursed into when rendering previousProperties
+    scope !== "previous" &&
+      !!pPr.propertyChange && ["w:pPrChange", () => renderParagraphPropertyChange(xml, pPr)]
+  ]);
 
   xml.closeNode();
+}
+
+function renderSpacing(xml: XmlSink, spacing: NonNullable<ParagraphProperties["spacing"]>): void {
+  const attrs: Record<string, string> = {};
+  if (spacing.before !== undefined) {
+    attrs["w:before"] = xmlValue(spacing.before, "w:before");
+  }
+  if (spacing.after !== undefined) {
+    attrs["w:after"] = xmlValue(spacing.after, "w:after");
+  }
+  if (spacing.line !== undefined) {
+    attrs["w:line"] = xmlValue(spacing.line, "w:line");
+  }
+  const lineRule = writtenToken(spacing, "lineRule", WRITTEN.lineRule, "spacing.lineRule");
+  if (lineRule !== undefined) {
+    attrs["w:lineRule"] = lineRule;
+  }
+  if (spacing.beforeAutoSpacing) {
+    attrs["w:beforeAutospacing"] = "1";
+  }
+  if (spacing.afterAutoSpacing) {
+    attrs["w:afterAutospacing"] = "1";
+  }
+  xml.leafNode("w:spacing", attrs);
+}
+
+function renderIndent(xml: XmlSink, indent: NonNullable<ParagraphProperties["indent"]>): void {
+  const attrs: Record<string, string> = {};
+  if (indent.left !== undefined) {
+    attrs["w:left"] = xmlValue(indent.left, "w:left");
+  }
+  if (indent.right !== undefined) {
+    attrs["w:right"] = xmlValue(indent.right, "w:right");
+  }
+  if (indent.hanging !== undefined) {
+    attrs["w:hanging"] = xmlValue(indent.hanging, "w:hanging");
+  }
+  if (indent.firstLine !== undefined) {
+    attrs["w:firstLine"] = xmlValue(indent.firstLine, "w:firstLine");
+  }
+  if (indent.start !== undefined) {
+    attrs["w:start"] = xmlValue(indent.start, "w:start");
+  }
+  if (indent.end !== undefined) {
+    attrs["w:end"] = xmlValue(indent.end, "w:end");
+  }
+  xml.leafNode("w:ind", attrs);
+}
+
+function renderParagraphPropertyChange(xml: XmlSink, pPr: ParagraphProperties): void {
+  const change = pPr.propertyChange!;
+  xml.openNode("w:pPrChange", revisionAttributes(change.revision));
+  if (change.previousProperties) {
+    const previous = change.previousProperties;
+    within("propertyChange.previousProperties", () =>
+      renderParagraphProperties(xml, previous, "previous")
+    );
+  } else {
+    // `CT_PPrChange` requires its `w:pPr`: no previous properties is an empty one.
+    xml.openNode("w:pPr");
+    xml.closeNode();
+  }
+  xml.closeNode();
+}
+
+function renderParagraphMarkProperties(xml: XmlSink, pPr: ParagraphProperties): void {
+  xml.openNode("w:rPr");
+  for (const { element, field } of PARAGRAPH_MARK_REVISIONS) {
+    const revision = pPr[field];
+    if (revision) {
+      xml.leafNode(`w:${element}`, revisionAttributes(revision));
+    }
+  }
+  if (pPr.markRunProperties) {
+    const mark = pPr.markRunProperties;
+    within("markRunProperties", () =>
+      renderRunPropertiesContents(xml, mark, false, { mark: true })
+    );
+  }
+  xml.closeNode(); // w:rPr
 }
 
 /** Render a hyperlink. */
@@ -623,15 +584,7 @@ function renderTrackedRuns(
       break;
     }
   }
-  const revision = first.revision;
-  const attrs: Record<string, string> = {
-    "w:id": xmlValue(writtenRevisionId(revision.id), "w:id"),
-    "w:author": revision.author
-  };
-  if (revision.date) {
-    attrs["w:date"] = revision.date;
-  }
-  xml.openNode(wrapper, attrs);
+  xml.openNode(wrapper, revisionAttributes(first.revision));
   for (let k = start; k < end; k++) {
     const child = children[k]!;
     within(pathOf(k), () => {

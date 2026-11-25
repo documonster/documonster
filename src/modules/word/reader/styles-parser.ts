@@ -6,11 +6,20 @@
  * (`styles-writer.ts` and `numbering-writer.ts` are already separate).
  */
 
+import { setAsideValue } from "@utils/unrecognized-values";
 import { runSteps } from "@utils/yield";
 import type { Steps } from "@utils/yield";
+import { TABLE_STYLE_CONDITION_TOKENS } from "@word/constants";
+import { TABLE_STYLE_EXCLUDED, type TableStyleProperties } from "@word/core/change-records";
 import type { Mutable } from "@word/core/internal-utils";
 import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
-import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
+import {
+  attrInt,
+  attrVal,
+  findChildNs,
+  findChildrenNs,
+  serializeElement
+} from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
 import {
   namespacesInScope,
@@ -18,17 +27,20 @@ import {
   unmodelledChildren,
   wordLocalName
 } from "@word/reader/preserved-xml";
-import { parseRowHeight, parseRunProperties, parseShading } from "@word/reader/properties-parsers";
-import { parseTableBorders, parseTableProperties } from "@word/reader/table-properties-parsers";
+import { parseRunProperties } from "@word/reader/properties-parsers";
+import {
+  parseTableCellProperties,
+  parseTableProperties,
+  parseTableRowProperties
+} from "@word/reader/table-properties-parsers";
 import type {
   DocDefaults,
   PreservedXml,
   StyleDef,
-  TableCellProperties,
-  TableRowProperties,
-  TableStyleConditionalFormat
+  TableStyleConditionalFormat,
+  TableStyleConditionType
 } from "@word/types";
-import type { XmlDocument } from "@xml/types";
+import type { XmlDocument, XmlElement } from "@xml/types";
 
 /** What `word/styles.xml` holds — see {@link parseStyles}. */
 export interface ParsedStyles {
@@ -36,6 +48,20 @@ export interface ParsedStyles {
   styles: StyleDef[];
   preservedXml?: PreservedXml;
 }
+
+/** Whether a `w:tblStylePr`'s `w:type` is one the model names. */
+function isTypedCondition(el: XmlElement): boolean {
+  const token = attrVal(el, "type");
+  return token !== undefined && CONDITION_BY_TOKEN.has(token);
+}
+
+/** A conditional format's model name by the `w:type` token it is written as. */
+const CONDITION_BY_TOKEN: ReadonlyMap<string, TableStyleConditionType> = new Map(
+  Object.entries(TABLE_STYLE_CONDITION_TOKENS).map(([type, token]) => [
+    token,
+    type as TableStyleConditionType
+  ])
+);
 
 export function parseStyles(xmlStr: string, maxDepth?: number): ParsedStyles {
   return runSteps(stylesOfPart(parsePartXml(xmlStr, maxDepth)));
@@ -65,7 +91,7 @@ export function* stylesOfPart(doc: XmlDocument): Steps<ParsedStyles> {
     if (pPrDefaultEl) {
       const pPrEl = findChildNs(pPrDefaultEl, "pPr");
       if (pPrEl) {
-        dd.paragraphProperties = parseParagraphProperties(pPrEl);
+        dd.paragraphProperties = parseParagraphProperties(pPrEl, { scope: "general" });
       }
     }
     docDefaults = dd;
@@ -124,7 +150,7 @@ export function* stylesOfPart(doc: XmlDocument): Steps<ParsedStyles> {
 
     const pPrEl = findChildNs(styleEl, "pPr");
     if (pPrEl) {
-      s.paragraphProperties = parseParagraphProperties(pPrEl);
+      s.paragraphProperties = parseParagraphProperties(pPrEl, { scope: "general" });
     }
     // Earlier versions of this writer put `w:outlineLvl` directly under
     // `w:style`, where the schema has no place for it: read it as the
@@ -146,20 +172,26 @@ export function* stylesOfPart(doc: XmlDocument): Steps<ParsedStyles> {
     // Table properties for table styles
     const tblPrEl = findChildNs(styleEl, "tblPr");
     if (tblPrEl) {
-      s.tableProperties = parseTableProperties(tblPrEl);
+      s.tableProperties = setAsideExcluded(
+        parseTableProperties(tblPrEl, { base: true }),
+        tblPrEl,
+        "styleTable"
+      );
     }
 
     // Table style conditional formats
-    const tblStylePrs = findChildrenNs(styleEl, "tblStylePr");
+    // A conditional format whose `w:type` is not one of `ST_TblStyleOverrideType` — missing, empty or unknown — has
+    // no type to model or to resolve by, so it is kept as it was read (`preservedXml`) rather than given one.
+    const tblStylePrs = findChildrenNs(styleEl, "tblStylePr").filter(isTypedCondition);
     if (tblStylePrs.length > 0) {
       const conditions: TableStyleConditionalFormat[] = [];
       for (const tsp of tblStylePrs) {
         const cond: Mutable<TableStyleConditionalFormat> = {
-          type: attrVal(tsp, "type") as TableStyleConditionalFormat["type"]
+          type: CONDITION_BY_TOKEN.get(attrVal(tsp, "type")!)!
         };
         const cpPr = findChildNs(tsp, "pPr");
         if (cpPr) {
-          cond.paragraphProperties = parseParagraphProperties(cpPr);
+          cond.paragraphProperties = parseParagraphProperties(cpPr, { scope: "general" });
         }
         const crPr = findChildNs(tsp, "rPr");
         if (crPr) {
@@ -167,29 +199,27 @@ export function* stylesOfPart(doc: XmlDocument): Steps<ParsedStyles> {
         }
         const ctblPr = findChildNs(tsp, "tblPr");
         if (ctblPr) {
-          cond.tableProperties = parseTableProperties(ctblPr);
+          cond.tableProperties = setAsideExcluded(
+            parseTableProperties(ctblPr, { base: true }),
+            ctblPr,
+            "conditionTable"
+          );
         }
         const ctrPr = findChildNs(tsp, "trPr");
         if (ctrPr) {
-          const rp: Mutable<TableRowProperties> = {};
-          const hEl = findChildNs(ctrPr, "trHeight");
-          if (hEl) {
-            rp.height = parseRowHeight(hEl);
-          }
-          cond.rowProperties = rp;
+          cond.rowProperties = setAsideExcluded(
+            parseTableRowProperties(ctrPr),
+            ctrPr,
+            "conditionRow"
+          );
         }
         const ctcPr = findChildNs(tsp, "tcPr");
         if (ctcPr) {
-          const cp: Mutable<TableCellProperties> = {};
-          const bEl = findChildNs(ctcPr, "tcBorders");
-          if (bEl) {
-            cp.borders = parseTableBorders(bEl);
-          }
-          const shd = findChildNs(ctcPr, "shd");
-          if (shd) {
-            cp.shading = parseShading(shd);
-          }
-          cond.cellProperties = cp;
+          cond.cellProperties = setAsideExcluded(
+            parseTableCellProperties(ctcPr),
+            ctcPr,
+            "conditionCell"
+          );
         }
         conditions.push(cond);
       }
@@ -198,7 +228,11 @@ export function* stylesOfPart(doc: XmlDocument): Steps<ParsedStyles> {
 
     const preservedXml = unmodelledChildren(styleEl, rootScope, child => {
       const local = wordLocalName(child);
-      return local !== undefined && MODELLED_STYLE_CHILDREN.has(local);
+      return (
+        local !== undefined &&
+        MODELLED_STYLE_CHILDREN.has(local) &&
+        (local !== "tblStylePr" || isTypedCondition(child))
+      );
     });
     if (preservedXml.length > 0) {
       s.preservedXml = preservedXml;
@@ -235,3 +269,32 @@ const MODELLED_STYLE_CHILDREN = new Set([
   // Misplaced by earlier versions of this writer; read into `w:pPr`.
   "outlineLvl"
 ]);
+
+/**
+ * `properties`, read from `source`, without what Word does not allow in a table style's properties of `kind`
+ * (`TABLE_STYLE_EXCLUDED`): each such field is cleared and its elements kept as not written back, so the read report
+ * names them and writing the document leaves them out — as Word, which drops them, does.
+ */
+function setAsideExcluded<T extends object>(
+  properties: T,
+  source: XmlElement,
+  kind: TableStyleProperties
+): T {
+  const excluded: Readonly<Record<string, string>> = TABLE_STYLE_EXCLUDED[kind];
+  const byField = new Map<string, string[]>();
+  for (const child of source.children) {
+    if (child.type !== "element") {
+      continue;
+    }
+    const local = wordLocalName(child);
+    if (local !== undefined && Object.hasOwn(excluded, local)) {
+      const field = excluded[local]!;
+      byField.set(field, [...(byField.get(field) ?? []), serializeElement(child)]);
+    }
+  }
+  for (const [field, elements] of byField) {
+    delete (properties as Record<string, unknown>)[field];
+    setAsideValue(properties, field, elements.join(""), { writtenBack: false });
+  }
+  return properties;
+}

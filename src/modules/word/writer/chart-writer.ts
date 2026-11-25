@@ -22,7 +22,8 @@ import {
   seriesKeys,
   titleKeys
 } from "@word/core/chart-kept";
-import { DocxRawXmlPolicyError } from "@word/errors";
+import { unwritableNode } from "@word/core/node-path";
+import { DocxRawXmlPolicyError, DocxWriteError } from "@word/errors";
 import type { DocxSecurityPolicy } from "@word/security/policy";
 import type {
   Chart,
@@ -36,8 +37,11 @@ import type {
   ChartType
 } from "@word/types";
 import { DATA_LABEL_POSITION_MAP, DATA_LABEL_POSITIONS } from "@word/writer/chart-checks";
+import { OOXML_SEQUENCES, type OoxmlSequenceType } from "@word/writer/ooxml-sequences";
 import { withPreservedNamespaces } from "@word/writer/preserved-xml";
+import { emitInSchemaOrder } from "@word/writer/schema-order";
 import { xmlValue } from "@xml/encode";
+import { chartContentModel } from "@xml/ooxml-chart-order";
 import type { XmlSink } from "@xml/types";
 
 const CHART_TYPE_CATEGORY = {
@@ -184,6 +188,33 @@ const DEFAULT_AXIS_IDS: AxisIds = {
   secondaryCategory: "333333333",
   secondaryValue: "444444444"
 };
+
+/**
+ * The chart types plotted on two value axes, with `xVal`/`yVal` data (`CT_ScatterSer`, `CT_BubbleSer`). Written on a
+ * category axis, with `cat`/`val`, Office refused a scatter chart outright.
+ */
+const XY_CHART_TYPES: ReadonlySet<ChartType> = new Set(["scatter", "scatterSmooth", "bubble"]);
+
+/**
+ * The chart types drawn over a third, series axis (`c:serAx`), as Excel writes them and as the workbook's chart
+ * engine does: a surface chart on two axes only is one Office refuses to open.
+ */
+const SERIES_AXIS_TAGS: ReadonlySet<string> = new Set(["surfaceChart", "surface3DChart"]);
+
+/** The series axis's id, beside {@link DEFAULT_AXIS_IDS}. */
+const SERIES_AXIS_ID = "555555555";
+
+/**
+ * The column a series' values sit in on the chart's sheet: B for the first, after the categories in A. The series'
+ * name and its values are written from one column, so a reference cannot point at another series' data.
+ */
+function seriesColumn(index: number): string {
+  let column = "";
+  for (let n = index + 2; n > 0; n = Math.floor((n - 1) / 26)) {
+    column = String.fromCharCode(65 + ((n - 1) % 26)) + column;
+  }
+  return column;
+}
 
 const CROSSING_AXIS: Readonly<Record<AxisRole, AxisRole>> = {
   category: "value",
@@ -473,6 +504,11 @@ function renderPlotArea(
   const keys = plotAreaKeys(chart);
   const groups = planGroups(chart);
   const hasSecondary = groups.some(g => g.secondary);
+  // A chart read from a file keeps the axes it had; one written afresh gets the series axis its type needs, and the
+  // group names it among its axes — the one condition for both, so they cannot disagree.
+  const seriesAxis =
+    kept === undefined &&
+    groups.some(g => !g.secondary && SERIES_AXIS_TAGS.has(CHART_TYPE_CATEGORY[g.type]?.tag ?? ""));
   openElement(xml, "c:plotArea", kept?.plotArea);
   writeSlots(
     ctx,
@@ -481,12 +517,17 @@ function renderPlotArea(
       {
         names: GROUP_TAGS,
         container: true,
-        write: source => renderGroups(ctx, chart, groups, kept, ids, source)
+        write: source => renderGroups(ctx, chart, groups, kept, ids, source, seriesAxis)
       },
       {
         names: AXIS_TAGS,
         container: true,
-        write: () => renderAxes(ctx, chart, kept, ids, hasSecondary)
+        write: () => {
+          renderAxes(ctx, chart, kept, ids, hasSecondary);
+          if (seriesAxis) {
+            renderSeriesAxis(xml, ids);
+          }
+        }
       },
       fixed("dTable"),
       { names: ["spPr"], key: keys.spPr, write: () => writeSolidSpPr(xml, chart.plotAreaColor) },
@@ -508,7 +549,8 @@ function renderGroups(
   groups: readonly PlannedGroup[],
   kept: ChartKept | undefined,
   ids: AxisIds,
-  source: readonly ChartKeptElement[]
+  source: readonly ChartKeptElement[],
+  seriesAxis: boolean
 ): void {
   const written = new Set<PlannedGroup>();
   let modelled = 0;
@@ -521,12 +563,12 @@ function renderGroups(
     const group = groups.find(g => !written.has(g) && g.key === keptGroup?.key);
     if (group) {
       written.add(group);
-      renderGroup(ctx, chart, group, ids, keptGroup);
+      renderGroup(ctx, chart, group, ids, keptGroup, seriesAxis);
     }
   }
   for (const group of groups) {
     if (!written.has(group)) {
-      renderGroup(ctx, chart, group, ids, undefined);
+      renderGroup(ctx, chart, group, ids, undefined, seriesAxis);
     }
   }
 }
@@ -536,7 +578,8 @@ function renderGroup(
   chart: Chart,
   group: PlannedGroup,
   ids: AxisIds,
-  kept: ChartKept["groups"][number] | undefined
+  kept: ChartKept["groups"][number] | undefined,
+  seriesAxis: boolean
 ): void {
   const { xml } = ctx;
   const chartType = group.type;
@@ -553,7 +596,18 @@ function renderGroup(
     chartType === "columnPercentStacked";
   const axes = group.secondary
     ? [ids.secondaryCategory, ids.secondaryValue]
-    : [ids.category, ids.value];
+    : seriesAxis && SERIES_AXIS_TAGS.has(info.tag)
+      ? [ids.category, ids.value, SERIES_AXIS_ID]
+      : [ids.category, ids.value];
+  // What the group's content model has: `CT_StockChart` and `CT_SurfaceChart` have no `varyColors`, which was
+  // written into every group, and a doughnut's `holeSize`, which Office expects, was never written.
+  const groupType = chartContentModel(info.tag, undefined);
+  const groupHas = (name: string): boolean =>
+    groupType !== undefined &&
+    Object.hasOwn(OOXML_SEQUENCES, groupType) &&
+    OOXML_SEQUENCES[groupType as OoxmlSequenceType].some(slot =>
+      (slot as readonly string[]).includes(name)
+    );
   openElement(xml, `c:${info.tag}`, kept?.node);
   writeSlots(
     ctx,
@@ -575,7 +629,10 @@ function renderGroup(
         "wireframe",
         leaf("wireframe", "wireframe" in info && info.wireframe ? "1" : undefined)
       ),
-      fixed("varyColors", leaf("varyColors", hasNoAxes(chartType) ? "1" : "0")),
+      fixed(
+        "varyColors",
+        leaf("varyColors", groupHas("varyColors") ? (hasNoAxes(chartType) ? "1" : "0") : undefined)
+      ),
       {
         names: ["ser"],
         container: true,
@@ -600,8 +657,9 @@ function renderGroup(
       fixed("overlap", leaf("overlap", info.tag === "barChart" && stacked ? "100" : undefined)),
       fixed("shape"),
       fixed("serLines"),
-      fixed("firstSliceAng"),
-      fixed("holeSize"),
+      fixed("firstSliceAng", leaf("firstSliceAng", info.tag === "doughnutChart" ? "0" : undefined)),
+      // Excel's default hole, as its own chart builder writes it (`holeSize`, 10–90 percent).
+      fixed("holeSize", leaf("holeSize", info.tag === "doughnutChart" ? "50" : undefined)),
       fixed("bubble3D"),
       fixed("bubbleScale"),
       fixed("showNegBubbles"),
@@ -618,6 +676,44 @@ function renderGroup(
   xml.closeNode(); // chart type tag
 }
 
+/** The series types that take an error bar in each direction: their `errBars` has `maxOccurs="2"`. */
+const TWO_ERROR_BARS: ReadonlySet<string> = new Set([
+  "c:CT_ScatterSer",
+  "c:CT_BubbleSer",
+  "c:CT_AreaSer"
+]);
+
+/**
+ * A series of a pie, doughnut, radar or surface chart has no trendline and no error bars: `CT_PieSer`,
+ * `CT_RadarSer` and `CT_SurfaceSer` do not have them. They used to be written there anyway, into a part Office
+ * does not accept; dropping them would lose them without a word, so they are refused. What a series may hold is
+ * read from its content model (`ooxml-sequences.ts`), not listed here a second time.
+ */
+function refuseSeriesChildren(series: ChartSeries, chartType: ChartType): void {
+  const { tag } = CHART_TYPE_CATEGORY[chartType];
+  const type = chartContentModel("ser", tag);
+  if (type === undefined || !Object.hasOwn(OOXML_SEQUENCES, type)) {
+    throw new DocxWriteError(`a ${chartType} chart's series has no content model to write it by`);
+  }
+  const allowed = new Set<string>(OOXML_SEQUENCES[type as OoxmlSequenceType].flat());
+  for (const [field, child] of [
+    ["trendline", "trendline"],
+    ["errorBars", "errBars"]
+  ] as const) {
+    if (series[field] !== undefined && !allowed.has(child)) {
+      unwritableNode(field, `absent: a ${chartType} chart's series has no ${child}`, series[field]);
+    }
+  }
+  // Two `c:errBars`, one per direction, only some series types have room for.
+  if (series.errorBars?.direction === "both" && !TWO_ERROR_BARS.has(type)) {
+    unwritableNode(
+      "errorBars.direction",
+      `"x" or "y": a ${chartType} chart's series has one error bar`,
+      series.errorBars.direction
+    );
+  }
+}
+
 function renderSeries(
   ctx: WriteContext,
   series: ChartSeries,
@@ -629,6 +725,8 @@ function renderSeries(
   const node = ctx.use(series._kept?.node);
   const keys = seriesKeys(series, index, chartType);
   const scatter = chartType === "scatter" || chartType === "scatterSmooth";
+  const xy = XY_CHART_TYPES.has(chartType);
+  refuseSeriesChildren(series, chartType);
   openElement(xml, "c:ser", node);
   writeSlots(
     ctx,
@@ -687,9 +785,9 @@ function renderSeries(
       {
         names: ["cat", "xVal"],
         key: keys.cat,
-        write: () => writeCategories(xml, series, scatter)
+        write: () => writeCategories(xml, series, xy)
       },
-      { names: ["val", "yVal"], key: keys.val, write: () => writeValues(xml, series, scatter) },
+      { names: ["val", "yVal"], key: keys.val, write: () => writeValues(xml, series, xy, index) },
       fixed("bubbleSize"),
       fixed("bubble3D"),
       fixed("shape"),
@@ -713,7 +811,7 @@ function writeSeriesName(xml: XmlSink, series: ChartSeries, index: number): void
   xml.openNode("c:tx");
   xml.openNode("c:strRef");
   xml.openNode("c:f");
-  xml.writeText(`Sheet1!$${String.fromCharCode(66 + index)}$1`);
+  xml.writeText(`Sheet1!$${seriesColumn(index)}$1`);
   xml.closeNode();
   xml.openNode("c:strCache");
   xml.leafNode("c:ptCount", { val: "1" });
@@ -760,15 +858,23 @@ function writePoints(
   [...points.keys()].sort((a, b) => a - b).forEach(i => points.get(i)!());
 }
 
-function writeCategories(xml: XmlSink, series: ChartSeries, scatter: boolean): void {
-  xml.openNode(scatter ? "c:xVal" : "c:cat");
-  xml.openNode(scatter ? "c:numRef" : "c:strRef");
+/**
+ * A series' categories — its `xVal` on a chart with two value axes (`xy`). They are written as numbers only when every
+ * one is a number: a number cache holding `Q1` is not one Office reads, and `CT_AxDataSource` takes text as well.
+ */
+function writeCategories(xml: XmlSink, series: ChartSeries, xy: boolean): void {
+  const numeric =
+    xy &&
+    series.categories.length > 0 &&
+    series.categories.every(cat => cat.trim() !== "" && Number.isFinite(Number(cat)));
+  xml.openNode(xy ? "c:xVal" : "c:cat");
+  xml.openNode(numeric ? "c:numRef" : "c:strRef");
   xml.openNode("c:f");
   xml.writeText(`Sheet1!$A$2:$A$${series.categories.length + 1}`);
   xml.closeNode();
-  xml.openNode(scatter ? "c:numCache" : "c:strCache");
-  if (scatter) {
-    xml.leafNode("c:formatCode", { val: "General" });
+  xml.openNode(numeric ? "c:numCache" : "c:strCache");
+  if (numeric) {
+    xml.leafNode("c:formatCode", undefined, "General");
   }
   xml.leafNode("c:ptCount", { val: xmlValue(series.categories.length, "val") });
   series.categories.forEach((cat, i) => {
@@ -783,14 +889,15 @@ function writeCategories(xml: XmlSink, series: ChartSeries, scatter: boolean): v
   xml.closeNode();
 }
 
-function writeValues(xml: XmlSink, series: ChartSeries, scatter: boolean): void {
-  xml.openNode(scatter ? "c:yVal" : "c:val");
+function writeValues(xml: XmlSink, series: ChartSeries, xy: boolean, index: number): void {
+  const column = seriesColumn(index);
+  xml.openNode(xy ? "c:yVal" : "c:val");
   xml.openNode("c:numRef");
   xml.openNode("c:f");
-  xml.writeText(`Sheet1!$B$2:$B$${series.values.length + 1}`);
+  xml.writeText(`Sheet1!$${column}$2:$${column}$${series.values.length + 1}`);
   xml.closeNode();
   xml.openNode("c:numCache");
-  xml.leafNode("c:formatCode", { val: "General" });
+  xml.leafNode("c:formatCode", undefined, "General");
   xml.leafNode("c:ptCount", { val: xmlValue(series.values.length, "val") });
   series.values.forEach((val, i) => {
     xml.openNode("c:pt", { idx: xmlValue(i, "idx") });
@@ -853,7 +960,8 @@ function renderAxis(
           ? chart.secondaryValueAxis
           : undefined;
   const isCategory = role === "category" || role === "secondaryCategory";
-  const tag = kept?.node.name ?? (isCategory ? "c:catAx" : "c:valAx");
+  const xy = XY_CHART_TYPES.has(chart.type);
+  const tag = kept?.node.name ?? (isCategory && !xy ? "c:catAx" : "c:valAx");
   const catAx = tag.endsWith("catAx");
   const valAx = tag.endsWith("valAx");
   const keys = axisKeys(axis, role);
@@ -897,7 +1005,7 @@ function renderAxis(
       fixed("txPr"),
       fixed("crossAx", leaf("crossAx", ids[CROSSING_AXIS[role]])),
       { names: ["crosses", "crossesAt"], write: leaf("crosses", "autoZero") },
-      fixed("crossBetween", onlyIf(valAx, leaf("crossBetween", "between"))),
+      fixed("crossBetween", onlyIf(valAx, leaf("crossBetween", xy ? "midCat" : "between"))),
       fixed("auto", onlyIf(catAx, leaf("auto", "1"))),
       fixed("lblAlgn", onlyIf(catAx, leaf("lblAlgn", "ctr"))),
       fixed("lblOffset", onlyIf(catAx, leaf("lblOffset", "100"))),
@@ -922,6 +1030,23 @@ function renderAxis(
     ],
     kept?.node
   );
+  xml.closeNode();
+}
+
+/** The series axis of a surface chart (`c:serAx`, `CT_SerAx`), crossing its category axis. */
+function renderSeriesAxis(xml: XmlSink, ids: AxisIds): void {
+  xml.openNode("c:serAx");
+  xml.leafNode("c:axId", { val: SERIES_AXIS_ID });
+  xml.openNode("c:scaling");
+  xml.leafNode("c:orientation", { val: "minMax" });
+  xml.closeNode();
+  xml.leafNode("c:delete", { val: "0" });
+  xml.leafNode("c:axPos", { val: "b" });
+  xml.leafNode("c:majorTickMark", { val: "out" });
+  xml.leafNode("c:minorTickMark", { val: "none" });
+  xml.leafNode("c:tickLblPos", { val: "nextTo" });
+  xml.leafNode("c:crossAx", { val: ids.category });
+  xml.leafNode("c:crosses", { val: "autoZero" });
   xml.closeNode();
 }
 
@@ -1097,19 +1222,21 @@ function renderTrendline(xml: XmlSink, trendline: ChartSeries["trendline"]): voi
     return;
   }
   xml.openNode("c:trendline");
-  xml.leafNode("c:trendlineType", { val: trendline.type });
-  if (trendline.type === "polynomial" && trendline.order !== undefined) {
-    xml.leafNode("c:order", { val: xmlValue(trendline.order, "val") });
-  }
-  if (trendline.type === "movingAvg" && trendline.period !== undefined) {
-    xml.leafNode("c:period", { val: xmlValue(trendline.period, "val") });
-  }
-  if (trendline.displayEquation) {
-    xml.leafNode("c:dispEq", { val: "1" });
-  }
-  if (trendline.displayRSquared) {
-    xml.leafNode("c:dispRSqr", { val: "1" });
-  }
+  emitInSchemaOrder("c:CT_Trendline", [
+    ["c:trendlineType", () => xml.leafNode("c:trendlineType", { val: trendline.type })],
+    trendline.type === "polynomial" &&
+      trendline.order !== undefined && [
+        "c:order",
+        () => xml.leafNode("c:order", { val: xmlValue(trendline.order!, "val") })
+      ],
+    trendline.type === "movingAvg" &&
+      trendline.period !== undefined && [
+        "c:period",
+        () => xml.leafNode("c:period", { val: xmlValue(trendline.period!, "val") })
+      ],
+    !!trendline.displayRSquared && ["c:dispRSqr", () => xml.leafNode("c:dispRSqr", { val: "1" })],
+    !!trendline.displayEquation && ["c:dispEq", () => xml.leafNode("c:dispEq", { val: "1" })]
+  ]);
   xml.closeNode();
 }
 
@@ -1125,16 +1252,17 @@ function renderErrorBars(xml: XmlSink, errorBars: ChartSeries["errorBars"]): voi
 
   for (const dir of directions) {
     xml.openNode("c:errBars");
-    xml.leafNode("c:errBarType", { val: "both" });
-    xml.leafNode("c:errValType", { val: errorBars.type });
-    xml.leafNode("c:errDir", { val: dir });
-    if (
+    emitInSchemaOrder("c:CT_ErrBars", [
+      ["c:errDir", () => xml.leafNode("c:errDir", { val: dir })],
+      ["c:errBarType", () => xml.leafNode("c:errBarType", { val: "both" })],
+      ["c:errValType", () => xml.leafNode("c:errValType", { val: errorBars.type })],
+      ["c:noEndCap", () => xml.leafNode("c:noEndCap", { val: "0" })],
       errorBars.value !== undefined &&
-      (errorBars.type === "fixedVal" || errorBars.type === "percentage")
-    ) {
-      xml.leafNode("c:val", { val: xmlValue(errorBars.value, "val") });
-    }
-    xml.leafNode("c:noEndCap", { val: "0" });
+        (errorBars.type === "fixedVal" || errorBars.type === "percentage") && [
+          "c:val",
+          () => xml.leafNode("c:val", { val: xmlValue(errorBars.value!, "val") })
+        ]
+    ]);
     xml.closeNode();
   }
 }

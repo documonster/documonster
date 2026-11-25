@@ -16,7 +16,7 @@ const expectations = [
       family: 2,
       scheme: "minor"
     },
-    xml: '<font><b/><color rgb="FF00FF00"/><family val="2"/><scheme val="minor"/><sz val="14"/><name val="Calibri"/></font>',
+    xml: '<font><b/><sz val="14"/><color rgb="FF00FF00"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>',
     get parsedModel() {
       return this.preparedModel;
     },
@@ -35,7 +35,7 @@ const expectations = [
       family: 2,
       scheme: "minor"
     },
-    xml: '<rPr><i/><color rgb="FF00FF00"/><family val="2"/><scheme val="minor"/><sz val="14"/><rFont val="Calibri"/></rPr>',
+    xml: '<rPr><i/><sz val="14"/><color rgb="FF00FF00"/><rFont val="Calibri"/><family val="2"/><scheme val="minor"/></rPr>',
     get parsedModel() {
       return this.preparedModel;
     },

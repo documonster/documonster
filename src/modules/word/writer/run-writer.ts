@@ -8,8 +8,17 @@ import { isEastAsianTypeface } from "@utils/cjk-typefaces";
 import { unrecognizedEntry } from "@utils/unrecognized-values";
 import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "@word/constants";
 import { WRITTEN, writtenToken } from "@word/core/argument-checks";
+import { NARROWER_PROPERTIES, PARAGRAPH_MARK_REVISIONS } from "@word/core/change-records";
 import { drawingInteger } from "@word/core/drawing-geometry";
-import { atNode, unwritableNode, within, writableList } from "@word/core/node-path";
+import { eastAsianDefaultsFor } from "@word/core/east-asian-defaults";
+import {
+  atNode,
+  refuseAbsentFields,
+  unwritableNode,
+  within,
+  writableList
+} from "@word/core/node-path";
+import { extractRunText } from "@word/core/text-utils";
 import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   RunProperties,
@@ -22,12 +31,13 @@ import type {
   FormField,
   Border,
   UnderlineSpec,
-  ColorSpec
+  ColorSpec,
+  RubyContent
 } from "@word/types";
 import { closeDrawingFrame, frameModel, openDrawingFrame } from "@word/writer/drawing-frame";
 import { renderRangeMarker } from "@word/writer/range-marker-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
-import { prepareRawMarkup, writtenRevisionId } from "@word/writer/render-context";
+import { prepareRawMarkup, revisionAttributes } from "@word/writer/render-context";
 import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
@@ -85,8 +95,20 @@ export function renderRunProperties(
 export function renderRunPropertiesContents(
   xml: XmlSink,
   rPr: RunProperties,
-  insidePropertyChange = false
+  insidePropertyChange = false,
+  { mark = false } = {}
 ): void {
+  if (insidePropertyChange) {
+    refuseAbsentFields(rPr, ["propertyChange"], NARROWER_PROPERTIES.previousRun);
+  }
+  if (!mark) {
+    // Only a paragraph mark's change record (`CT_ParaRPrOriginal`) holds the mark's revisions.
+    refuseAbsentFields(
+      rPr.propertyChange ?? {},
+      ["previousMarkRevisions"],
+      NARROWER_PROPERTIES.previousRun
+    );
+  }
   // 1. rStyle
   if (rPr.style) {
     xml.leafNode("w:rStyle", { "w:val": rPr.style });
@@ -397,22 +419,23 @@ export function renderRunPropertiesContents(
 
   // 28. rPrChange (track changes) — always last; NOT recursed into when rendering previousProperties
   if (!insidePropertyChange && rPr.propertyChange) {
-    const rev = rPr.propertyChange.revision;
-    const attrs: Record<string, string> = {
-      "w:id": xmlValue(writtenRevisionId(rev.id), "w:id"),
-      "w:author": rev.author
-    };
-    if (rev.date) {
-      attrs["w:date"] = rev.date;
+    const change = rPr.propertyChange;
+    xml.openNode("w:rPrChange", revisionAttributes(change.revision));
+    xml.openNode("w:rPr");
+    // A paragraph mark's revisions as they stood come first (`CT_ParaRPrOriginal`), their ids claimed as any other's.
+    for (const { element, previous } of PARAGRAPH_MARK_REVISIONS) {
+      const revision = change.previousMarkRevisions?.[previous];
+      if (revision) {
+        xml.leafNode(`w:${element}`, revisionAttributes(revision));
+      }
     }
-    xml.openNode("w:rPrChange", attrs);
-    if (rPr.propertyChange.previousProperties) {
-      const previous = rPr.propertyChange.previousProperties;
-      within("propertyChange.previousProperties", () => renderRunProperties(xml, previous, true));
-    } else {
-      xml.openNode("w:rPr");
-      xml.closeNode();
+    if (change.previousProperties) {
+      const previous = change.previousProperties;
+      within("propertyChange.previousProperties", () =>
+        renderRunPropertiesContents(xml, previous, true)
+      );
     }
+    xml.closeNode();
     xml.closeNode();
   }
 }
@@ -829,27 +852,7 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
 
     case "ruby": {
       xml.openNode("w:ruby");
-      // Ruby properties
-      if (content.properties) {
-        xml.openNode("w:rubyPr");
-        const p = content.properties;
-        if (p.align) {
-          xml.leafNode("w:rubyAlign", { "w:val": p.align });
-        }
-        if (p.fontSize !== undefined) {
-          xml.leafNode("w:hps", { "w:val": xmlValue(p.fontSize, "w:val") });
-        }
-        if (p.raise !== undefined) {
-          xml.leafNode("w:hpsRaise", { "w:val": xmlValue(p.raise, "w:val") });
-        }
-        if (p.baseFontSize !== undefined) {
-          xml.leafNode("w:hpsBaseText", { "w:val": xmlValue(p.baseFontSize, "w:val") });
-        }
-        if (p.language) {
-          xml.leafNode("w:lid", { "w:val": p.language });
-        }
-        xml.closeNode();
-      }
+      renderRubyProperties(xml, content, helpers);
       // Ruby text (w:rt)
       xml.openNode("w:rt");
       for (const run of content.rubyText) {
@@ -1021,4 +1024,41 @@ export function renderRun(xml: XmlSink, run: Run, helpers?: RenderHelpers): void
       }
     }
   }
+}
+
+/**
+ * A ruby's `w:rubyPr`, complete. `CT_Ruby` requires it and `CT_RubyPr` requires every child but `dirty`; only the
+ * properties the model stated were written, and none at all without any, which Office repairs. What the model leaves
+ * out is what Word fills in when it saves such a ruby: the base text's size — its own, or the document's default run
+ * size — half of it for the ruby text, two half-points less for the raise, centred.
+ */
+function renderRubyProperties(
+  xml: XmlSink,
+  ruby: RubyContent,
+  helpers: RenderHelpers | undefined
+): void {
+  const p = ruby.properties ?? {};
+  const base =
+    p.baseFontSize ??
+    ruby.baseText.find(run => run.properties?.size !== undefined)?.properties?.size ??
+    helpers?.defaultRunSize ??
+    // A run with no size anywhere is 10pt.
+    20;
+  xml.openNode("w:rubyPr");
+  xml.leafNode("w:rubyAlign", { "w:val": p.align ?? "center" });
+  xml.leafNode("w:hps", { "w:val": xmlValue(p.fontSize ?? Math.floor(base / 2), "w:val") });
+  xml.leafNode("w:hpsRaise", { "w:val": xmlValue(p.raise ?? Math.max(0, base - 2), "w:val") });
+  xml.leafNode("w:hpsBaseText", { "w:val": xmlValue(base, "w:val") });
+  xml.leafNode("w:lid", { "w:val": p.language ?? rubyLanguage(ruby) });
+  xml.closeNode();
+}
+
+/**
+ * The language a ruby without one is written with, which `w:lid` cannot be absent: the East Asian language its text is
+ * in, decided as the document's East Asian defaults are (`eastAsianDefaultsFor` — Han it cannot place is Simplified
+ * Chinese), and Japanese, where ruby comes from, for text with none.
+ */
+function rubyLanguage(ruby: RubyContent): string {
+  const text = [...ruby.baseText, ...ruby.rubyText].map(extractRunText).join("");
+  return eastAsianDefaultsFor(text)?.language.eastAsia ?? "ja-JP";
 }

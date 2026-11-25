@@ -66,7 +66,7 @@ import {
 import { referencedStyleIds, withReferencedBuiltInStyles } from "@word/core/builtin-styles";
 import { collectImageKeys, indexImagesByKey } from "@word/core/image-keys";
 import { assertWritableImage, imagePartOverride } from "@word/core/image-media";
-import { sanitizeUrl, utf8Encoder } from "@word/core/internal-utils";
+import { braceItemId, sanitizeUrl, utf8Encoder } from "@word/core/internal-utils";
 import { atNode, checkWritableBlock, within } from "@word/core/node-path";
 import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
 import { checkSchema, model, w } from "@word/core/option-schema";
@@ -839,7 +839,8 @@ export class DocumentWriter {
       // Hyperlinks that body markup kept verbatim refers to (a drawing's
       // `a:hlinkClick`) register as the markup is written; document.xml.rels
       // is written after the body.
-      preservedLinkRId: preservedLinkRegistrar(this._documentRels)
+      preservedLinkRId: preservedLinkRegistrar(this._documentRels),
+      defaultRunSize: withStatedDefaults(this._options.docDefaults).runProperties?.size
     });
     this._zipComplete = new Promise<void>(resolve => {
       this._resolveZipComplete = resolve;
@@ -1924,7 +1925,7 @@ export class DocumentWriter {
         const propsWriter = new XmlWriter();
         propsWriter.openXml(STD_DOC_ATTRIBUTES);
         propsWriter.openNode("ds:datastoreItem", {
-          "ds:itemID": `{${part.itemId}}`,
+          "ds:itemID": braceItemId(part.itemId),
           "xmlns:ds": "http://schemas.openxmlformats.org/officeDocument/2006/customXml"
         });
         if (part.schemaReferences && part.schemaReferences.length > 0) {
@@ -2261,7 +2262,8 @@ function checkStreamingOptions(options: unknown, where: string): void {
     checkParagraphProperties(
       o.docDefaults.paragraphProperties,
       "options.docDefaults.paragraphProperties",
-      where
+      where,
+      { scope: "general" }
     );
   }
   if (o.coreProperties !== undefined) {

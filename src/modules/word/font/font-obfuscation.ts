@@ -9,13 +9,14 @@
  */
 
 import { asPlainBytes } from "@utils/binary";
+import { newGuid } from "@utils/uuid";
 import { checkBytes, invalidArgument } from "@word/core/argument-checks";
-import { generateGuid } from "@word/core/internal-utils";
+import { bareGuid } from "@word/core/internal-utils";
 
 /** Parse a GUID string "{8-4-4-4-12}" into 16 bytes in obfuscation-apply order. */
 function parseGuid(guid: unknown, where: string): Uint8Array {
   // Strip braces
-  const hex = typeof guid === "string" ? guid.replace(/[{}]/g, "").replace(/-/g, "") : "";
+  const hex = typeof guid === "string" ? bareGuid(guid).replace(/-/g, "") : "";
   if (!/^[0-9a-f]{32}$/i.test(hex)) {
     invalidArgument(where, "fontKey", 'a GUID, "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}"', guid);
   }
@@ -87,5 +88,5 @@ export function obfuscateFont(data: Uint8Array, fontKey: string): Uint8Array<Arr
  * @returns A GUID string in the form "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}"
  */
 export function generateFontKey(): string {
-  return generateGuid();
+  return newGuid();
 }

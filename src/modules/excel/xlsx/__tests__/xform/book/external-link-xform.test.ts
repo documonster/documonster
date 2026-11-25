@@ -34,8 +34,8 @@ const expectations = [
     xml:
       `<externalLink ${RENDER_XMLNS}>` +
       `<externalBook r:id="rId1">` +
-      `<sheetDataSet><sheetData sheetId="0"/></sheetDataSet>` +
       `<sheetNames><sheetName val="Sheet1"/></sheetNames>` +
+      `<sheetDataSet><sheetData sheetId="0"/></sheetDataSet>` +
       `</externalBook>` +
       `</externalLink>`,
     tests: ["render"]

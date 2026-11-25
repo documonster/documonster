@@ -247,6 +247,8 @@ export interface DxfTable {
   readonly lost: readonly string[];
   /** Add the formats of more blocks. A format already in the table keeps its index. */
   readonly add: (blocks: readonly SheetConditionalFormatting[]) => void;
+  /** Add one format — a table column's — and return its index ({@link NO_DXF} when it cannot be written). */
+  readonly addStyle: (style: Partial<Style>) => number;
 }
 
 /**
@@ -297,6 +299,7 @@ export function createDxfTable(options: DxfCollectorOptions = {}): DxfTable {
       return index === undefined || index === NO_DXF ? undefined : index;
     },
     lost,
+    addStyle,
     add: blocks => {
       for (const block of blocks) {
         for (const rule of block.rules ?? []) {

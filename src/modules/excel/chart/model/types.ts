@@ -1301,6 +1301,7 @@ export interface PieChartGroup {
   varyColors?: boolean;
   series: PieSeries[];
   dataLabels?: DataLabels;
+  /** The first slice's angle, in degrees. A pie only: a 3-D pie is turned with `view3D.rotY`, and this is not written. */
   firstSliceAng?: number;
   axisIds?: number[]; // pie charts typically don't use axes
   extLst?: string;
@@ -2212,7 +2213,7 @@ export interface AddChartOptions {
   showMarker?: boolean;
   /** Smooth lines by default for all series (line/scatter) */
   smooth?: boolean;
-  /** First slice angle for pie/doughnut charts (0-360, default 0) */
+  /** First slice angle for pie and doughnut charts (0-360, default 0); a 3-D pie is turned with `view3D.rotY`. */
   firstSliceAng?: number;
   /** Show hi-low lines for line/stock charts */
   hiLowLines?: boolean;

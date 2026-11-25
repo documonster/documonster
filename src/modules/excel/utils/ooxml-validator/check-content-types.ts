@@ -36,7 +36,7 @@ const WORKBOOK_CONTENT_TYPES = [
   "application/vnd.ms-excel.template.macroEnabled.main+xml"
 ] as const;
 
-const CT = {
+export const CT = {
   workbook: WORKBOOK_CONTENT_TYPES[0],
   styles: "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
   sharedStrings: "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",

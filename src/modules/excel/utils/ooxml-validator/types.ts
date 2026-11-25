@@ -220,6 +220,9 @@ export type PivotKind =
   | "pivot-cacheId-not-in-workbook"
   | "pivot-cacheRecords-missing";
 
+/** A child out of its type's `xsd:sequence` order below a part's root — see `check-sequences.ts`. */
+export type SequenceKind = "part-child-out-of-order";
+
 // -----------------------------------------------------------------------------
 // Union
 // -----------------------------------------------------------------------------
@@ -241,7 +244,8 @@ export type OoxmlProblemKind =
   | ChartKind
   | DrawingKind
   | ChartsheetKind
-  | PivotKind;
+  | PivotKind
+  | SequenceKind;
 
 /**
  * Historical alias: the old public API exposed a separate union for the
@@ -339,6 +343,12 @@ export interface OoxmlValidateOptions {
    * back-references from xf records). Default: true.
    */
   checkStylesIntegrity?: boolean;
+
+  /**
+   * Validate child element order below each part's root against the ECMA-376 `xsd:sequence` content models
+   * (`<sheetPr>`, `<c>`, `<xf>`, `<dxf>`, drawing anchors, …). Default: true.
+   */
+  checkElementOrder?: boolean;
 
   /**
    * Stop after this many problems across all checks. Useful for large

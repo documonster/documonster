@@ -209,14 +209,16 @@ export function writeWorkbookPart(
 
   records.push(
     record("BrtCalcProp", calculationProperties(options.calcProperties)),
-    // `BrtFileRecover` — one byte of AutoRecover state, every bit clear because this is a normal save, not a
-    // recovery. Excel writes it here in every workbook part it produces and this wrote none.
-    record("BrtFileRecover", new Uint8Array(1)),
-    // The cache bindings, after the calculation properties. Each `idSx` here is what a view's
+    // The cache bindings, after the calculation properties and **before** `BrtFileRecover`: the workbook grammar
+    // (MS-XLSB §2.1.7.61) is `[BrtCalcProp] [BrtOleSize] *BrtUserBookView [PIVOTCACHEIDS] … *BrtFileRecover`.
+    // Written after it, every workbook with a pivot table broke the grammar. Each `idSx` here is what a view's
     // `BrtBeginSXView.idCache` must equal.
     ...pivotCacheIdRecords(options.pivotCaches ?? []).map(([name, payload]) =>
       record(name, payload)
     ),
+    // `BrtFileRecover` — one byte of AutoRecover state, every bit clear because this is a normal save, not a
+    // recovery. Excel writes it here in every workbook part it produces and this wrote none.
+    record("BrtFileRecover", new Uint8Array(1)),
     record("BrtEndBook")
   );
   return { bytes: encodeBiffRecords(records), unsupported };

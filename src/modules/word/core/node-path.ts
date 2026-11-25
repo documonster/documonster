@@ -12,15 +12,61 @@
  * not throw costs nothing.
  */
 
-import { describeValue } from "@word/core/argument-checks";
+import {
+  describeValue,
+  TABLE_DIAGONAL_EXPECTED,
+  TABLE_ONLY_EXPECTED,
+  tableDiagonal,
+  tableOnlyProperty
+} from "@word/core/argument-checks";
+import { absentFrom } from "@word/core/change-records";
 import { isRangeMarker } from "@word/core/text-utils";
 import { DocxArgumentError } from "@word/errors";
-import type { DocxDocument } from "@word/types";
+import type { DocxDocument, TableBorders } from "@word/types";
 import { XmlError } from "@xml/errors";
 
 /** Refuse a node the writer cannot write, at `field` (relative to its parent). */
 export function unwritableNode(field: string, expected: string, value: unknown): never {
   throw new DocxArgumentError(field, `${field} must be ${expected}, got ${describeValue(value)}`);
+}
+
+/**
+ * A row's table property exceptions (`w:tblPrEx`) with a property of the whole table, refused: `CT_TblPrEx` has no
+ * place for it, and dropping it would lose it without a word — `Build.row` refuses it for the same reason
+ * (`checkTablePropertyExceptions`).
+ */
+export function refuseTableOnlyProperties(exceptions: object): void {
+  const tableOnly = tableOnlyProperty(exceptions);
+  if (tableOnly !== undefined) {
+    unwritableNode(tableOnly[0], TABLE_ONLY_EXPECTED, tableOnly[1]);
+  }
+}
+
+/**
+ * A table's borders (`w:tblBorders`, in a table, a row's exceptions or a table style) with a diagonal, refused:
+ * `CT_TblBorders` has none. Writing one made the part invalid, and dropping it would lose it without a word —
+ * `Build.table` refuses it for the same reason (`checkTableProperties`).
+ */
+export function refuseTableDiagonals(borders: TableBorders): void {
+  const diagonal = tableDiagonal(borders);
+  if (diagonal !== undefined) {
+    unwritableNode(diagonal[0], TABLE_DIAGONAL_EXPECTED, diagonal[1]);
+  }
+}
+
+/**
+ * Refuse, rather than drop, any of `fields` set on `holder` where the schema has no place for it — a change record's
+ * previous properties (`CT_PPrBase`, `CT_RPrOriginal`, `CT_TblPrBase`, …) hold no change record of their own, and
+ * a paragraph's hold neither its mark nor its section. The reader sets such a thing aside instead of typing it, so one
+ * present is a caller's. `where` names the properties, plural: "a style's table properties".
+ */
+export function refuseAbsentFields(holder: object, fields: readonly string[], where: string): void {
+  for (const field of fields) {
+    const value = (holder as Record<string, unknown>)[field];
+    if (value !== undefined) {
+      unwritableNode(field, absentFrom(where), value);
+    }
+  }
 }
 
 /** An array, or {@link unwritableNode}. */

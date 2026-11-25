@@ -14,7 +14,8 @@
  */
 
 import { setAsideValue } from "@utils/unrecognized-values";
-import { WRITTEN, readToken } from "@word/core/argument-checks";
+import { WRITTEN, readToken, isDateTime } from "@word/core/argument-checks";
+import { PARAGRAPH_MARK_REVISIONS } from "@word/core/change-records";
 import type { Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
@@ -22,7 +23,8 @@ import {
   attrVal,
   boolToggle,
   findChildNs,
-  safeParseInt
+  safeParseInt,
+  serializeElement
 } from "@word/reader/parse-utils";
 import type {
   Border,
@@ -32,6 +34,7 @@ import type {
   FontSpec,
   RevisionInfo,
   RunProperties,
+  ParagraphMarkRevisions,
   RunPropertyChange,
   Shading,
   TableRowProperties,
@@ -44,9 +47,16 @@ import type { XmlElement } from "@xml/types";
 // Run Properties
 // =============================================================================
 
-export function parseRunProperties(rPrEl: XmlElement): RunProperties {
+/**
+ * A `w:rPr`. Inside `w:rPrChange` (`withChange: false`, `CT_RPrOriginal`) the schema has no change record, so one
+ * found there is set aside as not written back rather than typed and then dropped by the writer. A paragraph mark's
+ * (`mark`) is `CT_ParaRPr`, whose change record's previous properties may hold the mark's revisions.
+ */
+export function parseRunProperties(
+  rPrEl: XmlElement,
+  { withChange = true, mark = false } = {}
+): RunProperties {
   const rPr: Mutable<RunProperties> & Record<string, unknown> = {};
-
   const rStyleEl = findChildNs(rPrEl, "rStyle");
   if (rStyleEl) {
     rPr.style = attrVal(rStyleEl, "val");
@@ -283,14 +293,30 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
 
   // rPrChange (track changes for run properties)
   const rPrChangeEl = findChildNs(rPrEl, "rPrChange");
-  if (rPrChangeEl) {
+  if (rPrChangeEl && !withChange) {
+    setAsideValue(rPr, "propertyChange", serializeElement(rPrChangeEl), { writtenBack: false });
+  } else if (rPrChangeEl) {
     const rev = parseRevisionInfo(rPrChangeEl);
     if (rev) {
       const prevRPrEl = findChildNs(rPrChangeEl, "rPr");
-      const change: RunPropertyChange = {
+      const change: Mutable<RunPropertyChange> = {
         revision: rev,
-        previousProperties: prevRPrEl ? parseRunProperties(prevRPrEl) : undefined
+        previousProperties: prevRPrEl
+          ? parseRunProperties(prevRPrEl, { withChange: false })
+          : undefined
       };
+      // A paragraph mark's previous properties (`CT_ParaRPrOriginal`) may hold the mark's revisions as they stood.
+      const previousMark: Mutable<ParagraphMarkRevisions> = {};
+      for (const { element, previous } of mark && prevRPrEl ? PARAGRAPH_MARK_REVISIONS : []) {
+        const el = findChildNs(prevRPrEl!, element);
+        const revision = el ? parseRevisionInfo(el) : undefined;
+        if (revision) {
+          previousMark[previous] = revision;
+        }
+      }
+      if (Object.keys(previousMark).length > 0) {
+        change.previousMarkRevisions = previousMark;
+      }
       rPr.propertyChange = change;
     }
   }
@@ -421,9 +447,14 @@ export function parseRevisionInfo(el: XmlElement): RevisionInfo | undefined {
   // this result. Fall back to a sentinel author/id so the surrounding runs
   // are still preserved (the user-visible text is what matters; the
   // metadata is purely informational).
-  return {
-    author: author ?? "",
-    id: id ?? 0,
-    date: attrVal(el, "date")
-  };
+  const revision: Mutable<RevisionInfo> = { author: author ?? "", id: id ?? 0 };
+  // A date that is not an `xsd:dateTime` is set aside and written back as it was, not typed: typed, it made a read
+  // revision one the argument checks refuse, so handing read properties back to `Build.*` threw.
+  const date = attrVal(el, "date");
+  if (date !== undefined && isDateTime(date)) {
+    revision.date = date;
+  } else if (date !== undefined) {
+    setAsideValue(revision, "date", date);
+  }
+  return revision;
 }

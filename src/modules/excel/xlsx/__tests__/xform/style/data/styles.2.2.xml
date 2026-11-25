@@ -5,10 +5,10 @@
             xmlns:x16r2="http://schemas.microsoft.com/office/spreadsheetml/2015/02/main">
     <fonts count="1" x14ac:knownFonts="1">
         <font>
-            <color theme="1"/>
-            <family val="2"/>
             <sz val="11"/>
+            <color theme="1"/>
             <name val="Calibri"/>
+            <family val="2"/>
             <scheme val="minor"/>
         </font>
     </fonts>

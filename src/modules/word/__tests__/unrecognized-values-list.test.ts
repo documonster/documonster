@@ -35,8 +35,8 @@ describe("Document.listUnrecognizedValues", () => {
     const doc = await read();
     const listed: DocxUnrecognizedValue[] = Document.listUnrecognizedValues(doc);
     expect(listed).toEqual([
-      { path: "body[0].properties.alignment", value: "bogus" },
-      { path: "body[0].children[0].properties.underline", value: "squiggle" }
+      { path: "body[0].properties.alignment", value: "bogus", writtenBack: true },
+      { path: "body[0].children[0].properties.underline", value: "squiggle", writtenBack: true }
     ]);
     const reported = Validation.validate(doc)
       .issues.filter(i => i.rule === "unrecognized-value")
@@ -55,7 +55,7 @@ describe("Document.listUnrecognizedValues", () => {
     expect(Document.listUnrecognizedValues(doc)).toHaveLength(2);
     Document.discardUnrecognizedValues(doc, { filter: v => v.value === "squiggle" });
     expect(Document.listUnrecognizedValues(doc)).toEqual([
-      { path: "body[0].properties.alignment", value: "bogus" }
+      { path: "body[0].properties.alignment", value: "bogus", writtenBack: true }
     ]);
     Document.discardUnrecognizedValues(doc);
     expect(Document.listUnrecognizedValues(doc)).toEqual([]);

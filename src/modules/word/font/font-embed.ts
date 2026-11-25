@@ -27,6 +27,7 @@ import {
   checkString,
   invalidArgument
 } from "@word/core/argument-checks";
+import { bareGuid } from "@word/core/internal-utils";
 import { checkSchema, w } from "@word/core/option-schema";
 import { markDerived } from "@word/core/ownership";
 import { obfuscateFont, generateFontKey } from "@word/font/font-obfuscation";
@@ -544,9 +545,8 @@ export function embedFont(options: EmbedFontOptions): EmbedFontResult {
 
   if (shouldObfuscate) {
     processedData = obfuscateFont(new Uint8Array(fontData), fontKey);
-    // ODTTF file naming: {GUID}.odttf (strip braces for filename)
-    const keyClean = fontKey.replace(/[{}]/g, "");
-    fileName = `${keyClean}.odttf`;
+    // ODTTF file naming: {GUID}.odttf, without the braces.
+    fileName = `${bareGuid(fontKey)}.odttf`;
   } else {
     processedData = new Uint8Array(fontData);
     // Use the font name with appropriate extension

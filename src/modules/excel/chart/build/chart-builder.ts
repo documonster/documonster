@@ -423,10 +423,12 @@ function validateChartLevelOptions(opts: AddChartOptions, path: string): void {
     assertIntegerInRange(opts.holeSize, `${path}.holeSize`, 0, 90);
   }
   if (opts.firstSliceAng !== undefined) {
+    // `CT_PieChart` and `CT_DoughnutChart` have the element; `CT_Pie3DChart` and `CT_OfPieChart` do not. A 3-D pie was
+    // written with it, which the schema refuses and Excel drops; an of-pie chart dropped it in silence.
     assertChartOptions(
-      PIE_FAMILY_CHART_TYPES.has(opts.type),
+      opts.type === "pie" || opts.type === "doughnut",
       `${path}.firstSliceAng`,
-      `${path}.firstSliceAng is only valid for pie, doughnut, and ofPie charts.`
+      `${path}.firstSliceAng is only valid for pie and doughnut charts (a 3-D pie is turned with view3D.rotY).`
     );
     assertIntegerInRange(opts.firstSliceAng, `${path}.firstSliceAng`, 0, 360);
   }
@@ -923,6 +925,12 @@ function validateAxisOptions(opts: AddAxisOptions | undefined, path: string): vo
   }
   if (opts.crossesAt !== undefined) {
     assertFiniteNumber(opts.crossesAt, `${path}.crossesAt`);
+    // One choice in `CT_CatAx`/`CT_ValAx`: where the axis crosses is a named position or a value, never both.
+    assertChartOptions(
+      opts.crosses === undefined,
+      `${path}.crossesAt`,
+      `${path}.crosses and ${path}.crossesAt are alternatives: give one.`
+    );
   }
   if (opts.customUnit !== undefined) {
     assertNumberInRange(opts.customUnit, `${path}.customUnit`, 0, Number.MAX_SAFE_INTEGER);
@@ -2095,11 +2103,15 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
   if (opts.tickMarkSkip !== undefined && axis.axisType === "cat") {
     (axis as CategoryAxis).tickMarkSkip = opts.tickMarkSkip;
   }
+  // Alternatives (one `xsd:choice`): setting one replaces the other, which every axis is created with —
+  // `crosses: "autoZero"` stayed beside a `crossesAt`, and the schema refuses the pair.
   if (opts.crosses !== undefined) {
     axis.crosses = opts.crosses;
+    delete axis.crossesAt;
   }
   if (opts.crossesAt !== undefined) {
     axis.crossesAt = opts.crossesAt;
+    delete axis.crosses;
   }
   if (axis.axisType === "val") {
     const valAx = axis as ValueAxis;
@@ -2356,7 +2368,7 @@ function buildChartTypeGroup(
         type,
         varyColors: opts.varyColors ?? true,
         series: seriesOpts.map(buildPieSeries),
-        firstSliceAng: opts.firstSliceAng ?? 0
+        ...(type === "pie" ? { firstSliceAng: opts.firstSliceAng ?? 0 } : {})
       };
       result = { group, axes: [] };
       break;

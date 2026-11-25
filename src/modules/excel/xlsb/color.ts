@@ -1,3 +1,4 @@
+import type { Color } from "@excel/types";
 /**
  * `BrtColor` — the eight-byte colour structure BIFF12 uses everywhere a colour appears.
  *
@@ -20,7 +21,7 @@
  * spells it the other way round, which is a difference that produces a plausible-looking wrong
  * colour rather than an error.
  */
-import type { Color } from "@excel/types";
+import { opaqueArgb } from "@excel/utils/argb";
 import { INFERRED_VALUES } from "@excel/xlsb/spec/records";
 import type { BinaryReader } from "@utils/binary";
 import { BinaryWriter } from "@utils/binary";
@@ -146,9 +147,7 @@ export function encodeColor(color: Partial<Color> | undefined): Uint8Array {
 
   const argb = color?.argb;
   if (argb !== undefined && /^[0-9a-fA-F]{6,8}$/.test(argb)) {
-    // Six digits means no alpha was given; an opaque colour is the only sensible reading.
-    const padded = argb.length === 6 ? `FF${argb}` : argb;
-    const value = Number.parseInt(padded, 16);
+    const value = Number.parseInt(opaqueArgb(argb), 16);
     return (
       writer
         .writeUint8(VALID_RGB | (COLOR_KIND.rgb << 1))

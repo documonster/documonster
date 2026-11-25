@@ -23,6 +23,14 @@
  * check against real output exists to find.
  */
 
+import {
+  COMMENTS_GRAMMAR,
+  STYLESHEET_GRAMMAR,
+  TABLE_GRAMMAR,
+  WORKBOOK_GRAMMAR,
+  WORKSHEET_GRAMMAR,
+  type XlsbGrammar
+} from "@excel/utils/xlsb-validator/grammar";
 import { recordNamesInCategory } from "@excel/xlsb/spec/records";
 
 /** The kinds of part this validator knows about. */
@@ -115,8 +123,13 @@ export function partRole(path: string, contentType: string | undefined): XlsbPar
 export interface XlsbPartExpectations {
   /** Record the part must open with, when its role requires one. */
   readonly rootScope?: string;
-  /** Pairs of record names where the first must precede the second. */
+  /** Pairs of record names where the first must precede the second — for a part with no {@link grammar}. */
   readonly precedes?: readonly (readonly [string, string])[];
+  /**
+   * The part's top-level record grammar from MS-XLSB, by which the records directly inside the root scope are
+   * ranked (`grammar.ts`). It subsumes every `precedes` pair such a part used to carry.
+   */
+  readonly grammar?: XlsbGrammar;
   /** Whether cell records must sit inside `BrtBeginSheetData` and follow a row header. */
   readonly cellsInSheetData?: boolean;
   /**
@@ -138,9 +151,8 @@ export interface XlsbPartExpectations {
 export const XLSB_PART_ROLES: Readonly<Record<XlsbPartRole, XlsbPartExpectations>> = {
   workbook: {
     rootScope: "BrtBeginBook",
-    // The sheet bundle has to be declared before anything can reference a sheet by
-    // index, which `BrtExternSheet` and defined names both do.
-    precedes: [["BrtBeginBundleShs", "BrtExternSheet"]],
+    // Among much else, the sheet bundle before the externals and the names, which refer to sheets by index.
+    grammar: WORKBOOK_GRAMMAR,
     // Present in all nine Excel-authored reference workbooks. `BrtFileVersion` is the first record in every one
     // of them, and a consumer reads it before it reads anything it has to interpret.
     requiredRecords: [
@@ -165,31 +177,21 @@ export const XLSB_PART_ROLES: Readonly<Record<XlsbPartRole, XlsbPartExpectations
       "BrtWsFmtInfo",
       "BrtBeginSheetData"
     ],
-    // BrtWsDim declares the used range; a consumer sizes its buffers from it, so it
-    // arriving after the cells it describes defeats the purpose.
-    precedes: [
-      ["BrtWsDim", "BrtBeginSheetData"],
-      ["BrtBeginSheetData", "BrtBeginMergeCells"]
-    ],
+    // Among much else, `BrtWsDim` before the cells: a consumer sizes its buffers from the used range.
+    grammar: WORKSHEET_GRAMMAR,
     cellsInSheetData: true
   },
   sharedStrings: { rootScope: "BrtBeginSst" },
   styles: {
     rootScope: "BrtBeginStyleSheet",
-    // Cell formats reference fonts, fills, borders and number formats by index, so
-    // every table they index into has to be declared first.
-    precedes: [
-      ["BrtBeginFmts", "BrtBeginCellXFs"],
-      ["BrtBeginFonts", "BrtBeginCellXFs"],
-      ["BrtBeginFills", "BrtBeginCellXFs"],
-      ["BrtBeginBorders", "BrtBeginCellXFs"]
-    ]
+    // Among much else, every table a cell format indexes into before the cell formats.
+    grammar: STYLESHEET_GRAMMAR
   },
-  table: { rootScope: "BrtBeginList" },
+  table: { rootScope: "BrtBeginList", grammar: TABLE_GRAMMAR },
   comments: {
     rootScope: "BrtBeginComments",
-    // A comment names its author by index into the author list.
-    precedes: [["BrtBeginCommentAuthors", "BrtBeginCommentList"]]
+    // Among the rest, the author list before the comments, which name their author by index into it.
+    grammar: COMMENTS_GRAMMAR
   },
   // Excel's own row index and calculation chain are record streams with vocabularies this
   // validator does not model. Framing and scope balance still apply — they are the
