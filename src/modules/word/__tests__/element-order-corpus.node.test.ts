@@ -30,7 +30,8 @@ function docxFiles(dir: string): string[] {
   });
 }
 
-const FILES = ROOTS.flatMap(docxFiles);
+// Sorted: `readdirSync`'s order is the runtime's and the file system's, and differs between Node and Bun.
+const FILES = ROOTS.flatMap(docxFiles).sort();
 
 describe("element order of rewritten documents", () => {
   it("finds the corpus", () => {
@@ -59,7 +60,9 @@ describe("element order of rewritten documents", () => {
 
 describe("the corpus check is not vacuous", () => {
   it("reports a paragraph property moved out of order in a rewritten document", async () => {
-    const file = FILES.find(path => path.includes("word-probes"))!;
+    // A named document with styled paragraphs. "The first probe" was whichever `readdirSync` listed first, which under
+    // Bun was one with no `w:pStyle`, so the edit below changed nothing.
+    const file = join(ROOTS[0]!, "word-probes", "R1e-lists-borders.docx");
     const written = await Document.toBuffer(
       await Document.read(new Uint8Array(readFileSync(file)))
     );
@@ -70,9 +73,13 @@ describe("the corpus check is not vacuous", () => {
       }
     }
     const body = parts.get("word/document.xml")!;
-    // Move the first paragraph's style to the end of its properties: `w:pStyle` must come first.
-    const broken = body.replace(/<w:pPr>(<w:pStyle [^>]*\/>)(.*?)<\/w:pPr>/, "<w:pPr>$2$1</w:pPr>");
-    expect(broken).not.toBe(body);
+    // Move the first styled paragraph's style to the end of its properties: `w:pStyle` must come first.
+    const styled = /<w:pPr>(<w:pStyle [^>]*\/>)(.+?)<\/w:pPr>/;
+    expect(
+      styled.test(body),
+      "the document has a styled paragraph with more properties than its style"
+    ).toBe(true);
+    const broken = body.replace(styled, "<w:pPr>$2$1</w:pPr>");
     parts.set("word/document.xml", broken);
     expect(checkDocxElementOrder(parts)).not.toEqual([]);
   });
