@@ -52,6 +52,13 @@ export default defineConfig({
   test: {
     globals: true,
     testTimeout: 30000,
+    // **WebKit runs one test file at a time.** With files in parallel, a tester iframe stopped part-way through a shard
+    // on CI — a different, ordinary Excel or Word test each time, each passing on its own, `testTimeout` never firing:
+    // the frame was suspended, not busy. Measured on CI, twelve full WebKit runs: in parallel, 5 stalls in 41 shard
+    // runs and 3 of 6 runs affected; one file at a time, none in 36. One at a time costs about a fifth of a run that
+    // does not stall (≈ 480 s against ≈ 410 s) and less than one that does (a stall and its retry add four minutes or
+    // more). The watchdog in `scripts/run-browser-tests.ts` stays, for a stall this does not prevent.
+    fileParallelism: browserEngine() !== "webkit",
     // `scripts/run-browser-tests.ts` sets this when it watches a shard for a stall, and needs to hear when each file
     // finishes. The defaults are kept as they are (`github-actions` included on CI).
     reporters: process.env.BROWSER_PROGRESS_IPC

@@ -34,6 +34,10 @@
  * it was seen — a shard takes under a minute there and its slowest file about 25 s — and off elsewhere; `0` turns it
  * off.
  *
+ * The stalls came from running files in parallel: in twelve CI runs, WebKit stalled 5 times in 41 shard runs with files
+ * in parallel and never in 36 with one file at a time, which is how `vitest.browser.config.ts` runs it now. The
+ * watchdog stays for a stall that this does not prevent.
+ *
  * Shards run sequentially: running them at once would put the same total in memory at the same time.
  * `--passWithNoTests` keeps a filtered run (`pnpm test:browser some-file`) from failing on the shards it leaves empty.
  */
