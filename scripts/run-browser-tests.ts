@@ -20,19 +20,25 @@
  * `TMPDIR`, because the check `statfs`es `TMPDIR` or `/tmp`, which is not a path there, and a failed check skips the
  * collection. It costs about 6 ms a file. Remove it when the Chromium bug is fixed.
  *
- * **A stalled shard fails instead of hanging.** In WebKit on CI a tester iframe has stopped part-way through a shard —
- * a different file each time, each of which passes on its own — while the browser stayed alive. Nothing in Vitest ends
- * that: `testTimeout` runs inside the stopped iframe, and its heartbeat (vitest-dev/vitest#10956) only notices a browser
- * that stops answering. The job then sat silent until its `timeout-minutes` cancelled it, with no error and no file
- * named. So when no test file has finished for `BROWSER_STALL_TIMEOUT_MS`, the shard's process tree is killed, the
- * files that never reported a result are listed, and the run fails. It is not retried: a stall is a failure to
- * investigate, and a retry would turn it green. The default is 180 s for WebKit on CI, where it was seen — a shard takes
- * under a minute there and its slowest file about 25 s — and off elsewhere; `0` turns it off.
+ * **A stalled shard does not hang.** In WebKit on CI a tester iframe has stopped part-way through a shard — a different
+ * file each time, each of which passes on its own — while the browser stayed alive. Nothing in Vitest ends that:
+ * `testTimeout` runs inside the stopped iframe, and its heartbeat (vitest-dev/vitest#10956) only notices a browser that
+ * stops answering. The job then sat silent until its `timeout-minutes` cancelled it, with no error and no file named.
+ * So when nothing has finished for `BROWSER_STALL_TIMEOUT_MS` — no test, no file — the shard's process tree is killed
+ * and each file that never reported is listed with the test it stopped in and the last one that finished.
+ *
+ * The shard is then run once more in a fresh browser. The cause is not known, and failing on the first stall made every
+ * such run red until someone re-ran it by hand; a retry that hid the stall would be worse. So it is never silent: a
+ * stall that passes on its retry is a warning annotation and an entry in the job summary, with what the first attempt
+ * was doing, and a stall that recurs or a retry that fails fails the run. The default is 180 s for WebKit on CI, where
+ * it was seen — a shard takes under a minute there and its slowest file about 25 s — and off elsewhere; `0` turns it
+ * off.
  *
  * Shards run sequentially: running them at once would put the same total in memory at the same time.
  * `--passWithNoTests` keeps a filtered run (`pnpm test:browser some-file`) from failing on the shards it leaves empty.
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -88,10 +94,41 @@ interface ShardResult {
   readonly status: number | null;
   readonly signal: NodeJS.Signals | null;
   readonly error?: Error;
-  readonly stalled: boolean;
+  /** What the shard was doing when it stopped, when it stalled. */
+  readonly stall?: string;
 }
 
-function runShard(shard: number): Promise<ShardResult> {
+/** Where a file the shard holds had got to: the test running in it, and the last one that finished. */
+interface FileProgress {
+  running?: { readonly test: string; readonly since: number };
+  lastFinished?: string;
+}
+
+/** A stall, as a report names it: each file that never finished, with the test it stopped in. */
+function describeStall(
+  shard: string,
+  files: ReadonlyMap<string, FileProgress>,
+  finished: number,
+  total: number,
+  now: number
+): string {
+  const lines = [...files].map(([file, progress]) => {
+    const running = progress.running
+      ? `stopped in "${progress.running.test}", started ${Math.round((now - progress.running.since) / 1000)}s ago`
+      : "no test had started";
+    const last =
+      progress.lastFinished === undefined ? "" : `; last finished: "${progress.lastFinished}"`;
+    return `\n  - ${file}: ${running}${last}`;
+  });
+  return (
+    `browser tests, shard ${shard} stalled: nothing finished in ${stallMs / 1000}s (${finished} of ${total} files finished). ` +
+    (files.size === 0
+      ? "Every file had reported; the run did not end."
+      : `Never reported a result:${lines.join("")}`)
+  );
+}
+
+function runShard(shard: number, attempt: string): Promise<ShardResult> {
   const args = [
     VITEST,
     "run",
@@ -104,8 +141,8 @@ function runShard(shard: number): Promise<ShardResult> {
   if (stallMs === 0) {
     return new Promise(resolve => {
       const child = spawn(process.execPath, args, { stdio: "inherit", env });
-      child.on("error", error => resolve({ status: null, signal: null, error, stalled: false }));
-      child.on("exit", (status, signal) => resolve({ status, signal, stalled: false }));
+      child.on("error", error => resolve({ status: null, signal: null, error }));
+      child.on("exit", (status, signal) => resolve({ status, signal }));
     });
   }
 
@@ -115,9 +152,9 @@ function runShard(shard: number): Promise<ShardResult> {
       env: { ...env, BROWSER_PROGRESS_IPC: "1" },
       detached: process.platform !== "win32"
     });
-    const pending = new Set<string>();
+    const pending = new Map<string, FileProgress>();
     let total = 0;
-    let stalled = false;
+    let stall: string | undefined;
 
     // The shard is in a process group of its own, so the terminal's Ctrl-C no longer reaches it.
     const forward = (signal: NodeJS.Signals) => {
@@ -128,49 +165,110 @@ function runShard(shard: number): Promise<ShardResult> {
     process.once("SIGTERM", forward);
 
     const onStall = () => {
-      stalled = true;
-      const files = [...pending].map(file => `\n  - ${file}`).join("");
-      console.error(
-        `\n✗ browser tests, shard ${shard}/${SHARDS} stalled: no test file finished in ${stallMs / 1000}s ` +
-          `(${total - pending.size} of ${total} finished). ` +
-          (pending.size === 0
-            ? "Every file had reported; the run did not end."
-            : `Never reported a result:${files}`)
+      stall = describeStall(
+        `${shard}/${SHARDS}${attempt}`,
+        pending,
+        total - pending.size,
+        total,
+        Date.now()
       );
+      console.error(`\n✗ ${stall}`);
       killTree(child);
     };
     let timer = setTimeout(onStall, stallMs);
+    // A test starting or ending is progress, not only a file finishing: a file whose tests go on is not stalled.
     const progress = () => {
       clearTimeout(timer);
       timer = setTimeout(onStall, stallMs);
     };
 
     child.on("message", (message: BrowserProgressMessage) => {
-      if (message.type === "queued") {
-        total++;
-        pending.add(message.file);
-      } else {
-        pending.delete(message.file);
+      switch (message.type) {
+        case "queued":
+          total++;
+          pending.set(message.file, {});
+          break;
+        case "end":
+          pending.delete(message.file);
+          break;
+        case "test-start": {
+          const file = pending.get(message.file);
+          if (file) {
+            file.running = { test: message.test, since: Date.now() };
+          }
+          break;
+        }
+        case "test-end": {
+          const file = pending.get(message.file);
+          if (file) {
+            file.running = undefined;
+            file.lastFinished = message.test;
+          }
+          break;
+        }
       }
       progress();
     });
 
-    const settle = (result: Omit<ShardResult, "stalled">) => {
+    const settle = (result: Omit<ShardResult, "stall">) => {
       clearTimeout(timer);
       process.off("SIGINT", forward);
       process.off("SIGTERM", forward);
-      resolve({ ...result, stalled });
+      resolve(stall === undefined ? result : { ...result, stall });
     };
     child.on("error", error => settle({ status: null, signal: null, error }));
     child.on("exit", (status, signal) => settle({ status, signal }));
   });
 }
 
+/** A line for GitHub's job summary, when the run is on GitHub Actions; nothing elsewhere. */
+function summarize(markdown: string): void {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (file) {
+    appendFileSync(file, `${markdown}\n`);
+  }
+}
+
+/** A GitHub annotation, which shows on the run's page; a plain line elsewhere. */
+function annotate(level: "warning" | "error", title: string, message: string): void {
+  // An annotation is one line: GitHub reads `%0A` as its line break.
+  const text = message.replace(/%/g, "%25").replace(/\r?\n/g, "%0A");
+  console.log(
+    process.env.GITHUB_ACTIONS
+      ? `::${level} title=${title}::${text}`
+      : `${level}: ${title}: ${message}`
+  );
+}
+
 let failed = false;
 for (let shard = 1; shard <= SHARDS; shard++) {
   console.log(`\n▶ browser tests, shard ${shard}/${SHARDS}`);
-  const result = await runShard(shard);
-  if (result.stalled) {
+  let result = await runShard(shard, "");
+  if (result.stall !== undefined) {
+    // **Retried once, and never silently.** A tester iframe has stopped part-way through a shard in WebKit on CI, a
+    // different file each time, each passing on its own; the cause is not known. Failing on the first stall made every
+    // such run red, to be re-run by hand until it was not. The whole shard is run again in a fresh browser — files it
+    // never reached are not in the stall report — and a pass is reported as a warning annotation and in the job
+    // summary, with what the first attempt was doing, so each stall is on record. Stalling or failing again fails.
+    const first = result.stall;
+    console.log(
+      `\n▶ browser tests, shard ${shard}/${SHARDS}, once more in a fresh browser after the stall`
+    );
+    result = await runShard(shard, " (retry)");
+    const passed = result.stall === undefined && result.status === 0;
+    annotate(
+      passed ? "warning" : "error",
+      passed
+        ? "Browser shard stalled, passed on a retry"
+        : "Browser shard stalled, and failed its retry",
+      first
+    );
+    summarize(
+      `### ${passed ? "⚠️" : "❌"} Browser tests (${process.env.BROWSER_ENGINE ?? "chromium"}), shard ${shard}/${SHARDS} stalled\n\n` +
+        `\`\`\`\n${first}\n\`\`\`\n\n${passed ? "It passed when run again in a fresh browser." : "Its retry did not pass."}\n`
+    );
+  }
+  if (result.stall !== undefined) {
     failed = true;
   } else if (result.status !== 0) {
     // `error` is set when the shard never ran (Node not found, spawn refused); `status` is then null too.
